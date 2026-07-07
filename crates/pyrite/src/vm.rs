@@ -25,11 +25,20 @@ use crate::value::{EnumValue, Value};
 use std::collections::BTreeMap;
 use std::rc::Rc;
 
+/// Execution context passed to every host call: enough for the host to
+/// write crash dumps (line numbers) and serve `last_error()` without
+/// reaching into the VM.
+#[derive(Debug, Clone, Copy)]
+pub struct CallCtx<'a> {
+    pub line: u32,
+    pub last_fault: Option<&'a str>,
+}
+
 /// The world-side interface. Builtins and entity attributes live here.
 pub trait Host {
     /// Invoke a builtin. `Block` means an action was started: the VM parks
     /// until the sim calls [`Vm::resolve_action`].
-    fn call(&mut self, name: &str, args: &[Value]) -> HostCall;
+    fn call(&mut self, name: &str, args: &[Value], ctx: CallCtx<'_>) -> HostCall;
 
     /// Entity attribute lookup (`bot.distance` style).
     fn attr(&mut self, entity: u64, name: &str) -> Result<Value, String> {
@@ -299,7 +308,7 @@ impl Vm {
                 Signal::Hurt => RaiseOutcome::Ignored,
                 Signal::Death => {
                     // No death handler: straight to the forced call.
-                    let _ = host.call("become_disabled", &[]);
+                    let _ = host.call("become_disabled", &[], self.ctx());
                     self.state = State::Dead;
                     RaiseOutcome::Died
                 }
@@ -459,14 +468,15 @@ impl Vm {
             // Unhandled: the engine force-calls upload_crash_dump() — an
             // ordinary builtin, charged as cycle debt — then restarts.
             self.budget -= costs.crash_dump as i64;
-            let _ = host.call("upload_crash_dump", &[Value::Str(msg)]);
+            let ctx = CallCtx { line: self.current_line, last_fault: Some(msg.as_str()) };
+            let _ = host.call("upload_crash_dump", &[Value::Str(msg.clone())], ctx);
             self.reset();
         }
     }
 
     fn finish_death(&mut self, host: &mut dyn Host) {
         // Every death exits through the forced ordinary function.
-        let _ = host.call("become_disabled", &[]);
+        let _ = host.call("become_disabled", &[], self.ctx());
         self.state = State::Dead;
     }
 
@@ -489,6 +499,10 @@ impl Vm {
 
     fn pop_value(&mut self) -> Value {
         self.values.pop().expect("value stack underflow is a VM bug")
+    }
+
+    fn ctx(&self) -> CallCtx<'_> {
+        CallCtx { line: self.current_line, last_fault: self.last_fault.as_deref() }
     }
 
     fn push_block(&mut self, block: &[StmtId]) {
@@ -803,7 +817,8 @@ impl Vm {
                     self.work.push(Work::FrameEnd);
                     self.push_block(&body);
                 } else {
-                    match host.call(&name, &args) {
+                    let ctx = CallCtx { line: self.current_line, last_fault: self.last_fault.as_deref() };
+                    match host.call(&name, &args, ctx) {
                         HostCall::Ready(v) => self.values.push(v),
                         HostCall::Block => self.state = State::Blocked,
                         HostCall::Fault(msg) => self.fault(msg, host, costs),

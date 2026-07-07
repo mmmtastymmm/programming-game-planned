@@ -31,4 +31,4 @@ pub use error::{PyriteError, PyriteErrorKind};
 pub use parser::parse;
 pub use unlocks::{Construct, UnlockSet};
 pub use value::{EnumValue, Value};
-pub use vm::{Host, HostCall, Outcome, Phase, RaiseOutcome, Signal, Vm, VmConfig};
+pub use vm::{CallCtx, Host, HostCall, Outcome, Phase, RaiseOutcome, Signal, Vm, VmConfig};

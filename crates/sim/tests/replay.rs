@@ -1,0 +1,197 @@
+//! Golden-replay style tests: (map, command log) → exact world state, and
+//! bit-identical hashes across runs (docs/07-architecture.md testing
+//! strategy, day one).
+
+use sim::map::MapSpec;
+use sim::sim::{Command, Sim};
+use sim::TilePos;
+
+/// The doc's Tier-0 starter program, verbatim (docs/01-language.md).
+const MINER: &str = "\
+move_to(nearest_ore())
+mine()
+move_to(nearest_depot())
+deposit()
+";
+
+fn mining_map() -> MapSpec {
+    let mut spec = MapSpec::empty(10, 6);
+    spec.ore_nodes.push((TilePos::new(8, 2), 10));
+    spec.depots.push(TilePos::new(1, 2));
+    // A rubble ridge the path must cross.
+    spec.rubble.push(TilePos::new(5, 1));
+    spec.rubble.push(TilePos::new(5, 2));
+    spec.rubble.push(TilePos::new(5, 3));
+    spec
+}
+
+fn run_mining_sim(ticks: u64) -> Sim {
+    let mut sim = Sim::new(&mining_map());
+    sim.apply(&Command::SpawnBot {
+        pos: TilePos::new(1, 2),
+        source: MINER.into(),
+        cpu: 2,
+        cargo_cap: 3,
+    })
+    .expect("spawn");
+    for _ in 0..ticks {
+        sim.step();
+    }
+    sim
+}
+
+#[test]
+fn tier0_miner_delivers_ore() {
+    let sim = run_mining_sim(400);
+    assert!(
+        sim.world.stockpile_ore > 0,
+        "the starter program must produce ore; archive: {:?}",
+        sim.world.archive
+    );
+    // The bot is alive and working, not crash-looping.
+    assert_eq!(sim.world.bots.len(), 1);
+    let bot = sim.world.bots.values().next().unwrap();
+    assert!(bot.data.xp_mining > 0, "mining XP accrues from doing");
+    assert!(bot.data.xp_hauling > 0, "hauling XP accrues from delivering");
+}
+
+#[test]
+fn identical_runs_hash_identically() {
+    let a = run_mining_sim(300);
+    let b = run_mining_sim(300);
+    assert_eq!(a.state_hash(), b.state_hash());
+    assert_eq!(a.world.stockpile_ore, b.world.stockpile_ore);
+}
+
+#[test]
+fn hash_sequences_match_tick_by_tick() {
+    // The stronger property lockstep needs: state is identical at EVERY
+    // tick, not just the end.
+    let mut a = Sim::new(&mining_map());
+    let mut b = Sim::new(&mining_map());
+    let cmd = Command::SpawnBot {
+        pos: TilePos::new(1, 2),
+        source: MINER.into(),
+        cpu: 2,
+        cargo_cap: 3,
+    };
+    a.apply(&cmd).unwrap();
+    b.apply(&cmd).unwrap();
+    for tick in 0..300 {
+        a.step();
+        b.step();
+        assert_eq!(a.state_hash(), b.state_hash(), "desync at tick {tick}");
+    }
+}
+
+#[test]
+fn ore_depletes_then_program_faults_into_crash_dumps() {
+    // 10 ore, cargo trips of 3: eventually nearest_ore() faults ("no ore
+    // anywhere") → forced crash dump in the archive. Requirement: the
+    // failure is *visible*, not silent.
+    let sim = run_mining_sim(3000);
+    assert_eq!(sim.world.stockpile_ore, 10, "all ore ends up in the stockpile");
+    assert!(
+        sim.world
+            .archive
+            .iter()
+            .any(|e| e.kind == sim::world::ArchiveKind::CrashDump && e.text.contains("no ore")),
+        "depletion must surface as crash dumps; archive: {:?}",
+        sim.world.archive
+    );
+}
+
+#[test]
+fn unreachable_target_faults() {
+    // Ore on an island surrounded by water: move_to must fault, the bot
+    // crash-dumps and keeps retrying (fault loops are legal and visible).
+    let mut spec = MapSpec::empty(9, 7);
+    spec.ore_nodes.push((TilePos::new(5, 3), 5));
+    for dy in -2..=2_i32 {
+        for dx in -2..=2_i32 {
+            if dx.abs() == 2 || dy.abs() == 2 {
+                spec.water.push(TilePos::new(5 + dx, 3 + dy));
+            }
+        }
+    }
+    spec.depots.push(TilePos::new(0, 0));
+    let mut sim = Sim::new(&spec);
+    sim.apply(&Command::SpawnBot {
+        pos: TilePos::new(0, 0),
+        source: MINER.into(),
+        cpu: 4,
+        cargo_cap: 2,
+    })
+    .unwrap();
+    for _ in 0..200 {
+        sim.step();
+    }
+    assert!(
+        sim.world
+            .archive
+            .iter()
+            .any(|e| e.text.contains("unreachable")),
+        "archive: {:?}",
+        sim.world.archive
+    );
+    assert_eq!(sim.world.stockpile_ore, 0);
+}
+
+#[test]
+fn scuttle_becomes_a_wreck_with_logs() {
+    // become_disabled() is player-callable (deliberate scuttle). The bot
+    // wrecks; its unuploaded logs ride along in the wreck.
+    let src = "\
+log(123)
+become_disabled()
+";
+    let mut sim = Sim::new(&MapSpec::empty(4, 4));
+    let id = sim
+        .apply(&Command::SpawnBot {
+            pos: TilePos::new(2, 2),
+            source: src.into(),
+            cpu: 8,
+            cargo_cap: 1,
+        })
+        .unwrap();
+    for _ in 0..10 {
+        sim.step();
+    }
+    assert!(!sim.world.bots.contains_key(&id), "bot must be wrecked");
+    let wreck = sim.world.wrecks.get(&id).expect("wreck exists");
+    assert_eq!(wreck.logs, vec!["123".to_string()]);
+}
+
+#[test]
+fn rubble_slows_movement() {
+    // Same trip with and without a rubble wall across the corridor: the
+    // rubble run needs more ticks to make its first delivery.
+    let deliver_tick = |rubble: bool| -> u64 {
+        let mut spec = MapSpec::empty(12, 3);
+        spec.ore_nodes.push((TilePos::new(10, 1), 50));
+        spec.depots.push(TilePos::new(0, 1));
+        if rubble {
+            for y in 0..3 {
+                spec.rubble.push(TilePos::new(5, y));
+            }
+        }
+        let mut sim = Sim::new(&spec);
+        sim.apply(&Command::SpawnBot {
+            pos: TilePos::new(0, 1),
+            source: MINER.into(),
+            cpu: 4,
+            cargo_cap: 1,
+        })
+        .unwrap();
+        for tick in 1..=600 {
+            sim.step();
+            if sim.world.stockpile_ore > 0 {
+                return tick;
+            }
+        }
+        panic!("never delivered");
+    };
+    let fast = deliver_tick(false);
+    let slow = deliver_tick(true);
+    assert!(slow > fast, "rubble must slow the trip: {slow} vs {fast}");
+}

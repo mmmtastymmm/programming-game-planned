@@ -1,7 +1,7 @@
 //! Integration tests: parsing, gating, cycle metering, faults, handlers,
 //! double-handle, blocking actions. Each maps to a rule in docs/01-language.md.
 
-use pyrite::vm::{Host, HostCall, Outcome, RaiseOutcome, Signal, Vm, VmConfig};
+use pyrite::vm::{CallCtx, Host, HostCall, Outcome, RaiseOutcome, Signal, Vm, VmConfig};
 use pyrite::{parse, Construct, CostTable, PyriteErrorKind, UnlockSet, Value};
 use std::rc::Rc;
 
@@ -18,7 +18,7 @@ struct TestHost {
 }
 
 impl Host for TestHost {
-    fn call(&mut self, name: &str, args: &[Value]) -> HostCall {
+    fn call(&mut self, name: &str, args: &[Value], _ctx: CallCtx<'_>) -> HostCall {
         self.calls.push((name.to_string(), args.to_vec()));
         if let Some(msg) = self.faulting.get(name) {
             return HostCall::Fault(msg.clone());

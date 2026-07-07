@@ -63,6 +63,7 @@ impl Default for CostTable {
             ("mine", 2),
             ("deposit", 1),
             ("nearest_ore", 3),
+            ("nearest_depot", 3),
             ("cargo_full", 1),
             ("health_low", 1),
             ("attack", 2),
