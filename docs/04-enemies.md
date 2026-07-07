@@ -1,24 +1,26 @@
 # Enemies — The Feral
 
-The PvE faction: **Feral machines**, corrupted bots left over from whatever wrecked this world. The core conceit (requirement 5): **Ferals run real Pyrite programs on the same VM as player bots**, and players can *read those programs*.
+The PvE faction: **Feral machines**, corrupted bots left over from whatever wrecked this world. The core conceit (requirement 5): **Ferals run real Pyrite programs on the same VM as player bots**, and players can *decrypt and read those programs* — by the same rule that governs everything: programs are read on murder.
 
 ## Why enemies run the player's VM
 
 - **One interpreter, one truth.** No separate AI system to build or keep deterministic ([08-multiplayer.md](08-multiplayer.md)). Feral behavior is exactly as inspectable, steppable, and deterministic as player code.
-- **Reading code is the counterplay.** A Feral's program is its stat block *and* its weakness. `if attacker_count > 2: flee_to_nest()` is an instruction to the player: bring three bots.
-- **Enemies are the curriculum.** Early Feral programs are simple Tier-0/1 scripts that teach by example; late ones use constructs the player hasn't unlocked yet — a preview of their own future power.
+- **Reading code is the counterplay.** A Feral's program is its stat block *and* its weakness. `if attacker_count > 2: flee_to_nest()` is an instruction to the player: bring three bots. Decryption is how you earn the read.
+- **Enemies are the curriculum.** Early Feral programs are simple Tier-0/1 scripts that teach by example (and leak in a kill or two); late ones use constructs the player hasn't unlocked yet — a preview of their own future power, behind a longer decryption grind.
 
-## Inspection Mechanics
+## Inspection & Decryption
 
-Ferals are **always fully open** — click and read, live. (Opposing *players'* programs are not: those are read only by salvaging a kill, [08-multiplayer.md](08-multiplayer.md). Ferals are the curriculum; players are the competition.)
+Feral programs are **encrypted exactly like player code** ([08-multiplayer.md](08-multiplayer.md)): each salvage/analysis of a nest's unit grants **permanent +N% decryption** of that nest's archetype program. One universal rule, no exceptions: **programs are read on murder** — yours, theirs, everyone's.
 
-| Method | What you see |
+| Method | What you get |
 |---|---|
-| Click any visible Feral | Its program source, read-only, with **live program counter** stepping |
-| Analyze a Feral wreck (Artisan bot, `analyze()` function) | Full program copied to your **Codex** for offline study + grants **Data** ([03-resources.md](03-resources.md)) |
-| Codex library | Every Feral program ever analyzed, diffable against variants |
+| Click any visible Feral | Archetype + nest tag, live behavior — and your current **decrypted view** of its source (stable noise where unrevealed), with **live program counter** stepping over the lines you've revealed |
+| `analyze()` a Feral wreck | **Data** ([03-resources.md](03-resources.md)) + **+N% decryption** of that nest's archetype program + the nest's **comm key** ([01-language.md](01-language.md)) |
+| Codex library | Every decrypted view, versioned and diffable (mutating nests create versions; your % persists across them) |
 
-Live program-counter view means a retreating player can literally watch the pursuer's code hit its `if distance_from_nest > 40: return_home()` line. Aha-moments by design.
+- **Decrypt rate is per-arcanum tuning** — the difficulty knob: the Fool leaks its whole program in a couple of kills (the curriculum still works; it's just earned), while high arcana stay cryptic across a long campaign.
+- Once decrypted, the live program-counter view delivers the aha-moments: a retreating player literally watches the pursuer's code hit its `if distance_from_nest > 40: return_home()` line.
+- **Channels are never included**: even at 100% decryption you can *see* the Warden calls `try_broadcast("intruder", …)`, but listening in or spoofing requires the nest's comm key — reading is reconnaissance; interacting takes fieldwork. Suppressing a nest's alarms by message-stealing, or baiting defenders with fake alerts, is intended late-game play.
 
 ## Feral Archetypes (initial set)
 
@@ -106,7 +108,7 @@ All of this is first-pass flavor to tune; the mechanical skeleton (allegiance nu
 | 15 | The Devil | Corruption: spreads Corruption biome tiles outward and **hijacks your bots** — reprogrammed veterans fight for it, XP intact. | Hijack-capable; terrain-altering |
 | 16 | The Tower | Ruin: ignores your bots entirely; sudden all-in lightning raids on structures — Fabricators and Archives first. | Static siege scripts, long dormancy between strikes |
 | 17 | The Star | Guidance: relay beacons that extend **other nests'** broadcast range and repair their units. Kill the support first. | Static, cross-nest cooperative |
-| 18 | The Moon | Illusion: decoy units running deliberately misleading (but real, fully readable) programs; forges **fake Black Boxes** with lying logs. Trust nothing on this part of the map. | **Procedural counter-intel**; code is open and dishonest |
+| 18 | The Moon | Illusion: decoy units running deliberately misleading (but real) programs; forges **fake Black Boxes** with lying logs. Trust nothing on this part of the map — even what you've decrypted was *written to be decrypted*. | **Procedural counter-intel**; dishonest by design |
 | 19 | The Sun | Clarity: no tricks — simply the best straightforward combat programs in the game, surging on full Energy. Honest and terrifying. | Static, peak-quality authored code |
 | 20 | Judgement | Resurrection: reboots its dead **with XP intact** — its veterans accumulate all match. Leave no wrecks, or face them again, stronger. | Static; XP-preserving reprints |
 | 21 | The World | Completion: rotates through the behaviors of every lower arcanum and uses the full construct set. The endgame nest. | **Researches + procedurally mutates**; everything |
@@ -118,9 +120,12 @@ All of this is first-pass flavor to tune; the mechanical skeleton (allegiance nu
 - **Mutation style**: authored variants vs. procedural — set **per nest type and biome**. A Magician nest in Corruption mutates handlers; one in a Loop Desert unrolls loops. Biome cost overlays ([05-terrain.md](05-terrain.md)) shape what mutations are *viable*, so the same arcanum plays differently across the map.
 - **Map placement**: allegiance scales with distance from player starts — 0–4 near start zones, 5–13 midfield, 14–21 deep field. The **maximum arcanum on a map is a match option** (available on any server type, PvP included) — raising it doesn't make the neighborhood meaner, it makes the *frontier* deeper. Allegiance is geography as much as clock.
 
-## Capturing Ferals (decided)
+## Capturing Wrecks (decided)
 
-`hijack()` (late-game function block, [06-progression.md](06-progression.md)): field-repair an enemy wreck during its self-destruct countdown while flashing one of your **color programs** onto it — it passes through the standard Boot Sequence ([02-agents.md](02-agents.md)) and comes up as *your* bot, Feral chassis and all. Boot-as-interrupt applies: a hijack under fire explodes the prize. The Hierophant (5) and the Devil (15) run the same play against *you* — protect your wrecks or lose them twice.
+`hijack()` (late-game function block, [06-progression.md](06-progression.md)): field-repair **any enemy wreck** — Feral *or* player, on harm-enabled servers — during its self-destruct countdown while flashing one of your **color programs** onto it. It passes through the standard Boot Sequence ([02-agents.md](02-agents.md)) and comes up as *your* bot, original chassis, **XP intact**. Boot-as-interrupt applies: a hijack under fire explodes the prize.
+
+- **Hijacked bots are never reprintable** by their new owner — no blueprint transfers. A stolen L5 veteran or captured Feral chassis is a unique prize; when it dies, it's gone.
+- The Hierophant (5) and the Devil (15) run the same play against *you* — protect your wrecks or lose them twice.
 
 ## Escalation
 
@@ -143,8 +148,9 @@ flowchart LR
 
 ## Decided
 
-- **Capture & reprogram: yes** — `hijack()` via the Boot Sequence (see Capturing Ferals). Hierophant and Devil nests mirror it against players.
-- **Hijacked Ferals keep their XP** — high-arcana veterans are the best capture targets, mirroring Judgement's XP-keeping resurrections.
+- **Capture & reprogram: yes, any wreck** — `hijack()` works on Feral *and* player wrecks (harm-enabled servers) via the Boot Sequence (see Capturing Wrecks). Hierophant and Devil nests mirror it against players.
+- **Hijacked units keep their XP and are never reprintable** — unique prizes; high-arcana veterans are the best capture targets, mirroring Judgement's XP-keeping resurrections.
+- **Nothing Feral is free** — code decrypts by salvage/analyze attrition at per-arcanum rates (Fool leaks in ~2 kills; high arcana stay cryptic); channels additionally require the nest's comm key. One universal rule: programs are read on murder.
 - **Some nests research** — controlled by arcanum (Temperance, The World); the rest are static or mutate-only.
 - **Mutation style is per nest type × biome** — authored vs. procedural is an arcanum flag, flavored by the biome's cost overlays.
 - **Nest Allegiance 0–21** (Major Arcana) is the enemy difficulty-and-personality axis; number ≈ difficulty, arcanum ≈ how it treats code.

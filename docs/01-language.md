@@ -149,7 +149,7 @@ Base values:
 | Enum construction | 1 | `Order.Mine(target)` |
 | **`upload_crash_dump()`** | 25 | Force-called on unhandled errors; also player-callable |
 | **Trap cost** | 5 | Paid to enter an `on error:` handler |
-| **Handler grace window** | 10 ticks | Time in `on error:` at normal costs; past it, all ops ×2 |
+| **Handler grace window** | 10 ticks | Time in `on error:` at normal costs; past it, all ops ×2. Denominated in *ticks* on purpose: faster CPUs fit more recovery ops in the window — hardware buys handler capacity |
 | **Black-box budget** | 10 cycles | Hard cap for `on death:` before the bot goes down |
 
 Design intent: **cycle costs are the balance dial.** Complex behavior should be *possible* early but *slow*, so hardware upgrades and code golf both feel rewarding.
@@ -271,7 +271,8 @@ Semantics (deterministic):
 - **No queues, no mailboxes**: messages exist only in the instant of delivery. Fire-and-forget with nobody blocked = message gone. Persistent listening posts are something you build out of bots.
 - **One-receiver selection**: the longest-blocked receiver on the channel wins; ties break by lowest entity ID.
 - **Blocking consumes cycles.** A blocked bot (send *or* receive) executes nothing else, and its per-tick cycle budget burns while it waits — waiting *is* what its CPU is doing. No banking cycles, no free listening posts: a bot blocked for 100 ticks spent 100 ticks of compute on patience. Handlers still fire while blocked — with the usual double-handle stakes.
-- Channels are names (strings); the namespace is per-colony but **allies can be granted channels** (shared-library-style), enabling cross-colony coordination.
+- Channels are names (strings); the namespace is per-faction but **allies can be granted channels** (shared-library-style), enabling cross-colony coordination.
+- **Foreign channels require a comm key.** Knowing a channel's *name* (from decrypted code — player or Feral) is not enough — every faction's traffic is keyed. Extract a key by **salvaging** a player colony's bot or **`analyze()`-ing a Feral nest's wreck**; with key + name you can `receive` (eavesdrop / steal) and `send` (spoof) on their channels. Reading is reconnaissance; interacting takes fieldwork.
 - Corruption jams channel traffic in/out ([05-terrain.md](05-terrain.md)) — a blocking `send` from inside Corruption faults on timeout like anything else.
 
 ## Program Colors
@@ -363,4 +364,4 @@ The full catalog and unlock order live in [06-progression.md](06-progression.md)
 - **`on hurt(threshold):` is an unlock** — the default Damaged-threshold hurt is part of the handler unlock; custom thresholds are a separate research.
 - **Log buffer is hardware** — base 8 entries, +Memory bank.
 
-- **Channel espionage is real** (harm-enabled servers): an enemy who learns a channel name — via salvage decryption ([08-multiplayer.md](08-multiplayer.md)) — can `receive` on it (eavesdrop, or in one-receiver mode outright **steal** the message before your bot gets it) and `send` on it (**spoof** commands). Leaked code leaks infrastructure. Defensive protocol craft — rotating channel names, enum-tag authentication, decoy channels — is the endgame of colony design.
+- **Channel espionage is real, and gated by comm keys**: to touch a foreign channel you need its faction's **comm key** (salvage a player bot / analyze a Feral wreck) *plus* the channel name (found in decrypted portions of their code — player and Feral code decrypt by the same salvage-attrition rule, [08-multiplayer.md](08-multiplayer.md)). With both: `receive` to eavesdrop — or in one-receiver mode outright **steal** the message — and `send` to **spoof**. Defensive protocol craft — rotating names, enum-tag authentication, decoy channels — is the endgame of colony design.

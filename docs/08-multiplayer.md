@@ -63,8 +63,8 @@ The rules every system must obey (enforced by CI replay tests):
   - **Some kills = some leaks.** Every loss bleeds a little of that color, forever. There's no reset button — only the choice of *which* color bleeds.
   - **Risk is assigned per color.** Red on 30 disposable miners will be fully readable by mid-game: write it knowing that. Blue on one escorted veteran might end the match at 5%. Where you put your cleverness is a strategic decision — and visible tinting means the enemy always knows which secret a kill would buy.
   - **Counter-intel is possible**: a sacrificial color running plausible-but-misleading code is a legal and delicious play.
-  - Tiers: **own + allies** — full source, live; **opponents** — per-color decryption via salvage attrition; **Ferals** — always open, live ([04-enemies.md](04-enemies.md)) — the curriculum, not the competition.
-- **Spectating** is nearly free (a spectator is a lockstep peer with no command rights) and unusually fun here: watching two codebases fight.
+  - Tiers: **own + allies** — full source, live; **opponents** — per-color decryption via salvage attrition; **Ferals** — the *same* attrition rule, at per-arcanum rates ([04-enemies.md](04-enemies.md)): the Fool leaks in a couple of kills (the curriculum is earned), high arcana stay cryptic.
+- **Spectating** is nearly free (a spectator is a lockstep peer with no command rights) and unusually fun here: watching two codebases fight. Code-secrecy rule: **full disclosure only after the match completes** — replays (which contain every deploy) unlock post-match as the learning artifact; live spectators, when built, see per-faction views, never omniscient source.
 
 ### Color-decryption rules
 

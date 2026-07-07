@@ -91,7 +91,7 @@ Reading the tree: **constructs gate expressiveness, functions gate verbs**, and 
 
 1. **Every unlock changes what programs *can say*, immediately.** No "+5% damage" research. That lives in XP ([02-agents.md](02-agents.md)) and hardware.
 2. **The editor advertises the tree.** Locked syntax/functions are visible but greyed out in the editor with cost and prerequisites ([01-language.md](01-language.md)). The player wants `if` because they *felt* its absence, not because a tooltip said so.
-3. **Enemies preview unlocks.** Ferals use constructs before you have them ([04-enemies.md](04-enemies.md)) — Warden's `for`-loop patrol is an ad for Tier 5.
+3. **Enemies preview unlocks.** Ferals use constructs before you have them ([04-enemies.md](04-enemies.md)) — Warden's `for`-loop patrol is an ad for Tier 5, readable once you've killed enough Wardens to decrypt it. The preview is earned like everything else.
 4. **Data sources force breadth** — milestones span mining, exploring, combat, analysis, so a one-note strategy starves research (see Data rules in [03-resources.md](03-resources.md)).
 
 ## Hardware Upgrades (Chips, per-bot)
@@ -112,8 +112,8 @@ This table describes the *learning arc* — the one-time journey through the per
 
 | Time | Player state |
 |---|---|
-| 0–5 min | Reads the pre-deployed Tier-0 miner program; edits a line; feels ownership |
-| 5–15 min | Unlocks Variables + sensors; first `if cargo_full()` — the "my bot is smart now" beat |
+| 0–5 min | Reads the pre-deployed Tier-0 miner program; edits a line; feels ownership. First Cache spotted nearby |
+| 5–15 min | Studies the sensor Cache, researches Variables; first `if cargo_full()` — the "my bot is smart now" beat |
 | 15–30 min | Loops + combat functions; first Feral raid survived by *code they wrote* |
 | 30–45 min | `def` and `on error:`; colony library of shared functions emerges; first uploaded crash log explains a mystery |
 | 45–60 min | Lists/scan or messaging; coordinated multi-bot behavior; session climax vs. Warden raid or first Nest kill |
@@ -126,6 +126,4 @@ This table describes the *learning arc* — the one-time journey through the per
 - **All function blocks are learned at Template Caches** — non-consumable study sites; anyone can learn from any Cache; depth replaces Data pricing (see Template Caches).
 - **Any PvE play earns construct unlocks** — no dedicated academy required (one can be authored later as an accelerant).
 
-## Open Questions
-
-- **Veteran Data sinks**: with constructs owned and functions found, what does Data buy a veteran mid-match? Candidates: cache-locator pings, Archive boosts (temporary research-style buffs), reprint discounts. Needs an answer or Data goes dead for the players who generate the most of it.
+- **Data is a currency** — beyond one-time construct research, the Research Archive runs a **Data Exchange** (Data → Chips/Metal at tuned rates, [03-resources.md](03-resources.md)). Data never goes dead: veterans convert it, raze-vs-claim stays a real choice, and milestone Data keeps mattering in PvP.

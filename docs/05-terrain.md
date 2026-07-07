@@ -60,7 +60,7 @@ Corruption attacks the player's core resource — computation:
 - Every Pyrite operation costs +1 cycle inside it (via its biome overlay) → a 10-line smart program crawls; a 3-line dumb one barely notices. **Terrain that inverts the "better code wins" rule locally.**
 - Channel traffic (`send`/`receive`) is jammed → coordinated squads decohere, blocked receivers inside never wake; bots must be individually competent to fight there.
 - Crystal (needed for Chips → better CPUs) spawns near Corruption → the resource that buys computation lives where computation is worst. Deliberate loop.
-- Scouting-track L3 veterans resist the slow ([02-agents.md](02-agents.md)) — XP as terrain key.
+- Scouting-track L3 veterans are immune to the cycle tax ([02-agents.md](02-agents.md)) — XP as terrain key: the only bots whose *code* runs clean in there.
 
 ### Corruption is alive (dynamics)
 

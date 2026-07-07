@@ -41,7 +41,7 @@ flowchart TD
 | **Metal** | Smelter (refines Ore) | Chassis, structures, reprints, per-bot maintenance drain ([02-agents.md](02-agents.md)) | *How much are you willing to lose?* (combat/reprint costs) |
 | **Chips** | Foundry (Metal + Crystal) | CPU & tool modules | *Compute or claws?* Better brains vs. more bots |
 | **Energy** | Generators (burn Ore) or free at geothermal vents | Powers Fabricators/Smelters/Foundries; per-bot **upkeep** | *How big can the colony get?* Soft population cap |
-| **Data** | Task milestones, exploring, dissecting Feral wrecks, first-time achievements | Research: unlocks constructs and function blocks ([06-progression.md](06-progression.md)) | *Are you doing new things or the same thing?* |
+| **Data** | Task milestones, exploring, dissecting Feral wrecks, first-time achievements | Construct research (one-time, permanent — [06-progression.md](06-progression.md)) and the **Data Exchange**: convert Data into other resources at the Research Archive (tuned rates, Chips-favored) | *Are you doing new things or the same thing?* |
 
 ## Design Rules
 
@@ -80,7 +80,7 @@ No free-form resource gifting. A colony builds a **Request Box** and posts a req
 | **Foundry** | 15 Metal, 5 Chips | Metal + Crystal → Chips. Needs energy. |
 | **Generator** | 8 Metal | Burns Ore → Energy rate. |
 | **Geothermal Tap** | 12 Metal | Free steady Energy, only on vent tiles. |
-| **Research Archive** | 10 Metal, 5 Chips | Where Data is spent; one per colony needed to research. |
+| **Research Archive** | 10 Metal, 5 Chips | Where Data is spent: construct research (learners) and the **Data Exchange** — Data → Chips/Metal at tuned rates (everyone, forever). Data is a currency; the Archive is the bank. |
 | **Repair Bay** | 8 Metal | Repairs bots in range (energy drain while active). The target of `on hurt:` retreat programs ([01-language.md](01-language.md)). |
 | **Log Archive** | 5 Metal, 2 Chips | Receives `upload_log()` transmissions; the colony's crash-report/telemetry viewer. |
 | **Sentry Post** | 4 Metal | Wide sensor radius, nothing else. Fog of war is eyes-only ([05-terrain.md](05-terrain.md)) — fixed sightlines are cheap infrastructure. |
