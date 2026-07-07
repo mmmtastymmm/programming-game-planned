@@ -4,6 +4,7 @@
 
 use sim::map::MapSpec;
 use sim::sim::{Command, Sim};
+use sim::world::Color;
 use sim::TilePos;
 
 /// The doc's Tier-0 starter program, verbatim (docs/01-language.md).
@@ -34,6 +35,7 @@ fn run_mining_sim(ticks: u64) -> Sim {
         cargo_cap: 3,
         faction: 0,
         hp: 100,
+        color: Color::GREEN,
     })
     .expect("spawn");
     for _ in 0..ticks {
@@ -78,6 +80,7 @@ fn hash_sequences_match_tick_by_tick() {
         cargo_cap: 3,
         faction: 0,
         hp: 100,
+        color: Color::GREEN,
     };
     a.apply(&cmd).unwrap();
     b.apply(&cmd).unwrap();
@@ -127,6 +130,7 @@ fn unreachable_target_faults() {
         cargo_cap: 2,
         faction: 0,
         hp: 100,
+        color: Color::GREEN,
     })
     .unwrap();
     for _ in 0..200 {
@@ -160,7 +164,9 @@ become_disabled()
             cargo_cap: 1,
             faction: 0,
             hp: 100,
+            color: Color::GREEN,
         })
+        .unwrap()
         .unwrap();
     for _ in 0..10 {
         sim.step();
@@ -191,6 +197,7 @@ fn rubble_slows_movement() {
             cargo_cap: 1,
             faction: 0,
             hp: 100,
+            color: Color::GREEN,
         })
         .unwrap();
         for tick in 1..=600 {

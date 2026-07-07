@@ -97,11 +97,35 @@ pub struct MapSpec {
     /// (position, ore amount)
     pub ore_nodes: Vec<(TilePos, u32)>,
     pub depots: Vec<TilePos>,
+    pub printers: Vec<PrinterSpec>,
+    /// Seed stockpile (per docs/03 the starting state includes a buffer).
+    pub starting_ore: u64,
+}
+
+/// A printer placed by the map (docs/03: colonies start with a working
+/// Green printer and a ruined Red one).
+#[derive(Debug, Clone)]
+pub struct PrinterSpec {
+    pub pos: TilePos,
+    pub faction: u8,
+    /// Color slot index (0 = Green, 1 = Red, ...).
+    pub color: u8,
+    pub ruined: bool,
+    pub desired_max: u32,
 }
 
 impl MapSpec {
     pub fn empty(width: i32, height: i32) -> Self {
-        Self { width, height, rubble: Vec::new(), water: Vec::new(), ore_nodes: Vec::new(), depots: Vec::new() }
+        Self {
+            width,
+            height,
+            rubble: Vec::new(),
+            water: Vec::new(),
+            ore_nodes: Vec::new(),
+            depots: Vec::new(),
+            printers: Vec::new(),
+            starting_ore: 0,
+        }
     }
 }
 

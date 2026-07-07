@@ -4,6 +4,7 @@
 use sim::map::MapSpec;
 use sim::sim::{Command, Sim};
 use sim::world::ArchiveKind;
+use sim::world::Color;
 use sim::TilePos;
 
 /// A stationary attacker: hits the nearest enemy forever.
@@ -20,8 +21,10 @@ fn spawn(sim: &mut Sim, pos: TilePos, source: &str, faction: u8, hp: i64) -> sim
         cargo_cap: 1,
         faction,
         hp,
+        color: Color::GREEN,
     })
     .expect("spawn")
+    .expect("spawn returns id")
 }
 
 #[test]

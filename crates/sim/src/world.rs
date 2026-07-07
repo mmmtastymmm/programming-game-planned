@@ -2,14 +2,73 @@
 //! Everything lives in BTree containers with stable IDs (determinism).
 
 use crate::map::{Grid, MapSpec, TileKind, TilePos};
+use pyrite::ast::Program;
 use pyrite::Vm;
 use std::collections::BTreeMap;
+use std::rc::Rc;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct BotId(pub u32);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct EntityId(pub u64);
+
+/// A program color slot (docs/01 "Program Colors"). One color = one printer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Color(pub u8);
+
+impl Color {
+    pub const GREEN: Color = Color(0);
+    pub const RED: Color = Color(1);
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PrinterState {
+    Working,
+    /// Present but broken (the starting Red printer); repairable.
+    Ruined,
+}
+
+/// A Fabricator: prints/reprints bots for exactly one color and carries the
+/// desired-max population dial (docs/03-resources.md). Printers are also
+/// "the cloud" — they always accept log traffic.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Printer {
+    pub pos: TilePos,
+    pub faction: u8,
+    pub color: Color,
+    pub state: PrinterState,
+    pub desired_max: u32,
+    /// In-progress print job: ticks remaining.
+    pub job: Option<u32>,
+}
+
+/// The deployed program for one (faction, color) slot.
+#[derive(Debug, Clone)]
+pub struct ColorProgram {
+    pub source: String,
+    pub program: Rc<Program>,
+    pub version: u32,
+}
+
+/// The engine-fixed recall interrupt (docs/01): walk home, then re-color
+/// or scrap. Unwritable by player code; double-handle applies throughout.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Recall {
+    /// Remaining tiles to enter on the way to the home printer.
+    pub path: Vec<TilePos>,
+    /// Ticks left to enter `path[0]`.
+    pub ticks_left: u32,
+    pub purpose: RecallPurpose,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RecallPurpose {
+    /// Transported to the destination printer and re-colored (XP kept).
+    Recolor { dest: EntityId },
+    /// Decommissioned for a partial refund (over-capacity).
+    Scrap,
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct OreNode {
@@ -60,8 +119,13 @@ pub struct BotData {
     pub cargo_cap: u32,
     /// Cycles granted per tick (CPU hardware).
     pub cpu: u64,
+    pub color: Color,
     pub requested: Option<ActionRequest>,
     pub action: Option<Action>,
+    /// Boot Sequence countdown (docs/02): an engine interrupt context.
+    pub booting: Option<u32>,
+    /// In-progress recall (engine interrupt context).
+    pub recall: Option<Recall>,
     /// Set by the forced `become_disabled()`; the death phase wrecks the bot.
     pub dying: bool,
     /// Local log ring buffer (base 8 entries; hardware stat later).
@@ -123,6 +187,9 @@ pub struct World {
     pub bots: BTreeMap<BotId, Bot>,
     /// Entity handle -> bot, for targeting.
     pub bot_entities: BTreeMap<EntityId, BotId>,
+    pub printers: BTreeMap<EntityId, Printer>,
+    /// Deployed program per (faction, color slot).
+    pub color_programs: BTreeMap<(u8, u8), ColorProgram>,
     pub wrecks: BTreeMap<BotId, Wreck>,
     pub black_boxes: Vec<BlackBox>,
     pub stockpile_ore: u64,
@@ -147,6 +214,8 @@ impl World {
             depots: BTreeMap::new(),
             bots: BTreeMap::new(),
             bot_entities: BTreeMap::new(),
+            printers: BTreeMap::new(),
+            color_programs: BTreeMap::new(),
             wrecks: BTreeMap::new(),
             black_boxes: Vec::new(),
             stockpile_ore: 0,
@@ -162,7 +231,49 @@ impl World {
             let id = world.alloc_entity();
             world.depots.insert(id, Depot { pos });
         }
+        for p in &spec.printers {
+            let id = world.alloc_entity();
+            world.printers.insert(
+                id,
+                Printer {
+                    pos: p.pos,
+                    faction: p.faction,
+                    color: Color(p.color),
+                    state: if p.ruined { PrinterState::Ruined } else { PrinterState::Working },
+                    desired_max: p.desired_max,
+                    job: None,
+                },
+            );
+        }
+        world.stockpile_ore = spec.starting_ore;
         world
+    }
+
+    /// Live population of a (faction, color): excludes dying bots and bots
+    /// mid-recall (a recalled bot counts toward its *destination* color).
+    pub fn color_population(&self, faction: u8, color: Color) -> u32 {
+        let mut count = 0;
+        for bot in self.bots.values() {
+            if bot.data.faction != faction || bot.data.dying {
+                continue;
+            }
+            match &bot.data.recall {
+                Some(Recall { purpose: RecallPurpose::Recolor { dest }, .. }) => {
+                    if let Some(p) = self.printers.get(dest)
+                        && p.color == color
+                    {
+                        count += 1;
+                    }
+                }
+                Some(Recall { purpose: RecallPurpose::Scrap, .. }) => {}
+                None => {
+                    if bot.data.color == color {
+                        count += 1;
+                    }
+                }
+            }
+        }
+        count
     }
 
     pub fn alloc_entity(&mut self) -> EntityId {
@@ -196,12 +307,13 @@ impl World {
             .map(|(_, id)| id)
     }
 
-    /// Position of a targetable entity (ore node, depot, or bot).
+    /// Position of a targetable entity (ore node, depot, printer, or bot).
     pub fn entity_pos(&self, id: EntityId) -> Option<TilePos> {
         self.ore_nodes
             .get(&id)
             .map(|n| n.pos)
             .or_else(|| self.depots.get(&id).map(|d| d.pos))
+            .or_else(|| self.printers.get(&id).map(|p| p.pos))
             .or_else(|| {
                 self.bot_entities
                     .get(&id)
