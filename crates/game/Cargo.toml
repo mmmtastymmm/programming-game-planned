@@ -6,3 +6,4 @@ description = "Bevy app: rendering, UI, networking (placeholder until sim exists
 
 [dependencies]
 sim = { path = "../sim" }
+bevy = "0.16"
