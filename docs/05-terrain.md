@@ -37,7 +37,7 @@ The map is editable — both directions, by anyone with the tools (`terraform` f
 |---|---|---|
 | `clear(tile)` | Rubble → Plains | build time |
 | `bridge(tile)` | Water → Bridge (ground-passable) | Metal + build time |
-| `barricade(tile)` | Plains → Barricade (blocks movement, has HP, attackable) | Metal + build time |
+| `barricade(tile)` | Plains → Barricade (blocks movement **and vision** — it's tall; has HP, attackable) | Metal + build time |
 | `demolish(tile)` | remove Bridge / Barricade | build time |
 | `cleanse(tile)` | Corruption → Plains (see Corruption dynamics — it grows back) | build time, slow |
 
@@ -49,6 +49,7 @@ Deconstruction is symmetric and adversarial: enemies can `demolish` **your** bri
 
 - No permanent "explored" reveal. The UI keeps a **greyed terrain snapshot** of last-seen tiles (you remember the shape of the land), but live state — units, resources remaining, nest status — exists only where something of yours is looking *right now*.
 - Scouting is therefore **infrastructure, not an event**: standing watch is a job bots do (and earn Scouting XP for, [02-agents.md](02-agents.md)). A cheap Sentry Post structure exists for fixed sightlines ([03-resources.md](03-resources.md)).
+- **Tall things block vision.** Sensors are line-of-sight: Barricades and cliff faces cut sightlines. High Ground sees *over* Barricades — height beats walls, which is half of why perches matter. Corollary: walling your base in also blinds it; pair walls with Sentry Posts or high ground.
 - Terrain hooks apply: High Ground +2 sensor range, Water conducts sensor pings farther, Scouting-track veterans see farther.
 - **Ally vision sharing is a grant**, like channels ([01-language.md](01-language.md)) — allied colonies choose to pool eyes; it isn't automatic.
 
@@ -78,7 +79,7 @@ flowchart TD
 ```
 
 - **Start zones are safe and legible** — a Tier-0 program works there. Difficulty is geographic.
-- **Function Caches ring each start zone** ([06-progression.md](06-progression.md)): basic ones close, advanced ones toward the midfield — the opening sweep for your toolkit is the first thing eyes-only fog makes interesting.
+- **Template Caches ring each start zone** ([06-progression.md](06-progression.md)): basic ones close, advanced ones toward the midfield. They're non-consumable study sites — everyone can learn from them, so the deep ones are worth *holding*, not racing. The opening toolkit sweep is the first thing eyes-only fog makes interesting.
 - **Every expansion is a tradeoff**: more Ore = longer haul routes; Crystal = Corruption exposure; Vents = contested.
 - **Chokepoints from Water/High Ground** give defensive programs something to anchor on (`guard(ramp_tile)`).
 - PvP maps are **mirror-symmetric**; co-op maps are asymmetric with a shared frontier.
@@ -97,9 +98,9 @@ flowchart TD
 
 - **Terraforming is in scope** — build (bridges, barricades) and deconstruct (clear, demolish, cleanse), symmetric and adversarial (see Terraforming).
 - **Fog of war is eyes-only** — live union of friendly bot + structure sensors; greyed terrain memory, no persistent live intel (see Fog of War).
+- **Tall things block vision** — sensors are line-of-sight; Barricades are true walls; High Ground sees over them.
 - **Corruption is dynamic** — radiates from sources, re-corrupts cleansed ground until the source is destroyed (see Corruption dynamics).
 
 ## Open Questions
 
 - Corruption spread/re-corruption rates, source radii, and cleanse speed — pure tuning, needs the prototype.
-- Should Barricades block *sensor pings* as well as movement (true wall) or movement only? Lean movement-only; vision-blocking walls change fog interplay a lot.

@@ -14,16 +14,17 @@ A construct is permanently unlocked the first time it's researched in any match 
 The three per-match tracks in detail (requirements 3b/3c):
 
 1. **Language constructs** — what syntax your colony's programs may use (colony-wide; permanent scope). Unlocked by researching with Data, **in any PvE play** — first research ever = yours forever.
-2. **Function blocks** — what built-ins programs may call (colony-wide, per-match; some also need a tool module on the bot). **Found, not researched** — recovered from Caches (see below).
+2. **Function blocks** — what built-ins programs may call (colony-wide, per-match; some also need a tool module on the bot). **Learned, not researched** — studied at Template Caches (see below).
 3. **Hardware** (not research — purchased per-bot with Chips) — cycles/tick, program length, stack depth.
 
-## Function Caches
+## Template Caches
 
-Function blocks are **salvage from the wrecked world**: every match, **Cache sites** (ruined installations) are seeded around each start zone — close enough that finding them is an opening ritual, not an expedition. Send a bot to a Cache and recover it (`analyze()`-style action) to unlock its function block colony-wide for the match.
+Function blocks are **learned from Template Caches**: ruined installations holding intact old-world code templates. **Studying a template does not consume it** — a Cache is a *school*, not a pickup. Any colony, ally or enemy, can send a bot to study the same site (an `analyze()`-style action) and unlock its function colony-wide for the match.
 
-- **Depth ordering replaces Data pricing**: basic sensors and `attack` sit in the nearest ruins; `scan`, `guard`/`escort`, `hijack` lie farther out (the numbers in the tree below now read as *cache depth*, not Data cost). Construct prerequisites still apply — a Cache you can't use yet can still be recovered and held for later.
-- **The opening becomes exploration**: your first programs aren't just mining — they're sweeping the surroundings for your toolkit, under eyes-only fog ([05-terrain.md](05-terrain.md)). Map knowledge is an opening skill.
-- Caches are per-colony (each start zone gets its own spread) — no racing allies for `mine()`. Whether *contested* caches exist mid-map (one copy, first-come) is an open question below.
+- **Depth ordering replaces Data pricing**: basic sensors and `attack` sit in the ruins ringing every start zone (finding them is an opening ritual, not an expedition); `scan`, `guard`/`escort`, `hijack` lie deeper — shared map features worth controlling *access* to, though never used up. (The numbers in the tree below read as *cache depth*, not Data cost.)
+- **Skill expression is the tree walk**: what your colony can do this match = which templates you've studied, in what order. Routing study trips down the function tree — under eyes-only fog ([05-terrain.md](05-terrain.md)), past whatever holds the ground — is the opening/midgame craft.
+- **Contest is territorial, never exclusive**: you can't deny an opponent a function by learning it first — only by holding the ground around its Cache. Knowledge spreads; territory doesn't.
+- Construct prerequisites still apply, per-player ([Decided](#decided)).
 
 ## Unlock Tree
 
@@ -122,10 +123,9 @@ This table describes the *learning arc* — the one-time journey through the per
 - **Constructs are permanent account unlocks; functions/colors/hardware are per-match.** The language is knowledge you keep; the match is how well you use it (see scopes table above).
 - **PvP requires full construct knowledge** — symmetric expressiveness by construction.
 - **Progression is per-player, always.** Allies do **not** share function unlocks — each colony recovers its own Caches ([08-multiplayer.md](08-multiplayer.md) scaffolding shares libraries and intel, not capability). Cross-scope prerequisites check the *individual's* knowledge — a newer player in a veteran group keeps their own learning arc.
-- **All function blocks are findable** — recovered from Cache sites seeded near each start zone; depth replaces Data pricing (see Function Caches).
+- **All function blocks are learned at Template Caches** — non-consumable study sites; anyone can learn from any Cache; depth replaces Data pricing (see Template Caches).
 - **Any PvE play earns construct unlocks** — no dedicated academy required (one can be authored later as an accelerant).
 
 ## Open Questions
 
 - **Veteran Data sinks**: with constructs owned and functions found, what does Data buy a veteran mid-match? Candidates: cache-locator pings, Archive boosts (temporary research-style buffs), reprint discounts. Needs an answer or Data goes dead for the players who generate the most of it.
-- **Contested Caches**: should rare mid-map Caches exist (single copy, first-come) holding late functions like `hijack`? Strong PvP objective; risks feel-bad in co-op. Lean yes on Open servers only.

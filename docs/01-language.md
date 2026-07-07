@@ -363,6 +363,4 @@ The full catalog and unlock order live in [06-progression.md](06-progression.md)
 - **`on hurt(threshold):` is an unlock** — the default Damaged-threshold hurt is part of the handler unlock; custom thresholds are a separate research.
 - **Log buffer is hardware** — base 8 entries, +Memory bank.
 
-## Open Questions
-
-- **Channel espionage**: channel names appear in code, and code leaks via salvage ([08-multiplayer.md](08-multiplayer.md)). Once an enemy knows `"orders"` exists, can they `receive` on it (eavesdrop — and in one-receiver mode, outright **steal** the message before your bot gets it)? `send` on it (spoof commands — the killer play)? Lean: yes to all on harm-enabled servers — leaked code should leak *infrastructure*, and defensive protocol design (rotating channel names, enum tags as authentication) becomes endgame craft.
+- **Channel espionage is real** (harm-enabled servers): an enemy who learns a channel name — via salvage decryption ([08-multiplayer.md](08-multiplayer.md)) — can `receive` on it (eavesdrop, or in one-receiver mode outright **steal** the message before your bot gets it) and `send` on it (**spoof** commands). Leaked code leaks infrastructure. Defensive protocol craft — rotating channel names, enum-tag authentication, decoy channels — is the endgame of colony design.

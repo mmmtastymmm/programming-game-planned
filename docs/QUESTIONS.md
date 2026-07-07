@@ -2,16 +2,13 @@
 
 All unresolved design questions collected from docs 01–08. Answer inline under each **Answer:** or reference the numbers in conversation. As each is decided, it moves to the owning doc's *Decided* section and gets removed here.
 
+**Status 2026-07-06: Q1–Q26, Q28–Q29 all answered.** Remaining: **Q27** below, plus two playtest-tuning items (upkeep mix, 02; Corruption rates, 05) that need the prototype, not a decision.
+
 ---
 
 ## Language (01)
 
-*Q1–Q3 answered 2026-07-06 (blocking channels; hurt threshold as unlock; log buffer = hardware). New question below.*
-
-### Q25. Channel espionage
-Channel names leak with code (salvage decryption). On harm-enabled servers, can enemies `receive` on stolen channels (eavesdrop — and in one-receiver mode, *steal* the message before its intended recipient) or `send`/`broadcast` (spoof commands)?
-**Lean:** yes to all — leaked code should leak infrastructure; protocol defense (rotating names, enum-tag auth) becomes endgame craft.
-**Answer:**
+*Q1–Q3, Q25 answered 2026-07-06 (blocking channels; hurt threshold as unlock; log buffer = hardware; channel espionage fully legal — eavesdrop, message-theft, spoofing).*
 
 ## Agents (02)
 
@@ -27,12 +24,7 @@ Channel names leak with code (salvage decryption). On harm-enabled servers, can 
 
 ## Terrain (05)
 
-*Q12–Q14 answered 2026-07-06 (terraforming in scope, build + deconstruct; fog of war is eyes-only; Corruption radiates from sources and regrows unless rooted out). New question below.*
-
-### Q29. Do Barricades block vision?
-Movement-only walls, or sensor-blocking too (true walls)? Vision-blocking changes the eyes-only fog game substantially.
-**Lean:** movement-only.
-**Answer:**
+*Q12–Q14, Q29 answered 2026-07-06 (terraforming in scope; fog of war is eyes-only; Corruption radiates from sources; tall things block vision — Barricades are true walls, High Ground sees over them).*
 
 ## Progression (06)
 
@@ -43,24 +35,11 @@ With constructs owned (permanent) and functions found (Caches), what does Data b
 **Lean:** needs *something* — Data shouldn't go dead for the players who generate the most of it.
 **Answer:**
 
-### Q28. Contested Caches
-Rare mid-map single-copy Caches holding late functions (`hijack`)? Strong PvP objective; feel-bad risk in co-op.
-**Lean:** yes, on Open servers only.
-**Answer:**
+*Q28 answered 2026-07-06: Caches are non-consumable schools — anyone can learn from any site; contest is territorial (holding access), never exclusive. Renamed Template Caches.*
 
 ## Multiplayer (08)
 
-*Q19–Q20 answered 2026-07-06 (unanimous sim-speed votes with configurable cooldown; disconnected colonies run autonomously, remaining players can vote to decommission). PvP-disconnect handling split off below.*
-
-### Q26. PvP disconnects
-An autonomously-running colony with nobody at the helm is a free farm and a code-leak piñata. Grace-period armistice? Auto-forfeit window? Ally takes the helm on team servers?
-**Lean:** none yet — needs a real answer before ranked play.
-**Answer:**
-
-### Q21. Indirect aggression on Non-PvP servers
-Racing an ally to a nest claim, out-mining contested veins — allowed?
-**Lean:** yes — that's the point of the setting.
-**Answer:**
+*Q19–Q21, Q26 answered 2026-07-06 (unanimous sim-speed votes with cooldown; disconnected colonies run autonomously + decommission vote; indirect aggression always legal; PvP disconnect = free farm until reconnect — your code is your defense).*
 
 ## Architecture (07)
 
