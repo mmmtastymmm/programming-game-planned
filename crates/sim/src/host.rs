@@ -38,6 +38,18 @@ impl pyrite::Host for BotHost<'_> {
                 let data = &self.world.bots[&bot_id].data;
                 HostCall::Ready(Value::Bool(data.cargo >= data.cargo_cap))
             }
+            "nearest_enemy" => {
+                let faction = self.world.bots[&bot_id].data.faction;
+                match self.world.nearest_enemy(bot_pos, faction) {
+                    Some(id) => HostCall::Ready(Value::Entity(id.0)),
+                    None => HostCall::Fault("no enemy anywhere".into()),
+                }
+            }
+            "health_low" => {
+                let data = &self.world.bots[&bot_id].data;
+                // "Low" = below the Damaged threshold (50%).
+                HostCall::Ready(Value::Bool(data.hp * 2 < data.max_hp))
+            }
             "last_error" => {
                 HostCall::Ready(Value::Str(ctx.last_fault.unwrap_or("").to_string()))
             }
@@ -50,6 +62,11 @@ impl pyrite::Host for BotHost<'_> {
             },
             "mine" => self.request(ActionRequest::Mine),
             "deposit" => self.request(ActionRequest::Deposit),
+            "attack" => match args {
+                [Value::Entity(target)] => self.request(ActionRequest::Attack(EntityId(*target))),
+                [other] => HostCall::Fault(format!("attack requires an entity, got {}", other.type_name())),
+                _ => HostCall::Fault("attack takes 1 argument".into()),
+            },
 
             // --- logging (docs/01: ordinary costed functions) ---
             "log" => {

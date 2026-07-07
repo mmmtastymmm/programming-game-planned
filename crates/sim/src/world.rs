@@ -28,6 +28,7 @@ pub enum ActionRequest {
     MoveTo(EntityId),
     Mine,
     Deposit,
+    Attack(EntityId),
 }
 
 /// An in-flight world action.
@@ -38,6 +39,7 @@ pub enum Action {
     Move { path: Vec<TilePos>, ticks_left: u32 },
     Mine { node: EntityId, ticks_left: u32 },
     Deposit { depot: EntityId, ticks_left: u32 },
+    Attack { target: EntityId, ticks_left: u32 },
 }
 
 pub const LOG_BUFFER_CAP: usize = 8;
@@ -45,7 +47,15 @@ pub const LOG_BUFFER_CAP: usize = 8;
 #[derive(Debug)]
 pub struct BotData {
     pub id: BotId,
+    /// This bot's world entity handle (targetable by other bots).
+    pub entity: EntityId,
+    pub faction: u8,
     pub pos: TilePos,
+    pub hp: i64,
+    pub max_hp: i64,
+    /// Edge-trigger latch for the hurt signal; re-arms when repaired above
+    /// the threshold (no repair yet, so it fires at most once).
+    pub hurt_fired: bool,
     pub cargo: u32,
     pub cargo_cap: u32,
     /// Cycles granted per tick (CPU hardware).
@@ -58,6 +68,7 @@ pub struct BotData {
     pub log_buf: Vec<String>,
     pub xp_mining: u64,
     pub xp_hauling: u64,
+    pub xp_combat: u64,
 }
 
 #[derive(Debug)]
@@ -92,7 +103,8 @@ pub enum ArchiveKind {
     Log,
 }
 
-/// The colony Log Archive: crash dumps and uploaded logs.
+/// The colony cloud (printer-hosted): crash dumps and uploaded logs.
+/// Printers always accept log traffic (docs/03-resources.md).
 #[derive(Debug, Clone, PartialEq)]
 pub struct ArchiveEntry {
     pub tick: u64,
@@ -109,6 +121,8 @@ pub struct World {
     pub ore_nodes: BTreeMap<EntityId, OreNode>,
     pub depots: BTreeMap<EntityId, Depot>,
     pub bots: BTreeMap<BotId, Bot>,
+    /// Entity handle -> bot, for targeting.
+    pub bot_entities: BTreeMap<EntityId, BotId>,
     pub wrecks: BTreeMap<BotId, Wreck>,
     pub black_boxes: Vec<BlackBox>,
     pub stockpile_ore: u64,
@@ -132,6 +146,7 @@ impl World {
             ore_nodes: BTreeMap::new(),
             depots: BTreeMap::new(),
             bots: BTreeMap::new(),
+            bot_entities: BTreeMap::new(),
             wrecks: BTreeMap::new(),
             black_boxes: Vec::new(),
             stockpile_ore: 0,
@@ -181,11 +196,28 @@ impl World {
             .map(|(_, id)| id)
     }
 
-    /// Position of a targetable entity (ore node or depot).
+    /// Position of a targetable entity (ore node, depot, or bot).
     pub fn entity_pos(&self, id: EntityId) -> Option<TilePos> {
         self.ore_nodes
             .get(&id)
             .map(|n| n.pos)
             .or_else(|| self.depots.get(&id).map(|d| d.pos))
+            .or_else(|| {
+                self.bot_entities
+                    .get(&id)
+                    .and_then(|bid| self.bots.get(bid))
+                    .map(|b| b.data.pos)
+            })
+    }
+
+    /// Nearest living bot of a different faction: (manhattan, entity id)
+    /// order — deterministic tie-breaking.
+    pub fn nearest_enemy(&self, from: TilePos, faction: u8) -> Option<EntityId> {
+        self.bots
+            .values()
+            .filter(|b| b.data.faction != faction && !b.data.dying)
+            .map(|b| (from.manhattan(b.data.pos), b.data.entity))
+            .min()
+            .map(|(_, id)| id)
     }
 }

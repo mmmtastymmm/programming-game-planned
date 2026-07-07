@@ -5,7 +5,7 @@ Progression runs on two **scopes**:
 | Scope | What | Rationale |
 |---|---|---|
 | **Permanent (account)** | **Language constructs** — variables, `if`, loops, `def`, lists, handlers, messaging | *Knowledge.* Once a player has learned to use `if`, they have it — forever, in every future match. The constraint stops being "can I say it" and becomes "how effectively can I say it." |
-| **Per-match** | **Function blocks** (found at Caches — see below), **program colors** (controlled nests, [04-enemies.md](04-enemies.md)), **hardware** (Chips) | *Situation.* What your colony can *do* this game is earned this game. |
+| **Per-match** | **Function blocks** (found at Caches — see below), **program colors** (Green at start; repair the ruined Red printer with Data; more via controlled nests, [04-enemies.md](04-enemies.md)), **hardware** (Chips) | *Situation.* What your colony can *do* this game is earned this game. |
 
 A construct is permanently unlocked the first time it's researched in any match (its Data cost is paid once, ever). Function blocks re-unlock every match.
 

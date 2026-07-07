@@ -75,7 +75,7 @@ stateDiagram-v2
 
 ### Black Boxes & the Boot Sequence
 
-- **Every bot that reaches Destroyed — by any path — drops a Black Box** on its tile: a small persistent object containing the bot's local log ring buffer at the moment of destruction (plus id, position, tick, cause). Anyone with vision can click it to read; a bot can `recover_black_box()` it to bank the contents permanently in the colony's Log Archive. Enemies can grab it too — battlefield intel is physical.
+- **Every bot that reaches Destroyed — by any path — drops a Black Box** on its tile: a small persistent object containing the bot's local log ring buffer at the moment of destruction (plus id, position, tick, cause). Anyone with vision can click it to read; a bot can `recover_black_box()` it to bank the contents permanently to its colony's cloud. Enemies can grab it too — battlefield intel is physical.
 - **The stakes split cleanly: information always survives; XP is what's gambled.** Clean death vs. double-handle no longer differ in forensics — they differ in whether a rescue was possible at all.
 - **Rescued (and freshly printed) bots pass through a Boot Sequence** before running ([02-agents.md](02-agents.md)): step 1, if the local log buffer is non-empty, the engine **force-calls `upload_log()`** (the third forced-ordinary-function, after `upload_crash_dump` and `become_disabled`); step 2, the program starts from line 1, fresh state. A rescued veteran automatically files its own incident report before getting back to work.
 - **Boot is an interrupt context like any handler** — it participates in the double-handle rule. A signal arriving mid-boot (`hurt` from incoming fire, a fault in the forced upload, lethal damage) explodes the bot. Consequence: **rescues must be timed.** Field-repairing a veteran while it's still under fire hands the enemy a free erasure; secure the area first, or the boot itself is the kill window.
@@ -110,7 +110,7 @@ Rules (all deterministic):
 ### Logging
 
 - `log(value)` — append to the bot's local ring buffer (cost 1). **Buffer size is a hardware stat**: base 8 entries, grown by Memory-bank modules ([06-progression.md](06-progression.md)).
-- `upload_log()` — transmit the buffer to the colony **Log Archive**, viewable in the inspector (cost 5 + size).
+- `upload_log()` — transmit the buffer to **the cloud**: the colony's printers (cost 5 + size). **Printers always accept log traffic** — no extra structure required, no capacity limit; if you have a printer (and a colony without one is already dying), you have telemetry. Viewable in any printer's inspector.
 - `upload_crash_dump()` — the expensive one (~25): uploads a full structured debug report — **bot ID, position, inventory/cargo, error reason, faulting line, tick**. This is what the engine force-calls on unhandled errors; players can also call it themselves anywhere (it's just a function).
 
 Persistent *telemetry* is player-built infrastructure — a colony with good logs is one someone programmed. But *crash* reporting has a guaranteed floor: unhandled errors always dump, so "why is that bot blinking?" always has an answer in the Archive. Logs are as inspectable as everything else (transparency pillar): allies — and in PvP, anyone who `analyze()`s your wreck — can read them.
@@ -277,7 +277,9 @@ Semantics (deterministic):
 
 ## Program Colors
 
-A colony's programs live in **colored program slots**, and every slot is embodied in a physical **Printer** (Fabricator): one printer = one color. You start with two (**Red, Green**); additional printers are gated by **controlled Nests** ([04-enemies.md](04-enemies.md)) on a quadratic curve — not 1:1: the 3rd color needs 1 controlled nest, the 4th needs 3 total, then 6, 10, … (triangular; tuning constants). The named palette runs through nine (Red, Green, Blue, Yellow, Cyan, Magenta, Orange, Purple, White) and the count is **uncapped** beyond that (procedurally patterned tints). A nine-color colony is an endgame colony that has conquered a lot of map.
+A colony's programs live in **colored program slots**, and every slot is embodied in a physical **Printer** (Fabricator): one printer = one color.
+
+You start with **one working printer: Green**. A **ruined Red printer** stands in your base from tick zero — visibly broken, repairable for Data (tuning; "enough Data or something" is the spec) — making your second color the natural first colony milestone rather than a given. Printers beyond those two are gated by **controlled Nests** ([04-enemies.md](04-enemies.md)) on a quadratic curve — not 1:1: the 3rd color needs 1 controlled nest, the 4th needs 3 total, then 6, 10, … (triangular; tuning constants). The named palette runs through nine (Green, Red, Blue, Yellow, Cyan, Magenta, Orange, Purple, White) and the count is **uncapped** beyond that (procedurally patterned tints). A nine-color colony is an endgame colony that has conquered a lot of map.
 
 - Every bot is deployed with exactly one color and is **visibly tinted** by it — friend and foe alike can see at a glance *which* program a bot runs (not what's in it).
 - Redeploying a color pushes the new source to **all bots of that color** (taking effect at each bot's next loop boundary). Each deploy creates a new **version**.
@@ -329,11 +331,11 @@ The full catalog and unlock order live in [06-progression.md](06-progression.md)
 | `receive(ch[, timeout])` | 2 + blocks | Timeout expiry faults |
 | `try_receive(ch)` → `Recv` enum | 2 | `Recv.Got(v)` / `Recv.Empty` |
 | `log(val)` | 1 | Append to local ring buffer |
-| `upload_log()` | 5 + size | Transmit buffer to colony Log Archive |
+| `upload_log()` | 5 + size | Transmit buffer to the cloud (printers always accept) |
 | `upload_crash_dump()` | 25 | Full debug report (id, position, cargo, error, line); auto-forced on unhandled errors |
 | `become_disabled()` | 1 | Wreck this bot and start its self-destruct countdown; auto-forced at end of `on death:`. Player-callable = deliberate scuttle |
 | `salvage(entity)` | 2 + action | Recover partial Metal from a wreck (works on anyone's); destroys it → drops its Black Box. Salvager also gains **+N% permanent decryption of the bot's program color** (default 5%, [08-multiplayer.md](08-multiplayer.md)) |
-| `recover_black_box(entity)` | 2 + action | Pick up a Black Box and bank its contents in the colony Log Archive |
+| `recover_black_box(entity)` | 2 + action | Pick up a Black Box and bank its contents to the cloud |
 | `last_error()` → string | 1 | Most recent fault; mainly for handlers |
 | `drop_cargo()` | 1 + action | Dump cargo on current tile (grabbable by others) |
 | `nearest_repair_bay()` → entity | 3 | |

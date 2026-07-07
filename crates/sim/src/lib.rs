@@ -3,7 +3,7 @@
 //! contract in CLAUDE.md.
 //!
 //! - [`map`]: tile grid + deterministic A*
-//! - [`world`]: entities, bots, wrecks, black boxes, the Log Archive
+//! - [`world`]: entities, bots, wrecks, black boxes, the colony cloud
 //! - [`host`]: the `pyrite::Host` implementation (builtins → world)
 //! - [`sim`]: the fixed-tick phase loop and the `Command` input surface
 //! - [`hash`]: FNV-1a state hashing for desync detection / golden replays

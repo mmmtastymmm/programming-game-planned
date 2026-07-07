@@ -32,6 +32,8 @@ fn run_mining_sim(ticks: u64) -> Sim {
         source: MINER.into(),
         cpu: 2,
         cargo_cap: 3,
+        faction: 0,
+        hp: 100,
     })
     .expect("spawn");
     for _ in 0..ticks {
@@ -74,6 +76,8 @@ fn hash_sequences_match_tick_by_tick() {
         source: MINER.into(),
         cpu: 2,
         cargo_cap: 3,
+        faction: 0,
+        hp: 100,
     };
     a.apply(&cmd).unwrap();
     b.apply(&cmd).unwrap();
@@ -121,6 +125,8 @@ fn unreachable_target_faults() {
         source: MINER.into(),
         cpu: 4,
         cargo_cap: 2,
+        faction: 0,
+        hp: 100,
     })
     .unwrap();
     for _ in 0..200 {
@@ -152,6 +158,8 @@ become_disabled()
             source: src.into(),
             cpu: 8,
             cargo_cap: 1,
+            faction: 0,
+            hp: 100,
         })
         .unwrap();
     for _ in 0..10 {
@@ -181,6 +189,8 @@ fn rubble_slows_movement() {
             source: MINER.into(),
             cpu: 4,
             cargo_cap: 1,
+            faction: 0,
+            hp: 100,
         })
         .unwrap();
         for tick in 1..=600 {

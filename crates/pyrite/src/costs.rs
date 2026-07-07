@@ -67,6 +67,7 @@ impl Default for CostTable {
             ("cargo_full", 1),
             ("health_low", 1),
             ("attack", 2),
+            ("nearest_enemy", 3),
             ("scan_enemies", 4),
             ("send", 3),
             ("try_send", 3),
