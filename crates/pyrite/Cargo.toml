@@ -1,0 +1,7 @@
+[package]
+name = "pyrite"
+version.workspace = true
+edition.workspace = true
+description = "The Pyrite unit language: lexer, gated parser, and cycle-metered stepping VM"
+
+[dependencies]
