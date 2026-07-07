@@ -101,8 +101,8 @@ programming_game/
 └── docs/              # these documents
 ```
 
-## Open Questions
+## Decided
 
-- `bevy_ecs` inside `sim`, or hand-rolled struct-of-vecs world? Bevy ECS iteration order needs care for determinism (stable-ID sort before mutate). Lean: use `bevy_ecs` with explicit ordered queries; revisit if desyncs bite.
-- Pathfinding: A* per `move_to` call is the determinism-safe default; flow fields if perf demands.
-- Save format for programs: plain text source in save files (diff-able, shareable) — AST is a cache.
+- **`bevy_ecs` inside `sim`, with careful queries.** Iteration order is not guaranteed — every state-mutating system must collect + sort by stable entity ID (or use explicitly ordered queries) before mutating. This is the #1 desync risk in the codebase; the rule lives in `CLAUDE.md` and every PR touching sim systems must respect it. Revisit hand-rolled storage only if desyncs keep biting.
+- **Pathfinding: A\* per `move_to`.** Deterministic, simple, per-bot. **Note for later:** if profiling shows pathing dominating (hundreds of bots re-pathing every tick), flow fields per destination-tile are the escape hatch — one field shared by all bots heading to the same place; still deterministic. Don't build it until it's needed.
+- **Programs are stored as plain text, byte-exact.** Source is the canonical artifact everywhere: saves, replays, the Codex, network deploys. The AST is a derived cache (parser is deterministic). Color **versions are identified by hashing the source bytes** — hence byte-exact storage, no whitespace normalization, fixed UTF-8. Everything downstream composes: text diffs power the Codex, `(color, version-hash)` keys the decryption masks, and programs are shareable as ordinary files.

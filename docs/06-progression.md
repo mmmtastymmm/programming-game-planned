@@ -5,7 +5,7 @@ Progression runs on two **scopes**:
 | Scope | What | Rationale |
 |---|---|---|
 | **Permanent (account)** | **Language constructs** — variables, `if`, loops, `def`, lists, handlers, messaging | *Knowledge.* Once a player has learned to use `if`, they have it — forever, in every future match. The constraint stops being "can I say it" and becomes "how effectively can I say it." |
-| **Per-match** | **Function blocks** (Data), **program colors** (controlled nests, [04-enemies.md](04-enemies.md)), **hardware** (Chips) | *Situation.* What your colony can *do* this game is earned this game. |
+| **Per-match** | **Function blocks** (found at Caches — see below), **program colors** (controlled nests, [04-enemies.md](04-enemies.md)), **hardware** (Chips) | *Situation.* What your colony can *do* this game is earned this game. |
 
 A construct is permanently unlocked the first time it's researched in any match (its Data cost is paid once, ever). Function blocks re-unlock every match.
 
@@ -13,9 +13,17 @@ A construct is permanently unlocked the first time it's researched in any match 
 
 The three per-match tracks in detail (requirements 3b/3c):
 
-1. **Language constructs** — what syntax your colony's programs may use (colony-wide; permanent scope).
-2. **Function blocks** — what built-ins programs may call (colony-wide, per-match; some also need a tool module on the bot).
+1. **Language constructs** — what syntax your colony's programs may use (colony-wide; permanent scope). Unlocked by researching with Data, **in any PvE play** — first research ever = yours forever.
+2. **Function blocks** — what built-ins programs may call (colony-wide, per-match; some also need a tool module on the bot). **Found, not researched** — recovered from Caches (see below).
 3. **Hardware** (not research — purchased per-bot with Chips) — cycles/tick, program length, stack depth.
+
+## Function Caches
+
+Function blocks are **salvage from the wrecked world**: every match, **Cache sites** (ruined installations) are seeded around each start zone — close enough that finding them is an opening ritual, not an expedition. Send a bot to a Cache and recover it (`analyze()`-style action) to unlock its function block colony-wide for the match.
+
+- **Depth ordering replaces Data pricing**: basic sensors and `attack` sit in the nearest ruins; `scan`, `guard`/`escort`, `hijack` lie farther out (the numbers in the tree below now read as *cache depth*, not Data cost). Construct prerequisites still apply — a Cache you can't use yet can still be recovered and held for later.
+- **The opening becomes exploration**: your first programs aren't just mining — they're sweeping the surroundings for your toolkit, under eyes-only fog ([05-terrain.md](05-terrain.md)). Map knowledge is an opening skill.
+- Caches are per-colony (each start zone gets its own spread) — no racing allies for `mine()`. Whether *contested* caches exist mid-map (one copy, first-come) is an open question below.
 
 ## Unlock Tree
 
@@ -23,27 +31,30 @@ The three per-match tracks in detail (requirements 3b/3c):
 flowchart TD
     START([Game start:<br/>straight-line programs +<br/>move_to, mine, deposit, nearest_ore])
 
-    subgraph Constructs["Language constructs (Data cost)"]
-        VAR[Variables — 10]
-        IF[if / elif / else — 20]
-        WHILE[while / break — 35]
-        SIG1[on error: handler — 40]
-        SIG2[on hurt: / on death: — 55]
-        DEF[def / return — 50]
-        LIST[lists + for-in — 60]
-        MSG_C[messaging constructs — 80]
+    subgraph Constructs["Language constructs (one-time Data cost, PERMANENT)"]
+        VAR["Variables — 10"]
+        IF["if / elif / else — 20"]
+        WHILE["while / break — 35"]
+        SIG1["on error: handler — 40"]
+        SIG2["on hurt: / on death: — 55"]
+        HURT_T["custom hurt threshold on hurt(n): — 25"]
+        DEF["def / return — 50"]
+        LIST["lists + for-in — 60"]
+        ENUM["enum + match — 70"]
+        MSG_C["channels: send / receive — 80"]
     end
 
-    subgraph Functions["Function blocks (Data cost)"]
-        F_SENSE[cargo_full, health_low — 5]
-        F_LOG[log, upload_log, last_error — 10]
-        F_ATK[attack, nearest_enemy — 15]
-        F_BUILD[build, repair — 20]
-        F_SCAN[scan_enemies, scan_resources — 40]
-        F_AN[analyze — 30]
-        F_BC[broadcast, listen — incl. in messaging]
-        F_GUARD[guard, escort — 45]
-        F_HIJACK[hijack — 70]
+    subgraph Functions["Function blocks (found at Caches — number ≈ cache depth)"]
+        F_SENSE["cargo_full, health_low — 5"]
+        F_LOG["log, upload_log, last_error — 10"]
+        F_ATK["attack, nearest_enemy — 15"]
+        F_BUILD["build, repair — 20"]
+        F_SCAN["scan_enemies, scan_resources — 40"]
+        F_AN["analyze — 30"]
+        F_BC["send/broadcast + try variants,<br/>receive/try_receive — with channels"]
+        F_GUARD["guard, escort — 45"]
+        F_HIJACK["hijack — 70"]
+        F_TERRA["terraform: clear, bridge,<br/>barricade, demolish, cleanse — 35"]
     end
 
     START --> VAR
@@ -59,12 +70,15 @@ flowchart TD
     F_ATK --> F_GUARD
     IF --> F_BUILD
     WHILE --> DEF
+    SIG2 --> HURT_T
     F_BUILD --> F_AN
+    F_BUILD --> F_TERRA
     F_AN --> F_HIJACK
     SIG2 --> F_HIJACK
     DEF --> LIST
     LIST --> F_SCAN
-    LIST --> MSG_C
+    LIST --> ENUM
+    ENUM --> MSG_C
     MSG_C --> F_BC
 ```
 
@@ -84,7 +98,7 @@ Reading the tree: **constructs gate expressiveness, functions gate verbs**, and 
 | Upgrade | Cost | Effect |
 |---|---|---|
 | CPU Mk2 / Mk3 | 5 / 15 Chips | 2 / 4 cycles per tick |
-| Memory bank | 5 Chips | +32 program lines, +4 variables |
+| Memory bank | 5 Chips | +32 program lines, +4 variables, +8 log ring-buffer entries |
 | Stack module | 8 Chips | +4 call depth (base cap is 4; recursion is legal but overflows fault — stack is what makes recursive style viable, [01-language.md](01-language.md)) |
 | Coprocessor | 20 Chips | think *while* an action resolves (removes action-blocking — huge, late) |
 | Backup Core | 25 Chips | preserve 50% XP on destruction (see [02-agents.md](02-agents.md)) |
@@ -107,10 +121,11 @@ This table describes the *learning arc* — the one-time journey through the per
 
 - **Constructs are permanent account unlocks; functions/colors/hardware are per-match.** The language is knowledge you keep; the match is how well you use it (see scopes table above).
 - **PvP requires full construct knowledge** — symmetric expressiveness by construction.
+- **Progression is per-player, always.** Allies do **not** share function unlocks — each colony recovers its own Caches ([08-multiplayer.md](08-multiplayer.md) scaffolding shares libraries and intel, not capability). Cross-scope prerequisites check the *individual's* knowledge — a newer player in a veteran group keeps their own learning arc.
+- **All function blocks are findable** — recovered from Cache sites seeded near each start zone; depth replaces Data pricing (see Function Caches).
+- **Any PvE play earns construct unlocks** — no dedicated academy required (one can be authored later as an accelerant).
 
 ## Open Questions
 
-- Do co-op allies share per-match function research? Lean yes (shared Archive) — keeps a group at the same capability level.
-- Should some functions be *findable* (looted from Feral analysis) rather than researched? Thematic, encourages Codex play — prototype with `guard`/`escort`.
-- Where do new players earn their construct unlocks — co-op only, or a dedicated solo "academy" campaign against low-arcana nests? Lean: any PvE play counts; an authored academy accelerates it.
-- Cross-scope tree edges (e.g. `scan_enemies` requires lists): in a mixed-knowledge co-op match, a newer player simply can't research that function yet. Acceptable, or should function prereqs check the *team's* knowledge? Lean per-player — it preserves the learning arc.
+- **Veteran Data sinks**: with constructs owned and functions found, what does Data buy a veteran mid-match? Candidates: cache-locator pings, Archive boosts (temporary research-style buffs), reprint discounts. Needs an answer or Data goes dead for the players who generate the most of it.
+- **Contested Caches**: should rare mid-map Caches exist (single copy, first-come) holding late functions like `hijack`? Strong PvP objective; risks feel-bad in co-op. Lean yes on Open servers only.

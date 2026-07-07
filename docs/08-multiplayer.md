@@ -54,7 +54,7 @@ The rules every system must obey (enforced by CI replay tests):
 | **Duel** (stretch) | 2 players, tiny mirror map, fixed identical loadouts, pure program-vs-program. Esports-minimal; also the perfect balance-testing arena. |
 
 - **PvP entry gate**: joining any server where players can be harmed requires **all language constructs permanently unlocked** ([06-progression.md](06-progression.md)) — every combatant has the full language; matches are decided by usage, not vocabulary. Non-PvP servers have no gate.
-- Allied-colony scaffolding: shared Research Archive access (function research), shared **program library** (call a friend's published functions), shared color-decryption intel, and drop-in adoption rules are unnecessary — a quitting player's colony just goes Feral-dormant (open question below).
+- Allied-colony scaffolding: shared **program library** (call a friend's published functions), shared color-decryption intel, grantable channels and vision — but **not shared progression**: each colony recovers its own Function Caches and earns its own unlocks ([06-progression.md](06-progression.md)). Allies share *work products*, not capability.
 
 ## Multiplayer × Code — the interesting design space
 
@@ -80,9 +80,10 @@ The rules every system must obey (enforced by CI replay tests):
 - **PvP gate**: full permanent construct knowledge required to join harm-enabled servers ([06-progression.md](06-progression.md)).
 - **Replays ship v1** — free with lockstep (seed + command log); also our bug-report format and the input to golden-replay CI tests ([07-architecture.md](07-architecture.md)).
 - **Host migration on host quit** — serialize-state handoff to another peer, the same machinery as late join and save/load. Build it once, get all three.
+- **Sim-speed changes require unanimous consent, with a cooldown.** Any pause/speed proposal needs every player's agreement; each attempt (pass or fail) starts a **configurable cooldown** before the next proposal — no vote spam. One rule for all server types: in PvP, unanimity is its own gate (opponents *can* agree to a mutual pause; they usually won't).
+- **A disconnected player's colony keeps running.** The colony is code — it doesn't need its player. Programs execute, printers print to their dials, recalls fire, handlers handle. It's merely frozen *at the helm*: no new deploys, research, claims, or dial changes. Reconnecting resumes control seamlessly (lockstep late-join path). Remaining players may **vote to decommission** the absent colony — a graceful wind-down: bots scuttle to scrap, structures power down, nests unclaim. (Decided for co-op / non-harm play; PvP disconnects need more thought — see open questions.)
 
 ## Open Questions
 
-- Sim-speed control (pause/2× while everyone codes)? Needs unanimous consent. Probably yes on non-PvP servers, never where players can be harmed.
-- What happens to a quitting/disconnected player's colony? Options: goes dormant (bots hold last programs, printers stop), becomes Feral-aligned, or adoptable by allies. Lean dormant with a reconnection window.
 - Do Non-PvP servers still allow *indirect* aggression (racing to claim a nest an ally is sieging, out-mining a contested vein)? Lean yes — that's the point of the setting.
+- **PvP disconnects**: an autonomously-running colony with no one at the helm is a free farm (and a code-leak piñata). Grace-period armistice (can't be harmed for N minutes)? Auto-forfeit after a window? Ally assumes the helm on team servers? Needs a real answer before ranked play exists.

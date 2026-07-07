@@ -66,17 +66,19 @@ Steals *your* map's ore and feeds its nest. Ignores bots entirely — a pure rac
 for spot in patrol_route:
     move_to(spot)
     if can_see_bot():
-        broadcast("intruder", nearest_bot())
+        try_broadcast("intruder", nearest_bot())
         attack(nearest_bot())
 ```
 
-Patrols and *calls for help*. Counterplay: jam or bait the broadcast, or kill it inside one patrol leg.
+Patrols and *calls for help* (other Ferals block on `receive("intruder")`). Counterplay: jam or bait the call, or kill it inside one patrol leg.
 
 ### Nest (structure, threat scales)
 
 Prints Ferals from harvested resources, exactly like a player Fabricator. Feral economy is real: starve the nest (kill Harvesters) and it prints less. Destroying a Nest yields a large Data bounty.
 
 **Controlling nests is the territory game**: a defeated Nest can be **claimed** (an Artisan converts the site) instead of razed. Controlled nests gate how many **printers** — and therefore program colors — a colony may build, on a quadratic curve ([01-language.md](01-language.md), [03-resources.md](03-resources.md)). Razing pays Data now; claiming grows your program portfolio forever. Higher-arcana nests are worth the same slot credit but are far harder to take — pick your conquests.
+
+**Claims must be held: Ferals reclaim nests.** An undefended claim is a loan — nearby Feral activity can re-take the site, sending its printer dormant ([01-language.md](01-language.md)). Aggressiveness is arcanum-flavored: siege personalities (Tower, Justice) will assault defended claims; most others only reoccupy ones left empty.
 
 ## Nest Allegiance — the Major Arcana (0–21)
 
@@ -114,7 +116,7 @@ All of this is first-pass flavor to tune; the mechanical skeleton (allegiance nu
 - **Program quality**: which construct tiers ([01-language.md](01-language.md)) and function blocks its scripts use. Roughly: arcana 0–4 preview Tiers 0–2, 5–13 preview Tiers 3–5, 14+ use things players are still saving Data for.
 - **Code modification** (your Magician instinct, generalized): `static` (most) / `mutates-per-print` (1, 10, 18, 21) / `researches` (14, 21 — these escalate their own tree over the match, answering "should nests research?": *some do, by arcanum*).
 - **Mutation style**: authored variants vs. procedural — set **per nest type and biome**. A Magician nest in Corruption mutates handlers; one in a Loop Desert unrolls loops. Biome cost overlays ([05-terrain.md](05-terrain.md)) shape what mutations are *viable*, so the same arcanum plays differently across the map.
-- **Map placement**: start zones see 0–4; the midfield 5–13; deep field and co-op endgame events 14–21. Allegiance is geography as much as clock.
+- **Map placement**: allegiance scales with distance from player starts — 0–4 near start zones, 5–13 midfield, 14–21 deep field. The **maximum arcanum on a map is a match option** (available on any server type, PvP included) — raising it doesn't make the neighborhood meaner, it makes the *frontier* deeper. Allegiance is geography as much as clock.
 
 ## Capturing Ferals (decided)
 
@@ -149,9 +151,6 @@ flowchart LR
 - **Controlled nests gate printers/colors** (quadratic) — see Nest section above.
 - **v1 arcana subset: 0 (Fool), 1 (Magician), 5 (Hierophant), 7 (Chariot), 13 (Death), 16 (Tower), 18 (Moon)** — spans the difficulty axis and covers the flag matrix: static, mutating, hijacking, salvage-denial, siege, and counter-intel.
 - **Losing a claimed nest makes its printer dormant, not dead** — desired max forced to 0, color frozen (no prints, no hotfixes); stragglers optionally absorbed by other printers or left as a ghost fleet. Retaking the nest reactivates it ([01-language.md](01-language.md)).
-
-## Open Questions
-
-- Do high-arcana nests (14+) appear in PvP maps as neutrals, or are they co-op-only? A Devil nest hijacking *both* sides' wrecks could be a great PvP destabilizer.
-- Procedural mutation guardrails: mutated programs must stay parse-valid and non-degenerate (no fault-looping armies unless the arcanum *wants* that — looking at you, Fool).
-- Can Ferals *attempt* to re-take claimed nests proactively (siege arcana like The Tower targeting them), or only reclaim undefended ones? Lean: arcanum-dependent — Tower and Justice besiege, others only opportunistically reoccupy.
+- **Max arcanum is a match option, on any server type** — higher-arcana nests always spawn farther from player starts; raising the cap deepens the frontier rather than hardening the neighborhood.
+- **Mutated programs stay functional** — procedural mutation must yield parse-valid, non-degenerate programs. Buggy Feral code (the Fool) is an authored choice, never a mutation accident.
+- **Ferals reclaim claimed nests** — claims must be defended; loss sends the printer dormant. Siege arcana (Tower, Justice) assault defended claims; others reoccupy empty ones.

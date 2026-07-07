@@ -61,7 +61,7 @@ stateDiagram-v2
 |---|---|---|---|
 | **Unhandled error** | fault, no `on error:` installed | cost of `upload_crash_dump()` (~25 cycles) | The engine **always force-calls `upload_crash_dump()`** — full debug info (see Logging), then restart. Debuggability is guaranteed; you just pay full price for it. |
 | **Handled error** | fault, `on error:` installed | trap cost (~5), then a **10-tick grace window**; after it, **every operation costs ×2** until the handler ends | The overtime tax keeps handlers as *recovery*, not a place to live. Write your own lean crash logging and beat the default. |
-| **Hurt** | HP crosses below Damaged threshold (edge-triggered, re-arms above it) | **unlimited** | But see the double-handle rule. Unbounded time makes long retreats-to-Repair-Bay legal — at a risk. |
+| **Hurt** | HP crosses below the Damaged threshold (edge-triggered, re-arms above it). A separate unlock allows a custom threshold: `on hurt(30):` ([06-progression.md](06-progression.md)) | **unlimited** | But see the double-handle rule. Unbounded time makes long retreats-to-Repair-Bay legal — at a risk. |
 | **Death** | HP hits 0 | **10 cycles**, hard | Black-box budget: a couple of `log()`s + `upload_log()`. When it completes (or the budget runs out) the engine **force-calls `become_disabled()`** — every death exits through that function. It starts the wreck's **self-destruct countdown**: field-repair in time rescues the bot (XP intact); expiry means explosion ([02-agents.md](02-agents.md)). |
 | **Recall** | printer rebalancing or colony over-capacity | n/a — handler is **engine-fixed, not player-writable** | Suspend program, walk home, re-color (XP kept) or scrap (see Program Colors below). The one signal you can't customize. |
 
@@ -109,7 +109,7 @@ Rules (all deterministic):
 
 ### Logging
 
-- `log(value)` — append to the bot's small local ring buffer (cost 1).
+- `log(value)` — append to the bot's local ring buffer (cost 1). **Buffer size is a hardware stat**: base 8 entries, grown by Memory-bank modules ([06-progression.md](06-progression.md)).
 - `upload_log()` — transmit the buffer to the colony **Log Archive**, viewable in the inspector (cost 5 + size).
 - `upload_crash_dump()` — the expensive one (~25): uploads a full structured debug report — **bot ID, position, inventory/cargo, error reason, faulting line, tick**. This is what the engine force-calls on unhandled errors; players can also call it themselves anywhere (it's just a function).
 
@@ -126,7 +126,7 @@ Persistent *telemetry* is player-built infrastructure — a colony with good log
 
 ## Cycle Costs (base table — moddable per map/biome)
 
-The cost table is **data, not code** (`costs.ron`, see [07-architecture.md](07-architecture.md)). Maps and biomes ship **overlays** that override any entry, so terrain can stress *program designs*, not just stats: a biome where loop overhead triples punishes iteration-heavy code; one where `broadcast` is cheap invites swarm coordination. Corruption's cycle tax ([05-terrain.md](05-terrain.md)) is just the first shipped overlay.
+The cost table is **data, not code** (`costs.ron`, see [07-architecture.md](07-architecture.md)). Maps and biomes ship **overlays** that override any entry, so terrain can stress *program designs*, not just stats: a biome where loop overhead triples punishes iteration-heavy code; one where `send` is cheap invites swarm coordination. Corruption's cycle tax ([05-terrain.md](05-terrain.md)) is just the first shipped overlay.
 
 Base values:
 
@@ -142,7 +142,11 @@ Base values:
 | Loop iteration overhead | 1 per iteration | The "loop tax" — rewards flat code where possible |
 | User function call (`def`) | 2 + body | Call overhead; inlining is a real optimization |
 | List index / append | 1 | |
-| `broadcast()` / messaging | 3 + payload size | Communication is expensive on purpose |
+| `send()` / `try_send()` | 3 + payload size | Communication is expensive on purpose |
+| `broadcast()` / `try_broadcast()` | 5 + payload size | Reaching everyone costs more |
+| `receive()` issue | 2, then blocks | Blocking wait; timeout expiry is a fault |
+| `match` | 1 + 1 per arm checked | Arms checked top-to-bottom; destructuring bind is free |
+| Enum construction | 1 | `Order.Mine(target)` |
 | **`upload_crash_dump()`** | 25 | Force-called on unhandled errors; also player-callable |
 | **Trap cost** | 5 | Paid to enter an `on error:` handler |
 | **Handler grace window** | 10 ticks | Time in `on error:` at normal costs; past it, all ops ×2 |
@@ -218,9 +222,57 @@ for t in threats:
         alert(t)
 ```
 
-### Tier 6 — Inter-bot messaging
+### Tier 6 — Enums & `match`
 
-`broadcast(channel, value)` / `listen(channel)`. Enables coordinated colonies: forager scouts publish ore locations, haulers subscribe.
+Rust-style sum types in Python clothing: variants may carry associated data, and `match` destructures them. Arms are checked top-to-bottom, first match wins.
+
+```python
+enum Order:
+    Idle
+    Mine(target)
+    Guard(post, radius)
+
+match current_order:
+    case Order.Mine(target):
+        move_to(target)
+        mine()
+    case Order.Guard(post, radius):
+        move_to(post)
+    case Order.Idle:
+        wander()
+```
+
+Enum values are first-class: storable in variables and lists — and **sendable on channels** (Tier 7), which is the real payoff: colonies develop *typed command protocols*.
+
+### Tier 7 — Channels (inter-bot messaging)
+
+**Blocking channels.** Any value — int, entity, list, enum — can travel a named channel. The API is a 2×2: **delivery** (one receiver vs. everyone) × **send mode** (block until heard vs. fire-and-forget):
+
+| | Blocks until delivered | Fire-and-forget |
+|---|---|---|
+| **One receiver** | `send(ch, val[, timeout])` — rendezvous handoff to exactly one receiver | `try_send(ch, val)` → bool — delivers to one blocked receiver, else the message is **lost** |
+| **All receivers** | `broadcast(ch, val[, timeout])` — blocks until ≥1 receiver, then all blocked receivers get a copy | `try_broadcast(ch, val)` → bool — copies to all currently blocked, else **lost** |
+
+Receive side: `receive(channel)` **blocks** until a message arrives; `receive(channel, timeout_ticks)` blocks up to the timeout, then **faults** (the unified error model handles timeouts — write an `on error:`); `try_receive(channel)` returns the builtin `Recv.Got(v) / Recv.Empty` enum for non-blocking polls. Blocking sends time out the same way: fault, handle it or don't.
+
+```python
+on error:
+    upload_log()        # a timeout landed here
+
+order = receive("orders", 100)   # block up to 100 ticks
+match order:
+    case Order.Mine(target):
+        move_to(target)
+        mine()
+```
+
+Semantics (deterministic):
+
+- **No queues, no mailboxes**: messages exist only in the instant of delivery. Fire-and-forget with nobody blocked = message gone. Persistent listening posts are something you build out of bots.
+- **One-receiver selection**: the longest-blocked receiver on the channel wins; ties break by lowest entity ID.
+- **Blocking consumes cycles.** A blocked bot (send *or* receive) executes nothing else, and its per-tick cycle budget burns while it waits — waiting *is* what its CPU is doing. No banking cycles, no free listening posts: a bot blocked for 100 ticks spent 100 ticks of compute on patience. Handlers still fire while blocked — with the usual double-handle stakes.
+- Channels are names (strings); the namespace is per-colony but **allies can be granted channels** (shared-library-style), enabling cross-colony coordination.
+- Corruption jams channel traffic in/out ([05-terrain.md](05-terrain.md)) — a blocking `send` from inside Corruption faults on timeout like anything else.
 
 ## Program Colors
 
@@ -254,7 +306,7 @@ Intel wrinkle: a ghost fleet can still be salvaged toward its color's decryption
 
 ## Types
 
-Deliberately small: `int` (i64), `bool`, `string` (labels/channels only, no manipulation initially), `entity` (opaque handle to a world object), `list`. **No floats** — all world math is fixed-point internally and exposed to Pyrite as scaled integers (e.g. positions in millitiles).
+Deliberately small: `int` (i64), `bool`, `string` (labels/channels only, no manipulation initially), `entity` (opaque handle to a world object), `list`, and `enum` values (user-declared sum types with associated data, Tier 6). **No floats** — all world math is fixed-point internally and exposed to Pyrite as scaled integers (e.g. positions in millitiles).
 
 ## Built-in Function Blocks (starter set)
 
@@ -269,7 +321,12 @@ The full catalog and unlock order live in [06-progression.md](06-progression.md)
 | `cargo_full()` → bool | 1 | |
 | `attack(entity)` | 2 + action | |
 | `scan_enemies()` → list | 4 | Requires Tier 5 |
-| `broadcast(ch, val)` | 3 + size | Requires Tier 6 |
+| `send(ch, val[, timeout])` | 3 + size, blocks | Requires Tier 7; one receiver, rendezvous; timeout faults |
+| `try_send(ch, val)` → bool | 3 + size | One receiver or lost |
+| `broadcast(ch, val[, timeout])` | 5 + size, blocks | All blocked receivers; waits for ≥1; timeout faults |
+| `try_broadcast(ch, val)` → bool | 5 + size | All blocked receivers or lost |
+| `receive(ch[, timeout])` | 2 + blocks | Timeout expiry faults |
+| `try_receive(ch)` → `Recv` enum | 2 | `Recv.Got(v)` / `Recv.Empty` |
 | `log(val)` | 1 | Append to local ring buffer |
 | `upload_log()` | 5 + size | Transmit buffer to colony Log Archive |
 | `upload_crash_dump()` | 25 | Full debug report (id, position, cargo, error, line); auto-forced on unhandled errors |
@@ -301,8 +358,11 @@ The full catalog and unlock order live in [06-progression.md](06-progression.md)
 - **Logging is ordinary functions** — `log`, `upload_log`, `upload_crash_dump` are costed builtins, so telemetry and black boxes are player-built, not engine magic (with the forced crash dump as the guaranteed floor).
 - **Loops** — `while` + `break`/`continue` at Tier 3; Python-style `for x in container` with containers at Tier 5. Implicit program loop stays; `while True:` legal but redundant.
 
+- **Messaging is blocking channels, not signals** — a 2×2 API: `send`/`try_send` (one receiver) and `broadcast`/`try_broadcast` (all receivers), each blocking-with-timeout or fire-and-forget (unheard messages are lost); `receive(timeout)`/`try_receive` on the other end. No queues. Timeouts fault. **Blocking burns cycles** — waiting is what the CPU is doing, so listening posts and rendezvous have real compute cost. Any value travels; enums + `match` (Tier 6) make channel traffic into typed protocols.
+- **Enums & `match`** — Rust-style sum types with associated data, Tier 6 construct.
+- **`on hurt(threshold):` is an unlock** — the default Damaged-threshold hurt is part of the handler unlock; custom thresholds are a separate research.
+- **Log buffer is hardware** — base 8 entries, +Memory bank.
+
 ## Open Questions
 
-- More signals later? Candidates: `on cargo_full:`, `on message(ch):` (would partially replace polling `listen()`), `on enemy_sighted:`. Each one shifts programs from polling to event-driven — powerful, so probably late unlocks if at all.
-- Can `on hurt:`'s threshold be parameterized (`on hurt(30):`)? Start fixed at the Damaged threshold; revisit.
-- Log ring buffer size: fixed, or a Memory-bank hardware stat? Lean hardware stat — one more reason to buy memory.
+- **Channel espionage**: channel names appear in code, and code leaks via salvage ([08-multiplayer.md](08-multiplayer.md)). Once an enemy knows `"orders"` exists, can they `receive` on it (eavesdrop — and in one-receiver mode, outright **steal** the message before your bot gets it)? `send` on it (spoof commands — the killer play)? Lean: yes to all on harm-enabled servers — leaked code should leak *infrastructure*, and defensive protocol design (rotating channel names, enum tags as authentication) becomes endgame craft.

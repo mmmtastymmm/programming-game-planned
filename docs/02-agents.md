@@ -10,7 +10,7 @@ Every bot is a **chassis + modules + program**:
 |---|---|
 | **Chassis** | HP, speed, cargo size, module slots. Printed at a Fabricator from resources ([03-resources.md](03-resources.md)). |
 | **CPU module** | Cycles per tick, max program length, stack depth. Upgradable. |
-| **Tool modules** | Which function blocks the bot can *physically* execute (a mining drill enables `mine()`, a blaster enables `attack()`). Language unlocks are colony-wide; tools are per-bot. |
+| **Tool modules** | Which function blocks the bot can *physically* execute (a mining drill enables `mine()`, a blaster enables `attack()`). Harvest tools are **tiered** — level N mines resources of tier ≤ N ([03-resources.md](03-resources.md)). Language unlocks are colony-wide; tools are per-bot. |
 | **Program** | One of the colony's **colored program slots** ([01-language.md](01-language.md)) — one color per Printer, printer count gated by controlled nests. The bot is visibly tinted by its color. Redeploying a color updates all its bots at their next loop boundary; the printer's **desired max** controls its color's population via the recall interrupt. |
 
 Chassis classes (initial set — tune freely):
@@ -50,7 +50,7 @@ stateDiagram-v2
 ```
 
 - **Damaged** (< 50% HP): visible sparks; speed and cycle budget reduced 25%. Crossing this threshold fires the `on hurt:` signal ([01-language.md](01-language.md)) — the canonical handler drops cargo and retreats to a Repair Bay ([03-resources.md](03-resources.md)). Pre-handler-unlock, polling `if health_low():` does the same job, worse.
-- **Disabled** (0 HP): the `on death:` signal runs (10-cycle black-box budget), then the engine force-calls `become_disabled()` — the same forced-ordinary-function pattern as `upload_crash_dump()` on unhandled errors; every death exits through that function. It puts the bot into an inert wreck state with a **self-destruct countdown** (~60s). Before it ends, the wreck can be:
+- **Disabled** (0 HP): the `on death:` signal runs (10-cycle black-box budget), then the engine force-calls `become_disabled()` — the same forced-ordinary-function pattern as `upload_crash_dump()` on unhandled errors; every death exits through that function. It puts the bot into an inert wreck state with a **self-destruct countdown that scales with total XP** (base ~30s + per-XP bonus, tuning constants): rookies pop fast, veterans linger — the more a bot was worth, the longer the window to save it (and the longer the enemy has to salvage-snipe it; the race gets richer exactly when the stakes are highest). Before it ends, the wreck can be:
   - **field-repaired** (Artisan-class) → enters **Boot Sequence**, **XP preserved** — rescue missions are a real play;
   - **`salvage()`d** — by anyone, allies *or enemies* — for a fraction of its Metal **plus +5% permanent decryption of the bot's program color** ([08-multiplayer.md](08-multiplayer.md)) — programs are read on murder, a few percent per murder, and the percentage never goes back down. Salvage destroys the wreck: rescue vs. enemy salvage is a race for the veteran *and* another slice of that color's source.
 - **Destroyed**: the countdown expires (the wreck explodes), the wreck is salvaged/destroyed, or — instantly, skipping Disabled entirely — a **double-handle** ([01-language.md](01-language.md)): any second handler firing while one runs, *any combination*, including a fault inside `on death:`. Reprinting at a Fabricator costs full resources; the program redeploys automatically; **all XP is lost**.
@@ -104,10 +104,10 @@ Levels are visible to **everyone** (pillar 2: transparency) — a veteran bot ha
 
 - **Perks apply to the bot only.** No colony-wide or program-attached XP effects — the veteran *is* the asset, which is what gives death its sting.
 - **Quadratic XP increments** — level *n* costs 100×*n* additional XP (see XP curve table).
-- **No hard bot cap — population is what the colony can sustain.** Bots draw ongoing upkeep from a *mix* of resources (Energy as the primary drain, per [03-resources.md](03-resources.md); potentially small Metal maintenance on damaged chassis). Over-extending doesn't block printing — it degrades the colony (brownout halves cycle budgets) and, if sustained, triggers **scrap recalls**: the colony recalls its lowest-total-XP bot for a partial Metal refund. The cap is an economic equilibrium the player feels, not a number they hit.
+- **No hard bot cap — population is what the colony can sustain.** Upkeep is a **data-driven resource mix** (an `upkeep.ron`-style config, adjustable without code changes — prototype the system, then tune); **v1 config: Energy (primary drain) + Metal (chassis maintenance)** per [03-resources.md](03-resources.md). Over-extending doesn't block printing — it degrades the colony (brownout halves cycle budgets) and, if sustained, triggers **scrap recalls**: the colony recalls its lowest-total-XP bot for a partial Metal refund. The cap is an economic equilibrium the player feels, not a number they hit.
+- **Wreck countdown scales with XP** — base + per-XP bonus (tuning): veterans get longer rescue windows; rookie wrecks barely exist.
 - **Per-color population is player-dialed** — each printer's desired max, enforced by recall re-coloring (XP kept).
 
 ## Open Questions
 
-- Does Metal maintenance (beyond Energy upkeep) pull its weight as a second sustain resource, or is Energy alone cleaner? Prototype Energy-only first.
-- Wreck self-destruct countdown length (~60s): flat, or scale with chassis size (a Bulwark wreck lingers longer than a Scamp's)?
+- Upkeep mix tuning: does Metal maintenance earn its complexity alongside Energy, or should the v1 config lean harder on Energy? (System is data-driven — answer via playtest, not redesign.)

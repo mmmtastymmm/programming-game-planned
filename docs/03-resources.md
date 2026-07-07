@@ -38,7 +38,7 @@ flowchart TD
 |---|---|---|---|
 | **Ore** | Ore veins (finite nodes) | Smelt into Metal | *Can your mining programs scale and reach?* |
 | **Crystal** | Crystal fields (finite, in risky terrain — see [05-terrain.md](05-terrain.md)) | Chips, consumables | *Will you venture into dangerous ground?* |
-| **Metal** | Smelter (refines Ore) | Chassis, structures, reprints | *How much are you willing to lose?* (combat/reprint costs) |
+| **Metal** | Smelter (refines Ore) | Chassis, structures, reprints, per-bot maintenance drain ([02-agents.md](02-agents.md)) | *How much are you willing to lose?* (combat/reprint costs) |
 | **Chips** | Foundry (Metal + Crystal) | CPU & tool modules | *Compute or claws?* Better brains vs. more bots |
 | **Energy** | Generators (burn Ore) or free at geothermal vents | Powers Fabricators/Smelters/Foundries; per-bot **upkeep** | *How big can the colony get?* Soft population cap |
 | **Data** | Task milestones, exploring, dissecting Feral wrecks, first-time achievements | Research: unlocks constructs and function blocks ([06-progression.md](06-progression.md)) | *Are you doing new things or the same thing?* |
@@ -47,8 +47,28 @@ flowchart TD
 
 1. **Data is not minable.** It comes from *activity* — first kill, tiles explored, Feral wrecks analyzed, milestones ("deliver 500 ore"). This ties progression to playing broadly, and it means a turtling player unlocks slower than an active one.
 2. **Energy is upkeep, not stockpile.** It's a rate (generation vs. drain), not a pile. Exceeding generation causes **brownout**: all bot cycle budgets are halved. A colony that overbuilds *gets visibly dumber* — a thematic and legible failure state.
-3. **Raw resources are spatial.** Nodes are finite and placed by terrain generation, forcing expansion — which forces longer supply lines — which rewards better hauling/escort programs. The resource system exists to create *routing problems for player code*.
+3. **Raw resources are spatial.** Nodes are placed by terrain generation and **mostly finite**, forcing expansion — which forces longer supply lines — which rewards better hauling/escort programs. The resource system exists to create *routing problems for player code*. **Regeneration is a per-node-type data flag**: the engine supports it, most node types ship with it off, and maps can place regenerating variants (e.g. a slow *seeping vein*) as design accents or for long-running servers.
 4. **Refinement is a logistics step, not a click.** Smelters/Foundries have input/output buffers that bots must physically feed and empty. Factory-game DNA: throughput is a program-quality problem.
+
+## Harvest Tool Tiers
+
+Harvesting requires a **tool module** ([02-agents.md](02-agents.md)), and tools are **tiered**: a level-N harvester works every resource of tier ≤ N. Each resource declares its required tier (data-driven; numbers below are made-up tuning values):
+
+| Resource | Required tool tier |
+|---|---|
+| Ore | 1 |
+| (future: deep/rich variants) | 2–3 |
+| Crystal | 4 |
+
+Higher-tier tools cost more Chips — so reaching Crystal is a hardware investment on top of a territorial risk ([05-terrain.md](05-terrain.md)): the bot that can mine it is expensive, and it's working next to Corruption. Escort it.
+
+## Ally Aid: the Request Box
+
+No free-form resource gifting. A colony builds a **Request Box** and posts a request on it (*resource, amount*). Allied bots may — entirely voluntarily — haul the requested resource in and `deposit()` it; the owner collects what arrives.
+
+- Aid is **physical logistics**: someone's haulers cross the map to deliver it, through whatever is between the colonies. Charity has supply lines.
+- It's **programmable**: a good ally writes a standing program — `if ally_request_open(): haul_to(request_box)` — and generosity becomes infrastructure.
+- Requests are visible to all allies (and, being on the field, spottable by enemy scouts: a colony begging for Metal is telling everyone something).
 
 ## Structures (resource-relevant set)
 
@@ -63,6 +83,8 @@ flowchart TD
 | **Research Archive** | 10 Metal, 5 Chips | Where Data is spent; one per colony needed to research. |
 | **Repair Bay** | 8 Metal | Repairs bots in range (energy drain while active). The target of `on hurt:` retreat programs ([01-language.md](01-language.md)). |
 | **Log Archive** | 5 Metal, 2 Chips | Receives `upload_log()` transmissions; the colony's crash-report/telemetry viewer. |
+| **Sentry Post** | 4 Metal | Wide sensor radius, nothing else. Fog of war is eyes-only ([05-terrain.md](05-terrain.md)) — fixed sightlines are cheap infrastructure. |
+| **Request Box** | 3 Metal | Posts a resource request allies may voluntarily fulfill by hauling and depositing (see Ally Aid). |
 
 ## Starting State (per player)
 
@@ -70,8 +92,10 @@ flowchart TD
 - 2 Drudge bots (Red) with a working Tier-0 mining program pre-deployed (the tutorial *is* reading this program)
 - 30 Metal, 10 Ore buffer, 0 Crystal/Chips/Data
 
-## Open Questions
+## Decided
 
-- Do resource nodes regenerate? Lean **no** for match modes (forces map control), possible **slow regen** for long co-op sessions.
-- Is Crystal harvesting mechanically different from Ore (e.g. needs a specific tool module)? Lean yes — one more thing programs must handle.
-- Market/trading between co-op allies: free gifting, or a transfer structure? Defer to [08-multiplayer.md](08-multiplayer.md) open questions.
+- **Regen is a per-node-type data flag** — most node types are finite; regenerating variants exist for map design and long servers (see Design Rules).
+- **Harvest tools are tiered** — level-N tools work resources of tier ≤ N; Ore low, Crystal high (see Harvest Tool Tiers).
+- **Ally aid = Request Box** — posted requests, voluntarily fulfilled by physical hauling; no free-form gifting (see Ally Aid).
+
+- **No extra reward for fulfilling requests** — the Hauling XP the trip naturally earns is the reward.
