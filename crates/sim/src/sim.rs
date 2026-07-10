@@ -38,6 +38,8 @@ pub struct Tuning {
     /// Colony population the economy sustains before scrap recalls fire
     /// (Energy upkeep stands in later; docs/02).
     pub capacity: u32,
+    /// Freeze duration after bumping into an occupied tile (50 = 5s @10Hz).
+    pub bump_freeze_ticks: u32,
 }
 
 impl Default for Tuning {
@@ -52,6 +54,7 @@ impl Default for Tuning {
             printed_cpu: 2,
             printed_cargo_cap: 2,
             capacity: 10_000,
+            bump_freeze_ticks: 50,
         }
     }
 }
@@ -179,6 +182,7 @@ impl Sim {
                     action: None,
                     booting,
                     recall: None,
+                    bump_frozen: 0,
                     dying: false,
                     log_buf: Vec::new(),
                     xp_mining: 0,
@@ -203,6 +207,9 @@ impl Sim {
                 // Boot/recall are engine interrupt contexts: the program is
                 // suspended and the engine drives the bot.
                 continue;
+            }
+            if bot.data.bump_frozen > 0 {
+                continue; // stunned by a bump — no thinking either
             }
             let mut vm = bot.vm.take().expect("vm present between phases");
             if vm.is_dead() {
@@ -268,6 +275,10 @@ impl Sim {
     fn resolve_bot(&mut self, id: BotId) {
         let Some(bot) = self.world.bots.get_mut(&id) else { return };
         if bot.data.dying {
+            return;
+        }
+        if bot.data.bump_frozen > 0 {
+            bot.data.bump_frozen -= 1;
             return;
         }
 
@@ -368,7 +379,17 @@ impl Sim {
                     bot.data.action = Some(Action::Move { path, ticks_left });
                     return;
                 }
-                let entered = path.remove(0);
+                // Bots are solid: bumping an occupied tile freezes the
+                // mover, who retries the step after thawing.
+                let entered = path[0];
+                if self.world.tile_occupied(entered, id) {
+                    let bot = self.world.bots.get_mut(&id).expect("bot exists");
+                    bot.data.bump_frozen = self.tuning.bump_freeze_ticks;
+                    bot.data.action = Some(Action::Move { path, ticks_left: 1 });
+                    return;
+                }
+                let bot = self.world.bots.get_mut(&id).expect("bot exists");
+                path.remove(0);
                 bot.data.pos = entered;
                 if path.is_empty() {
                     self.finish_action(id, Ok(Value::Unit));
@@ -479,6 +500,9 @@ impl Sim {
         }
 
         // Recall walk.
+        if bot.data.bump_frozen > 0 {
+            return; // decremented in resolve_bot
+        }
         let Some(mut recall) = bot.data.recall.take() else { return };
         if !recall.path.is_empty() {
             recall.ticks_left -= 1;
@@ -486,7 +510,16 @@ impl Sim {
                 bot.data.recall = Some(recall);
                 return;
             }
-            let entered = recall.path.remove(0);
+            let entered = recall.path[0];
+            if self.world.tile_occupied(entered, id) {
+                let bot = self.world.bots.get_mut(&id).expect("bot exists");
+                bot.data.bump_frozen = self.tuning.bump_freeze_ticks;
+                recall.ticks_left = 1;
+                bot.data.recall = Some(recall);
+                return;
+            }
+            let bot = self.world.bots.get_mut(&id).expect("bot exists");
+            recall.path.remove(0);
             bot.data.pos = entered;
             if let Some(next) = recall.path.first() {
                 recall.ticks_left = self
@@ -543,8 +576,9 @@ impl Sim {
             return;
         };
         let program = Rc::clone(&cp.program);
+        let landing = self.world.free_spawn_tile(printer_pos).unwrap_or(printer_pos);
         let bot = self.world.bots.get_mut(&id).expect("bot exists");
-        bot.data.pos = printer_pos;
+        bot.data.pos = landing;
         bot.data.color = color;
         bot.data.recall = None;
         bot.data.booting = Some(self.tuning.boot_ticks);
@@ -587,8 +621,14 @@ impl Sim {
                 if ticks > 1 {
                     printer.job = Some(ticks - 1);
                 } else {
-                    printer.job = None;
                     let (pos, faction, color) = (printer.pos, printer.faction, printer.color);
+                    // Bots are solid: hold the finished print until a tile
+                    // near the printer frees up.
+                    let Some(spawn_pos) = self.world.free_spawn_tile(pos) else {
+                        self.world.printers.get_mut(&pid).expect("printer exists").job = Some(1);
+                        continue;
+                    };
+                    self.world.printers.get_mut(&pid).expect("printer exists").job = None;
                     match self.world.color_programs.get(&(faction, color.0)) {
                         Some(cp) => {
                             let program = Rc::clone(&cp.program);
@@ -596,7 +636,7 @@ impl Sim {
                             vm.set_engine_interrupt(true);
                             let t = &self.tuning;
                             let (hp, cpu, cap) = (t.printed_hp, t.printed_cpu, t.printed_cargo_cap);
-                            self.insert_bot(pos, faction, color, hp, cpu, cap, vm, true);
+                            self.insert_bot(spawn_pos, faction, color, hp, cpu, cap, vm, true);
                         }
                         None => {
                             // Program was undeployed mid-print: refund.
@@ -880,6 +920,7 @@ impl Sim {
             h.write_u64(bot.data.xp_combat);
             h.write_u8(bot.data.dying as u8);
             h.write_u32(bot.data.booting.unwrap_or(0));
+            h.write_u32(bot.data.bump_frozen);
             h.write_u8(bot.data.recall.is_some() as u8);
             h.write_u64(bot.data.xp_mining);
             h.write_u64(bot.data.xp_hauling);

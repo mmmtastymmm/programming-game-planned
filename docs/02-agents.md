@@ -110,6 +110,7 @@ Levels are visible to **everyone** (pillar 2: transparency) — a veteran bot ha
 - **No hard bot cap — population is what the colony can sustain.** Upkeep is a **data-driven resource mix** (an `upkeep.ron`-style config, adjustable without code changes — prototype the system, then tune); **v1 config: Energy (primary drain) + Metal (chassis maintenance)** per [03-resources.md](03-resources.md). Over-extending doesn't block printing — it degrades the colony (brownout halves cycle budgets) and, if sustained, triggers **scrap recalls**: the colony recalls its lowest-total-XP bot for a partial Metal refund. The cap is an economic equilibrium the player feels, not a number they hit.
 - **Wreck countdown scales with XP** — base + per-XP bonus (tuning): veterans get longer rescue windows; rookie wrecks barely exist.
 - **Per-color population is player-dialed** — each printer's desired max, enforced by recall re-coloring (XP kept).
+- **Bots are solid — one per tile.** Trying to enter an occupied tile is a **bump**: the mover recoils and freezes (~5 s, tuning), thinking included — a stun, not a pause — then retries the step. Traffic jams are therefore *visible program bugs* (write better routing). Printed and re-colored bots emerge on the first free tile beside their printer; a fully walled-in printer holds finished prints until space opens.
 
 ## Open Questions
 

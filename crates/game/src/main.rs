@@ -409,21 +409,30 @@ fn update_poses(
     mut poses: Query<(&mut Pose, &mut Transform)>,
 ) {
     let world = &game.0.world;
+    let freeze_total = game.0.tuning.bump_freeze_ticks;
     for (id, bot) in &world.bots {
         let Some(&entity) = index.bots.get(&id.0) else { continue };
         let Ok((mut pose, mut transform)) = poses.get_mut(entity) else { continue };
-        let y = if bot.data.booting.is_some() {
+        let mut y = if bot.data.booting.is_some() {
             0.1 // rising out of the printer
         } else {
             0.45
         };
+        // Bump recoil: a little hop over the first few frozen ticks.
+        if bot.data.bump_frozen > 0 {
+            let age = freeze_total.saturating_sub(bot.data.bump_frozen) as f32;
+            if age < 5.0 {
+                y += 0.3 * (std::f32::consts::PI * (age + 1.0) / 6.0).sin();
+            }
+        }
         let target = tile_xyz(world, bot.data.pos, y);
         pose.prev = pose.curr;
         pose.curr = target;
         if pose.grid != bot.data.pos {
             let dx = (bot.data.pos.x - pose.grid.x) as f32;
             let dz = (bot.data.pos.y - pose.grid.y) as f32;
-            transform.rotation = Quat::from_rotation_y(dx.atan2(dz));
+            // Nose is on the local -Z face; lead with it.
+            transform.rotation = Quat::from_rotation_y((-dx).atan2(-dz));
             pose.grid = bot.data.pos;
         }
     }

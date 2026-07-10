@@ -126,6 +126,8 @@ pub struct BotData {
     pub booting: Option<u32>,
     /// In-progress recall (engine interrupt context).
     pub recall: Option<Recall>,
+    /// Ticks left in a collision-bump freeze (docs/02: bots are solid).
+    pub bump_frozen: u32,
     /// Set by the forced `become_disabled()`; the death phase wrecks the bot.
     pub dying: bool,
     /// Local log ring buffer (base 8 entries; hardware stat later).
@@ -320,6 +322,24 @@ impl World {
                     .and_then(|bid| self.bots.get(bid))
                     .map(|b| b.data.pos)
             })
+    }
+
+    /// Is a living bot (other than `exclude`) standing on `pos`?
+    pub fn tile_occupied(&self, pos: TilePos, exclude: BotId) -> bool {
+        self.bots
+            .values()
+            .any(|b| b.data.id != exclude && !b.data.dying && b.data.pos == pos)
+    }
+
+    /// First free, passable tile at/around `center`, in a fixed
+    /// deterministic order. Used for print/re-color placement.
+    pub fn free_spawn_tile(&self, center: TilePos) -> Option<TilePos> {
+        const ORDER: [(i32, i32); 9] =
+            [(0, 0), (0, -1), (1, 0), (0, 1), (-1, 0), (1, -1), (1, 1), (-1, 1), (-1, -1)];
+        ORDER.iter().map(|(dx, dy)| TilePos::new(center.x + dx, center.y + dy)).find(|&p| {
+            self.grid.get(p).is_some_and(|t| t.move_ticks().is_some())
+                && !self.tile_occupied(p, BotId(u32::MAX))
+        })
     }
 
     /// Nearest living bot of a different faction: (manhattan, entity id)
