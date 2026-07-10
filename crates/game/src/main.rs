@@ -428,13 +428,26 @@ fn update_poses(
         let target = tile_xyz(world, bot.data.pos, y);
         pose.prev = pose.curr;
         pose.curr = target;
-        if pose.grid != bot.data.pos {
-            let dx = (bot.data.pos.x - pose.grid.x) as f32;
-            let dz = (bot.data.pos.y - pose.grid.y) as f32;
+        // Face the tile currently being attempted (so a bumped bot stares
+        // at whatever it walked into for the whole freeze), else the tile
+        // just entered.
+        let next_tile = match (&bot.data.action, &bot.data.recall) {
+            (Some(sim::world::Action::Move { path, .. }), _) if !path.is_empty() => Some(path[0]),
+            (_, Some(recall)) if !recall.path.is_empty() => Some(recall.path[0]),
+            _ => None,
+        };
+        let face_from_to = match next_tile {
+            Some(next) if next != bot.data.pos => Some((bot.data.pos, next)),
+            _ if pose.grid != bot.data.pos => Some((pose.grid, bot.data.pos)),
+            _ => None,
+        };
+        if let Some((from, to)) = face_from_to {
+            let dx = (to.x - from.x) as f32;
+            let dz = (to.y - from.y) as f32;
             // Nose is on the local -Z face; lead with it.
             transform.rotation = Quat::from_rotation_y((-dx).atan2(-dz));
-            pose.grid = bot.data.pos;
         }
+        pose.grid = bot.data.pos;
     }
 }
 

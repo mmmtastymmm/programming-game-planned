@@ -2,6 +2,7 @@
 //! Everything lives in BTree containers with stable IDs (determinism).
 
 use crate::map::{Grid, MapSpec, TileKind, TilePos};
+use std::collections::BTreeSet;
 use pyrite::ast::Program;
 use pyrite::Vm;
 use std::collections::BTreeMap;
@@ -59,6 +60,8 @@ pub struct Recall {
     pub path: Vec<TilePos>,
     /// Ticks left to enter `path[0]`.
     pub ticks_left: u32,
+    /// The printer being walked to (for bump re-planning).
+    pub home: EntityId,
     pub purpose: RecallPurpose,
 }
 
@@ -94,8 +97,9 @@ pub enum ActionRequest {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Action {
     /// `path[0]` is the next tile to enter; `ticks_left` is the remaining
-    /// cost of entering it (Rubble takes 2, Plains 1).
-    Move { path: Vec<TilePos>, ticks_left: u32 },
+    /// cost of entering it (Rubble takes 2, Plains 1). `goals` is kept so
+    /// the route can be re-planned after a bump.
+    Move { path: Vec<TilePos>, ticks_left: u32, goals: BTreeSet<TilePos> },
     Mine { node: EntityId, ticks_left: u32 },
     Deposit { depot: EntityId, ticks_left: u32 },
     Attack { target: EntityId, ticks_left: u32 },

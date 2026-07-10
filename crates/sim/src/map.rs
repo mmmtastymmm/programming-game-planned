@@ -133,6 +133,17 @@ impl MapSpec {
 /// (start excluded, goal included). `None` if unreachable. An empty path
 /// means the start already satisfies a goal.
 pub fn astar(grid: &Grid, start: TilePos, goals: &BTreeSet<TilePos>) -> Option<Vec<TilePos>> {
+    astar_avoiding(grid, start, goals, &BTreeSet::new())
+}
+
+/// A* that additionally refuses to enter `blocked` tiles (used for bump
+/// re-planning: other bots' current positions are obstacles).
+pub fn astar_avoiding(
+    grid: &Grid,
+    start: TilePos,
+    goals: &BTreeSet<TilePos>,
+    blocked: &BTreeSet<TilePos>,
+) -> Option<Vec<TilePos>> {
     if goals.contains(&start) {
         return Some(Vec::new());
     }
@@ -170,6 +181,9 @@ pub fn astar(grid: &Grid, start: TilePos, goals: &BTreeSet<TilePos>) -> Option<V
         // Fixed neighbor order: N, E, S, W.
         for (dx, dy) in [(0, -1), (1, 0), (0, 1), (-1, 0)] {
             let next = TilePos::new(pos.x + dx, pos.y + dy);
+            if blocked.contains(&next) {
+                continue;
+            }
             let Some(kind) = grid.get(next) else { continue };
             let Some(step_cost) = kind.move_ticks() else { continue };
             let ng = g + step_cost;

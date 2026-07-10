@@ -123,3 +123,31 @@ fn collision_world_is_deterministic() {
         assert_eq!(a.state_hash(), b.state_hash(), "desync at tick {tick}");
     }
 }
+
+#[test]
+fn repath_around_blocker_after_bump() {
+    // Open ground: the straight line to the depot passes the blocker, but
+    // after one bump-freeze the mover re-plans around it and arrives.
+    let mut spec = MapSpec::empty(7, 3);
+    spec.depots.push(TilePos::new(0, 1));
+    let mut sim = Sim::new(&spec);
+    let blocker = spawn(&mut sim, TilePos::new(2, 1), IDLER);
+    let mover = spawn(&mut sim, TilePos::new(4, 1), "move_to(nearest_depot())\n");
+
+    let mut froze = false;
+    for _ in 0..150 {
+        sim.step();
+        let a = sim.world.bots[&blocker].data.pos;
+        let b = sim.world.bots[&mover].data.pos;
+        assert_ne!(a, b, "never overlap");
+        if sim.world.bots[&mover].data.bump_frozen > 0 {
+            froze = true;
+        }
+    }
+    assert!(froze, "the straight-line attempt must bump once");
+    let end = sim.world.bots[&mover].data.pos;
+    assert!(
+        end.chebyshev(TilePos::new(0, 1)) <= 1,
+        "after re-planning the mover must reach the depot; ended at {end:?}"
+    );
+}

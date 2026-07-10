@@ -10,7 +10,7 @@
 
 use crate::hash::Fnv1a;
 use crate::host::BotHost;
-use crate::map::{astar, MapSpec, TilePos};
+use crate::map::{astar, astar_avoiding, MapSpec, TilePos};
 use crate::world::{
     Action, ActionRequest, ArchiveEntry, ArchiveKind, BlackBox, Bot, BotData, BotId, Color,
     ColorProgram, EntityId, PrinterState, Recall, RecallPurpose, Wreck, World,
@@ -279,6 +279,9 @@ impl Sim {
         }
         if bot.data.bump_frozen > 0 {
             bot.data.bump_frozen -= 1;
+            if bot.data.bump_frozen == 0 {
+                self.replan_after_bump(id);
+            }
             return;
         }
 
@@ -317,7 +320,8 @@ impl Sim {
                                 .and_then(|t| t.move_ticks())
                                 .expect("path tiles are passable");
                             let bot = self.world.bots.get_mut(&id).expect("bot exists");
-                            bot.data.action = Some(Action::Move { path, ticks_left: first_cost });
+                            bot.data.action =
+                                Some(Action::Move { path, ticks_left: first_cost, goals });
                         }
                         None => {
                             self.finish_action(id, Err("move_to: unreachable".into()));
@@ -373,19 +377,19 @@ impl Sim {
         // Advance an in-flight action.
         let Some(action) = bot.data.action.take() else { return };
         match action {
-            Action::Move { mut path, ticks_left } => {
+            Action::Move { mut path, ticks_left, goals } => {
                 let ticks_left = ticks_left - 1;
                 if ticks_left > 0 {
-                    bot.data.action = Some(Action::Move { path, ticks_left });
+                    bot.data.action = Some(Action::Move { path, ticks_left, goals });
                     return;
                 }
                 // Bots are solid: bumping an occupied tile freezes the
-                // mover, who retries the step after thawing.
+                // mover, which re-plans its route as it thaws.
                 let entered = path[0];
                 if self.world.tile_occupied(entered, id) {
                     let bot = self.world.bots.get_mut(&id).expect("bot exists");
                     bot.data.bump_frozen = self.tuning.bump_freeze_ticks;
-                    bot.data.action = Some(Action::Move { path, ticks_left: 1 });
+                    bot.data.action = Some(Action::Move { path, ticks_left: 1, goals });
                     return;
                 }
                 let bot = self.world.bots.get_mut(&id).expect("bot exists");
@@ -401,7 +405,7 @@ impl Sim {
                         .and_then(|t| t.move_ticks())
                         .expect("path tiles are passable");
                     let bot = self.world.bots.get_mut(&id).expect("bot exists");
-                    bot.data.action = Some(Action::Move { path, ticks_left: next_cost });
+                    bot.data.action = Some(Action::Move { path, ticks_left: next_cost, goals });
                 }
             }
             Action::Mine { node, ticks_left } => {
@@ -790,9 +794,76 @@ impl Sim {
         let bot = self.world.bots.get_mut(&id).expect("bot exists");
         bot.data.requested = None;
         bot.data.action = None;
-        bot.data.recall = Some(Recall { path, ticks_left, purpose });
+        bot.data.recall = Some(Recall { path, ticks_left, home, purpose });
         if let Some(vm) = bot.vm.as_mut() {
             vm.set_engine_interrupt(true);
+        }
+    }
+
+    /// As a bump-freeze ends: re-run A* to the same goals, treating other
+    /// bots' current tiles as obstacles. Falls back to the old path when no
+    /// clear route exists (true corridors keep jamming, visibly).
+    fn replan_after_bump(&mut self, id: BotId) {
+        let Some(bot) = self.world.bots.get(&id) else { return };
+        let start = bot.data.pos;
+        let occupied: BTreeSet<TilePos> = self
+            .world
+            .bots
+            .values()
+            .filter(|b| b.data.id != id && !b.data.dying)
+            .map(|b| b.data.pos)
+            .collect();
+
+        // Program move.
+        if let Some(Action::Move { goals, .. }) = &bot.data.action {
+            let goals = goals.clone();
+            match astar_avoiding(&self.world.grid, start, &goals, &occupied) {
+                Some(path) if path.is_empty() => {
+                    // Already standing at a goal: the move is done.
+                    self.finish_action(id, Ok(Value::Unit));
+                }
+                Some(path) => {
+                    let first_cost = self
+                        .world
+                        .grid
+                        .get(path[0])
+                        .and_then(|t| t.move_ticks())
+                        .expect("path tiles are passable");
+                    let bot = self.world.bots.get_mut(&id).expect("bot exists");
+                    bot.data.action =
+                        Some(Action::Move { path, ticks_left: first_cost, goals });
+                }
+                None => {} // no clear route: keep the old path, retry
+            }
+            return;
+        }
+
+        // Engine-driven recall walk.
+        let Some(bot) = self.world.bots.get(&id) else { return };
+        if let Some(recall) = &bot.data.recall {
+            let home = recall.home;
+            let Some(home_pos) = self.world.printers.get(&home).map(|p| p.pos) else { return };
+            let mut goals = BTreeSet::new();
+            goals.insert(home_pos);
+            for dy in -1..=1 {
+                for dx in -1..=1 {
+                    let g = TilePos::new(home_pos.x + dx, home_pos.y + dy);
+                    if self.world.grid.get(g).is_some_and(|t| t.move_ticks().is_some()) {
+                        goals.insert(g);
+                    }
+                }
+            }
+            if let Some(path) = astar_avoiding(&self.world.grid, start, &goals, &occupied) {
+                let ticks_left = path
+                    .first()
+                    .map(|p| self.world.grid.get(*p).and_then(|t| t.move_ticks()).unwrap_or(1))
+                    .unwrap_or(0);
+                let bot = self.world.bots.get_mut(&id).expect("bot exists");
+                if let Some(recall) = bot.data.recall.as_mut() {
+                    recall.path = path;
+                    recall.ticks_left = ticks_left;
+                }
+            }
         }
     }
 
