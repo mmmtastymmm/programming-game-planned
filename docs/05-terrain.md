@@ -43,6 +43,19 @@ The map is editable — both directions, by anyone with the tools (`terraform` f
 
 Deconstruction is symmetric and adversarial: enemies can `demolish` **your** bridge — behind your raiding party. Chokepoints stop being facts of the map and become claims you defend.
 
+## Narrow Corridors & Traffic Tools
+
+Bots are solid and bump-freezes are expensive ([02-agents.md](02-agents.md)), so a one-tile corridor is a real engineering problem: two bots meeting head-on inside one **deadlock** — mutual bump, freeze, re-plan (no route), bump again, forever. **The engine will not solve this for you.** Traffic is player code; the toolkit is a ladder:
+
+| Tier | Tool | The fix it enables |
+|---|---|---|
+| 0 | `wait(n)` (function block, cost 1 + n idle ticks) | Stagger departures; crude time-slicing of a shared corridor |
+| 2 | sensors + `if` | Check before committing (candidate blocks: `path_blocked()`, occupancy peeks) |
+| 6–7 | enums + **channels** | The real answer: a one-receiver channel token **is a mutex** — hold the token to enter the corridor, `send` it back on exit; gatekeeper bots at each mouth |
+| terraform | `bridge()` / `clear()` | Widen the corridor: turn the traffic problem into infrastructure ([Terraforming](#terraforming-build--deconstruct)) |
+
+Design intent: corridor congestion is the first *systems* problem a colony hits — visible (frozen bots stare at each other), diagnosable (crash-free, just slow), and solvable at every tier with the tools of that tier. A deadlocked corridor is not a bug; it's the tutorial for channels.
+
 ## Fog of War (decided: eyes only)
 
 **Vision is the live union of every friendly bot's and structure's sensor range. Nothing else.**

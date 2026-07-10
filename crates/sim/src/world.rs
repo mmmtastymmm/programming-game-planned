@@ -91,6 +91,8 @@ pub enum ActionRequest {
     Mine,
     Deposit,
     Attack(EntityId),
+    /// Idle deliberately for N ticks — the Tier-0 traffic tool.
+    Wait(u32),
 }
 
 /// An in-flight world action.
@@ -103,6 +105,7 @@ pub enum Action {
     Mine { node: EntityId, ticks_left: u32 },
     Deposit { depot: EntityId, ticks_left: u32 },
     Attack { target: EntityId, ticks_left: u32 },
+    Wait { ticks_left: u32 },
 }
 
 pub const LOG_BUFFER_CAP: usize = 8;

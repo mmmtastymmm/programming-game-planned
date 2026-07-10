@@ -351,6 +351,9 @@ impl Sim {
                     let bot = self.world.bots.get_mut(&id).expect("bot exists");
                     bot.data.action = Some(Action::Attack { target, ticks_left: 1 });
                 }
+                ActionRequest::Wait(ticks) => {
+                    bot.data.action = Some(Action::Wait { ticks_left: ticks });
+                }
                 ActionRequest::Deposit => {
                     let depot = self
                         .world
@@ -481,6 +484,14 @@ impl Sim {
                 bot.data.xp_combat += ATTACK_DAMAGE as u64;
                 self.finish_action(id, Ok(Value::Unit));
                 self.apply_damage(target_bot, ATTACK_DAMAGE);
+            }
+            Action::Wait { ticks_left } => {
+                let ticks_left = ticks_left - 1;
+                if ticks_left > 0 {
+                    bot.data.action = Some(Action::Wait { ticks_left });
+                } else {
+                    self.finish_action(id, Ok(Value::Unit));
+                }
             }
             Action::Deposit { depot, ticks_left } => {
                 let ticks_left = ticks_left - 1;

@@ -62,6 +62,7 @@ impl Default for CostTable {
             ("move_to", 2),
             ("mine", 2),
             ("deposit", 1),
+            ("wait", 1),
             ("nearest_ore", 3),
             ("nearest_depot", 3),
             ("cargo_full", 1),

@@ -61,6 +61,11 @@ impl pyrite::Host for BotHost<'_> {
                 _ => HostCall::Fault("move_to takes 1 argument".into()),
             },
             "mine" => self.request(ActionRequest::Mine),
+            "wait" => match args {
+                [Value::Int(n)] if *n > 0 => self.request(ActionRequest::Wait(*n as u32)),
+                [Value::Int(_)] => HostCall::Fault("wait requires a positive tick count".into()),
+                _ => HostCall::Fault("wait takes 1 integer argument".into()),
+            },
             "deposit" => self.request(ActionRequest::Deposit),
             "attack" => match args {
                 [Value::Entity(target)] => self.request(ActionRequest::Attack(EntityId(*target))),

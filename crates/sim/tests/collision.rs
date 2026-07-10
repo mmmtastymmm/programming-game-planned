@@ -150,3 +150,23 @@ fn sidestep_dodges_blocker_without_freezing() {
         "the dodge + re-plan must reach the depot; ended at {end:?}"
     );
 }
+
+#[test]
+fn wait_idles_for_the_requested_ticks() {
+    let mut sim = Sim::new(&MapSpec::empty(4, 4));
+    let bot = spawn(&mut sim, TilePos::new(1, 1), "wait(10)\nlog(1)\n");
+    for _ in 0..8 {
+        sim.step();
+    }
+    assert!(
+        sim.world.bots[&bot].data.log_buf.is_empty(),
+        "log must not run while waiting"
+    );
+    for _ in 0..12 {
+        sim.step();
+    }
+    assert!(
+        !sim.world.bots[&bot].data.log_buf.is_empty(),
+        "log runs once the wait completes"
+    );
+}

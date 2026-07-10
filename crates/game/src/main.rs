@@ -132,9 +132,11 @@ fn build_colony() -> Sim {
     for y in 2..9 {
         spec.rubble.push(TilePos::new(12, y));
     }
-    for x in 15..19 {
-        for y in 9..12 {
-            spec.water.push(TilePos::new(x, y));
+    // A water wall splits the map; the only way east is a single-tile
+    // corridor at (16, 6) — the traffic-engineering test bed.
+    for y in 0..14 {
+        if y != 6 {
+            spec.water.push(TilePos::new(16, y));
         }
     }
     spec.ore_nodes.push((TilePos::new(20, 3), 60));
