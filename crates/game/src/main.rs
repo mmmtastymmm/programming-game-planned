@@ -373,7 +373,9 @@ fn orbit_camera(
     mut wheel: EventReader<MouseWheel>,
     mut cams: Query<(&mut OrbitCam, &mut Transform)>,
 ) {
-    let over_ui = contexts.ctx_mut().wants_pointer_input();
+    // try_ctx_mut: the context is gone during shutdown / not yet there on
+    // the first frame — never panic for a camera nicety.
+    let over_ui = contexts.try_ctx_mut().is_some_and(|ctx| ctx.wants_pointer_input());
     let Ok((mut cam, mut transform)) = cams.single_mut() else { return };
 
     let delta: Vec2 = motion.read().map(|m| m.delta).sum();
@@ -689,7 +691,7 @@ fn editor_ui(
     mut game: NonSendMut<GameSim>,
     mut editor: ResMut<EditorState>,
 ) {
-    let ctx = contexts.ctx_mut();
+    let Some(ctx) = contexts.try_ctx_mut() else { return };
     egui::SidePanel::left("editor").exact_width(300.0).show(ctx, |ui| {
         ui.heading("Pyrite");
         ui.add(
