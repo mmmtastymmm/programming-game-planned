@@ -100,6 +100,8 @@ pub struct MapSpec {
     pub printers: Vec<PrinterSpec>,
     /// Seed stockpile (per docs/03 the starting state includes a buffer).
     pub starting_ore: u64,
+    /// Seed for the sim's RNG stream (dodge picks, later wander/combat).
+    pub seed: u64,
 }
 
 /// A printer placed by the map (docs/03: colonies start with a working
@@ -125,6 +127,7 @@ impl MapSpec {
             depots: Vec::new(),
             printers: Vec::new(),
             starting_ore: 0,
+            seed: 0x5EED_0001,
         }
     }
 }

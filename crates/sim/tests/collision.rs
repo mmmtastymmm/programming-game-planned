@@ -125,29 +125,28 @@ fn collision_world_is_deterministic() {
 }
 
 #[test]
-fn repath_around_blocker_after_bump() {
-    // Open ground: the straight line to the depot passes the blocker, but
-    // after one bump-freeze the mover re-plans around it and arrives.
+fn sidestep_dodges_blocker_without_freezing() {
+    // Open ground: when the next tile is occupied the mover takes a free
+    // sidestep (no freeze), re-plans, and arrives at the depot.
     let mut spec = MapSpec::empty(7, 3);
     spec.depots.push(TilePos::new(0, 1));
     let mut sim = Sim::new(&spec);
     let blocker = spawn(&mut sim, TilePos::new(2, 1), IDLER);
     let mover = spawn(&mut sim, TilePos::new(4, 1), "move_to(nearest_depot())\n");
 
-    let mut froze = false;
     for _ in 0..150 {
         sim.step();
         let a = sim.world.bots[&blocker].data.pos;
         let b = sim.world.bots[&mover].data.pos;
         assert_ne!(a, b, "never overlap");
-        if sim.world.bots[&mover].data.bump_frozen > 0 {
-            froze = true;
-        }
+        assert_eq!(
+            sim.world.bots[&mover].data.bump_frozen, 0,
+            "open ground must dodge, not freeze"
+        );
     }
-    assert!(froze, "the straight-line attempt must bump once");
     let end = sim.world.bots[&mover].data.pos;
     assert!(
         end.chebyshev(TilePos::new(0, 1)) <= 1,
-        "after re-planning the mover must reach the depot; ended at {end:?}"
+        "the dodge + re-plan must reach the depot; ended at {end:?}"
     );
 }

@@ -200,6 +200,8 @@ pub struct World {
     pub black_boxes: Vec<BlackBox>,
     pub stockpile_ore: u64,
     pub archive: Vec<ArchiveEntry>,
+    /// SplitMix64 state — the sim's only randomness source (CLAUDE.md).
+    pub rng_state: u64,
     next_entity: u64,
     next_bot: u32,
 }
@@ -226,6 +228,7 @@ impl World {
             black_boxes: Vec::new(),
             stockpile_ore: 0,
             archive: Vec::new(),
+            rng_state: spec.seed,
             next_entity: 1,
             next_bot: 1,
         };
@@ -280,6 +283,16 @@ impl World {
             }
         }
         count
+    }
+
+    /// Deterministic SplitMix64. Advanced only by sim systems, in tick
+    /// order — never from rendering or UI.
+    pub fn next_rand(&mut self) -> u64 {
+        self.rng_state = self.rng_state.wrapping_add(0x9E3779B97F4A7C15);
+        let mut z = self.rng_state;
+        z = (z ^ (z >> 30)).wrapping_mul(0xBF58476D1CE4E5B9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94D049BB133111EB);
+        z ^ (z >> 31)
     }
 
     pub fn alloc_entity(&mut self) -> EntityId {

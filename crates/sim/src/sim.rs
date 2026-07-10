@@ -383,20 +383,46 @@ impl Sim {
                     bot.data.action = Some(Action::Move { path, ticks_left, goals });
                     return;
                 }
-                // Bots are solid: bumping an occupied tile freezes the
-                // mover, which re-plans its route as it thaws.
+                // Bots are solid. If the next tile is occupied, first try a
+                // random sidestep among free neighbors that lose no ground
+                // toward the goal; only when boxed in, bump-freeze (and
+                // re-plan on thaw).
                 let entered = path[0];
                 if self.world.tile_occupied(entered, id) {
-                    let bot = self.world.bots.get_mut(&id).expect("bot exists");
-                    bot.data.bump_frozen = self.tuning.bump_freeze_ticks;
-                    bot.data.action = Some(Action::Move { path, ticks_left: 1, goals });
+                    let from = self.world.bots[&id].data.pos;
+                    let dodges = self.sidestep_candidates(id, from, entered, &goals);
+                    if dodges.is_empty() {
+                        let bot = self.world.bots.get_mut(&id).expect("bot exists");
+                        bot.data.bump_frozen = self.tuning.bump_freeze_ticks;
+                        bot.data.action = Some(Action::Move { path, ticks_left: 1, goals });
+                    } else {
+                        let pick = (self.world.next_rand() % dodges.len() as u64) as usize;
+                        let step = dodges[pick];
+                        let cost = self
+                            .world
+                            .grid
+                            .get(step)
+                            .and_then(|t| t.move_ticks())
+                            .expect("candidates are passable");
+                        let bot = self.world.bots.get_mut(&id).expect("bot exists");
+                        // Single-step path; landing off-route triggers a
+                        // re-plan (see the empty-path branch below).
+                        bot.data.action =
+                            Some(Action::Move { path: vec![step], ticks_left: cost, goals });
+                    }
                     return;
                 }
                 let bot = self.world.bots.get_mut(&id).expect("bot exists");
                 path.remove(0);
                 bot.data.pos = entered;
                 if path.is_empty() {
-                    self.finish_action(id, Ok(Value::Unit));
+                    if goals.contains(&entered) {
+                        self.finish_action(id, Ok(Value::Unit));
+                    } else {
+                        // A dodge landed us off-route: plan a fresh path,
+                        // preferring one that threads around current bots.
+                        self.replan_move(id, goals);
+                    }
                 } else {
                     let next_cost = self
                         .world
@@ -800,6 +826,60 @@ impl Sim {
         }
     }
 
+    /// Free, passable neighbor tiles of `from` (excluding the blocked
+    /// `avoid` tile) that are no farther from `goals` than `from` is —
+    /// dodges may not lose ground, so corridors still queue and freeze.
+    fn sidestep_candidates(
+        &self,
+        id: BotId,
+        from: TilePos,
+        avoid: TilePos,
+        goals: &BTreeSet<TilePos>,
+    ) -> Vec<TilePos> {
+        let dist = |p: TilePos| goals.iter().map(|g| p.manhattan(*g)).min().unwrap_or(u32::MAX);
+        let here = dist(from);
+        [(0, -1), (1, 0), (0, 1), (-1, 0)]
+            .iter()
+            .map(|(dx, dy)| TilePos::new(from.x + dx, from.y + dy))
+            .filter(|&p| {
+                p != avoid
+                    && self.world.grid.get(p).is_some_and(|t| t.move_ticks().is_some())
+                    && !self.world.tile_occupied(p, id)
+                    && dist(p) <= here
+            })
+            .collect()
+    }
+
+    /// Fresh route to `goals`: prefer threading around current bot
+    /// positions, fall back to terrain-only, fault if truly unreachable.
+    fn replan_move(&mut self, id: BotId, goals: BTreeSet<TilePos>) {
+        let Some(bot) = self.world.bots.get(&id) else { return };
+        let start = bot.data.pos;
+        let occupied: BTreeSet<TilePos> = self
+            .world
+            .bots
+            .values()
+            .filter(|b| b.data.id != id && !b.data.dying)
+            .map(|b| b.data.pos)
+            .collect();
+        let path = astar_avoiding(&self.world.grid, start, &goals, &occupied)
+            .or_else(|| astar(&self.world.grid, start, &goals));
+        match path {
+            Some(path) if path.is_empty() => self.finish_action(id, Ok(Value::Unit)),
+            Some(path) => {
+                let first_cost = self
+                    .world
+                    .grid
+                    .get(path[0])
+                    .and_then(|t| t.move_ticks())
+                    .expect("path tiles are passable");
+                let bot = self.world.bots.get_mut(&id).expect("bot exists");
+                bot.data.action = Some(Action::Move { path, ticks_left: first_cost, goals });
+            }
+            None => self.finish_action(id, Err("move_to: unreachable".into())),
+        }
+    }
+
     /// As a bump-freeze ends: re-run A* to the same goals, treating other
     /// bots' current tiles as obstacles. Falls back to the old path when no
     /// clear route exists (true corridors keep jamming, visibly).
@@ -962,6 +1042,7 @@ impl Sim {
             h.write_i32(depot.pos.y);
         }
         h.write_u64(w.stockpile_ore);
+        h.write_u64(w.rng_state);
         for (id, printer) in &w.printers {
             h.write_u64(id.0);
             h.write_i32(printer.pos.x);
