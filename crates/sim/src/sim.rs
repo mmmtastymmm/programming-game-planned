@@ -10,10 +10,11 @@
 
 use crate::hash::Fnv1a;
 use crate::host::BotHost;
-use crate::map::{astar, astar_avoiding, MapSpec, TilePos};
+use crate::map::{astar, astar_avoiding, MapSpec, TileKind, TilePos};
 use crate::world::{
-    Action, ActionRequest, ArchiveEntry, ArchiveKind, BlackBox, Bot, BotData, BotId, Color,
-    ColorProgram, EntityId, PrinterState, Recall, RecallPurpose, Wreck, World,
+    Action, ActionRequest, ArchiveEntry, ArchiveKind, BlackBox, Blueprint, BlueprintKind, Bot,
+    BotData, BotId, Color, ColorProgram, EntityId, PrinterState, Recall, RecallPurpose, Wreck,
+    World,
 };
 use pyrite::{CostTable, Outcome, PyriteError, RaiseOutcome, Signal, UnlockSet, Value, Vm, VmConfig};
 use std::collections::BTreeSet;
@@ -40,6 +41,9 @@ pub struct Tuning {
     pub capacity: u32,
     /// Freeze duration after bumping into an occupied tile (50 = 5s @10Hz).
     pub bump_freeze_ticks: u32,
+    pub bridge_cost_ore: u64,
+    /// Builder-ticks of labor a bridge takes.
+    pub bridge_build_ticks: u32,
 }
 
 impl Default for Tuning {
@@ -55,6 +59,8 @@ impl Default for Tuning {
             printed_cargo_cap: 2,
             capacity: 10_000,
             bump_freeze_ticks: 50,
+            bridge_cost_ore: 3,
+            bridge_build_ticks: 20,
         }
     }
 }
@@ -80,6 +86,9 @@ pub enum Command {
     SetDesiredMax { printer: EntityId, value: u32 },
     /// Fix a ruined printer (Data cost; ore stands in until Data exists).
     RepairPrinter { printer: EntityId },
+    /// Designate a terraform site (the build UI's output). Bots do the
+    /// labor via nearest_blueprint()/build().
+    PlaceBlueprint { pos: TilePos, kind: BlueprintKind },
 }
 
 pub struct Sim {
@@ -137,6 +146,29 @@ impl Sim {
                 }
                 Ok(None)
             }
+            Command::PlaceBlueprint { pos, kind } => {
+                let valid_site = match kind {
+                    BlueprintKind::Bridge => {
+                        self.world.grid.get(*pos) == Some(TileKind::Water)
+                    }
+                };
+                let occupied_by_blueprint =
+                    self.world.blueprints.values().any(|b| b.pos == *pos);
+                let cost = match kind {
+                    BlueprintKind::Bridge => self.tuning.bridge_cost_ore,
+                };
+                if valid_site && !occupied_by_blueprint && self.world.stockpile_ore >= cost {
+                    self.world.stockpile_ore -= cost;
+                    let needed = match kind {
+                        BlueprintKind::Bridge => self.tuning.bridge_build_ticks,
+                    };
+                    let id = self.world.alloc_entity();
+                    self.world
+                        .blueprints
+                        .insert(id, Blueprint { pos: *pos, kind: *kind, progress: 0, needed });
+                }
+                Ok(None)
+            }
         }
     }
 
@@ -188,6 +220,7 @@ impl Sim {
                     xp_mining: 0,
                     xp_hauling: 0,
                     xp_combat: 0,
+                    xp_building: 0,
                 },
                 vm: Some(vm),
             },
@@ -354,6 +387,9 @@ impl Sim {
                 ActionRequest::Wait(ticks) => {
                     bot.data.action = Some(Action::Wait { ticks_left: ticks });
                 }
+                ActionRequest::Build(blueprint) => {
+                    bot.data.action = Some(Action::Build { blueprint });
+                }
                 ActionRequest::Deposit => {
                     let depot = self
                         .world
@@ -484,6 +520,33 @@ impl Sim {
                 bot.data.xp_combat += ATTACK_DAMAGE as u64;
                 self.finish_action(id, Ok(Value::Unit));
                 self.apply_damage(target_bot, ATTACK_DAMAGE);
+            }
+            Action::Build { blueprint } => {
+                let pos = bot.data.pos;
+                let Some(bp) = self.world.blueprints.get_mut(&blueprint) else {
+                    // Someone else finished it: that's success.
+                    self.finish_action(id, Ok(Value::Unit));
+                    return;
+                };
+                if pos.chebyshev(bp.pos) > 1 {
+                    self.finish_action(id, Err("build: blueprint out of range".into()));
+                    return;
+                }
+                bp.progress += 1;
+                let done = bp.progress >= bp.needed;
+                let (site, kind) = (bp.pos, bp.kind);
+                let bot = self.world.bots.get_mut(&id).expect("bot exists");
+                bot.data.xp_building += 1;
+                if done {
+                    self.world.blueprints.remove(&blueprint);
+                    match kind {
+                        BlueprintKind::Bridge => self.world.grid.set(site, TileKind::Bridge),
+                    }
+                    self.finish_action(id, Ok(Value::Unit));
+                } else {
+                    let bot = self.world.bots.get_mut(&id).expect("bot exists");
+                    bot.data.action = Some(Action::Build { blueprint });
+                }
             }
             Action::Wait { ticks_left } => {
                 let ticks_left = ticks_left - 1;
@@ -1064,6 +1127,13 @@ impl Sim {
             h.write_u32(printer.desired_max);
             h.write_u32(printer.job.unwrap_or(0));
         }
+        for (id, bp) in &w.blueprints {
+            h.write_u64(id.0);
+            h.write_i32(bp.pos.x);
+            h.write_i32(bp.pos.y);
+            h.write_u32(bp.progress);
+            h.write_u32(bp.needed);
+        }
         for ((faction, color), cp) in &w.color_programs {
             h.write_u8(*faction);
             h.write_u8(*color);
@@ -1081,6 +1151,7 @@ impl Sim {
             h.write_i64(bot.data.hp);
             h.write_u8(bot.data.hurt_fired as u8);
             h.write_u64(bot.data.xp_combat);
+            h.write_u64(bot.data.xp_building);
             h.write_u8(bot.data.dying as u8);
             h.write_u32(bot.data.booting.unwrap_or(0));
             h.write_u32(bot.data.bump_frozen);

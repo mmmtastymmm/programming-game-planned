@@ -30,6 +30,8 @@ pub enum TileKind {
     Plains,
     Rubble,
     Water,
+    /// Built over Water by terraforming (docs/05): ground-passable.
+    Bridge,
 }
 
 impl TileKind {
@@ -39,6 +41,7 @@ impl TileKind {
             TileKind::Plains => Some(1),
             TileKind::Rubble => Some(2),
             TileKind::Water => None,
+            TileKind::Bridge => Some(1),
         }
     }
 
@@ -47,6 +50,7 @@ impl TileKind {
             TileKind::Plains => 0,
             TileKind::Rubble => 1,
             TileKind::Water => 2,
+            TileKind::Bridge => 3,
         }
     }
 }

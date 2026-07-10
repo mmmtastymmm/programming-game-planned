@@ -339,6 +339,10 @@ The full catalog and unlock order live in [06-progression.md](06-progression.md)
 | `last_error()` → string | 1 | Most recent fault; mainly for handlers |
 | `drop_cargo()` | 1 + action | Dump cargo on current tile (grabbable by others) |
 | `nearest_repair_bay()` → entity | 3 | |
+| `wait(n)` | 1 + n idle ticks | Deliberate idling; the Tier-0 traffic tool |
+| `rng(n)` → int | 1 | Uniform in [0, n) from the sim's seeded stream — `wait(rng(20))` desyncs identical programs |
+| `nearest_blueprint()` → entity | 3 | Player-placed terraform sites ([05-terrain.md](05-terrain.md)) |
+| `build()` | 2 + action | Work the nearest in-range blueprint, 1 progress/tick; earns Building XP |
 
 ## Editor & Player Experience
 

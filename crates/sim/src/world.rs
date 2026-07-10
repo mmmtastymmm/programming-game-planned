@@ -93,6 +93,8 @@ pub enum ActionRequest {
     Attack(EntityId),
     /// Idle deliberately for N ticks — the Tier-0 traffic tool.
     Wait(u32),
+    /// Work on a designated blueprint.
+    Build(EntityId),
 }
 
 /// An in-flight world action.
@@ -106,6 +108,8 @@ pub enum Action {
     Deposit { depot: EntityId, ticks_left: u32 },
     Attack { target: EntityId, ticks_left: u32 },
     Wait { ticks_left: u32 },
+    /// Contributes 1 progress per tick while adjacent to the blueprint.
+    Build { blueprint: EntityId },
 }
 
 pub const LOG_BUFFER_CAP: usize = 8;
@@ -142,6 +146,7 @@ pub struct BotData {
     pub xp_mining: u64,
     pub xp_hauling: u64,
     pub xp_combat: u64,
+    pub xp_building: u64,
 }
 
 #[derive(Debug)]
@@ -150,6 +155,21 @@ pub struct Bot {
     /// Taken out while running (borrow discipline); always `Some` between
     /// phases.
     pub vm: Option<Vm>,
+}
+
+/// A player-designated terraform site (docs/05): the player places it
+/// (a lockstep Command); bots do the labor via `build()`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Blueprint {
+    pub pos: TilePos,
+    pub kind: BlueprintKind,
+    pub progress: u32,
+    pub needed: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BlueprintKind {
+    Bridge,
 }
 
 /// A disabled bot awaiting rescue/salvage (countdown comes later).
@@ -197,6 +217,7 @@ pub struct World {
     /// Entity handle -> bot, for targeting.
     pub bot_entities: BTreeMap<EntityId, BotId>,
     pub printers: BTreeMap<EntityId, Printer>,
+    pub blueprints: BTreeMap<EntityId, Blueprint>,
     /// Deployed program per (faction, color slot).
     pub color_programs: BTreeMap<(u8, u8), ColorProgram>,
     pub wrecks: BTreeMap<BotId, Wreck>,
@@ -226,6 +247,7 @@ impl World {
             bots: BTreeMap::new(),
             bot_entities: BTreeMap::new(),
             printers: BTreeMap::new(),
+            blueprints: BTreeMap::new(),
             color_programs: BTreeMap::new(),
             wrecks: BTreeMap::new(),
             black_boxes: Vec::new(),
@@ -336,6 +358,7 @@ impl World {
             .map(|n| n.pos)
             .or_else(|| self.depots.get(&id).map(|d| d.pos))
             .or_else(|| self.printers.get(&id).map(|p| p.pos))
+            .or_else(|| self.blueprints.get(&id).map(|b| b.pos))
             .or_else(|| {
                 self.bot_entities
                     .get(&id)
@@ -360,6 +383,14 @@ impl World {
             self.grid.get(p).is_some_and(|t| t.move_ticks().is_some())
                 && !self.tile_occupied(p, BotId(u32::MAX))
         })
+    }
+
+    pub fn nearest_blueprint(&self, from: TilePos) -> Option<EntityId> {
+        self.blueprints
+            .iter()
+            .map(|(id, b)| (from.manhattan(b.pos), *id))
+            .min()
+            .map(|(_, id)| id)
     }
 
     /// Nearest living bot of a different faction: (manhattan, entity id)

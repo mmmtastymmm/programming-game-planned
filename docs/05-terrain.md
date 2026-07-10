@@ -31,7 +31,7 @@ Map authors pick overlays per biome; the editor shows *effective* per-line costs
 
 ## Terraforming (build & deconstruct)
 
-The map is editable — both directions, by anyone with the tools (`terraform` function blocks, unlocked after `build`/`repair`, [06-progression.md](06-progression.md)):
+The map is editable — both directions. **Designation is the player's; labor is code**: the player places a **blueprint** on a target tile (a UI act — one lockstep Command, charged on placement), and bots service it with `move_to(nearest_blueprint())` + `build()` (1 progress/tick, adjacent, earns Building XP; several bots stack). Programs never name tiles — Pyrite has no position literals, and doesn't need them. Terraform actions (unlocked after `build`/`repair`, [06-progression.md](06-progression.md)):
 
 | Action | Effect | Cost |
 |---|---|---|
@@ -49,7 +49,7 @@ Bots are solid and bump-freezes are expensive ([02-agents.md](02-agents.md)), so
 
 | Tier | Tool | The fix it enables |
 |---|---|---|
-| 0 | `wait(n)` (function block, cost 1 + n idle ticks) | Stagger departures; crude time-slicing of a shared corridor |
+| 0 | `wait(n)` + `rng(n)` | `wait(rng(20))` desynchronizes identical programs — stagger departures, time-slice the corridor |
 | 2 | sensors + `if` | Check before committing (candidate blocks: `path_blocked()`, occupancy peeks) |
 | 6–7 | enums + **channels** | The real answer: a one-receiver channel token **is a mutex** — hold the token to enter the corridor, `send` it back on exit; gatekeeper bots at each mouth |
 | terraform | `bridge()` / `clear()` | Widen the corridor: turn the traffic problem into infrastructure ([Terraforming](#terraforming-build--deconstruct)) |

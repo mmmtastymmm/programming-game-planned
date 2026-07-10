@@ -15,9 +15,9 @@ use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts, EguiPlugin};
 use sim::map::{MapSpec, PrinterSpec};
 use sim::sim::{Command, Sim};
-use sim::world::{Color as BotColor, PrinterState};
+use sim::world::{BlueprintKind, Color as BotColor, PrinterState};
 use sim::{TileKind, TilePos};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// The doc's Tier-0 starter program, verbatim.
 const MINER: &str = "\
@@ -92,6 +92,8 @@ struct ViewIndex {
     wrecks: HashMap<u32, Entity>,
     black_boxes: usize,
     printers: HashMap<u64, (Entity, PrinterState)>,
+    blueprints: HashMap<u64, Entity>,
+    bridges: HashSet<(i32, i32)>,
 }
 
 #[derive(Resource)]
@@ -110,6 +112,8 @@ struct Palette {
     nose_mat: Handle<StandardMaterial>,
     bot_mats: HashMap<u8, Handle<StandardMaterial>>,
     ruined_mat: Handle<StandardMaterial>,
+    bridge_mat: Handle<StandardMaterial>,
+    tile_slab: Handle<Mesh>,
 }
 
 #[derive(Resource)]
@@ -117,11 +121,13 @@ struct EditorState {
     code: String,
     status: String,
     status_ok: bool,
+    /// Bridge-placement mode: LMB on a water tile places a blueprint.
+    build_mode: bool,
 }
 
 impl Default for EditorState {
     fn default() -> Self {
-        Self { code: MINER.to_string(), status: "ready".into(), status_ok: true }
+        Self { code: MINER.to_string(), status: "ready".into(), status_ok: true, build_mode: false }
     }
 }
 
@@ -190,6 +196,7 @@ fn main() {
             (
                 editor_ui,
                 orbit_camera,
+                place_blueprint,
                 sync_view,
                 interpolate,
                 spin,
@@ -283,6 +290,12 @@ fn setup_scene(
             perceptual_roughness: 0.95,
             ..default()
         }),
+        bridge_mat: materials.add(StandardMaterial {
+            base_color: Color::srgb(0.55, 0.40, 0.22),
+            perceptual_roughness: 0.8,
+            ..default()
+        }),
+        tile_slab: meshes.add(Cuboid::new(0.96, 0.12, 0.96)),
     };
 
     // Terrain slabs (0.96 with grout lines, prototype-style).
@@ -311,6 +324,9 @@ fn setup_scene(
                 TileKind::Plains => (plains_mat.clone(), 0.0),
                 TileKind::Rubble => (rubble_mat.clone(), 0.04),
                 TileKind::Water => (water_mat.clone(), -0.05),
+                // Bridges only exist after terraforming; at startup none do
+                // (sync_view overlays planks when they appear).
+                TileKind::Bridge => (plains_mat.clone(), 0.0),
             };
             commands.spawn((
                 Mesh3d(slab_plains.clone()),
@@ -401,6 +417,44 @@ fn orbit_camera(
         cam.distance = (cam.distance * (1.0 - scroll * 0.1)).clamp(3.0, 80.0);
     }
     *transform = orbit_transform(&cam);
+}
+
+/// Build mode: LMB picks a tile via the cursor ray onto the ground plane;
+/// the sim validates (water only, funds, no duplicate) — the UI just aims.
+fn place_blueprint(
+    mut contexts: EguiContexts,
+    editor: Res<EditorState>,
+    buttons: Res<ButtonInput<MouseButton>>,
+    windows: Query<&Window>,
+    cams: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
+    mut game: NonSendMut<GameSim>,
+) {
+    if !editor.build_mode || !buttons.just_pressed(MouseButton::Left) {
+        return;
+    }
+    if contexts.try_ctx_mut().is_some_and(|ctx| ctx.wants_pointer_input()) {
+        return;
+    }
+    let Ok(window) = windows.single() else { return };
+    let Some(cursor) = window.cursor_position() else { return };
+    let Ok((camera, cam_transform)) = cams.single() else { return };
+    let Ok(ray) = camera.viewport_to_world(cam_transform, cursor) else { return };
+    if ray.direction.y.abs() < 1e-4 {
+        return;
+    }
+    let t = -ray.origin.y / ray.direction.y;
+    if t < 0.0 {
+        return;
+    }
+    let hit = ray.origin + *ray.direction * t;
+    let world = &game.0.world;
+    let pos = TilePos::new(
+        (hit.x + world.grid.width as f32 / 2.0).round() as i32,
+        (hit.z + world.grid.height as f32 / 2.0).round() as i32,
+    );
+    if world.grid.in_bounds(pos) {
+        let _ = game.0.apply(&Command::PlaceBlueprint { pos, kind: BlueprintKind::Bridge });
+    }
 }
 
 // ------------------------------------------------------------------- view
@@ -653,6 +707,52 @@ fn sync_view(
         }
     });
 
+    // Blueprints: glowing ghost slabs that rise with build progress.
+    for (id, bp) in &world.blueprints {
+        let grown = 0.15 + 0.85 * (bp.progress as f32 / bp.needed as f32);
+        match index.blueprints.get(&id.0) {
+            Some(&entity) => {
+                if let Ok(mut transform) = transforms.get_mut(entity) {
+                    transform.scale = Vec3::new(1.0, grown, 1.0);
+                }
+            }
+            None => {
+                let entity = commands
+                    .spawn((
+                        Mesh3d(palette.tile_slab.clone()),
+                        MeshMaterial3d(palette.print_glow_mat.clone()),
+                        Transform::from_translation(tile_xyz(world, bp.pos, 0.05))
+                            .with_scale(Vec3::new(1.0, grown, 1.0)),
+                    ))
+                    .id();
+                index.blueprints.insert(id.0, entity);
+            }
+        }
+    }
+    index.blueprints.retain(|id, entity| {
+        if world.blueprints.contains_key(&sim::EntityId(*id)) {
+            true
+        } else {
+            commands.entity(*entity).despawn();
+            false
+        }
+    });
+
+    // Finished bridges: plank slabs over the water.
+    for y in 0..world.grid.height {
+        for x in 0..world.grid.width {
+            if world.grid.get(TilePos::new(x, y)) == Some(sim::TileKind::Bridge)
+                && index.bridges.insert((x, y))
+            {
+                commands.spawn((
+                    Mesh3d(palette.tile_slab.clone()),
+                    MeshMaterial3d(palette.bridge_mat.clone()),
+                    Transform::from_translation(tile_xyz(world, TilePos::new(x, y), 0.0)),
+                ));
+            }
+        }
+    }
+
     // Wrecks: low dark slabs.
     for (id, wreck) in &world.wrecks {
         if let std::collections::hash_map::Entry::Vacant(e) = index.wrecks.entry(id.0) {
@@ -790,6 +890,24 @@ fn editor_ui(
                     }
                 }
             });
+        }
+        ui.separator();
+
+        ui.heading("Build");
+        let bridge_cost = game.0.tuning.bridge_cost_ore;
+        let label = if editor.build_mode {
+            "Bridge mode ON — click water".to_string()
+        } else {
+            format!("Place bridge ({bridge_cost} ore)")
+        };
+        if ui.selectable_label(editor.build_mode, label).clicked() {
+            editor.build_mode = !editor.build_mode;
+        }
+        if !game.0.world.blueprints.is_empty() {
+            ui.small(format!(
+                "{} blueprint(s) waiting for builders (nearest_blueprint / build)",
+                game.0.world.blueprints.len()
+            ));
         }
         ui.separator();
 

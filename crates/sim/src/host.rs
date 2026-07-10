@@ -62,10 +62,40 @@ impl pyrite::Host for BotHost<'_> {
             },
             "mine" => self.request(ActionRequest::Mine),
             "wait" => match args {
+                [Value::Int(0)] => HostCall::Ready(Value::Unit), // waiting 0 is free
                 [Value::Int(n)] if *n > 0 => self.request(ActionRequest::Wait(*n as u32)),
-                [Value::Int(_)] => HostCall::Fault("wait requires a positive tick count".into()),
+                [Value::Int(_)] => HostCall::Fault("wait requires a non-negative tick count".into()),
                 _ => HostCall::Fault("wait takes 1 integer argument".into()),
             },
+            // Uniform integer in [0, n) from the sim's seeded stream —
+            // the sanctioned randomness (wait(rng(20)) desyncs identical
+            // programs).
+            "rng" => match args {
+                [Value::Int(n)] if *n > 0 => {
+                    let v = (self.world.next_rand() % *n as u64) as i64;
+                    HostCall::Ready(Value::Int(v))
+                }
+                [Value::Int(_)] => HostCall::Fault("rng requires a positive bound".into()),
+                _ => HostCall::Fault("rng takes 1 integer argument".into()),
+            },
+            "nearest_blueprint" => match self.world.nearest_blueprint(bot_pos) {
+                Some(id) => HostCall::Ready(Value::Entity(id.0)),
+                None => HostCall::Fault("no blueprint anywhere".into()),
+            },
+            "build" => {
+                // Work on the nearest blueprint in range.
+                let target = self
+                    .world
+                    .blueprints
+                    .iter()
+                    .filter(|(_, b)| bot_pos.chebyshev(b.pos) <= 1)
+                    .map(|(id, _)| *id)
+                    .next();
+                match target {
+                    Some(id) => self.request(ActionRequest::Build(id)),
+                    None => HostCall::Fault("build: no blueprint in range".into()),
+                }
+            }
             "deposit" => self.request(ActionRequest::Deposit),
             "attack" => match args {
                 [Value::Entity(target)] => self.request(ActionRequest::Attack(EntityId(*target))),
