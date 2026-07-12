@@ -15,6 +15,7 @@ use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts, EguiPlugin};
 use sim::map::{MapSpec, PrinterSpec};
 use sim::sim::{Command, Sim};
+use sim::map::Direction;
 use sim::world::{BlueprintKind, Color as BotColor, PrinterState};
 use sim::{TileKind, TilePos};
 use std::collections::{HashMap, HashSet};
@@ -149,8 +150,21 @@ struct BuildItem {
     kind: BlueprintKind,
 }
 
-const BUILD_CATEGORIES: &[(&str, &[BuildItem])] =
-    &[("Structures", &[BuildItem { name: "Bridge", kind: BlueprintKind::Bridge }])];
+const BUILD_CATEGORIES: &[(&str, &[BuildItem])] = &[(
+    "Structures",
+    &[
+        BuildItem { name: "Bridge", kind: BlueprintKind::Bridge },
+        BuildItem {
+            name: "One-way Bridge",
+            kind: BlueprintKind::BridgeOneWay(Direction::East),
+        },
+    ],
+)];
+
+/// Same catalog item, ignoring per-placement state like rotation.
+fn same_item(a: BlueprintKind, b: BlueprintKind) -> bool {
+    std::mem::discriminant(&a) == std::mem::discriminant(&b)
+}
 
 /// 48x48 pixel-art icon for a build item, drawn in code (no asset files;
 /// matches the primitive look).
@@ -181,6 +195,20 @@ fn build_icon(name: &str) -> egui::ColorImage {
             }
         }
     }
+    if name == "One-way Bridge" {
+        // Bold arrow across the planks.
+        let glow = egui::Color32::from_rgb(255, 235, 130);
+        for x in 8..32 {
+            for y in 21..27 {
+                img[(x, y)] = glow;
+            }
+        }
+        for i in 0..9usize {
+            for y in (15 + i)..(33 - i) {
+                img[(31 + i, y)] = glow;
+            }
+        }
+    }
     img
 }
 
@@ -191,13 +219,13 @@ fn build_colony() -> Sim {
     for y in 2..9 {
         spec.rubble.push(TilePos::new(12, y));
     }
-    // A water wall splits the map; the only way east is a single-tile
-    // corridor at (16, 6) — the traffic-engineering test bed.
+    // A water wall fully splits the map: the ONLY way east is bridges the
+    // player builds — one-way pairs make deadlock-free crossings.
     for y in 0..14 {
-        if y != 6 {
-            spec.water.push(TilePos::new(16, y));
-        }
+        spec.water.push(TilePos::new(16, y));
     }
+    // Modest west-side ore keeps the colony alive pre-bridge.
+    spec.ore_nodes.push((TilePos::new(8, 3), 25));
     spec.ore_nodes.push((TilePos::new(20, 3), 60));
     spec.ore_nodes.push((TilePos::new(19, 11), 40));
     spec.depots.push(TilePos::new(3, 7));
@@ -379,7 +407,7 @@ fn setup_scene(
                 TileKind::Water => (water_mat.clone(), -0.05),
                 // Bridges only exist after terraforming; at startup none do
                 // (sync_view overlays planks when they appear).
-                TileKind::Bridge => (plains_mat.clone(), 0.0),
+                TileKind::Bridge | TileKind::BridgeOneWay(_) => (plains_mat.clone(), 0.0),
             };
             commands.spawn((
                 Mesh3d(slab_plains.clone()),
@@ -485,6 +513,11 @@ fn place_blueprint(
 ) {
     if keys.just_pressed(KeyCode::Escape) {
         editor.selected_build = None;
+    }
+    if keys.just_pressed(KeyCode::KeyR)
+        && let Some(BlueprintKind::BridgeOneWay(d)) = editor.selected_build
+    {
+        editor.selected_build = Some(BlueprintKind::BridgeOneWay(d.clockwise()));
     }
     let Some(kind) = editor.selected_build else { return };
     if !buttons.just_pressed(MouseButton::Left) {
@@ -796,18 +829,48 @@ fn sync_view(
         }
     });
 
-    // Finished bridges: plank slabs over the water.
+    // Finished bridges: plank slabs over the water; one-ways get a gold
+    // direction chevron (strip + tip) on top.
     for y in 0..world.grid.height {
         for x in 0..world.grid.width {
-            if world.grid.get(TilePos::new(x, y)) == Some(sim::TileKind::Bridge)
-                && index.bridges.insert((x, y))
-            {
-                commands.spawn((
+            let pos = TilePos::new(x, y);
+            let dir = match world.grid.get(pos) {
+                Some(sim::TileKind::Bridge) => None,
+                Some(sim::TileKind::BridgeOneWay(d)) => Some(d),
+                _ => continue,
+            };
+            if !index.bridges.insert((x, y)) {
+                continue;
+            }
+            commands
+                .spawn((
                     Mesh3d(palette.tile_slab.clone()),
                     MeshMaterial3d(palette.bridge_mat.clone()),
-                    Transform::from_translation(tile_xyz(world, TilePos::new(x, y), 0.0)),
-                ));
-            }
+                    Transform::from_translation(tile_xyz(world, pos, 0.0)),
+                ))
+                .with_children(|parent| {
+                    if let Some(d) = dir {
+                        let (dx, dz) = d.delta();
+                        let along = Vec3::new(dx as f32, 0.0, dz as f32);
+                        let strip_size = if dx != 0 {
+                            Vec3::new(0.6, 0.06, 0.16)
+                        } else {
+                            Vec3::new(0.16, 0.06, 0.6)
+                        };
+                        parent.spawn((
+                            Mesh3d(palette.nose_cube.clone()),
+                            MeshMaterial3d(palette.ore_mat.clone()),
+                            Transform::from_translation(Vec3::Y * 0.1)
+                                .with_scale(strip_size / 0.22),
+                        ));
+                        parent.spawn((
+                            Mesh3d(palette.nose_cube.clone()),
+                            MeshMaterial3d(palette.ore_mat.clone()),
+                            Transform::from_translation(along * 0.34 + Vec3::Y * 0.1)
+                                .with_scale(Vec3::new(1.4, 1.2, 1.4)),
+                        ));
+                    }
+                });
         }
     }
 
@@ -870,7 +933,9 @@ fn editor_ui(
             let (_, items) = BUILD_CATEGORIES[editor.build_category.min(BUILD_CATEGORIES.len() - 1)];
             for item in items {
                 let cost = match item.kind {
-                    BlueprintKind::Bridge => game.0.tuning.bridge_cost_ore,
+                    BlueprintKind::Bridge | BlueprintKind::BridgeOneWay(_) => {
+                        game.0.tuning.bridge_cost_ore
+                    }
                 };
                 let affordable = game.0.world.stockpile_ore >= cost;
                 if !editor.icons.contains_key(item.name) {
@@ -882,7 +947,7 @@ fn editor_ui(
                     editor.icons.insert(item.name, tex);
                 }
                 let tex_id = editor.icons[item.name].id();
-                let selected = editor.selected_build == Some(item.kind);
+                let selected = editor.selected_build.is_some_and(|k| same_item(k, item.kind));
                 ui.vertical(|ui| {
                     let button = egui::ImageButton::new(egui::load::SizedTexture::new(
                         tex_id,
@@ -904,10 +969,17 @@ fn editor_ui(
             ui.separator();
             ui.vertical(|ui| {
                 if let Some(kind) = editor.selected_build {
-                    let target = match kind {
-                        BlueprintKind::Bridge => "a water tile",
-                    };
-                    ui.label(format!("Click {target} to place — Esc to cancel"));
+                    match kind {
+                        BlueprintKind::Bridge => {
+                            ui.label("Click a water tile to place — Esc to cancel");
+                        }
+                        BlueprintKind::BridgeOneWay(d) => {
+                            ui.label(format!(
+                                "Click a water tile to place {} — R rotates, Esc cancels",
+                                d.arrow()
+                            ));
+                        }
+                    }
                 } else {
                     ui.small("Select a structure, then click the map.");
                 }

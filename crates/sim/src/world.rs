@@ -1,7 +1,7 @@
 //! World state: entities, bots, wrecks, black boxes, the colony stockpile.
 //! Everything lives in BTree containers with stable IDs (determinism).
 
-use crate::map::{Grid, MapSpec, TileKind, TilePos};
+use crate::map::{Direction, Grid, MapSpec, TileKind, TilePos};
 use std::collections::BTreeSet;
 use pyrite::ast::Program;
 use pyrite::Vm;
@@ -170,6 +170,7 @@ pub struct Blueprint {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BlueprintKind {
     Bridge,
+    BridgeOneWay(Direction),
 }
 
 /// A disabled bot awaiting rescue/salvage (countdown comes later).

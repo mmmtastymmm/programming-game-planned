@@ -25,6 +25,52 @@ impl TilePos {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Direction {
+    North,
+    East,
+    South,
+    West,
+}
+
+impl Direction {
+    pub fn delta(self) -> (i32, i32) {
+        match self {
+            Direction::North => (0, -1),
+            Direction::East => (1, 0),
+            Direction::South => (0, 1),
+            Direction::West => (-1, 0),
+        }
+    }
+
+    pub fn clockwise(self) -> Direction {
+        match self {
+            Direction::North => Direction::East,
+            Direction::East => Direction::South,
+            Direction::South => Direction::West,
+            Direction::West => Direction::North,
+        }
+    }
+
+    pub fn arrow(self) -> &'static str {
+        match self {
+            Direction::North => "↑",
+            Direction::East => "→",
+            Direction::South => "↓",
+            Direction::West => "←",
+        }
+    }
+
+    pub fn as_u8(self) -> u8 {
+        match self {
+            Direction::North => 0,
+            Direction::East => 1,
+            Direction::South => 2,
+            Direction::West => 3,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TileKind {
     Plains,
@@ -32,6 +78,9 @@ pub enum TileKind {
     Water,
     /// Built over Water by terraforming (docs/05): ground-passable.
     Bridge,
+    /// A bridge crossable in one direction only — directional
+    /// infrastructure (two opposing one-ways = a deadlock-free crossing).
+    BridgeOneWay(Direction),
 }
 
 impl TileKind {
@@ -42,6 +91,7 @@ impl TileKind {
             TileKind::Rubble => Some(2),
             TileKind::Water => None,
             TileKind::Bridge => Some(1),
+            TileKind::BridgeOneWay(_) => Some(1),
         }
     }
 
@@ -51,6 +101,7 @@ impl TileKind {
             TileKind::Rubble => 1,
             TileKind::Water => 2,
             TileKind::Bridge => 3,
+            TileKind::BridgeOneWay(d) => 4 + d.as_u8(),
         }
     }
 }
@@ -136,6 +187,28 @@ impl MapSpec {
     }
 }
 
+/// May a bot step from `from` onto adjacent `to`? Tile passability plus
+/// one-way constraints on either end (you can neither enter a one-way
+/// bridge against its arrow nor back off one against it).
+pub fn edge_allowed(grid: &Grid, from: TilePos, to: TilePos) -> bool {
+    let Some(to_kind) = grid.get(to) else { return false };
+    if to_kind.move_ticks().is_none() {
+        return false;
+    }
+    let delta = (to.x - from.x, to.y - from.y);
+    if let TileKind::BridgeOneWay(d) = to_kind
+        && delta != d.delta()
+    {
+        return false;
+    }
+    if let Some(TileKind::BridgeOneWay(d)) = grid.get(from)
+        && delta != d.delta()
+    {
+        return false;
+    }
+    true
+}
+
 /// Deterministic A*. Returns the path as the sequence of tiles to *enter*
 /// (start excluded, goal included). `None` if unreachable. An empty path
 /// means the start already satisfies a goal.
@@ -191,8 +264,10 @@ pub fn astar_avoiding(
             if blocked.contains(&next) {
                 continue;
             }
-            let Some(kind) = grid.get(next) else { continue };
-            let Some(step_cost) = kind.move_ticks() else { continue };
+            if !edge_allowed(grid, pos, next) {
+                continue;
+            }
+            let step_cost = grid.get(next).and_then(|k| k.move_ticks()).expect("edge checked");
             let ng = g + step_cost;
             if ng < *g_score.get(&next).unwrap_or(&u32::MAX) {
                 g_score.insert(next, ng);

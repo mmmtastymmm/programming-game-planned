@@ -10,7 +10,7 @@
 
 use crate::hash::Fnv1a;
 use crate::host::BotHost;
-use crate::map::{astar, astar_avoiding, MapSpec, TileKind, TilePos};
+use crate::map::{astar, astar_avoiding, edge_allowed, MapSpec, TileKind, TilePos};
 use crate::world::{
     Action, ActionRequest, ArchiveEntry, ArchiveKind, BlackBox, Blueprint, BlueprintKind, Bot,
     BotData, BotId, Color, ColorProgram, EntityId, PrinterState, Recall, RecallPurpose, Wreck,
@@ -148,19 +148,23 @@ impl Sim {
             }
             Command::PlaceBlueprint { pos, kind } => {
                 let valid_site = match kind {
-                    BlueprintKind::Bridge => {
+                    BlueprintKind::Bridge | BlueprintKind::BridgeOneWay(_) => {
                         self.world.grid.get(*pos) == Some(TileKind::Water)
                     }
                 };
                 let occupied_by_blueprint =
                     self.world.blueprints.values().any(|b| b.pos == *pos);
                 let cost = match kind {
-                    BlueprintKind::Bridge => self.tuning.bridge_cost_ore,
+                    BlueprintKind::Bridge | BlueprintKind::BridgeOneWay(_) => {
+                        self.tuning.bridge_cost_ore
+                    }
                 };
                 if valid_site && !occupied_by_blueprint && self.world.stockpile_ore >= cost {
                     self.world.stockpile_ore -= cost;
                     let needed = match kind {
-                        BlueprintKind::Bridge => self.tuning.bridge_build_ticks,
+                        BlueprintKind::Bridge | BlueprintKind::BridgeOneWay(_) => {
+                            self.tuning.bridge_build_ticks
+                        }
                     };
                     let id = self.world.alloc_entity();
                     self.world
@@ -541,6 +545,9 @@ impl Sim {
                     self.world.blueprints.remove(&blueprint);
                     match kind {
                         BlueprintKind::Bridge => self.world.grid.set(site, TileKind::Bridge),
+                        BlueprintKind::BridgeOneWay(d) => {
+                            self.world.grid.set(site, TileKind::BridgeOneWay(d));
+                        }
                     }
                     self.finish_action(id, Ok(Value::Unit));
                 } else {
@@ -917,7 +924,7 @@ impl Sim {
             .map(|(dx, dy)| TilePos::new(from.x + dx, from.y + dy))
             .filter(|&p| {
                 p != avoid
-                    && self.world.grid.get(p).is_some_and(|t| t.move_ticks().is_some())
+                    && edge_allowed(&self.world.grid, from, p)
                     && !self.world.tile_occupied(p, id)
                     && dist(p) <= here
             })

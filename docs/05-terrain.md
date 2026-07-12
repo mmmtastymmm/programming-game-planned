@@ -37,6 +37,7 @@ The map is editable — both directions. **Designation is the player's; labor is
 |---|---|---|
 | `clear(tile)` | Rubble → Plains | build time |
 | `bridge(tile)` | Water → Bridge (ground-passable) | Metal + build time |
+| one-way bridge | Water → directional bridge (crossable only along its arrow; rotate at placement) | Metal + build time |
 | `barricade(tile)` | Plains → Barricade (blocks movement **and vision** — it's tall; has HP, attackable) | Metal + build time |
 | `demolish(tile)` | remove Bridge / Barricade | build time |
 | `cleanse(tile)` | Corruption → Plains (see Corruption dynamics — it grows back) | build time, slow |
@@ -52,7 +53,7 @@ Bots are solid and bump-freezes are expensive ([02-agents.md](02-agents.md)), so
 | 0 | `wait(n)` + `rng(n)` | `wait(rng(20))` desynchronizes identical programs — stagger departures, time-slice the corridor |
 | 2 | sensors + `if` | Check before committing (candidate blocks: `path_blocked()`, occupancy peeks) |
 | 6–7 | enums + **channels** | The real answer: a one-receiver channel token **is a mutex** — hold the token to enter the corridor, `send` it back on exit; gatekeeper bots at each mouth |
-| terraform | `bridge()` / `clear()` | Widen the corridor: turn the traffic problem into infrastructure ([Terraforming](#terraforming-build--deconstruct)) |
+| terraform | bridges / `clear()` | Widen the corridor — or build an **opposing pair of one-way bridges**: a deadlock-free roundabout, no mutex required ([Terraforming](#terraforming-build--deconstruct)) |
 
 Design intent: corridor congestion is the first *systems* problem a colony hits — visible (frozen bots stare at each other), diagnosable (crash-free, just slow), and solvable at every tier with the tools of that tier. A deadlocked corridor is not a bug; it's the tutorial for channels.
 

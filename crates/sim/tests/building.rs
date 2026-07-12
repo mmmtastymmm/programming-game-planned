@@ -4,6 +4,7 @@
 
 use sim::map::{MapSpec, TileKind};
 use sim::sim::{Command, Sim};
+use sim::map::Direction;
 use sim::world::{BlueprintKind, Color};
 use sim::TilePos;
 
@@ -123,4 +124,75 @@ fn rng_is_bounded_and_deterministic() {
         let v: i64 = entry.parse().expect("logged ints");
         assert!((0..100).contains(&v), "rng(100) out of range: {v}");
     }
+}
+
+#[test]
+fn one_way_bridge_only_crosses_with_the_arrow() {
+    // Solid wall; a single EAST-bound one-way bridge. West bots can cross
+    // to the ore; nothing can come back — including the loaded miner, whose
+    // return trip faults unreachable. Directionality bites both ways.
+    let mut sim = Sim::new(&walled_map());
+    spawn(&mut sim, TilePos::new(1, 2), BUILDER);
+    let miner = spawn(
+        &mut sim,
+        TilePos::new(1, 1),
+        "move_to(nearest_ore())\nmine()\nmove_to(nearest_depot())\ndeposit()\n",
+    );
+    sim.apply(&Command::PlaceBlueprint {
+        pos: TilePos::new(4, 2),
+        kind: BlueprintKind::BridgeOneWay(Direction::East),
+    })
+    .unwrap();
+
+    for _ in 0..600 {
+        sim.step();
+    }
+    let miner_bot = &sim.world.bots[&miner];
+    assert!(miner_bot.data.xp_mining > 0, "the miner must cross east and mine");
+    assert!(miner_bot.data.pos.x > 4, "and be stranded east of the wall");
+    assert_eq!(sim.world.stockpile_ore, 20 - sim.tuning.bridge_cost_ore, "no ore comes back west");
+    assert!(
+        sim.world
+            .archive
+            .iter()
+            .any(|e| e.text.contains("unreachable") && e.bot == miner),
+        "the return trip must fault unreachable"
+    );
+}
+
+#[test]
+fn opposing_one_way_bridges_make_a_round_trip() {
+    // Two one-ways, opposite arrows: a deadlock-free crossing. The miner
+    // does full loops and ore lands in the depot.
+    let mut sim = Sim::new(&walled_map());
+    spawn(&mut sim, TilePos::new(1, 2), BUILDER);
+    spawn(
+        &mut sim,
+        TilePos::new(1, 1),
+        "move_to(nearest_ore())\nmine()\nmove_to(nearest_depot())\ndeposit()\n",
+    );
+    // Return bridge FIRST (placement order = build order here): if the
+    // outbound bridge finishes first, the miner crosses, fills its cargo,
+    // and livelocks — mine() faults "cargo full" on every restart, so the
+    // return lines never run again. A straight-line program meeting a
+    // one-way world: the Tier-2 `if cargo_full():` unlock in miniature.
+    sim.apply(&Command::PlaceBlueprint {
+        pos: TilePos::new(4, 3),
+        kind: BlueprintKind::BridgeOneWay(Direction::West),
+    })
+    .unwrap();
+    sim.apply(&Command::PlaceBlueprint {
+        pos: TilePos::new(4, 1),
+        kind: BlueprintKind::BridgeOneWay(Direction::East),
+    })
+    .unwrap();
+
+    for _ in 0..1000 {
+        sim.step();
+    }
+    assert!(
+        sim.world.stockpile_ore > 20 - 2 * sim.tuning.bridge_cost_ore,
+        "ore must round-trip over the opposing one-ways; stockpile {}",
+        sim.world.stockpile_ore
+    );
 }
