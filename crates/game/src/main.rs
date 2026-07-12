@@ -73,6 +73,9 @@ struct Pose {
     /// Last hp seen; a change shows the health bar for a few seconds.
     hp_seen: i64,
     hp_age: u32,
+    /// Last bump_frozen seen; a rise triggers the recoil hop.
+    freeze_seen: u32,
+    freeze_age: u32,
 }
 
 /// World-space progress bar over anything being built: root billboards
@@ -1164,7 +1167,6 @@ fn update_poses(
     mut poses: Query<(&mut Pose, &mut Transform)>,
 ) {
     let world = &game.0.world;
-    let freeze_total = game.0.tuning.bump_freeze_ticks;
     for (id, bot) in &world.bots {
         let Some(&entity) = index.bots.get(&id.0) else { continue };
         let Ok((mut pose, mut transform)) = poses.get_mut(entity) else { continue };
@@ -1173,12 +1175,16 @@ fn update_poses(
         } else {
             0.45
         };
-        // Bump recoil: a little hop over the first few frozen ticks.
-        if bot.data.bump_frozen > 0 {
-            let age = freeze_total.saturating_sub(bot.data.bump_frozen) as f32;
-            if age < 5.0 {
-                y += 0.3 * (std::f32::consts::PI * (age + 1.0) / 6.0).sin();
-            }
+        // Bump recoil: a hop whenever the freeze counter RISES (covers the
+        // rammer's long freeze and the victim's short stagger alike).
+        if bot.data.bump_frozen > pose.freeze_seen {
+            pose.freeze_age = 0;
+        } else {
+            pose.freeze_age = pose.freeze_age.saturating_add(1);
+        }
+        pose.freeze_seen = bot.data.bump_frozen;
+        if pose.freeze_age < 5 {
+            y += 0.3 * (std::f32::consts::PI * (pose.freeze_age as f32 + 1.0) / 6.0).sin();
         }
         // Fault jump: any entry into error handling (crash dump or
         // on error: trap) makes the bot visibly startle.
@@ -1435,6 +1441,8 @@ fn sync_view(
                     fault_age: u32::MAX,
                     hp_seen: bot.data.hp,
                     hp_age: u32::MAX,
+                    freeze_seen: 0,
+                    freeze_age: u32::MAX,
                 },
             ))
             .with_children(|parent| {

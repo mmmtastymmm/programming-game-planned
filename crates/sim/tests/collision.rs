@@ -229,3 +229,27 @@ fn corridor_deadlock_ends_in_mutual_destruction() {
         "head-on deadlock must end in mutual destruction"
     );
 }
+
+#[test]
+fn rammer_freezes_longer_than_the_rammed() {
+    let mut spec = MapSpec::empty(7, 3);
+    for x in 0..7 {
+        spec.water.push(TilePos::new(x, 0));
+        spec.water.push(TilePos::new(x, 2));
+    }
+    spec.depots.push(TilePos::new(0, 1));
+    let mut sim = Sim::new(&spec);
+    let blocker = spawn(&mut sim, TilePos::new(1, 1), IDLER);
+    let rammer = spawn(&mut sim, TilePos::new(3, 1), "move_to(closest(depot).expect())\n");
+    for _ in 0..200 {
+        sim.step();
+        let r = sim.world.bots[&rammer].data.bump_frozen;
+        let b = sim.world.bots[&blocker].data.bump_frozen;
+        if r > 0 {
+            assert!(b > 0, "victim staggers too");
+            assert!(r > b, "the at-fault rammer sits longer ({r} vs {b})");
+            return;
+        }
+    }
+    panic!("no bump observed");
+}

@@ -39,8 +39,12 @@ pub struct Tuning {
     /// Colony population the economy sustains before scrap recalls fire
     /// (Energy upkeep stands in later; docs/02).
     pub capacity: u32,
-    /// Freeze duration after bumping into an occupied tile (50 = 5s @10Hz).
+    /// Rammer's freeze after bumping into an occupied tile (50 = 5s @10Hz).
+    /// The at-fault party sits longest — by the time it re-plans, the
+    /// victim has cleared the scene.
     pub bump_freeze_ticks: u32,
+    /// Victim's (shorter) freeze — a stagger, then it moves on.
+    pub bump_victim_freeze_ticks: u32,
     /// Collisions are accidents: BOTH bots take this chassis damage.
     pub bump_damage: i64,
     pub bridge_cost_ore: u64,
@@ -69,6 +73,7 @@ impl Default for Tuning {
             printed_cargo_cap: 2,
             capacity: 10_000,
             bump_freeze_ticks: 50,
+            bump_victim_freeze_ticks: 15,
             bump_damage: 2,
             bridge_cost_ore: 3,
             bridge_build_ticks: 20,
@@ -371,10 +376,10 @@ impl Sim {
 
         // --- phase 4.8: passive regen — and the hurt signal re-arms when
         // health climbs back above its threshold (docs/02: edge-triggered).
-        if self.world.tick % self.tuning.regen_interval_ticks == 0 {
+        if self.world.tick.is_multiple_of(self.tuning.regen_interval_ticks) {
             let amount = self.tuning.regen_amount;
-            for id in ids.iter().copied() {
-                let Some(bot) = self.world.bots.get_mut(&id) else { continue };
+            for id in ids.iter() {
+                let Some(bot) = self.world.bots.get_mut(id) else { continue };
                 if bot.data.dying || bot.data.hp >= bot.data.max_hp {
                     continue;
                 }
@@ -882,10 +887,10 @@ impl Sim {
                     // Bots are solid: hold the finished print until a tile
                     // near the printer frees up.
                     let Some(spawn_pos) = self.world.free_spawn_tile(pos) else {
-                        self.world.printers.get_mut(&pid).expect("printer exists").job = Some(1);
+                        self.world.printers.get_mut(pid).expect("printer exists").job = Some(1);
                         continue;
                     };
-                    self.world.printers.get_mut(&pid).expect("printer exists").job = None;
+                    self.world.printers.get_mut(pid).expect("printer exists").job = None;
                     match self.world.color_programs.get(&(faction, color.0)) {
                         Some(cp) => {
                             let program = Rc::clone(&cp.program);
@@ -1065,14 +1070,16 @@ impl Sim {
             .filter(|b| b.data.id != mover && !b.data.dying && b.data.pos == tile)
             .map(|b| b.data.id)
             .min();
-        let freeze = self.tuning.bump_freeze_ticks;
+        // Asymmetric blame: the rammer freezes long, the victim staggers
+        // briefly and clears the scene. Freezes never downgrade.
         if let Some(bot) = self.world.bots.get_mut(&mover) {
-            bot.data.bump_frozen = freeze;
+            bot.data.bump_frozen = bot.data.bump_frozen.max(self.tuning.bump_freeze_ticks);
         }
         if let Some(blocker) = blocker
             && let Some(bot) = self.world.bots.get_mut(&blocker)
         {
-            bot.data.bump_frozen = freeze;
+            bot.data.bump_frozen =
+                bot.data.bump_frozen.max(self.tuning.bump_victim_freeze_ticks);
         }
         let damage = self.tuning.bump_damage;
         self.apply_damage(mover, damage);
