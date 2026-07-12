@@ -68,7 +68,7 @@ The loop players should feel: *observe → rewrite → redeploy → watch it pla
 | **Reprint** | Rebuilding a destroyed bot. Its program is preserved; its XP is not. |
 | **Black Box** | Object dropped by every destroyed bot: its local logs + cause of death. Readable/recoverable by anyone. |
 | **Color** | A colony program slot (start with Green; repair the ruined Red printer with Data; more by controlling nests, quadratic, uncapped). One color = one printer. Every bot runs one color and is tinted by it. Enemy salvages permanently decrypt a color a few % at a time. |
-| **Recall** | The engine-owned fifth signal (un-writable): a printer over its desired max recalls its lowest-XP bot for re-coloring (XP kept); an over-capacity colony recalls its lowest-XP bot for scrap. An interrupt context — double-handle applies. |
+| **Recall** | The engine-owned signal (un-writable): a printer over its desired max recalls its lowest-XP bot for re-coloring (XP kept); an over-capacity colony recalls its lowest-XP bot for scrap. An interrupt context — double-handle applies. |
 | **Boot Sequence** | State a bot passes through on print or rescue: auto-upload of any local logs, then execute from line 1. |
 | **Feral** | The PvE enemy faction: corrupted machines running real Pyrite programs, decryptable by salvage like everyone else's. |
 | **Allegiance** | A Nest's rank 0–21, named for the tarot Major Arcana. Number ≈ difficulty; arcanum ≈ personality, especially how the nest treats code (static, mutating, researching). |

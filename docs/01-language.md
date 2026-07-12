@@ -45,17 +45,20 @@ stateDiagram-v2
     Running --> ErrHandler: fault, "on error#colon;" →<br/>trap cost, then normal code<br/>(ops ×2 after 10-tick grace)
     Running --> HurtHandler: HP crosses Damaged →<br/>"on hurt#colon;", NO budget limit
     Running --> DeathHandler: HP hits 0 →<br/>"on death#colon;", 10 cycles hard cap
+    Running --> BumpHandler: collision →<br/>"on bump#colon;" (rammer) /<br/>"on bumped#colon;" (victim)<br/>unhandled → engine stun
     CrashDump --> Restart
     ErrHandler --> Restart: completes
     HurtHandler --> Restart: completes
+    BumpHandler --> Restart: completes
     HurtHandler --> Exploded: any second handler<br/>→ DOUBLE HANDLE
     ErrHandler --> Exploded: any second handler<br/>→ DOUBLE HANDLE
+    BumpHandler --> Exploded: any second handler<br/>→ DOUBLE HANDLE
     DeathHandler --> Exploded: fault inside<br/>→ DOUBLE HANDLE
     DeathHandler --> Wreck: completes or budget spent →<br/>forced become_disabled()<br/>starts self-destruct countdown
     Restart --> Running: line 1, variables +<br/>stack cleared
 ```
 
-### The five kinds
+### The seven kinds
 
 | Kind | Trigger | Budget / limit | Notes |
 |---|---|---|---|
@@ -291,7 +294,7 @@ You start with **one working printer: Green**. A **ruined Red printer** stands i
 
 ### The recall interrupt
 
-`recall` is the fifth signal — and the only one **players cannot write a handler for**. Its handler is engine-fixed: suspend the program, path home to the printer, get transported to the destination printer, re-color, and pass through the Boot Sequence. It fires when:
+`recall` is the engine-owned signal — the only one **players cannot write a handler for**. Its handler is engine-fixed: suspend the program, path home to the printer, get transported to the destination printer, re-color, and pass through the Boot Sequence. It fires when:
 
 1. **Rebalancing** — a printer is over its desired max *and* some other printer has headroom (desired > actual): the lowest-total-XP bot of the over-quota color is recalled and re-colored at the under-quota printer, **keeping all XP** (XP tracks live on the bot, not the color). No destination with headroom → no recall; surplus bots just keep working.
 2. **Over-capacity** — the colony exceeds what it can sustain ([02-agents.md](02-agents.md)): the lowest-total-XP bot in the whole colony is recalled **for scrap** (partial Metal refund).
@@ -370,13 +373,13 @@ The full catalog and unlock order live in [06-progression.md](06-progression.md)
 
 - **Cost table is moddable** — base `costs.ron` + per-map/biome overlays, so maps can stress specific program designs (see Cycle Costs above).
 - **Recursion allowed, small stack cap** — base 4 frames, overflow is a standard fault (see Tier 4).
-- **Four-kind error/signal model** (see Errors & Signals): unhandled error → engine force-calls `upload_crash_dump()` (guaranteed debuggability, full price); handled error → trap cost + 10-tick grace window, then ops ×2 (overtime tax); `on hurt:` → unlimited budget; `on death:` → 10-cycle black box. All constants live in the cost table.
+- **Error/signal model** (see Errors & Signals): unhandled error → engine force-calls `upload_crash_dump()` (guaranteed debuggability, full price); handled error → trap cost + 10-tick grace window, then ops ×2 (overtime tax); `on hurt:` → unlimited budget; `on death:` → 10-cycle black box; `on bump:` / `on bumped:` → collision signals (rammer / victim) whose *unhandled* default is the engine's asymmetric stun — a handler replaces the stun with your own response, and engine-driven walks (recall) never raise `bump` on the mover. All constants live in the cost table.
 - **Double-handle rule** — any event that would start a handler while another handler runs (any combination, including faults inside `on death:`) destroys the bot instantly: no wreck, no rescue. The counterweight to hurt's unlimited budget.
 - **Every death exits through a forced `become_disabled()`**, which starts the wreck's self-destruct countdown: field-repair in time rescues it (XP intact); otherwise it explodes. Wrecks can also be `salvage()`d (by anyone) for partial Metal.
 - **Every destruction drops a Black Box** (local logs + cause); information always survives — XP is the only thing gambled. Rescued/printed bots run a **Boot Sequence**: forced `upload_log()` if the buffer is non-empty, then execute from line 1. Forced engine behaviors are ordinary player-callable builtins (`upload_crash_dump`, `become_disabled`, `upload_log`) — one code path.
 - **Boot participates in double-handle** — any signal mid-boot explodes the bot, so rescues must be timed to safety.
 - **Colored program slots** — every bot carries one of the colony's colored programs, visibly tinted. One color = one Printer; printer count is gated by **controlled nests, quadratically** (3rd color: 1 nest; then 3, 6, 10 …) — named palette through 9 colors, **uncapped** beyond. Secrecy is per-color attrition: each enemy salvage grants +N% (default 5%) **permanent** decryption of that color, surviving redeploys ([08-multiplayer.md](08-multiplayer.md)). A *new* slot starts at 0%.
-- **Recall** — the fifth signal, engine-fixed and un-writable: printers over their desired max recall the lowest-XP bot of their color for re-coloring (XP kept); an over-capacity colony recalls its lowest-XP bot for scrap. Recall is an interrupt context — double-handle applies all the way home.
+- **Recall** — the engine-owned signal, engine-fixed and un-writable: printers over their desired max recall the lowest-XP bot of their color for re-coloring (XP kept); an over-capacity colony recalls its lowest-XP bot for scrap. Recall is an interrupt context — double-handle applies all the way home.
 - **Logging is ordinary functions** — `log`, `upload_log`, `upload_crash_dump` are costed builtins, so telemetry and black boxes are player-built, not engine magic (with the forced crash dump as the guaranteed floor).
 - **Loops** — `while` + `break`/`continue` at Tier 3; Python-style `for x in container` with containers at Tier 5. Implicit program loop stays; `while True:` legal but redundant.
 - **Generic fallible queries** — `exists(kind)` / `closest(kind)` with bare kind constants (`ore`, `depot`, `enemy`, `blueprint`, …) replace the old `nearest_*` / `*_exists` builtin family. `closest` returns the builtin `Result` enum (`Result.Ok(entity)` / `Result.Err(msg)`); unwrap with the `.expect()` method (faults with the message on `Err` — same behavior the old builtins had on a miss) or handle fault-free with `match`. Kind constants are host-bound names, shadowable, and survive post-fault restarts.
