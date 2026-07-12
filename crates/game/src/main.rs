@@ -2373,9 +2373,9 @@ fn editor_ui(
         let printer_ids: Vec<_> = game.0.world.printers.keys().copied().collect();
         let repair_cost = game.0.tuning.repair_cost_ore;
         for pid in printer_ids {
-            let (color, state, mut desired, job) = {
+            let (color, state, mut desired) = {
                 let p = &game.0.world.printers[&pid];
-                (p.color, p.state, p.desired_max, p.job)
+                (p.color, p.state, p.desired_max)
             };
             let name = match color {
                 BotColor::GREEN => "Green",
@@ -2406,13 +2406,8 @@ fn editor_ui(
                                 .0
                                 .apply(&Command::SetDesiredMax { printer: pid, value: desired });
                         }
-                        if let Some(ticks) = job {
-                            let total = game.0.tuning.print_ticks as f32;
-                            ui.add(
-                                egui::ProgressBar::new(1.0 - ticks as f32 / total)
-                                    .desired_width(60.0),
-                            );
-                        }
+                        // Print progress lives on the world-space bar
+                        // above the printer now — no duplicate here.
                     }
                 }
             });
