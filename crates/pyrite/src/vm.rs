@@ -264,6 +264,11 @@ impl Vm {
         self.state == State::Blocked
     }
 
+    /// Source line of the program's handler for `kind`, if installed.
+    pub fn handler_line(&self, kind: SignalKind) -> Option<u32> {
+        self.program.handlers.get(&kind).map(|h| h.line)
+    }
+
     /// The hurt threshold this program wants (`on hurt(n):`), if any.
     /// The sim reads this to decide when to raise `Signal::Hurt`.
     pub fn hurt_threshold(&self) -> Option<i64> {

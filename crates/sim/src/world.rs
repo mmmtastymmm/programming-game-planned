@@ -165,6 +165,35 @@ impl Bot {
     pub fn in_signal_handler(&self) -> bool {
         self.vm.as_ref().is_some_and(|vm| vm.phase() != pyrite::Phase::Main)
     }
+
+    /// Name of the signal currently being handled, if any.
+    pub fn handler_name(&self) -> Option<&'static str> {
+        use pyrite::ast::SignalKind;
+        match self.vm.as_ref()?.phase() {
+            pyrite::Phase::Main => None,
+            pyrite::Phase::Handler(kind) => Some(match kind {
+                SignalKind::Error => "error",
+                SignalKind::Hurt => "hurt",
+                SignalKind::Death => "death",
+                SignalKind::Bump => "bump",
+                SignalKind::Bumped => "bumped",
+            }),
+        }
+    }
+
+    /// (signal name, handler's source line if the program installed one) —
+    /// for every player-facing signal, inspector-ready.
+    pub fn handler_summary(&self) -> [(&'static str, Option<u32>); 5] {
+        use pyrite::ast::SignalKind;
+        let line = |kind| self.vm.as_ref().and_then(|vm| vm.handler_line(kind));
+        [
+            ("error", line(SignalKind::Error)),
+            ("hurt", line(SignalKind::Hurt)),
+            ("death", line(SignalKind::Death)),
+            ("bump", line(SignalKind::Bump)),
+            ("bumped", line(SignalKind::Bumped)),
+        ]
+    }
 }
 
 /// A player-designated terraform site (docs/05): the player places it

@@ -29,6 +29,15 @@ const TILES: &[&str] = &[
     "scribble_0",
     "scribble_1",
     "scribble_2",
+    "scribble_error_0",
+    "scribble_error_1",
+    "scribble_error_2",
+    "scribble_hurt_0",
+    "scribble_hurt_1",
+    "scribble_hurt_2",
+    "scribble_death_0",
+    "scribble_death_1",
+    "scribble_death_2",
 ];
 
 /// Atlased 6-face bodies: (svg prefix, output prefix).

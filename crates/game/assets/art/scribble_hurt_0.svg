@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- hurt handler cloud: red impact starburst -->
+  <g fill="none" stroke-linecap="round">
+    <g stroke="#d43728" stroke-width="4.5">
+      <line x1="32" y1="18" x2="32" y2="8"/>
+      <line x1="44" y1="24" x2="52" y2="17"/>
+      <line x1="46" y1="36" x2="57" y2="39"/>
+      <line x1="38" y1="46" x2="43" y2="55"/>
+      <line x1="24" y1="45" x2="19" y2="54"/>
+      <line x1="19" y1="34" x2="8" y2="35"/>
+      <line x1="22" y1="23" x2="14" y2="15"/>
+    </g>
+    <g stroke="#23242a" stroke-width="3">
+      <line x1="38" y1="20" x2="42" y2="13"/>
+      <line x1="25" y1="42" x2="21" y2="47"/>
+    </g>
+  </g>
+</svg>

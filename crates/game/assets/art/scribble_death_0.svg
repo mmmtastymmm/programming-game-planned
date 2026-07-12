@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- death handler cloud: pale scribbled skull, X eyes -->
+  <g fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <path stroke="#c9cdd8" stroke-width="4"
+      d="M20 30 Q18 12 32 12 Q46 12 44 30 Q44 38 38 40 L38 46 L26 46 L26 40 Q20 38 20 30 Z"/>
+    <g stroke="#23242a" stroke-width="3">
+      <path d="M25 24 L31 30 M31 24 L25 30"/>
+      <path d="M35 24 L41 30 M41 24 L35 30"/>
+      <path d="M30 46 L30 41 M34 46 L34 41"/>
+    </g>
+    <g stroke="#c9cdd8" stroke-width="3.5">
+      <line x1="14" y1="52" x2="50" y2="56"/>
+      <line x1="14" y1="56" x2="50" y2="52"/>
+    </g>
+  </g>
+</svg>

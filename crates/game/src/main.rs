@@ -198,7 +198,8 @@ struct Palette {
     bar_health_grad: Vec<Handle<StandardMaterial>>,
     bar_trail_mat: Handle<StandardMaterial>,
     scribble_quad: Handle<Mesh>,
-    scribble_mats: Vec<Handle<StandardMaterial>>,
+    /// Mood-cloud frames, keyed "angry" / "error" / "hurt" / "death".
+    scribble_mats: HashMap<&'static str, Vec<Handle<StandardMaterial>>>,
     sel_ring: Handle<Mesh>,
     sel_mat: Handle<StandardMaterial>,
 }
@@ -807,18 +808,30 @@ fn setup_scene(
             unlit: true,
             ..default()
         }),
-        scribble_mats: (0..3)
-            .map(|i| {
-                materials.add(StandardMaterial {
-                    base_color_texture: Some(
-                        asset_server.load(format!("textures/scribble_{i}.png")),
-                    ),
-                    alpha_mode: AlphaMode::Blend,
-                    unlit: true,
-                    ..default()
-                })
-            })
-            .collect(),
+        scribble_mats: {
+            let mut sets = HashMap::new();
+            for (mood, prefix) in [
+                ("angry", "scribble"),
+                ("error", "scribble_error"),
+                ("hurt", "scribble_hurt"),
+                ("death", "scribble_death"),
+            ] {
+                let frames = (0..3)
+                    .map(|i| {
+                        materials.add(StandardMaterial {
+                            base_color_texture: Some(
+                                asset_server.load(format!("textures/{prefix}_{i}.png")),
+                            ),
+                            alpha_mode: AlphaMode::Blend,
+                            unlit: true,
+                            ..default()
+                        })
+                    })
+                    .collect();
+                sets.insert(mood, frames);
+            }
+            sets
+        },
         paint_mats: PAINT_COLORS.map(|(r, gc, b)| {
             materials.add(StandardMaterial {
                 base_color: Color::srgba(
@@ -1580,7 +1593,7 @@ fn sync_view(
                 ScribbleCloud,
                 BillboardBar, // camera-facing, parent-rotation compensated
                 Mesh3d(palette.scribble_quad.clone()),
-                MeshMaterial3d(palette.scribble_mats[0].clone()),
+                MeshMaterial3d(palette.scribble_mats["angry"][0].clone()),
                 Transform::from_xyz(0.0, 1.75, 0.0),
                 Visibility::Hidden,
             ))
@@ -1863,18 +1876,28 @@ fn update_scribbles(
     >,
 ) {
     let t = time.elapsed_secs();
-    let frame = ((t * 8.0) as usize) % palette.scribble_mats.len();
     for (id, bot) in &game.0.world.bots {
         let Some(&cloud) = index.bot_scribbles.get(&id.0) else { continue };
         let Ok((mut visibility, mut material, mut transform)) = clouds.get_mut(cloud) else {
             continue;
         };
-        // Frustrated while stunned by a bump OR while any signal handler
-        // (error/hurt/death/bump/bumped) is running.
-        if bot.data.bump_frozen > 0 || bot.in_signal_handler() {
+        // The cloud reads *why* the bot is upset: angry squiggle for bump
+        // stun and collision handlers, ?! for error, starburst for hurt,
+        // skull for the death handler.
+        let mood = if bot.data.bump_frozen > 0 {
+            Some("angry")
+        } else {
+            bot.handler_name().map(|name| match name {
+                "error" | "hurt" | "death" => name,
+                _ => "angry", // bump / bumped share the collision squiggle
+            })
+        };
+        if let Some(mood) = mood {
+            let frames = &palette.scribble_mats[mood];
+            let frame = ((t * 8.0) as usize) % frames.len();
             *visibility = Visibility::Visible;
-            if material.0 != palette.scribble_mats[frame] {
-                material.0 = palette.scribble_mats[frame].clone();
+            if material.0 != frames[frame] {
+                material.0 = frames[frame].clone();
             }
             transform.scale = Vec3::splat(1.0 + 0.08 * (t * 9.0).sin());
         } else {
@@ -2021,8 +2044,8 @@ fn inspector_ui(
             "recalled (engine)".to_string()
         } else if data.bump_frozen > 0 {
             format!("bump-frozen ({} ticks)", data.bump_frozen)
-        } else if bot.in_signal_handler() {
-            "handling a signal".to_string()
+        } else if let Some(signal) = bot.handler_name() {
+            format!("handling: on {signal}:")
         } else if bot.vm.as_ref().is_some_and(|vm| vm.is_blocked()) {
             match &data.action {
                 Some(sim::world::Action::Move { path, .. }) => {
@@ -2093,6 +2116,39 @@ fn inspector_ui(
                 }
                 None => {
                     ui.small("(no deployed source for this color)");
+                }
+            }
+        }
+        ui.separator();
+
+        // Handler coverage: player-installed ones point at their line;
+        // the rest show the engine default in plain words.
+        ui.strong("handlers");
+        let tuning = &game.0.tuning;
+        for (signal, line) in bot.handler_summary() {
+            match line {
+                Some(n) => {
+                    ui.monospace(format!("on {signal}: — line {n}"));
+                }
+                None => {
+                    let default = match signal {
+                        "error" => format!(
+                            "crash dump, -{} hp, restart",
+                            tuning.fault_damage
+                        ),
+                        "hurt" => "nothing (keep running)".to_string(),
+                        "death" => "become a wreck".to_string(),
+                        "bump" => format!(
+                            "freeze {}t, -{} hp",
+                            tuning.bump_freeze_ticks, tuning.bump_damage
+                        ),
+                        "bumped" => format!(
+                            "freeze {}t, -{} hp",
+                            tuning.bump_victim_freeze_ticks, tuning.bump_damage
+                        ),
+                        _ => unreachable!(),
+                    };
+                    ui.monospace(format!("on {signal}: (engine) {default}"));
                 }
             }
         }
@@ -2762,6 +2818,38 @@ fn editor_ui(
                 let pause_label = if editor.paused { "▶ resume" } else { "⏸ pause" };
                 if ui.selectable_label(editor.paused, pause_label).clicked() {
                     editor.paused = !editor.paused;
+                }
+                // Debug stepping, paused only (right_to_left: these land
+                // left of the pause button).
+                if editor.paused {
+                    if ui.button("⏭ tick").on_hover_text("advance one sim tick").clicked() {
+                        game.0.step();
+                    }
+                    let target = editor.selected_bot;
+                    let step_line = ui
+                        .add_enabled(target.is_some(), egui::Button::new("⏭ line"))
+                        .on_hover_text("run until the inspected bot's line changes");
+                    if step_line.clicked()
+                        && let Some(id) = target
+                    {
+                        let bot_id = sim::world::BotId(id);
+                        let vm_state = |game: &GameSim| {
+                            game.0
+                                .world
+                                .bots
+                                .get(&bot_id)
+                                .and_then(|b| b.vm.as_ref())
+                                .map(|vm| (vm.current_line(), vm.fault_count()))
+                        };
+                        let before = vm_state(&game);
+                        for _ in 0..300 {
+                            game.0.step();
+                            let now = vm_state(&game);
+                            if now != before || now.is_none() {
+                                break; // line moved, fault fired, or bot died
+                            }
+                        }
+                    }
                 }
             });
         });
