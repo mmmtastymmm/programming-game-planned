@@ -175,7 +175,8 @@ struct Palette {
     bar_mesh: Handle<Mesh>,
     bar_bg_mat: Handle<StandardMaterial>,
     bar_fill_mat: Handle<StandardMaterial>,
-    bar_health_mat: Handle<StandardMaterial>,
+    /// Health-fill gradient bins: index 0 = empty/red .. last = full/green.
+    bar_health_grad: Vec<Handle<StandardMaterial>>,
     bar_trail_mat: Handle<StandardMaterial>,
 }
 
@@ -734,15 +735,28 @@ fn setup_scene(
             unlit: true,
             ..default()
         }),
-        bar_health_mat: materials.add(StandardMaterial {
-            base_color: Color::srgb(0.95, 0.25, 0.2),
-            emissive: LinearRgba::new(0.7, 0.08, 0.06, 1.0),
-            unlit: true,
-            ..default()
-        }),
+        bar_health_grad: (0..12)
+            .map(|i| {
+                let p = i as f32 / 11.0;
+                // red (0) -> yellow (0.5) -> green (1).
+                let (r, gr, b) = if p >= 0.5 {
+                    let t = (p - 0.5) * 2.0;
+                    (0.9 - 0.7 * t, 0.85, 0.2 + 0.05 * t)
+                } else {
+                    let t = p * 2.0;
+                    (0.95 - 0.05 * t, 0.25 + 0.6 * t, 0.2)
+                };
+                materials.add(StandardMaterial {
+                    base_color: Color::srgb(r, gr, b),
+                    emissive: LinearRgba::new(r * 0.6, gr * 0.6, b * 0.3, 1.0),
+                    unlit: true,
+                    ..default()
+                })
+            })
+            .collect(),
         bar_trail_mat: materials.add(StandardMaterial {
-            base_color: Color::srgb(0.98, 0.85, 0.55),
-            emissive: LinearRgba::new(0.6, 0.45, 0.2, 1.0),
+            base_color: Color::srgb(0.8, 0.12, 0.08),
+            emissive: LinearRgba::new(0.55, 0.05, 0.03, 1.0),
             unlit: true,
             ..default()
         }),
@@ -1458,7 +1472,9 @@ fn sync_view(
                             .spawn((
                                 HealthFill,
                                 Mesh3d(palette.bar_mesh.clone()),
-                                MeshMaterial3d(palette.bar_health_mat.clone()),
+                                MeshMaterial3d(
+                                    palette.bar_health_grad.last().expect("bins").clone(),
+                                ),
                                 Transform::from_xyz(0.0, 0.0, 0.011)
                                     .with_scale(Vec3::new(0.02, 0.55, 1.0)),
                             ))
@@ -1694,8 +1710,12 @@ fn update_health_bars(
     time: Res<Time>,
     game: NonSend<GameSim>,
     index: Res<ViewIndex>,
+    palette: Res<Palette>,
     poses: Query<&Pose>,
-    mut fills: Query<&mut Transform, (With<HealthFill>, Without<HealthTrail>)>,
+    mut fills: Query<
+        (&mut Transform, &mut MeshMaterial3d<StandardMaterial>),
+        (With<HealthFill>, Without<HealthTrail>),
+    >,
     mut trails: Query<(&mut Transform, &mut HealthTrail), Without<HealthFill>>,
     mut roots: Query<&mut Visibility, With<BillboardBar>>,
 ) {
@@ -1724,8 +1744,14 @@ fn update_health_bars(
                 ghost.frac = p; // no stale chunk on the next reveal
             }
         }
-        if recent && let Ok(mut transform) = fills.get_mut(fill) {
+        if recent && let Ok((mut transform, mut material)) = fills.get_mut(fill) {
             place(&mut transform, p, 0.55);
+            // Green -> yellow -> red as health falls.
+            let bins = &palette.bar_health_grad;
+            let bin = ((p * (bins.len() - 1) as f32).round() as usize).min(bins.len() - 1);
+            if material.0 != bins[bin] {
+                material.0 = bins[bin].clone();
+            }
         }
     }
 }
