@@ -219,3 +219,26 @@ fn deploy_hot_swaps_live_bots() {
     let logs = &sim.world.bots[&bot].data.log_buf;
     assert!(logs.iter().any(|l| l == "2"), "live bot must hot-swap; logs: {logs:?}");
 }
+
+#[test]
+fn blueprint_exists_predicate() {
+    let mut sim = Sim::new(&walled_map());
+    let bot = spawn(&mut sim, TilePos::new(1, 1), "log(blueprint_exists())\nwait(2)\n");
+    for _ in 0..12 {
+        sim.step();
+    }
+    assert_eq!(sim.world.bots[&bot].data.log_buf.first().map(String::as_str), Some("False"));
+    sim.apply(&Command::PlaceBlueprint {
+        pos: TilePos::new(4, 1),
+        kind: BlueprintKind::Bridge,
+    })
+    .unwrap();
+    for _ in 0..30 {
+        sim.step();
+    }
+    assert!(
+        sim.world.bots[&bot].data.log_buf.iter().any(|l| l == "True"),
+        "predicate must flip once a blueprint exists: {:?}",
+        sim.world.bots[&bot].data.log_buf
+    );
+}

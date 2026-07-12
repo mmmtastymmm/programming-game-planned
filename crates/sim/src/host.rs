@@ -78,6 +78,9 @@ impl pyrite::Host for BotHost<'_> {
                 [Value::Int(_)] => HostCall::Fault("rng requires a positive bound".into()),
                 _ => HostCall::Fault("rng takes 1 integer argument".into()),
             },
+            "blueprint_exists" => {
+                HostCall::Ready(Value::Bool(!self.world.blueprints.is_empty()))
+            }
             "nearest_blueprint" => match self.world.nearest_blueprint(bot_pos) {
                 Some(id) => HostCall::Ready(Value::Entity(id.0)),
                 None => HostCall::Fault("no blueprint anywhere".into()),

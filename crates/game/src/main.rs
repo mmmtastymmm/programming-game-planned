@@ -1,6 +1,9 @@
 //! Colony viewer & editor, modeled on the original prototype's look:
 //! bright emissive primitives on a dark void, orbit camera, and a live
-//! Pyrite editor panel on the left. No models — color IS the identity.
+//! Pyrite editor panel on the left. No 3D models — bots are cubes whose six
+//! faces sample a baked SVG atlas, and terrain slabs sample baked SVG tiles
+//! (`assets/art/*.svg` -> `cargo bake` -> `assets/textures/*.png`). Team
+//! identity is a palette swap done at bake time.
 //!
 //! The sim steps on `FixedUpdate` at 10 Hz (docs/07 tick rate); rendering
 //! free-runs with per-frame interpolation between ticks. All game state
@@ -10,8 +13,11 @@
 //! Camera: RMB drag = orbit · Shift+RMB / MMB = pan · scroll = zoom.
 //! Run: `cargo run -p game`
 
+use bevy::asset::RenderAssetUsages;
 use bevy::input::mouse::{MouseMotion, MouseWheel};
 use bevy::prelude::*;
+use bevy::render::mesh::Indices;
+use bevy::render::render_resource::PrimitiveTopology;
 use bevy_egui::{egui, EguiContexts, EguiPlugin};
 use sim::map::{MapSpec, PrinterSpec};
 use sim::sim::{Command, Sim};
@@ -20,8 +26,13 @@ use sim::world::{BlueprintKind, Color as BotColor, PrinterState};
 use sim::{TileKind, TilePos};
 use std::collections::{HashMap, HashSet};
 
-/// The doc's Tier-0 starter program, verbatim.
-const MINER: &str = "\
+/// The default colony program: service any blueprint first, then mine.
+/// (Uses `if` — the dev sandbox runs with all constructs unlocked; the
+/// doc's true Tier-0 starter is the four mining lines alone.)
+const DEFAULT_PROGRAM: &str = "\
+if blueprint_exists():
+    move_to(nearest_blueprint())
+    build()
 move_to(nearest_ore())
 mine()
 move_to(nearest_depot())
@@ -125,8 +136,15 @@ struct Palette {
     nose_mat: Handle<StandardMaterial>,
     bot_mats: HashMap<u8, Handle<StandardMaterial>>,
     ruined_mat: Handle<StandardMaterial>,
-    bridge_mat: Handle<StandardMaterial>,
     tile_slab: Handle<Mesh>,
+    /// Bot body: cube whose faces sample cells of the team's 3x2 atlas.
+    bot_cube: Handle<Mesh>,
+    bot_tex_mats: HashMap<u8, Handle<StandardMaterial>>,
+    /// Terrain slab: full tile texture on top, dark trim on the sides.
+    tex_slab: Handle<Mesh>,
+    ground_tex_mat: Handle<StandardMaterial>,
+    bridge_tex_mat: Handle<StandardMaterial>,
+    oneway_tex_mat: Handle<StandardMaterial>,
     preview_valid_mat: Handle<StandardMaterial>,
     preview_invalid_mat: Handle<StandardMaterial>,
     preview_chevron_mat: Handle<StandardMaterial>,
@@ -148,7 +166,7 @@ struct EditorState {
 impl Default for EditorState {
     fn default() -> Self {
         Self {
-            code: MINER.to_string(),
+            code: DEFAULT_PROGRAM.to_string(),
             status: "ready".into(),
             status_ok: true,
             selected_build: None,
@@ -264,7 +282,7 @@ fn build_colony() -> Sim {
     game.apply(&Command::DeployProgram {
         faction: 0,
         color: BotColor::GREEN,
-        source: MINER.into(),
+        source: DEFAULT_PROGRAM.into(),
     })
     .expect("miner program parses");
     game
@@ -318,9 +336,83 @@ fn setup_sim(world: &mut World) {
     world.insert_non_send_resource(GameSim(build_colony()));
 }
 
+// -------------------------------------------------------- textured meshes
+
+/// Axis-aligned box with an explicit UV rectangle `[u0, v0, u1, v1]` per
+/// face, ordered [front(-Z), right(+X), back(+Z), left(-X), top(+Y),
+/// bottom(-Y)]. Front is -Z so it matches the nose child and the facing
+/// math in `update_poses`; image-up on the top face is the bot's forward.
+fn box_with_face_uvs(half: Vec3, face_uvs: [[f32; 4]; 6]) -> Mesh {
+    // (outward normal, texture-right, texture-up), chosen so r x u = n.
+    const AXES: [(Vec3, Vec3, Vec3); 6] = [
+        (Vec3::NEG_Z, Vec3::NEG_X, Vec3::Y),
+        (Vec3::X, Vec3::NEG_Z, Vec3::Y),
+        (Vec3::Z, Vec3::X, Vec3::Y),
+        (Vec3::NEG_X, Vec3::Z, Vec3::Y),
+        (Vec3::Y, Vec3::X, Vec3::NEG_Z),
+        (Vec3::NEG_Y, Vec3::X, Vec3::Z),
+    ];
+    let mut positions = Vec::with_capacity(24);
+    let mut normals = Vec::with_capacity(24);
+    let mut uvs = Vec::with_capacity(24);
+    let mut indices = Vec::with_capacity(36);
+    for ((n, r, u), [u0, v0, u1, v1]) in AXES.into_iter().zip(face_uvs) {
+        let center = n * n.abs().dot(half);
+        let rv = r * r.abs().dot(half);
+        let uv = u * u.abs().dot(half);
+        let base = positions.len() as u32;
+        for (p, tex) in [
+            (center - rv - uv, [u0, v1]), // bottom-left
+            (center + rv - uv, [u1, v1]), // bottom-right
+            (center + rv + uv, [u1, v0]), // top-right
+            (center - rv + uv, [u0, v0]), // top-left
+        ] {
+            positions.push(p.to_array());
+            normals.push(n.to_array());
+            uvs.push(tex);
+        }
+        indices.extend([base, base + 1, base + 2, base + 2, base + 3, base]);
+    }
+    Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default())
+        .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, positions)
+        .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, normals)
+        .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, uvs)
+        .with_inserted_indices(Indices::U32(indices))
+}
+
+/// The bot body: each face samples its cell of the 3x2 team atlas
+/// (front/right/back over left/top/bottom — the layout `cargo bake` emits).
+fn bot_cube_mesh() -> Mesh {
+    let cell =
+        |c: f32, r: f32| [c / 3.0, r / 2.0, (c + 1.0) / 3.0, (r + 1.0) / 2.0];
+    box_with_face_uvs(
+        Vec3::splat(0.35),
+        [
+            cell(0.0, 0.0),
+            cell(1.0, 0.0),
+            cell(2.0, 0.0),
+            cell(0.0, 1.0),
+            cell(1.0, 1.0),
+            cell(2.0, 1.0),
+        ],
+    )
+}
+
+/// Terrain slab: the full tile texture on top (image-up = north, so the
+/// one-way chevrons point east until the transform spins them); sides and
+/// bottom sample a sliver of the tile's border so they read as dark trim.
+fn tex_slab_mesh() -> Mesh {
+    const EDGE: [f32; 4] = [0.005, 0.45, 0.02, 0.55];
+    box_with_face_uvs(
+        Vec3::new(0.48, 0.05, 0.48),
+        [EDGE, EDGE, EDGE, EDGE, [0.0, 0.0, 1.0, 1.0], EDGE],
+    )
+}
+
 fn setup_scene(
     mut commands: Commands,
     game: NonSend<GameSim>,
+    asset_server: Res<AssetServer>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
@@ -340,6 +432,37 @@ fn setup_scene(
             }),
         );
     }
+    // Baked-atlas bot bodies; the emissive texture keeps the "glowing
+    // primitives" identity without washing out the face art.
+    let mut bot_tex_mats = HashMap::new();
+    for (c, team) in [(0u8, "green"), (1, "red"), (2, "blue")] {
+        let atlas: Handle<Image> =
+            asset_server.load(format!("textures/bot_atlas_{team}.png"));
+        bot_tex_mats.insert(
+            c,
+            materials.add(StandardMaterial {
+                base_color_texture: Some(atlas.clone()),
+                emissive: LinearRgba::new(0.35, 0.35, 0.35, 1.0),
+                emissive_texture: Some(atlas),
+                metallic: 0.1,
+                perceptual_roughness: 0.5,
+                ..default()
+            }),
+        );
+    }
+    let tile_tex_mat = |materials: &mut Assets<StandardMaterial>, tex: Handle<Image>| {
+        materials.add(StandardMaterial {
+            base_color_texture: Some(tex),
+            perceptual_roughness: 0.85,
+            ..default()
+        })
+    };
+    let ground_tex_mat =
+        tile_tex_mat(&mut materials, asset_server.load("textures/tile_ground.png"));
+    let bridge_tex_mat =
+        tile_tex_mat(&mut materials, asset_server.load("textures/tile_bridge.png"));
+    let oneway_tex_mat =
+        tile_tex_mat(&mut materials, asset_server.load("textures/tile_oneway.png"));
     let palette = Palette {
         unit_cube: meshes.add(Cuboid::new(0.7, 0.7, 0.7)),
         nose_cube: meshes.add(Cuboid::new(0.22, 0.22, 0.22)),
@@ -387,12 +510,13 @@ fn setup_scene(
             perceptual_roughness: 0.95,
             ..default()
         }),
-        bridge_mat: materials.add(StandardMaterial {
-            base_color: Color::srgb(0.55, 0.40, 0.22),
-            perceptual_roughness: 0.8,
-            ..default()
-        }),
         tile_slab: meshes.add(Cuboid::new(0.96, 0.12, 0.96)),
+        bot_cube: meshes.add(bot_cube_mesh()),
+        bot_tex_mats,
+        tex_slab: meshes.add(tex_slab_mesh()),
+        ground_tex_mat,
+        bridge_tex_mat,
+        oneway_tex_mat,
         preview_valid_mat: materials.add(StandardMaterial {
             base_color: Color::srgba(0.85, 0.95, 1.0, 0.45),
             alpha_mode: AlphaMode::Blend,
@@ -411,13 +535,8 @@ fn setup_scene(
         }),
     };
 
-    // Terrain slabs (0.96 with grout lines, prototype-style).
-    let slab_plains = meshes.add(Cuboid::new(0.96, 0.1, 0.96));
-    let plains_mat = materials.add(StandardMaterial {
-        base_color: GROUND,
-        perceptual_roughness: 0.9,
-        ..default()
-    });
+    // Terrain slabs (0.96 with grout lines, prototype-style). Plains get
+    // the baked circuit tile; rubble/water stay flat colors.
     let rubble_mat = materials.add(StandardMaterial {
         base_color: RUBBLE,
         metallic: 0.05,
@@ -434,15 +553,17 @@ fn setup_scene(
             let pos = TilePos::new(x, y);
             let kind = world.grid.get(pos).expect("in bounds");
             let (mat, y_off) = match kind {
-                TileKind::Plains => (plains_mat.clone(), 0.0),
+                TileKind::Plains => (palette.ground_tex_mat.clone(), 0.0),
                 TileKind::Rubble => (rubble_mat.clone(), 0.04),
                 TileKind::Water => (water_mat.clone(), -0.05),
                 // Bridges only exist after terraforming; at startup none do
                 // (sync_view overlays planks when they appear).
-                TileKind::Bridge | TileKind::BridgeOneWay(_) => (plains_mat.clone(), 0.0),
+                TileKind::Bridge | TileKind::BridgeOneWay(_) => {
+                    (palette.ground_tex_mat.clone(), 0.0)
+                }
             };
             commands.spawn((
-                Mesh3d(slab_plains.clone()),
+                Mesh3d(palette.tex_slab.clone()),
                 MeshMaterial3d(mat),
                 Transform::from_translation(tile_xyz(world, pos, y_off - 0.05)),
             ));
@@ -930,8 +1051,8 @@ fn sync_view(
         let start = tile_xyz(world, bot.data.pos, 0.45);
         let entity = commands
             .spawn((
-                Mesh3d(palette.unit_cube.clone()),
-                MeshMaterial3d(palette.bot_mats[&bot.data.color.0.min(2)].clone()),
+                Mesh3d(palette.bot_cube.clone()),
+                MeshMaterial3d(palette.bot_tex_mats[&bot.data.color.0.min(2)].clone()),
                 Transform::from_translation(start),
                 Pose {
                     prev: start,
@@ -1025,8 +1146,8 @@ fn sync_view(
         }
     });
 
-    // Finished bridges: plank slabs over the water; one-ways get a gold
-    // direction chevron (strip + tip) on top.
+    // Finished bridges: baked plank tiles over the water; one-ways use the
+    // chevron tile, spun so its east-pointing arrows match the direction.
     for y in 0..world.grid.height {
         for x in 0..world.grid.width {
             let pos = TilePos::new(x, y);
@@ -1038,35 +1159,21 @@ fn sync_view(
             if !index.bridges.insert((x, y)) {
                 continue;
             }
-            commands
-                .spawn((
-                    Mesh3d(palette.tile_slab.clone()),
-                    MeshMaterial3d(palette.bridge_mat.clone()),
-                    Transform::from_translation(tile_xyz(world, pos, 0.0)),
-                ))
-                .with_children(|parent| {
-                    if let Some(d) = dir {
-                        let (dx, dz) = d.delta();
-                        let along = Vec3::new(dx as f32, 0.0, dz as f32);
-                        let strip_size = if dx != 0 {
-                            Vec3::new(0.6, 0.06, 0.16)
-                        } else {
-                            Vec3::new(0.16, 0.06, 0.6)
-                        };
-                        parent.spawn((
-                            Mesh3d(palette.nose_cube.clone()),
-                            MeshMaterial3d(palette.ore_mat.clone()),
-                            Transform::from_translation(Vec3::Y * 0.1)
-                                .with_scale(strip_size / 0.22),
-                        ));
-                        parent.spawn((
-                            Mesh3d(palette.nose_cube.clone()),
-                            MeshMaterial3d(palette.ore_mat.clone()),
-                            Transform::from_translation(along * 0.34 + Vec3::Y * 0.1)
-                                .with_scale(Vec3::new(1.4, 1.2, 1.4)),
-                        ));
-                    }
-                });
+            let (mat, rot) = match dir {
+                None => (palette.bridge_tex_mat.clone(), Quat::IDENTITY),
+                Some(d) => {
+                    let (dx, dz) = d.delta();
+                    (
+                        palette.oneway_tex_mat.clone(),
+                        Quat::from_rotation_y(-(dz as f32).atan2(dx as f32)),
+                    )
+                }
+            };
+            commands.spawn((
+                Mesh3d(palette.tex_slab.clone()),
+                MeshMaterial3d(mat),
+                Transform::from_translation(tile_xyz(world, pos, 0.0)).with_rotation(rot),
+            ));
         }
     }
 
@@ -1388,4 +1495,58 @@ fn editor_ui(
         ui.separator();
         ui.small("RMB drag: orbit · Shift+RMB / MMB: pan · scroll: zoom");
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn spans(text: &str) -> Vec<(String, egui::Color32)> {
+        highlight_pyrite(text, egui::FontId::monospace(12.0))
+            .sections
+            .iter()
+            .map(|s| (text[s.byte_range.clone()].to_string(), s.format.color))
+            .collect()
+    }
+
+    #[test]
+    fn highlights_keywords_functions_variables_and_literals() {
+        let got = spans("if x > 1:\n    move_to(target, \"hi\") # go\n");
+        for expected in [
+            ("if", HL_KEYWORD),
+            ("x", HL_VARIABLE),
+            ("1", HL_NUMBER),
+            ("move_to", HL_FUNCTION),
+            ("target", HL_VARIABLE),
+            ("\"hi\"", HL_STRING),
+            ("# go", HL_COMMENT),
+        ] {
+            assert!(
+                got.contains(&(expected.0.to_string(), expected.1)),
+                "missing span {expected:?} in {got:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn def_name_is_a_function_and_unterminated_string_stops_at_eol() {
+        let got = spans("def go(n):\n    s = \"oops\nreturn n\n");
+        assert!(got.contains(&("def".into(), HL_KEYWORD)));
+        assert!(got.contains(&("go".into(), HL_FUNCTION)));
+        assert!(got.contains(&("n".into(), HL_VARIABLE)));
+        assert!(got.contains(&("\"oops".into(), HL_STRING)));
+        assert!(got.contains(&("return".into(), HL_KEYWORD)));
+    }
+
+    #[test]
+    fn highlight_covers_every_byte_exactly_once() {
+        let text = "move_to(nearest_ore())\n# comment\nwhile True:\n    x = x + 1\n";
+        let job = highlight_pyrite(text, egui::FontId::monospace(12.0));
+        let mut pos = 0;
+        for s in &job.sections {
+            assert_eq!(s.byte_range.start, pos, "gap or overlap at byte {pos}");
+            pos = s.byte_range.end;
+        }
+        assert_eq!(pos, text.len());
+    }
 }

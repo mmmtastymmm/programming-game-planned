@@ -65,6 +65,7 @@ impl Default for CostTable {
             ("wait", 1),
             ("rng", 1),
             ("nearest_blueprint", 3),
+            ("blueprint_exists", 1),
             ("build", 2),
             ("nearest_ore", 3),
             ("nearest_depot", 3),
