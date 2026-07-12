@@ -986,6 +986,31 @@ fn sync_view(
                         Transform::from_translation(tile_xyz(world, bp.pos, 0.05))
                             .with_scale(Vec3::new(1.0, grown, 1.0)),
                     ))
+                    .with_children(|parent| {
+                        // One-way blueprints keep their traffic arrow from
+                        // ghost to plank — direction is never invisible.
+                        if let BlueprintKind::BridgeOneWay(d) = bp.kind {
+                            let (dx, dz) = d.delta();
+                            let along = Vec3::new(dx as f32, 0.0, dz as f32);
+                            let strip_size = if dx != 0 {
+                                Vec3::new(0.6, 0.06, 0.16)
+                            } else {
+                                Vec3::new(0.16, 0.06, 0.6)
+                            };
+                            parent.spawn((
+                                Mesh3d(palette.nose_cube.clone()),
+                                MeshMaterial3d(palette.ore_mat.clone()),
+                                Transform::from_xyz(0.0, 0.15, 0.0)
+                                    .with_scale(strip_size / 0.22),
+                            ));
+                            parent.spawn((
+                                Mesh3d(palette.nose_cube.clone()),
+                                MeshMaterial3d(palette.ore_mat.clone()),
+                                Transform::from_translation(along * 0.34 + Vec3::Y * 0.15)
+                                    .with_scale(Vec3::new(1.4, 1.2, 1.4)),
+                            ));
+                        }
+                    })
                     .id();
                 index.blueprints.insert(id.0, entity);
             }

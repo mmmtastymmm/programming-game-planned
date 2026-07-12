@@ -173,6 +173,9 @@ pub struct Vm {
     /// Total faults so far (crash dumps AND handled traps) — lets the
     /// outside world observe fault *events*, not just the latest message.
     fault_count: u64,
+    /// A redeployed program, installed at the next loop boundary
+    /// (docs/01: "redeploy takes effect at each bot's next loop boundary").
+    pending_program: Option<Rc<Program>>,
 }
 
 impl Vm {
@@ -194,6 +197,7 @@ impl Vm {
             current_line: 0,
             last_fault: None,
             fault_count: 0,
+            pending_program: None,
         }
     }
 
@@ -218,6 +222,12 @@ impl Vm {
     /// Monotone count of faults (unhandled and handled alike).
     pub fn fault_count(&self) -> u64 {
         self.fault_count
+    }
+
+    /// Queue a redeployed program; it takes effect at the next loop
+    /// boundary (natural wrap, or the restart after a fault/handler).
+    pub fn queue_program(&mut self, program: Rc<Program>) {
+        self.pending_program = Some(program);
     }
 
     pub fn budget(&self) -> i64 {
@@ -259,7 +269,11 @@ impl Vm {
     }
 
     /// Full reset: line 1, variables cleared. Used by the sim at boot.
+    /// A queued redeploy installs here — every reset is a loop boundary.
     pub fn reset(&mut self) {
+        if let Some(program) = self.pending_program.take() {
+            self.program = program;
+        }
         self.work = Self::block_work(&self.program.body.clone());
         self.values.clear();
         self.frames.clear();
@@ -365,6 +379,9 @@ impl Vm {
                             return Outcome::Paused;
                         }
                         self.budget -= cost as i64;
+                        if let Some(program) = self.pending_program.take() {
+                            self.program = program; // redeploy lands here
+                        }
                         self.globals.clear();
                         self.values.clear();
                         self.frames.clear();

@@ -79,8 +79,9 @@ pub enum Command {
         hp: i64,
         color: Color,
     },
-    /// Deploy source to a (faction, color) slot. Affects new prints and
-    /// re-colors; live bots hot-swap at their next loop boundary (TODO).
+    /// Deploy source to a (faction, color) slot: new prints and re-colors
+    /// use it immediately; live bots of that color hot-swap at their next
+    /// loop boundary (docs/01).
     DeployProgram { faction: u8, color: Color, source: String },
     /// The population dial on a printer.
     SetDesiredMax { printer: EntityId, value: u32 },
@@ -123,10 +124,21 @@ impl Sim {
                 let slot = (*faction, color.0);
                 let version =
                     self.world.color_programs.get(&slot).map(|c| c.version + 1).unwrap_or(1);
+                let program = Rc::new(program);
                 self.world.color_programs.insert(
                     slot,
-                    ColorProgram { source: source.clone(), program: Rc::new(program), version },
+                    ColorProgram { source: source.clone(), program: Rc::clone(&program), version },
                 );
+                // Hot-swap every live bot of this color at its next loop
+                // boundary (docs/01: redeploy semantics).
+                for bot in self.world.bots.values_mut() {
+                    if bot.data.faction == *faction
+                        && bot.data.color == *color
+                        && let Some(vm) = bot.vm.as_mut()
+                    {
+                        vm.queue_program(Rc::clone(&program));
+                    }
+                }
                 Ok(None)
             }
             Command::SetDesiredMax { printer, value } => {

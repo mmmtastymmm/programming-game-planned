@@ -609,3 +609,19 @@ while n < 5:
     };
     assert_eq!(run(), run());
 }
+
+#[test]
+fn queued_program_installs_at_the_loop_boundary() {
+    let (mut vm, mut host, costs) = vm_for("log(1)\n");
+    vm.grant(3);
+    vm.run(&mut host, &costs);
+    assert_eq!(call_names(&host), ["log"]);
+    // Redeploy: takes effect at the wrap, not mid-pass.
+    let new_program = parse("log(2)\nhalt()\n", &UnlockSet::all()).unwrap();
+    vm.queue_program(Rc::new(new_program));
+    vm.grant(20);
+    vm.run(&mut host, &costs);
+    let logged: Vec<&Value> =
+        host.calls.iter().filter(|(n, _)| n == "log").map(|(_, a)| &a[0]).collect();
+    assert_eq!(logged.last(), Some(&&Value::Int(2)), "new program runs after the wrap");
+}

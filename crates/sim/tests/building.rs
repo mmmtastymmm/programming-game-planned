@@ -196,3 +196,26 @@ fn opposing_one_way_bridges_make_a_round_trip() {
         sim.world.stockpile_ore
     );
 }
+
+#[test]
+fn deploy_hot_swaps_live_bots() {
+    // The viewer regression: bots exist at their dial, the player deploys
+    // new code — live bots must pick it up at their next loop boundary,
+    // without waiting for a fresh print.
+    let mut sim = Sim::new(&MapSpec::empty(5, 5));
+    let bot = spawn(&mut sim, TilePos::new(2, 2), "log(1)\n");
+    for _ in 0..10 {
+        sim.step();
+    }
+    sim.apply(&Command::DeployProgram {
+        faction: 0,
+        color: Color::GREEN,
+        source: "log(2)\n".into(),
+    })
+    .unwrap();
+    for _ in 0..20 {
+        sim.step();
+    }
+    let logs = &sim.world.bots[&bot].data.log_buf;
+    assert!(logs.iter().any(|l| l == "2"), "live bot must hot-swap; logs: {logs:?}");
+}
