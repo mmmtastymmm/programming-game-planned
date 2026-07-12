@@ -121,14 +121,67 @@ struct EditorState {
     code: String,
     status: String,
     status_ok: bool,
-    /// Bridge-placement mode: LMB on a water tile places a blueprint.
-    build_mode: bool,
+    /// Armed build item: LMB places its blueprint (Esc cancels).
+    selected_build: Option<BlueprintKind>,
+    /// Selected category tab in the build bar.
+    build_category: usize,
+    /// Procedurally-drawn item icons, keyed by item name.
+    icons: HashMap<&'static str, egui::TextureHandle>,
 }
 
 impl Default for EditorState {
     fn default() -> Self {
-        Self { code: MINER.to_string(), status: "ready".into(), status_ok: true, build_mode: false }
+        Self {
+            code: MINER.to_string(),
+            status: "ready".into(),
+            status_ok: true,
+            selected_build: None,
+            build_category: 0,
+            icons: HashMap::new(),
+        }
     }
+}
+
+/// The build catalog: categories -> items. One category today; military,
+/// logistics, etc. slot in later.
+struct BuildItem {
+    name: &'static str,
+    kind: BlueprintKind,
+}
+
+const BUILD_CATEGORIES: &[(&str, &[BuildItem])] =
+    &[("Structures", &[BuildItem { name: "Bridge", kind: BlueprintKind::Bridge }])];
+
+/// 48x48 pixel-art icon for a build item, drawn in code (no asset files;
+/// matches the primitive look).
+fn build_icon(name: &str) -> egui::ColorImage {
+    let s = 48usize;
+    let water = egui::Color32::from_rgb(26, 72, 140);
+    let mut img = egui::ColorImage::new([s, s], water);
+    if name == "Bridge" {
+        let plank_light = egui::Color32::from_rgb(150, 108, 60);
+        let plank_dark = egui::Color32::from_rgb(122, 86, 46);
+        let rail = egui::Color32::from_rgb(92, 64, 34);
+        for y in 15..33 {
+            for x in 2..46 {
+                let c = if (x / 7) % 2 == 0 { plank_light } else { plank_dark };
+                img[(x, y)] = c;
+            }
+        }
+        for x in 2..46 {
+            img[(x, 13)] = rail;
+            img[(x, 14)] = rail;
+            img[(x, 33)] = rail;
+            img[(x, 34)] = rail;
+        }
+        // Pylons into the water.
+        for y in 35..44 {
+            for x in [6usize, 7, 23, 24, 40, 41] {
+                img[(x, y)] = rail;
+            }
+        }
+    }
+    img
 }
 
 // ------------------------------------------------------------------ world
@@ -423,13 +476,18 @@ fn orbit_camera(
 /// the sim validates (water only, funds, no duplicate) — the UI just aims.
 fn place_blueprint(
     mut contexts: EguiContexts,
-    editor: Res<EditorState>,
+    mut editor: ResMut<EditorState>,
     buttons: Res<ButtonInput<MouseButton>>,
+    keys: Res<ButtonInput<KeyCode>>,
     windows: Query<&Window>,
     cams: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
     mut game: NonSendMut<GameSim>,
 ) {
-    if !editor.build_mode || !buttons.just_pressed(MouseButton::Left) {
+    if keys.just_pressed(KeyCode::Escape) {
+        editor.selected_build = None;
+    }
+    let Some(kind) = editor.selected_build else { return };
+    if !buttons.just_pressed(MouseButton::Left) {
         return;
     }
     if contexts.try_ctx_mut().is_some_and(|ctx| ctx.wants_pointer_input()) {
@@ -453,7 +511,7 @@ fn place_blueprint(
         (hit.z + world.grid.height as f32 / 2.0).round() as i32,
     );
     if world.grid.in_bounds(pos) {
-        let _ = game.0.apply(&Command::PlaceBlueprint { pos, kind: BlueprintKind::Bridge });
+        let _ = game.0.apply(&Command::PlaceBlueprint { pos, kind });
     }
 }
 
@@ -794,6 +852,75 @@ fn editor_ui(
     mut editor: ResMut<EditorState>,
 ) {
     let Some(ctx) = contexts.try_ctx_mut() else { return };
+
+    egui::TopBottomPanel::bottom("build_bar").exact_height(96.0).show(ctx, |ui| {
+        ui.horizontal(|ui| {
+            // Category tabs.
+            ui.vertical(|ui| {
+                ui.strong("Build");
+                for (i, (name, _)) in BUILD_CATEGORIES.iter().enumerate() {
+                    if ui.selectable_label(editor.build_category == i, *name).clicked() {
+                        editor.build_category = i;
+                    }
+                }
+            });
+            ui.separator();
+
+            // Items of the selected category.
+            let (_, items) = BUILD_CATEGORIES[editor.build_category.min(BUILD_CATEGORIES.len() - 1)];
+            for item in items {
+                let cost = match item.kind {
+                    BlueprintKind::Bridge => game.0.tuning.bridge_cost_ore,
+                };
+                let affordable = game.0.world.stockpile_ore >= cost;
+                if !editor.icons.contains_key(item.name) {
+                    let tex = ctx.load_texture(
+                        item.name,
+                        build_icon(item.name),
+                        egui::TextureOptions::NEAREST,
+                    );
+                    editor.icons.insert(item.name, tex);
+                }
+                let tex_id = editor.icons[item.name].id();
+                let selected = editor.selected_build == Some(item.kind);
+                ui.vertical(|ui| {
+                    let button = egui::ImageButton::new(egui::load::SizedTexture::new(
+                        tex_id,
+                        egui::vec2(48.0, 48.0),
+                    ))
+                    .selected(selected);
+                    let response = ui
+                        .add_enabled(affordable, button)
+                        .on_hover_text(format!("{} — {cost} ore", item.name));
+                    if response.clicked() {
+                        editor.selected_build = if selected { None } else { Some(item.kind) };
+                    }
+                    ui.small(format!("{}
+{cost} ore", item.name));
+                });
+            }
+
+            // Status / hints on the right.
+            ui.separator();
+            ui.vertical(|ui| {
+                if let Some(kind) = editor.selected_build {
+                    let target = match kind {
+                        BlueprintKind::Bridge => "a water tile",
+                    };
+                    ui.label(format!("Click {target} to place — Esc to cancel"));
+                } else {
+                    ui.small("Select a structure, then click the map.");
+                }
+                let pending = game.0.world.blueprints.len();
+                if pending > 0 {
+                    ui.small(format!(
+                        "{pending} blueprint(s) waiting for builders (nearest_blueprint / build)"
+                    ));
+                }
+            });
+        });
+    });
+
     egui::SidePanel::left("editor").exact_width(300.0).show(ctx, |ui| {
         ui.heading("Pyrite");
         ui.add(
@@ -890,24 +1017,6 @@ fn editor_ui(
                     }
                 }
             });
-        }
-        ui.separator();
-
-        ui.heading("Build");
-        let bridge_cost = game.0.tuning.bridge_cost_ore;
-        let label = if editor.build_mode {
-            "Bridge mode ON — click water".to_string()
-        } else {
-            format!("Place bridge ({bridge_cost} ore)")
-        };
-        if ui.selectable_label(editor.build_mode, label).clicked() {
-            editor.build_mode = !editor.build_mode;
-        }
-        if !game.0.world.blueprints.is_empty() {
-            ui.small(format!(
-                "{} blueprint(s) waiting for builders (nearest_blueprint / build)",
-                game.0.world.blueprints.len()
-            ));
         }
         ui.separator();
 
