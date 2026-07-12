@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <!-- wreck: a dead bot from above — charred chassis, thrown tread, dark eye -->
+  <!-- scorch ring on transparent-ish dark base -->
+  <rect width="64" height="64" fill="#23242a"/>
+  <ellipse cx="32" cy="34" rx="26" ry="22" fill="#1a1b20"/>
+  <ellipse cx="32" cy="34" rx="18" ry="15" fill="#141519"/>
+  <!-- broken chassis, cracked in two and skewed -->
+  <path d="M18 22 L38 18 L40 34 L26 40 L16 34 Z" fill="#4a4e57" stroke="#0e1116" stroke-width="2"/>
+  <path d="M40 36 L50 32 L52 46 L38 50 Z" fill="#3f434b" stroke="#0e1116" stroke-width="2"/>
+  <!-- crack between the halves -->
+  <path d="M39 20 L36 30 L41 38" fill="none" stroke="#0e1116" stroke-width="2.5" stroke-linecap="round"/>
+  <!-- dead eye, no glow -->
+  <circle cx="27" cy="29" r="5.5" fill="#0e1116"/>
+  <circle cx="27" cy="29" r="3" fill="#2a2d33"/>
+  <!-- thrown tread -->
+  <rect x="12" y="46" width="18" height="7" rx="3.5" fill="#151a21" transform="rotate(-14 21 49)"/>
+  <!-- faded team stripe remnant -->
+  <path d="M20 24 L34 21 L34 25 L20 28 Z" fill="#5a5f6a"/>
+  <!-- scorch flecks -->
+  <g fill="#101114">
+    <circle cx="48" cy="20" r="2"/>
+    <circle cx="14" cy="40" r="1.6"/>
+    <circle cx="52" cy="52" r="1.6"/>
+  </g>
+  <!-- a last ember -->
+  <circle cx="42" cy="42" r="1.4" fill="#f2b23e" opacity="0.7"/>
+</svg>

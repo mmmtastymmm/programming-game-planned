@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <!-- terraform edge: grass west half giving way to the tech plate east;
+       jagged seam glows with terraform energy. Rotate in-engine. -->
+  <rect width="64" height="64" fill="#335c38"/>
+  <!-- grass details, west half -->
+  <path d="M6 10 Q14 6 18 12 Q18 20 10 20 Q4 18 6 10 Z" fill="#2c5030"/>
+  <path d="M8 40 Q16 36 20 42 Q20 50 12 50 Q6 48 8 40 Z" fill="#2f5434"/>
+  <g stroke="#4a7a4f" stroke-width="1.6" stroke-linecap="round" fill="none">
+    <path d="M12 30 L10 25 M14 30 L14 24 M16 30 L18 26"/>
+    <path d="M18 58 L16 53 M20 58 L20 52"/>
+  </g>
+  <circle cx="22" cy="16" r="1.2" fill="#42714a"/>
+  <circle cx="8" cy="58" r="1.0" fill="#42714a"/>
+  <!-- tech plate, east half, jagged leading edge -->
+  <path d="M64 0 L30 0 L36 10 L28 22 L36 34 L30 46 L36 56 L32 64 L64 64 Z" fill="#1a2028"/>
+  <!-- tech plate details -->
+  <g stroke="#26303d" stroke-width="2" fill="none" stroke-linecap="square">
+    <path d="M44 14 H58 V26"/>
+    <path d="M60 48 H48 V38"/>
+  </g>
+  <g fill="#314052">
+    <circle cx="44" cy="14" r="2.5"/>
+    <circle cx="58" cy="26" r="2.5"/>
+    <circle cx="48" cy="38" r="2.5"/>
+  </g>
+  <circle cx="58" cy="58" r="2" fill="#242c37"/>
+  <circle cx="58" cy="6" r="2" fill="#242c37"/>
+  <!-- tech fragments spreading into the grass -->
+  <rect x="20" y="6" width="4" height="4" fill="#1a2028"/>
+  <rect x="16" y="33" width="3" height="3" fill="#1a2028"/>
+  <rect x="22" y="48" width="4" height="4" fill="#1a2028"/>
+  <!-- terraform seam glow -->
+  <path d="M30 0 L36 10 L28 22 L36 34 L30 46 L36 56 L32 64"
+        fill="none" stroke="#39d98a" stroke-width="5" opacity="0.18"/>
+  <path d="M30 0 L36 10 L28 22 L36 34 L30 46 L36 56 L32 64"
+        fill="none" stroke="#39d98a" stroke-width="1.8" opacity="0.9"/>
+</svg>

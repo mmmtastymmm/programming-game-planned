@@ -22,6 +22,7 @@ const TILES: &[&str] = &[
     "tile_grass",
     "tile_water",
     "tile_mountain",
+    "tile_terraform",
 ];
 
 /// (face, atlas column, atlas row)

@@ -175,6 +175,9 @@ struct EditorState {
     selected_build: Option<ToolKind>,
     /// Last tile painted during a drag (avoids re-sending every frame).
     last_paint_tile: Option<TilePos>,
+    /// Sim time controls (viewer-local; multiplayer will vote — docs/08).
+    paused: bool,
+    speed: f32,
     /// Selected category tab in the build bar.
     build_category: usize,
     /// Procedurally-drawn item icons, keyed by item name.
@@ -189,6 +192,8 @@ impl Default for EditorState {
             status_ok: true,
             selected_build: None,
             last_paint_tile: None,
+            paused: false,
+            speed: 1.0,
             build_category: 0,
             icons: HashMap::new(),
         }
@@ -436,6 +441,7 @@ fn main() {
             Update,
             (
                 editor_ui,
+                time_controls,
                 orbit_camera,
                 place_blueprint,
                 build_preview,
@@ -783,8 +789,26 @@ fn setup_scene(
     commands.insert_resource(palette);
 }
 
-fn step_sim(mut game: NonSendMut<GameSim>) {
+fn step_sim(mut game: NonSendMut<GameSim>, editor: Res<EditorState>) {
+    if editor.paused {
+        return;
+    }
     game.0.step();
+}
+
+/// Space toggles pause (unless the code editor has keyboard focus);
+/// the chosen speed drives the fixed timestep.
+fn time_controls(
+    mut contexts: EguiContexts,
+    keys: Res<ButtonInput<KeyCode>>,
+    mut editor: ResMut<EditorState>,
+    mut fixed: ResMut<Time<Fixed>>,
+) {
+    let typing = contexts.try_ctx_mut().is_some_and(|ctx| ctx.wants_keyboard_input());
+    if !typing && keys.just_pressed(KeyCode::Space) {
+        editor.paused = !editor.paused;
+    }
+    fixed.set_timestep_hz((10.0 * editor.speed as f64).max(0.01));
 }
 
 // ------------------------------------------------------------------ camera
@@ -1630,6 +1654,31 @@ fn editor_ui(
 {cost_line}", item.name));
                 });
             }
+
+            // Time controls.
+            ui.separator();
+            ui.vertical(|ui| {
+                ui.strong("Time");
+                ui.horizontal(|ui| {
+                    let pause_label = if editor.paused { "▶ resume" } else { "⏸ pause" };
+                    if ui.selectable_label(editor.paused, pause_label).clicked() {
+                        editor.paused = !editor.paused;
+                    }
+                });
+                ui.horizontal(|ui| {
+                    for (label, mult) in
+                        [("¼×", 0.25f32), ("½×", 0.5), ("1×", 1.0), ("2×", 2.0), ("4×", 4.0)]
+                    {
+                        if ui
+                            .selectable_label((editor.speed - mult).abs() < 0.01, label)
+                            .clicked()
+                        {
+                            editor.speed = mult;
+                        }
+                    }
+                });
+                ui.small("Space pauses");
+            });
 
             // Status / hints on the right.
             ui.separator();

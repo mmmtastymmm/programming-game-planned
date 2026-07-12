@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <!-- printer side: heat fins, team stripe. Image-right = front. -->
+  <rect width="64" height="64" fill="#2c3542"/>
+  <rect width="64" height="8" fill="#4a5668"/>
+  <rect y="8" width="64" height="6" fill="#39d98a"/>
+  <rect y="14" width="64" height="2" fill="#2aa86b"/>
+  <!-- fins -->
+  <g fill="#1c232c">
+    <rect x="8" y="26" width="6" height="30" rx="2"/>
+    <rect x="19" y="26" width="6" height="30" rx="2"/>
+    <rect x="30" y="26" width="6" height="30" rx="2"/>
+    <rect x="41" y="26" width="6" height="30" rx="2"/>
+  </g>
+  <!-- front marker light -->
+  <rect x="54" y="30" width="6" height="12" rx="2" fill="#c8ffe6" opacity="0.9"/>
+  <rect x="1" y="1" width="62" height="62" fill="none" stroke="#0e1116" stroke-width="2"/>
+</svg>

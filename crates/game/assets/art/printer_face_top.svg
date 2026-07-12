@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <!-- printer top: the print bed the job cube rises from -->
+  <rect width="64" height="64" fill="#3a4454"/>
+  <!-- bed opening -->
+  <rect x="14" y="14" width="36" height="36" rx="2" fill="#0e1116"/>
+  <rect x="14" y="14" width="36" height="36" rx="2" fill="none" stroke="#3d8cf2" stroke-width="2" opacity="0.9"/>
+  <!-- clamps on the rim -->
+  <g fill="#39d98a">
+    <rect x="29" y="10" width="6" height="4" rx="1"/>
+    <rect x="29" y="50" width="6" height="4" rx="1"/>
+    <rect x="10" y="29" width="4" height="6" rx="1"/>
+    <rect x="50" y="29" width="4" height="6" rx="1"/>
+  </g>
+  <!-- corner bolts -->
+  <g fill="#242c37">
+    <circle cx="7" cy="7" r="2"/>
+    <circle cx="57" cy="7" r="2"/>
+    <circle cx="7" cy="57" r="2"/>
+    <circle cx="57" cy="57" r="2"/>
+  </g>
+  <rect x="1" y="1" width="62" height="62" fill="none" stroke="#0e1116" stroke-width="2"/>
+</svg>
