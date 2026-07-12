@@ -78,9 +78,22 @@ pub enum TileKind {
     Water,
     /// Built over Water by terraforming (docs/05): ground-passable.
     Bridge,
-    /// A bridge crossable in one direction only — directional
-    /// infrastructure (two opposing one-ways = a deadlock-free crossing).
-    BridgeOneWay(Direction),
+}
+
+/// A traffic rule painted onto any tile — independent of terrain.
+/// Arrows make the tile one-way (two opposing arrowed bridges = a
+/// deadlock-free crossing; an arrowed corridor = a dedicated lane).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum OverlayKind {
+    Arrow(Direction),
+}
+
+impl OverlayKind {
+    pub fn as_u8(self) -> u8 {
+        match self {
+            OverlayKind::Arrow(d) => d.as_u8(),
+        }
+    }
 }
 
 impl TileKind {
@@ -91,7 +104,6 @@ impl TileKind {
             TileKind::Rubble => Some(2),
             TileKind::Water => None,
             TileKind::Bridge => Some(1),
-            TileKind::BridgeOneWay(_) => Some(1),
         }
     }
 
@@ -101,7 +113,6 @@ impl TileKind {
             TileKind::Rubble => 1,
             TileKind::Water => 2,
             TileKind::Bridge => 3,
-            TileKind::BridgeOneWay(d) => 4 + d.as_u8(),
         }
     }
 }
@@ -188,20 +199,25 @@ impl MapSpec {
 }
 
 /// May a bot step from `from` onto adjacent `to`? Tile passability plus
-/// one-way constraints on either end (you can neither enter a one-way
-/// bridge against its arrow nor back off one against it).
-pub fn edge_allowed(grid: &Grid, from: TilePos, to: TilePos) -> bool {
+/// arrow-overlay constraints on either end (you can neither enter an
+/// arrowed tile against its arrow nor leave one against it).
+pub fn edge_allowed(
+    grid: &Grid,
+    overlays: &BTreeMap<TilePos, OverlayKind>,
+    from: TilePos,
+    to: TilePos,
+) -> bool {
     let Some(to_kind) = grid.get(to) else { return false };
     if to_kind.move_ticks().is_none() {
         return false;
     }
     let delta = (to.x - from.x, to.y - from.y);
-    if let TileKind::BridgeOneWay(d) = to_kind
+    if let Some(OverlayKind::Arrow(d)) = overlays.get(&to)
         && delta != d.delta()
     {
         return false;
     }
-    if let Some(TileKind::BridgeOneWay(d)) = grid.get(from)
+    if let Some(OverlayKind::Arrow(d)) = overlays.get(&from)
         && delta != d.delta()
     {
         return false;
@@ -212,14 +228,20 @@ pub fn edge_allowed(grid: &Grid, from: TilePos, to: TilePos) -> bool {
 /// Deterministic A*. Returns the path as the sequence of tiles to *enter*
 /// (start excluded, goal included). `None` if unreachable. An empty path
 /// means the start already satisfies a goal.
-pub fn astar(grid: &Grid, start: TilePos, goals: &BTreeSet<TilePos>) -> Option<Vec<TilePos>> {
-    astar_avoiding(grid, start, goals, &BTreeSet::new())
+pub fn astar(
+    grid: &Grid,
+    overlays: &BTreeMap<TilePos, OverlayKind>,
+    start: TilePos,
+    goals: &BTreeSet<TilePos>,
+) -> Option<Vec<TilePos>> {
+    astar_avoiding(grid, overlays, start, goals, &BTreeSet::new())
 }
 
 /// A* that additionally refuses to enter `blocked` tiles (used for bump
 /// re-planning: other bots' current positions are obstacles).
 pub fn astar_avoiding(
     grid: &Grid,
+    overlays: &BTreeMap<TilePos, OverlayKind>,
     start: TilePos,
     goals: &BTreeSet<TilePos>,
     blocked: &BTreeSet<TilePos>,
@@ -264,7 +286,7 @@ pub fn astar_avoiding(
             if blocked.contains(&next) {
                 continue;
             }
-            if !edge_allowed(grid, pos, next) {
+            if !edge_allowed(grid, overlays, pos, next) {
                 continue;
             }
             let step_cost = grid.get(next).and_then(|k| k.move_ticks()).expect("edge checked");

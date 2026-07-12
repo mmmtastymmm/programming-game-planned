@@ -2,9 +2,8 @@
 //! command), bots do the labor (nearest_blueprint()/build()) — docs/05.
 //! Plus rng(n): sanctioned randomness from the sim's seeded stream.
 
-use sim::map::{MapSpec, TileKind};
+use sim::map::{Direction, MapSpec, OverlayKind, TileKind};
 use sim::sim::{Command, Sim};
-use sim::map::Direction;
 use sim::world::{BlueprintKind, Color};
 use sim::TilePos;
 
@@ -128,7 +127,7 @@ fn rng_is_bounded_and_deterministic() {
 
 #[test]
 fn one_way_bridge_only_crosses_with_the_arrow() {
-    // Solid wall; a single EAST-bound one-way bridge. West bots can cross
+    // Solid wall; a bridge with an EAST arrow overlay. West bots can cross
     // to the ore; nothing can come back — including the loaded miner, whose
     // return trip faults unreachable. Directionality bites both ways.
     let mut sim = Sim::new(&walled_map());
@@ -140,7 +139,12 @@ fn one_way_bridge_only_crosses_with_the_arrow() {
     );
     sim.apply(&Command::PlaceBlueprint {
         pos: TilePos::new(4, 2),
-        kind: BlueprintKind::BridgeOneWay(Direction::East),
+        kind: BlueprintKind::Bridge,
+    })
+    .unwrap();
+    sim.apply(&Command::PlaceOverlay {
+        pos: TilePos::new(4, 2),
+        overlay: Some(OverlayKind::Arrow(Direction::East)),
     })
     .unwrap();
 
@@ -150,7 +154,11 @@ fn one_way_bridge_only_crosses_with_the_arrow() {
     let miner_bot = &sim.world.bots[&miner];
     assert!(miner_bot.data.xp_mining > 0, "the miner must cross east and mine");
     assert!(miner_bot.data.pos.x > 4, "and be stranded east of the wall");
-    assert_eq!(sim.world.stockpile_ore, 20 - sim.tuning.bridge_cost_ore, "no ore comes back west");
+    assert_eq!(
+        sim.world.stockpile_ore,
+        20 - sim.tuning.bridge_cost_ore - sim.tuning.overlay_cost_ore,
+        "no ore comes back west"
+    );
     assert!(
         sim.world
             .archive
@@ -176,25 +184,77 @@ fn opposing_one_way_bridges_make_a_round_trip() {
     // and livelocks — mine() faults "cargo full" on every restart, so the
     // return lines never run again. A straight-line program meeting a
     // one-way world: the Tier-2 `if cargo_full():` unlock in miniature.
-    sim.apply(&Command::PlaceBlueprint {
-        pos: TilePos::new(4, 3),
-        kind: BlueprintKind::BridgeOneWay(Direction::West),
-    })
-    .unwrap();
-    sim.apply(&Command::PlaceBlueprint {
-        pos: TilePos::new(4, 1),
-        kind: BlueprintKind::BridgeOneWay(Direction::East),
-    })
-    .unwrap();
+    for (y, dir) in [(3, Direction::West), (1, Direction::East)] {
+        sim.apply(&Command::PlaceBlueprint {
+            pos: TilePos::new(4, y),
+            kind: BlueprintKind::Bridge,
+        })
+        .unwrap();
+        sim.apply(&Command::PlaceOverlay {
+            pos: TilePos::new(4, y),
+            overlay: Some(OverlayKind::Arrow(dir)),
+        })
+        .unwrap();
+    }
 
     for _ in 0..1000 {
         sim.step();
     }
     assert!(
-        sim.world.stockpile_ore > 20 - 2 * sim.tuning.bridge_cost_ore,
+        sim.world.stockpile_ore
+            > 20 - 2 * (sim.tuning.bridge_cost_ore + sim.tuning.overlay_cost_ore),
         "ore must round-trip over the opposing one-ways; stockpile {}",
         sim.world.stockpile_ore
     );
+}
+
+#[test]
+fn arrow_overlay_works_on_plain_ground() {
+    // Overlays are terrain-independent: an EAST arrow on open plains
+    // blocks westbound crossing of that tile; clearing it reopens it.
+    let mut spec = MapSpec::empty(7, 3);
+    for x in 0..7 {
+        spec.water.push(TilePos::new(x, 0));
+        spec.water.push(TilePos::new(x, 2));
+    }
+    spec.depots.push(TilePos::new(0, 1));
+    spec.starting_ore = 10;
+    let mut sim = Sim::new(&spec);
+    sim.apply(&Command::PlaceOverlay {
+        pos: TilePos::new(3, 1),
+        overlay: Some(OverlayKind::Arrow(Direction::East)),
+    })
+    .unwrap();
+    let bot = spawn(&mut sim, TilePos::new(5, 1), "move_to(nearest_depot())\n");
+    for _ in 0..80 {
+        sim.step();
+    }
+    assert!(
+        sim.world.archive.iter().any(|e| e.text.contains("unreachable") && e.bot == bot),
+        "westbound travel over an east arrow must be unreachable"
+    );
+    // Clear the arrow: the road reopens.
+    sim.apply(&Command::PlaceOverlay { pos: TilePos::new(3, 1), overlay: None }).unwrap();
+    for _ in 0..120 {
+        sim.step();
+    }
+    assert!(
+        sim.world.bots[&bot].data.pos.chebyshev(TilePos::new(0, 1)) <= 1,
+        "clearing the overlay must reopen the road; at {:?}",
+        sim.world.bots[&bot].data.pos
+    );
+}
+
+#[test]
+fn paint_is_stored_and_cleared() {
+    let mut sim = Sim::new(&MapSpec::empty(4, 4));
+    let pos = TilePos::new(2, 2);
+    sim.apply(&Command::PlacePaint { pos, color: Some(3) }).unwrap();
+    assert_eq!(sim.world.paint.get(&pos), Some(&3));
+    let painted_hash = sim.state_hash();
+    sim.apply(&Command::PlacePaint { pos, color: None }).unwrap();
+    assert!(sim.world.paint.is_empty());
+    assert_ne!(sim.state_hash(), painted_hash, "paint is shared, replayed state");
 }
 
 #[test]

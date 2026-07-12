@@ -21,7 +21,7 @@ use bevy::render::render_resource::PrimitiveTopology;
 use bevy_egui::{egui, EguiContexts, EguiPlugin};
 use sim::map::{MapSpec, PrinterSpec};
 use sim::sim::{Command, Sim};
-use sim::map::Direction;
+use sim::map::{Direction, OverlayKind};
 use sim::world::{BlueprintKind, Color as BotColor, PrinterState};
 use sim::{TileKind, TilePos};
 use std::collections::{HashMap, HashSet};
@@ -44,7 +44,6 @@ struct GameSim(Sim);
 // ---------------------------------------------------------------- palette
 // Lifted from the original prototype (see docs of that repo).
 const CLEAR: Color = Color::srgb(0.05, 0.06, 0.09);
-const GROUND: Color = Color::srgb(0.20, 0.36, 0.22);
 const RUBBLE: Color = Color::srgb(0.45, 0.46, 0.50);
 const WATER: Color = Color::srgb(0.10, 0.28, 0.55);
 const ORE_GOLD: Color = Color::srgb(1.0, 0.85, 0.15);
@@ -118,6 +117,8 @@ struct ViewIndex {
     printers: HashMap<u64, (Entity, PrinterState)>,
     blueprints: HashMap<u64, Entity>,
     bridges: HashSet<(i32, i32)>,
+    overlays: HashMap<(i32, i32), (Entity, OverlayKind)>,
+    paint: HashMap<(i32, i32), (Entity, u8)>,
 }
 
 #[derive(Resource)]
@@ -148,6 +149,7 @@ struct Palette {
     preview_valid_mat: Handle<StandardMaterial>,
     preview_invalid_mat: Handle<StandardMaterial>,
     preview_chevron_mat: Handle<StandardMaterial>,
+    paint_mats: [Handle<StandardMaterial>; 4],
 }
 
 #[derive(Resource)]
@@ -155,8 +157,10 @@ struct EditorState {
     code: String,
     status: String,
     status_ok: bool,
-    /// Armed build item: LMB places its blueprint (Esc cancels).
-    selected_build: Option<BlueprintKind>,
+    /// Armed build-bar tool (Esc cancels).
+    selected_build: Option<ToolKind>,
+    /// Last tile painted during a drag (avoids re-sending every frame).
+    last_paint_tile: Option<TilePos>,
     /// Selected category tab in the build bar.
     build_category: usize,
     /// Procedurally-drawn item icons, keyed by item name.
@@ -170,33 +174,69 @@ impl Default for EditorState {
             status: "ready".into(),
             status_ok: true,
             selected_build: None,
+            last_paint_tile: None,
             build_category: 0,
             icons: HashMap::new(),
         }
     }
 }
 
-/// The build catalog: categories -> items. One category today; military,
-/// logistics, etc. slot in later.
-struct BuildItem {
-    name: &'static str,
-    kind: BlueprintKind,
+/// What an armed build-bar item does on click.
+#[derive(Clone, Copy, PartialEq)]
+enum ToolKind {
+    /// Blueprint construction (bots do the labor).
+    Building(BlueprintKind),
+    /// Instant traffic signage on any tile; None = eraser.
+    Overlay(Option<OverlayKind>),
+    /// Instant cosmetic tile paint (drag to paint); None = eraser.
+    Paint(Option<u8>),
 }
 
-const BUILD_CATEGORIES: &[(&str, &[BuildItem])] = &[(
-    "Structures",
-    &[
-        BuildItem { name: "Bridge", kind: BlueprintKind::Bridge },
-        BuildItem {
-            name: "One-way Bridge",
-            kind: BlueprintKind::BridgeOneWay(Direction::East),
-        },
-    ],
-)];
+struct BuildItem {
+    name: &'static str,
+    kind: ToolKind,
+}
 
-/// Same catalog item, ignoring per-placement state like rotation.
-fn same_item(a: BlueprintKind, b: BlueprintKind) -> bool {
-    std::mem::discriminant(&a) == std::mem::discriminant(&b)
+/// Paint palette (index -> display color).
+const PAINT_COLORS: [(u8, u8, u8); 4] =
+    [(220, 60, 50), (70, 200, 80), (70, 120, 230), (235, 200, 60)];
+
+const BUILD_CATEGORIES: &[(&str, &[BuildItem])] = &[
+    (
+        "Buildings",
+        &[BuildItem { name: "Bridge", kind: ToolKind::Building(BlueprintKind::Bridge) }],
+    ),
+    (
+        "Overlay",
+        &[
+            BuildItem {
+                name: "Arrow",
+                kind: ToolKind::Overlay(Some(OverlayKind::Arrow(Direction::East))),
+            },
+            BuildItem { name: "Clear Overlay", kind: ToolKind::Overlay(None) },
+        ],
+    ),
+    (
+        "Paint",
+        &[
+            BuildItem { name: "Red Paint", kind: ToolKind::Paint(Some(0)) },
+            BuildItem { name: "Green Paint", kind: ToolKind::Paint(Some(1)) },
+            BuildItem { name: "Blue Paint", kind: ToolKind::Paint(Some(2)) },
+            BuildItem { name: "Yellow Paint", kind: ToolKind::Paint(Some(3)) },
+            BuildItem { name: "Clear Paint", kind: ToolKind::Paint(None) },
+        ],
+    ),
+];
+
+/// Same catalog item, ignoring per-placement state (arrow rotation).
+fn same_item(a: ToolKind, b: ToolKind) -> bool {
+    match (a, b) {
+        (
+            ToolKind::Overlay(Some(OverlayKind::Arrow(_))),
+            ToolKind::Overlay(Some(OverlayKind::Arrow(_))),
+        ) => true,
+        _ => a == b,
+    }
 }
 
 /// 48x48 pixel-art icon for a build item, drawn in code (no asset files;
@@ -228,7 +268,51 @@ fn build_icon(name: &str) -> egui::ColorImage {
             }
         }
     }
-    if name == "One-way Bridge" {
+    if name == "Arrow" {
+        // Neutral ground under the arrow glyph.
+        let ground = egui::Color32::from_rgb(70, 92, 66);
+        for x in 0..s {
+            for y in 0..s {
+                img[(x, y)] = ground;
+            }
+        }
+    }
+    if let Some(stripped) = name.strip_suffix(" Paint") {
+        let rgb = match stripped {
+            "Red" => PAINT_COLORS[0],
+            "Green" => PAINT_COLORS[1],
+            "Blue" => PAINT_COLORS[2],
+            "Yellow" => PAINT_COLORS[3],
+            _ => (230, 230, 230), // "Clear" handled below
+        };
+        let c = egui::Color32::from_rgb(rgb.0, rgb.1, rgb.2);
+        for x in 4..44 {
+            for y in 4..44 {
+                img[(x, y)] = c;
+            }
+        }
+    }
+    if name.starts_with("Clear") {
+        // Checkerboard + red X = eraser.
+        for x in 0..s {
+            for y in 0..s {
+                let light = ((x / 8) + (y / 8)) % 2 == 0;
+                img[(x, y)] = if light {
+                    egui::Color32::from_rgb(200, 200, 205)
+                } else {
+                    egui::Color32::from_rgb(150, 150, 158)
+                };
+            }
+        }
+        let red = egui::Color32::from_rgb(210, 50, 40);
+        for i in 6..42usize {
+            for w in 0..3usize {
+                img[(i, (i + w).min(47))] = red;
+                img[(i, (47 - i + w).min(47))] = red;
+            }
+        }
+    }
+    if name == "Arrow" || name == "One-way Bridge" {
         // Bold arrow across the planks.
         let glow = egui::Color32::from_rgb(255, 235, 130);
         for x in 8..32 {
@@ -533,6 +617,19 @@ fn setup_scene(
             alpha_mode: AlphaMode::Blend,
             ..default()
         }),
+        paint_mats: PAINT_COLORS.map(|(r, gc, b)| {
+            materials.add(StandardMaterial {
+                base_color: Color::srgba(
+                    r as f32 / 255.0,
+                    gc as f32 / 255.0,
+                    b as f32 / 255.0,
+                    0.55,
+                ),
+                alpha_mode: AlphaMode::Blend,
+                perceptual_roughness: 0.9,
+                ..default()
+            })
+        }),
     };
 
     // Terrain slabs (0.96 with grout lines, prototype-style). Plains get
@@ -558,7 +655,7 @@ fn setup_scene(
                 TileKind::Water => (water_mat.clone(), -0.05),
                 // Bridges only exist after terraforming; at startup none do
                 // (sync_view overlays planks when they appear).
-                TileKind::Bridge | TileKind::BridgeOneWay(_) => {
+                TileKind::Bridge => {
                     (palette.ground_tex_mat.clone(), 0.0)
                 }
             };
@@ -694,12 +791,18 @@ fn place_blueprint(
         editor.selected_build = None;
     }
     if keys.just_pressed(KeyCode::KeyR)
-        && let Some(BlueprintKind::BridgeOneWay(d)) = editor.selected_build
+        && let Some(ToolKind::Overlay(Some(OverlayKind::Arrow(d)))) = editor.selected_build
     {
-        editor.selected_build = Some(BlueprintKind::BridgeOneWay(d.clockwise()));
+        editor.selected_build = Some(ToolKind::Overlay(Some(OverlayKind::Arrow(d.clockwise()))));
     }
     let Some(kind) = editor.selected_build else { return };
-    if !buttons.just_pressed(MouseButton::Left) {
+    // Paint drags; everything else places on click.
+    let painting = matches!(kind, ToolKind::Paint(_));
+    if painting && !buttons.pressed(MouseButton::Left) {
+        editor.last_paint_tile = None;
+        return;
+    }
+    if !painting && !buttons.just_pressed(MouseButton::Left) {
         return;
     }
     if contexts.try_ctx_mut().is_some_and(|ctx| ctx.wants_pointer_input()) {
@@ -709,8 +812,22 @@ fn place_blueprint(
     let Some(pos) = cursor_tile(&windows, &cams, world.grid.width, world.grid.height) else {
         return;
     };
-    if world.grid.in_bounds(pos) {
-        let _ = game.0.apply(&Command::PlaceBlueprint { pos, kind });
+    if !world.grid.in_bounds(pos) {
+        return;
+    }
+    match kind {
+        ToolKind::Building(blueprint) => {
+            let _ = game.0.apply(&Command::PlaceBlueprint { pos, kind: blueprint });
+        }
+        ToolKind::Overlay(overlay) => {
+            let _ = game.0.apply(&Command::PlaceOverlay { pos, overlay });
+        }
+        ToolKind::Paint(color) => {
+            if editor.last_paint_tile != Some(pos) {
+                editor.last_paint_tile = Some(pos);
+                let _ = game.0.apply(&Command::PlacePaint { pos, color });
+            }
+        }
     }
 }
 
@@ -785,23 +902,33 @@ fn build_preview(
         return;
     }
 
-    let cost = match kind {
-        BlueprintKind::Bridge | BlueprintKind::BridgeOneWay(_) => game.0.tuning.bridge_cost_ore,
+    let (valid, paint_ghost) = match kind {
+        ToolKind::Building(BlueprintKind::Bridge) => {
+            let cost = game.0.tuning.bridge_cost_ore;
+            let ok = world.grid.get(pos) == Some(sim::TileKind::Water)
+                && !world.blueprints.values().any(|b| b.pos == pos)
+                && world.stockpile_ore >= cost;
+            (ok, None)
+        }
+        ToolKind::Overlay(Some(_)) => {
+            (world.stockpile_ore >= game.0.tuning.overlay_cost_ore, None)
+        }
+        ToolKind::Overlay(None) | ToolKind::Paint(None) => (true, None),
+        ToolKind::Paint(Some(c)) => (true, Some(palette.paint_mats[c as usize % 4].clone())),
     };
-    let valid = world.grid.get(pos) == Some(sim::TileKind::Water)
-        && !world.blueprints.values().any(|b| b.pos == pos)
-        && world.stockpile_ore >= cost;
 
     slab_tf.translation = tile_xyz(world, pos, 0.08);
     *slab_vis = Visibility::Visible;
-    slab_mat.0 = if valid {
-        palette.preview_valid_mat.clone()
-    } else {
-        palette.preview_invalid_mat.clone()
-    };
+    slab_mat.0 = paint_ghost.unwrap_or_else(|| {
+        if valid {
+            palette.preview_valid_mat.clone()
+        } else {
+            palette.preview_invalid_mat.clone()
+        }
+    });
 
     match kind {
-        BlueprintKind::BridgeOneWay(d) => {
+        ToolKind::Overlay(Some(OverlayKind::Arrow(d))) => {
             let (dx, dz) = d.delta();
             let along = Vec3::new(dx as f32, 0.0, dz as f32);
             let strip_size = if dx != 0 {
@@ -815,7 +942,7 @@ fn build_preview(
             *strip_vis = Visibility::Visible;
             *tip_vis = Visibility::Visible;
         }
-        BlueprintKind::Bridge => {
+        _ => {
             *strip_vis = Visibility::Hidden;
             *tip_vis = Visibility::Hidden;
         }
@@ -1107,31 +1234,6 @@ fn sync_view(
                         Transform::from_translation(tile_xyz(world, bp.pos, 0.05))
                             .with_scale(Vec3::new(1.0, grown, 1.0)),
                     ))
-                    .with_children(|parent| {
-                        // One-way blueprints keep their traffic arrow from
-                        // ghost to plank — direction is never invisible.
-                        if let BlueprintKind::BridgeOneWay(d) = bp.kind {
-                            let (dx, dz) = d.delta();
-                            let along = Vec3::new(dx as f32, 0.0, dz as f32);
-                            let strip_size = if dx != 0 {
-                                Vec3::new(0.6, 0.06, 0.16)
-                            } else {
-                                Vec3::new(0.16, 0.06, 0.6)
-                            };
-                            parent.spawn((
-                                Mesh3d(palette.nose_cube.clone()),
-                                MeshMaterial3d(palette.ore_mat.clone()),
-                                Transform::from_xyz(0.0, 0.15, 0.0)
-                                    .with_scale(strip_size / 0.22),
-                            ));
-                            parent.spawn((
-                                Mesh3d(palette.nose_cube.clone()),
-                                MeshMaterial3d(palette.ore_mat.clone()),
-                                Transform::from_translation(along * 0.34 + Vec3::Y * 0.15)
-                                    .with_scale(Vec3::new(1.4, 1.2, 1.4)),
-                            ));
-                        }
-                    })
                     .id();
                 index.blueprints.insert(id.0, entity);
             }
@@ -1146,36 +1248,85 @@ fn sync_view(
         }
     });
 
-    // Finished bridges: baked plank tiles over the water; one-ways use the
-    // chevron tile, spun so its east-pointing arrows match the direction.
+    // Finished bridges: baked plank tiles over the water. (Direction
+    // arrows are an overlay layer now — see below.)
     for y in 0..world.grid.height {
         for x in 0..world.grid.width {
             let pos = TilePos::new(x, y);
-            let dir = match world.grid.get(pos) {
-                Some(sim::TileKind::Bridge) => None,
-                Some(sim::TileKind::BridgeOneWay(d)) => Some(d),
-                _ => continue,
-            };
+            if world.grid.get(pos) != Some(sim::TileKind::Bridge) {
+                continue;
+            }
             if !index.bridges.insert((x, y)) {
                 continue;
             }
-            let (mat, rot) = match dir {
-                None => (palette.bridge_tex_mat.clone(), Quat::IDENTITY),
-                Some(d) => {
-                    let (dx, dz) = d.delta();
-                    (
-                        palette.oneway_tex_mat.clone(),
-                        Quat::from_rotation_y(-(dz as f32).atan2(dx as f32)),
-                    )
-                }
-            };
             commands.spawn((
                 Mesh3d(palette.tex_slab.clone()),
-                MeshMaterial3d(mat),
-                Transform::from_translation(tile_xyz(world, pos, 0.0)).with_rotation(rot),
+                MeshMaterial3d(palette.bridge_tex_mat.clone()),
+                Transform::from_translation(tile_xyz(world, pos, 0.0)),
             ));
         }
     }
+
+    // Overlay layer: the baked arrow tile (east-pointing art), spun to the
+    // arrow's direction, floated just above whatever terrain is beneath.
+    for (pos, overlay) in &world.overlays {
+        let key = (pos.x, pos.y);
+        if let Some((entity, kind)) = index.overlays.get(&key) {
+            if kind == overlay {
+                continue;
+            }
+            commands.entity(*entity).despawn();
+            index.overlays.remove(&key);
+        }
+        let OverlayKind::Arrow(d) = overlay;
+        let (dx, dz) = d.delta();
+        let rot = Quat::from_rotation_y(-(dz as f32).atan2(dx as f32));
+        let entity = commands
+            .spawn((
+                Mesh3d(palette.tex_slab.clone()),
+                MeshMaterial3d(palette.oneway_tex_mat.clone()),
+                Transform::from_translation(tile_xyz(world, *pos, 0.08)).with_rotation(rot),
+            ))
+            .id();
+        index.overlays.insert(key, (entity, *overlay));
+    }
+    index.overlays.retain(|key, (entity, _)| {
+        if world.overlays.contains_key(&TilePos::new(key.0, key.1)) {
+            true
+        } else {
+            commands.entity(*entity).despawn();
+            false
+        }
+    });
+
+    // Paint layer: thin translucent color washes over tiles.
+    for (pos, color) in &world.paint {
+        let key = (pos.x, pos.y);
+        if let Some((entity, c)) = index.paint.get(&key) {
+            if c == color {
+                continue;
+            }
+            commands.entity(*entity).despawn();
+            index.paint.remove(&key);
+        }
+        let entity = commands
+            .spawn((
+                Mesh3d(palette.tile_slab.clone()),
+                MeshMaterial3d(palette.paint_mats[*color as usize % 4].clone()),
+                Transform::from_translation(tile_xyz(world, *pos, 0.02))
+                    .with_scale(Vec3::new(1.0, 0.25, 1.0)),
+            ))
+            .id();
+        index.paint.insert(key, (entity, *color));
+    }
+    index.paint.retain(|key, (entity, _)| {
+        if world.paint.contains_key(&TilePos::new(key.0, key.1)) {
+            true
+        } else {
+            commands.entity(*entity).despawn();
+            false
+        }
+    });
 
     // Wrecks: low dark slabs.
     for (id, wreck) in &world.wrecks {
@@ -1321,9 +1472,9 @@ fn editor_ui(
             let (_, items) = BUILD_CATEGORIES[editor.build_category.min(BUILD_CATEGORIES.len() - 1)];
             for item in items {
                 let cost = match item.kind {
-                    BlueprintKind::Bridge | BlueprintKind::BridgeOneWay(_) => {
-                        game.0.tuning.bridge_cost_ore
-                    }
+                    ToolKind::Building(BlueprintKind::Bridge) => game.0.tuning.bridge_cost_ore,
+                    ToolKind::Overlay(Some(_)) => game.0.tuning.overlay_cost_ore,
+                    ToolKind::Overlay(None) | ToolKind::Paint(_) => 0,
                 };
                 let affordable = game.0.world.stockpile_ore >= cost;
                 if !editor.icons.contains_key(item.name) {
@@ -1342,14 +1493,18 @@ fn editor_ui(
                         egui::vec2(48.0, 48.0),
                     ))
                     .selected(selected);
-                    let response = ui
-                        .add_enabled(affordable, button)
-                        .on_hover_text(format!("{} — {cost} ore", item.name));
+                    let hover = if cost > 0 {
+                        format!("{} — {cost} ore", item.name)
+                    } else {
+                        format!("{} — free", item.name)
+                    };
+                    let response = ui.add_enabled(affordable, button).on_hover_text(hover);
                     if response.clicked() {
                         editor.selected_build = if selected { None } else { Some(item.kind) };
                     }
+                    let cost_line = if cost > 0 { format!("{cost} ore") } else { "free".into() };
                     ui.small(format!("{}
-{cost} ore", item.name));
+{cost_line}", item.name));
                 });
             }
 
@@ -1358,18 +1513,27 @@ fn editor_ui(
             ui.vertical(|ui| {
                 if let Some(kind) = editor.selected_build {
                     match kind {
-                        BlueprintKind::Bridge => {
+                        ToolKind::Building(BlueprintKind::Bridge) => {
                             ui.label("Click a water tile to place — Esc to cancel");
                         }
-                        BlueprintKind::BridgeOneWay(d) => {
+                        ToolKind::Overlay(Some(OverlayKind::Arrow(d))) => {
                             ui.label(format!(
-                                "Click a water tile to place {} — R rotates, Esc cancels",
+                                "Click any tile to set {} — R rotates, Esc cancels",
                                 d.arrow()
                             ));
                         }
+                        ToolKind::Overlay(None) => {
+                            ui.label("Click a tile to clear its overlay — Esc cancels");
+                        }
+                        ToolKind::Paint(Some(_)) => {
+                            ui.label("Click or drag to paint tiles — Esc cancels");
+                        }
+                        ToolKind::Paint(None) => {
+                            ui.label("Click or drag to erase paint — Esc cancels");
+                        }
                     }
                 } else {
-                    ui.small("Select a structure, then click the map.");
+                    ui.small("Select a tool, then click the map.");
                 }
                 let pending = game.0.world.blueprints.len();
                 if pending > 0 {

@@ -1,7 +1,7 @@
 //! World state: entities, bots, wrecks, black boxes, the colony stockpile.
 //! Everything lives in BTree containers with stable IDs (determinism).
 
-use crate::map::{Direction, Grid, MapSpec, TileKind, TilePos};
+use crate::map::{Grid, MapSpec, OverlayKind, TileKind, TilePos};
 use std::collections::BTreeSet;
 use pyrite::ast::Program;
 use pyrite::Vm;
@@ -170,7 +170,6 @@ pub struct Blueprint {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BlueprintKind {
     Bridge,
-    BridgeOneWay(Direction),
 }
 
 /// A disabled bot awaiting rescue/salvage (countdown comes later).
@@ -219,6 +218,11 @@ pub struct World {
     pub bot_entities: BTreeMap<EntityId, BotId>,
     pub printers: BTreeMap<EntityId, Printer>,
     pub blueprints: BTreeMap<EntityId, Blueprint>,
+    /// Traffic rules painted per tile (arrows) — affects pathfinding.
+    pub overlays: BTreeMap<TilePos, OverlayKind>,
+    /// Cosmetic tile paint (color index) — player markings; a future
+    /// paint_at() sensor can make programs read these.
+    pub paint: BTreeMap<TilePos, u8>,
     /// Deployed program per (faction, color slot).
     pub color_programs: BTreeMap<(u8, u8), ColorProgram>,
     pub wrecks: BTreeMap<BotId, Wreck>,
@@ -249,6 +253,8 @@ impl World {
             bot_entities: BTreeMap::new(),
             printers: BTreeMap::new(),
             blueprints: BTreeMap::new(),
+            overlays: BTreeMap::new(),
+            paint: BTreeMap::new(),
             color_programs: BTreeMap::new(),
             wrecks: BTreeMap::new(),
             black_boxes: Vec::new(),

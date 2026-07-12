@@ -10,7 +10,7 @@
 
 use crate::hash::Fnv1a;
 use crate::host::BotHost;
-use crate::map::{astar, astar_avoiding, edge_allowed, MapSpec, TileKind, TilePos};
+use crate::map::{astar, astar_avoiding, edge_allowed, MapSpec, OverlayKind, TileKind, TilePos};
 use crate::world::{
     Action, ActionRequest, ArchiveEntry, ArchiveKind, BlackBox, Blueprint, BlueprintKind, Bot,
     BotData, BotId, Color, ColorProgram, EntityId, PrinterState, Recall, RecallPurpose, Wreck,
@@ -44,6 +44,8 @@ pub struct Tuning {
     pub bridge_cost_ore: u64,
     /// Builder-ticks of labor a bridge takes.
     pub bridge_build_ticks: u32,
+    /// Placing a traffic overlay (arrow) — instant signage.
+    pub overlay_cost_ore: u64,
 }
 
 impl Default for Tuning {
@@ -61,6 +63,7 @@ impl Default for Tuning {
             bump_freeze_ticks: 50,
             bridge_cost_ore: 3,
             bridge_build_ticks: 20,
+            overlay_cost_ore: 1,
         }
     }
 }
@@ -90,6 +93,11 @@ pub enum Command {
     /// Designate a terraform site (the build UI's output). Bots do the
     /// labor via nearest_blueprint()/build().
     PlaceBlueprint { pos: TilePos, kind: BlueprintKind },
+    /// Set or clear a traffic overlay on any tile — instant signage, not
+    /// construction (small ore cost to place; clearing is free).
+    PlaceOverlay { pos: TilePos, overlay: Option<OverlayKind> },
+    /// Set or clear cosmetic tile paint (free).
+    PlacePaint { pos: TilePos, color: Option<u8> },
 }
 
 pub struct Sim {
@@ -160,28 +168,52 @@ impl Sim {
             }
             Command::PlaceBlueprint { pos, kind } => {
                 let valid_site = match kind {
-                    BlueprintKind::Bridge | BlueprintKind::BridgeOneWay(_) => {
-                        self.world.grid.get(*pos) == Some(TileKind::Water)
-                    }
+                    BlueprintKind::Bridge => self.world.grid.get(*pos) == Some(TileKind::Water),
                 };
                 let occupied_by_blueprint =
                     self.world.blueprints.values().any(|b| b.pos == *pos);
                 let cost = match kind {
-                    BlueprintKind::Bridge | BlueprintKind::BridgeOneWay(_) => {
-                        self.tuning.bridge_cost_ore
-                    }
+                    BlueprintKind::Bridge => self.tuning.bridge_cost_ore,
                 };
                 if valid_site && !occupied_by_blueprint && self.world.stockpile_ore >= cost {
                     self.world.stockpile_ore -= cost;
                     let needed = match kind {
-                        BlueprintKind::Bridge | BlueprintKind::BridgeOneWay(_) => {
-                            self.tuning.bridge_build_ticks
-                        }
+                        BlueprintKind::Bridge => self.tuning.bridge_build_ticks,
                     };
                     let id = self.world.alloc_entity();
                     self.world
                         .blueprints
                         .insert(id, Blueprint { pos: *pos, kind: *kind, progress: 0, needed });
+                }
+                Ok(None)
+            }
+            Command::PlaceOverlay { pos, overlay } => {
+                if self.world.grid.in_bounds(*pos) {
+                    match overlay {
+                        Some(kind) => {
+                            let cost = self.tuning.overlay_cost_ore;
+                            if self.world.stockpile_ore >= cost {
+                                self.world.stockpile_ore -= cost;
+                                self.world.overlays.insert(*pos, *kind);
+                            }
+                        }
+                        None => {
+                            self.world.overlays.remove(pos);
+                        }
+                    }
+                }
+                Ok(None)
+            }
+            Command::PlacePaint { pos, color } => {
+                if self.world.grid.in_bounds(*pos) {
+                    match color {
+                        Some(c) => {
+                            self.world.paint.insert(*pos, *c);
+                        }
+                        None => {
+                            self.world.paint.remove(pos);
+                        }
+                    }
                 }
                 Ok(None)
             }
@@ -357,7 +389,7 @@ impl Sim {
                             }
                         }
                     }
-                    match astar(&self.world.grid, pos, &goals) {
+                    match astar(&self.world.grid, &self.world.overlays, pos, &goals) {
                         Some(path) if path.is_empty() => {
                             self.finish_action(id, Ok(Value::Unit));
                         }
@@ -557,9 +589,6 @@ impl Sim {
                     self.world.blueprints.remove(&blueprint);
                     match kind {
                         BlueprintKind::Bridge => self.world.grid.set(site, TileKind::Bridge),
-                        BlueprintKind::BridgeOneWay(d) => {
-                            self.world.grid.set(site, TileKind::BridgeOneWay(d));
-                        }
                     }
                     self.finish_action(id, Ok(Value::Unit));
                 } else {
@@ -905,7 +934,8 @@ impl Sim {
                 }
             }
         }
-        let path = astar(&self.world.grid, start, &goals).unwrap_or_default();
+        let path =
+            astar(&self.world.grid, &self.world.overlays, start, &goals).unwrap_or_default();
         let ticks_left = path
             .first()
             .map(|p| self.world.grid.get(*p).and_then(|t| t.move_ticks()).unwrap_or(1))
@@ -936,7 +966,7 @@ impl Sim {
             .map(|(dx, dy)| TilePos::new(from.x + dx, from.y + dy))
             .filter(|&p| {
                 p != avoid
-                    && edge_allowed(&self.world.grid, from, p)
+                    && edge_allowed(&self.world.grid, &self.world.overlays, from, p)
                     && !self.world.tile_occupied(p, id)
                     && dist(p) <= here
             })
@@ -955,8 +985,8 @@ impl Sim {
             .filter(|b| b.data.id != id && !b.data.dying)
             .map(|b| b.data.pos)
             .collect();
-        let path = astar_avoiding(&self.world.grid, start, &goals, &occupied)
-            .or_else(|| astar(&self.world.grid, start, &goals));
+        let path = astar_avoiding(&self.world.grid, &self.world.overlays, start, &goals, &occupied)
+            .or_else(|| astar(&self.world.grid, &self.world.overlays, start, &goals));
         match path {
             Some(path) if path.is_empty() => self.finish_action(id, Ok(Value::Unit)),
             Some(path) => {
@@ -990,7 +1020,7 @@ impl Sim {
         // Program move.
         if let Some(Action::Move { goals, .. }) = &bot.data.action {
             let goals = goals.clone();
-            match astar_avoiding(&self.world.grid, start, &goals, &occupied) {
+            match astar_avoiding(&self.world.grid, &self.world.overlays, start, &goals, &occupied) {
                 Some(path) if path.is_empty() => {
                     // Already standing at a goal: the move is done.
                     self.finish_action(id, Ok(Value::Unit));
@@ -1026,7 +1056,9 @@ impl Sim {
                     }
                 }
             }
-            if let Some(path) = astar_avoiding(&self.world.grid, start, &goals, &occupied) {
+            if let Some(path) =
+                astar_avoiding(&self.world.grid, &self.world.overlays, start, &goals, &occupied)
+            {
                 let ticks_left = path
                     .first()
                     .map(|p| self.world.grid.get(*p).and_then(|t| t.move_ticks()).unwrap_or(1))
@@ -1145,6 +1177,16 @@ impl Sim {
             h.write_u8(matches!(printer.state, PrinterState::Working) as u8);
             h.write_u32(printer.desired_max);
             h.write_u32(printer.job.unwrap_or(0));
+        }
+        for (pos, overlay) in &w.overlays {
+            h.write_i32(pos.x);
+            h.write_i32(pos.y);
+            h.write_u8(overlay.as_u8());
+        }
+        for (pos, color) in &w.paint {
+            h.write_i32(pos.x);
+            h.write_i32(pos.y);
+            h.write_u8(*color);
         }
         for (id, bp) in &w.blueprints {
             h.write_u64(id.0);
