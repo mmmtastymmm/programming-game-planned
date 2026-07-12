@@ -45,18 +45,9 @@ struct GameSim(Sim);
 // Lifted from the original prototype (see docs of that repo).
 const CLEAR: Color = Color::srgb(0.05, 0.06, 0.09);
 const ORE_GOLD: Color = Color::srgb(1.0, 0.85, 0.15);
-const DEPOT_BLUE: Color = Color::srgb(0.30, 0.55, 0.75);
 const PRINT_GLOW: Color = Color::srgb(0.25, 0.55, 0.95);
 const EXPLODE_ORANGE: Color = Color::srgb(1.0, 0.45, 0.1);
-const WRECK_GRAY: Color = Color::srgb(0.28, 0.28, 0.30);
 
-fn bot_body_color(color: BotColor) -> (Color, LinearRgba) {
-    match color {
-        BotColor::GREEN => (Color::srgb(0.30, 0.85, 0.30), LinearRgba::new(0.03, 0.25, 0.03, 1.0)),
-        BotColor::RED => (Color::srgb(0.95, 0.30, 0.25), LinearRgba::new(0.30, 0.04, 0.03, 1.0)),
-        _ => (Color::srgb(0.40, 0.50, 0.95), LinearRgba::new(0.05, 0.08, 0.30, 1.0)),
-    }
-}
 
 // ------------------------------------------------------------- components
 
@@ -125,6 +116,8 @@ struct ViewIndex {
     overlays: HashMap<(i32, i32), (Entity, OverlayKind)>,
     /// Blueprint id -> its progress-bar fill entity.
     blueprint_fills: HashMap<u64, Entity>,
+    /// Printer id -> (bar root, fill) for print-job progress.
+    printer_fills: HashMap<u64, (Entity, Entity)>,
     paint: HashMap<(i32, i32), (Entity, u8)>,
 }
 
@@ -133,21 +126,24 @@ struct Palette {
     unit_cube: Handle<Mesh>,
     nose_cube: Handle<Mesh>,
     gem: Handle<Mesh>,
-    slab: Handle<Mesh>,
-    printer_body: Handle<Mesh>,
     explode_cube: Handle<Mesh>,
     ore_mat: Handle<StandardMaterial>,
-    wreck_mat: Handle<StandardMaterial>,
     black_mat: Handle<StandardMaterial>,
     explode_mat: Handle<StandardMaterial>,
     print_glow_mat: Handle<StandardMaterial>,
     nose_mat: Handle<StandardMaterial>,
-    bot_mats: HashMap<u8, Handle<StandardMaterial>>,
-    ruined_mat: Handle<StandardMaterial>,
     tile_slab: Handle<Mesh>,
     /// Bot body: cube whose faces sample cells of the team's 3x2 atlas.
     bot_cube: Handle<Mesh>,
     bot_tex_mats: HashMap<u8, Handle<StandardMaterial>>,
+    /// Printer body: same atlas treatment, squat box.
+    printer_box: Handle<Mesh>,
+    printer_tex_mats: HashMap<u8, Handle<StandardMaterial>>,
+    printer_ruined_mat: Handle<StandardMaterial>,
+    /// Sub-tile textured slab for depot pads and wrecks.
+    pad_slab: Handle<Mesh>,
+    depot_tex_mat: Handle<StandardMaterial>,
+    wreck_tex_mat: Handle<StandardMaterial>,
     /// Terrain slab: full tile texture on top, dark trim on the sides.
     tex_slab: Handle<Mesh>,
     /// The "tech" tile — terraformed ground (unused by natural terrain).
@@ -515,13 +511,14 @@ fn box_with_face_uvs(half: Vec3, face_uvs: [[f32; 4]; 6]) -> Mesh {
         .with_inserted_indices(Indices::U32(indices))
 }
 
-/// The bot body: each face samples its cell of the 3x2 team atlas
-/// (front/right/back over left/top/bottom — the layout `cargo bake` emits).
-fn bot_cube_mesh() -> Mesh {
+/// A body box (bot, printer, ...): each face samples its cell of a 3x2
+/// atlas (front/right/back over left/top/bottom — the layout the build.rs
+/// bake emits).
+fn atlas_box_mesh(half: Vec3) -> Mesh {
     let cell =
         |c: f32, r: f32| [c / 3.0, r / 2.0, (c + 1.0) / 3.0, (r + 1.0) / 2.0];
     box_with_face_uvs(
-        Vec3::splat(0.35),
+        half,
         [
             cell(0.0, 0.0),
             cell(1.0, 0.0),
@@ -533,15 +530,13 @@ fn bot_cube_mesh() -> Mesh {
     )
 }
 
-/// Terrain slab: the full tile texture on top (image-up = north, so the
-/// one-way chevrons point east until the transform spins them); sides and
-/// bottom sample a sliver of the tile's border so they read as dark trim.
-fn tex_slab_mesh() -> Mesh {
+/// Textured slab (terrain tile, depot pad, wreck): the full texture on top
+/// (image-up = north, so directional art points east until the transform
+/// spins it); sides and bottom sample a sliver of the texture's border so
+/// they read as dark trim.
+fn textured_slab_mesh(half: Vec3) -> Mesh {
     const EDGE: [f32; 4] = [0.005, 0.45, 0.02, 0.55];
-    box_with_face_uvs(
-        Vec3::new(0.48, 0.05, 0.48),
-        [EDGE, EDGE, EDGE, EDGE, [0.0, 0.0, 1.0, 1.0], EDGE],
-    )
+    box_with_face_uvs(half, [EDGE, EDGE, EDGE, EDGE, [0.0, 0.0, 1.0, 1.0], EDGE])
 }
 
 fn setup_scene(
@@ -553,38 +548,33 @@ fn setup_scene(
 ) {
     let world = &game.0.world;
 
-    let mut bot_mats = HashMap::new();
-    for c in [0u8, 1, 2] {
-        let (base, emissive) = bot_body_color(BotColor(c));
-        bot_mats.insert(
-            c,
-            materials.add(StandardMaterial {
-                base_color: base,
-                emissive,
-                metallic: 0.1,
-                perceptual_roughness: 0.4,
-                ..default()
-            }),
-        );
-    }
-    // Baked-atlas bot bodies; the emissive texture keeps the "glowing
+    // Baked-atlas bodies; the emissive texture keeps the "glowing
     // primitives" identity without washing out the face art.
+    let atlas_mat = |materials: &mut Assets<StandardMaterial>, tex: Handle<Image>| {
+        materials.add(StandardMaterial {
+            base_color_texture: Some(tex.clone()),
+            emissive: LinearRgba::new(0.35, 0.35, 0.35, 1.0),
+            emissive_texture: Some(tex),
+            metallic: 0.1,
+            perceptual_roughness: 0.5,
+            ..default()
+        })
+    };
     let mut bot_tex_mats = HashMap::new();
+    let mut printer_tex_mats = HashMap::new();
     for (c, team) in [(0u8, "green"), (1, "red"), (2, "blue")] {
-        let atlas: Handle<Image> =
-            asset_server.load(format!("textures/bot_atlas_{team}.png"));
-        bot_tex_mats.insert(
-            c,
-            materials.add(StandardMaterial {
-                base_color_texture: Some(atlas.clone()),
-                emissive: LinearRgba::new(0.35, 0.35, 0.35, 1.0),
-                emissive_texture: Some(atlas),
-                metallic: 0.1,
-                perceptual_roughness: 0.5,
-                ..default()
-            }),
-        );
+        let bot: Handle<Image> = asset_server.load(format!("textures/bot_atlas_{team}.png"));
+        bot_tex_mats.insert(c, atlas_mat(&mut materials, bot));
+        let printer: Handle<Image> =
+            asset_server.load(format!("textures/printer_atlas_{team}.png"));
+        printer_tex_mats.insert(c, atlas_mat(&mut materials, printer));
     }
+    // Ruined printers: the gray palette swap, no glow — the machine is dead.
+    let printer_ruined_mat = materials.add(StandardMaterial {
+        base_color_texture: Some(asset_server.load("textures/printer_atlas_ruined.png")),
+        perceptual_roughness: 0.95,
+        ..default()
+    });
     let tile_tex_mat =
         |materials: &mut Assets<StandardMaterial>, tex: Handle<Image>, rough: f32| {
             materials.add(StandardMaterial {
@@ -605,23 +595,28 @@ fn setup_scene(
         tile_tex_mat(&mut materials, asset_server.load("textures/tile_water.png"), 0.35);
     let mountain_tex_mat =
         tile_tex_mat(&mut materials, asset_server.load("textures/tile_mountain.png"), 0.95);
+    let wreck_tex_mat =
+        tile_tex_mat(&mut materials, asset_server.load("textures/tile_wreck.png"), 0.95);
+    // Depot pad glows: reuse its own texture as the emissive map.
+    let depot_tex: Handle<Image> = asset_server.load("textures/tile_depot.png");
+    let depot_tex_mat = materials.add(StandardMaterial {
+        base_color_texture: Some(depot_tex.clone()),
+        emissive: LinearRgba::new(0.45, 0.45, 0.45, 1.0),
+        emissive_texture: Some(depot_tex),
+        metallic: 0.2,
+        perceptual_roughness: 0.5,
+        ..default()
+    });
     let palette = Palette {
         unit_cube: meshes.add(Cuboid::new(0.7, 0.7, 0.7)),
         nose_cube: meshes.add(Cuboid::new(0.22, 0.22, 0.22)),
         gem: meshes.add(Cuboid::new(0.32, 0.32, 0.32)),
-        slab: meshes.add(Cuboid::new(0.85, 0.14, 0.85)),
-        printer_body: meshes.add(Cuboid::new(0.9, 0.5, 0.9)),
         explode_cube: meshes.add(Cuboid::new(0.9, 0.9, 0.9)),
         ore_mat: materials.add(StandardMaterial {
             base_color: ORE_GOLD,
             emissive: LinearRgba::new(0.9, 0.65, 0.1, 1.0),
             metallic: 0.2,
             perceptual_roughness: 0.3,
-            ..default()
-        }),
-        wreck_mat: materials.add(StandardMaterial {
-            base_color: WRECK_GRAY,
-            perceptual_roughness: 0.9,
             ..default()
         }),
         black_mat: materials.add(StandardMaterial {
@@ -646,16 +641,16 @@ fn setup_scene(
             perceptual_roughness: 0.6,
             ..default()
         }),
-        bot_mats,
-        ruined_mat: materials.add(StandardMaterial {
-            base_color: Color::srgb(0.16, 0.14, 0.12),
-            perceptual_roughness: 0.95,
-            ..default()
-        }),
         tile_slab: meshes.add(Cuboid::new(0.96, 0.12, 0.96)),
-        bot_cube: meshes.add(bot_cube_mesh()),
+        bot_cube: meshes.add(atlas_box_mesh(Vec3::splat(0.35))),
         bot_tex_mats,
-        tex_slab: meshes.add(tex_slab_mesh()),
+        printer_box: meshes.add(atlas_box_mesh(Vec3::new(0.45, 0.25, 0.45))),
+        printer_tex_mats,
+        printer_ruined_mat,
+        pad_slab: meshes.add(textured_slab_mesh(Vec3::new(0.425, 0.07, 0.425))),
+        depot_tex_mat,
+        wreck_tex_mat,
+        tex_slab: meshes.add(textured_slab_mesh(Vec3::new(0.48, 0.05, 0.48))),
         ground_tex_mat,
         bridge_tex_mat,
         oneway_tex_mat,
@@ -728,18 +723,11 @@ fn setup_scene(
         }
     }
 
-    // Depots: flat glowing blue slabs (the prototype's "base").
-    let depot_mat = materials.add(StandardMaterial {
-        base_color: DEPOT_BLUE,
-        emissive: LinearRgba::new(0.05, 0.18, 0.30, 1.0),
-        metallic: 0.4,
-        perceptual_roughness: 0.35,
-        ..default()
-    });
+    // Depots: glowing drop-off pads.
     for depot in world.depots.values() {
         commands.spawn((
-            Mesh3d(palette.slab.clone()),
-            MeshMaterial3d(depot_mat.clone()),
+            Mesh3d(palette.pad_slab.clone()),
+            MeshMaterial3d(palette.depot_tex_mat.clone()),
             Transform::from_translation(tile_xyz(world, depot.pos, 0.07)),
         ));
     }
@@ -1199,14 +1187,16 @@ fn sync_view(
         if needs_spawn {
             let (mat, scale) = match printer.state {
                 PrinterState::Working => (
-                    palette.bot_mats[&printer.color.0.min(2)].clone(),
+                    palette.printer_tex_mats[&printer.color.0.min(2)].clone(),
                     Vec3::ONE,
                 ),
-                PrinterState::Ruined => (palette.ruined_mat.clone(), Vec3::new(1.0, 0.45, 1.0)),
+                PrinterState::Ruined => {
+                    (palette.printer_ruined_mat.clone(), Vec3::new(1.0, 0.45, 1.0))
+                }
             };
             let entity = commands
                 .spawn((
-                    Mesh3d(palette.printer_body.clone()),
+                    Mesh3d(palette.printer_box.clone()),
                     MeshMaterial3d(mat),
                     Transform::from_translation(tile_xyz(world, printer.pos, 0.25))
                         .with_scale(scale),
@@ -1221,7 +1211,36 @@ fn sync_view(
                     ));
                 })
                 .id();
+            // Print-job progress bar, shown only while a job runs.
+            let mut fill_entity = Entity::PLACEHOLDER;
+            let mut bar_root = Entity::PLACEHOLDER;
+            commands.entity(entity).with_children(|parent| {
+                bar_root = parent
+                    .spawn((
+                        BillboardBar,
+                        Transform::from_xyz(0.0, 1.8, 0.0),
+                        Visibility::Hidden,
+                    ))
+                    .with_children(|bar| {
+                        bar.spawn((
+                            Mesh3d(palette.bar_mesh.clone()),
+                            MeshMaterial3d(palette.bar_bg_mat.clone()),
+                            Transform::default(),
+                        ));
+                        fill_entity = bar
+                            .spawn((
+                                ProgressFill,
+                                Mesh3d(palette.bar_mesh.clone()),
+                                MeshMaterial3d(palette.bar_fill_mat.clone()),
+                                Transform::from_xyz(0.0, 0.0, 0.011)
+                                    .with_scale(Vec3::new(0.02, 0.8, 1.0)),
+                            ))
+                            .id();
+                    })
+                    .id();
+            });
             index.printers.insert(id.0, (entity, printer.state));
+            index.printer_fills.insert(id.0, (bar_root, fill_entity));
         }
     }
 
@@ -1449,13 +1468,13 @@ fn sync_view(
         }
     });
 
-    // Wrecks: low dark slabs.
+    // Wrecks: charred dead-bot slabs.
     for (id, wreck) in &world.wrecks {
         if let std::collections::hash_map::Entry::Vacant(e) = index.wrecks.entry(id.0) {
             let entity = commands
                 .spawn((
-                    Mesh3d(palette.slab.clone()),
-                    MeshMaterial3d(palette.wreck_mat.clone()),
+                    Mesh3d(palette.pad_slab.clone()),
+                    MeshMaterial3d(palette.wreck_tex_mat.clone()),
                     Transform::from_translation(tile_xyz(world, wreck.pos, 0.07)),
                 ))
                 .id();
@@ -1482,18 +1501,37 @@ fn sync_view(
     }
 }
 
-/// Grow each blueprint's progress fill (left-anchored).
+/// Grow each progress fill (left-anchored): blueprints always show their
+/// bar; printers show one only while a print job runs.
 fn update_progress_bars(
     game: NonSend<GameSim>,
     index: Res<ViewIndex>,
     mut fills: Query<&mut Transform, With<ProgressFill>>,
+    mut roots: Query<&mut Visibility, With<BillboardBar>>,
 ) {
+    let set_fill = |transform: &mut Transform, p: f32| {
+        let p = p.clamp(0.02, 1.0);
+        transform.scale = Vec3::new(p, 0.8, 1.0);
+        transform.translation.x = -(0.9 * (1.0 - p)) / 2.0;
+    };
     for (id, bp) in &game.0.world.blueprints {
         let Some(&fill) = index.blueprint_fills.get(&id.0) else { continue };
         let Ok(mut transform) = fills.get_mut(fill) else { continue };
-        let p = (bp.progress as f32 / bp.needed as f32).clamp(0.02, 1.0);
-        transform.scale = Vec3::new(p, 0.8, 1.0);
-        transform.translation.x = -(0.9 * (1.0 - p)) / 2.0;
+        set_fill(&mut transform, bp.progress as f32 / bp.needed as f32);
+    }
+    let total = game.0.tuning.print_ticks as f32;
+    for (id, printer) in &game.0.world.printers {
+        let Some(&(root, fill)) = index.printer_fills.get(&id.0) else { continue };
+        let Ok(mut visibility) = roots.get_mut(root) else { continue };
+        match printer.job {
+            Some(ticks_left) => {
+                *visibility = Visibility::Visible;
+                if let Ok(mut transform) = fills.get_mut(fill) {
+                    set_fill(&mut transform, 1.0 - ticks_left as f32 / total);
+                }
+            }
+            None => *visibility = Visibility::Hidden,
+        }
     }
 }
 
@@ -1593,6 +1631,43 @@ fn highlight_pyrite(text: &str, font_id: egui::FontId) -> egui::text::LayoutJob 
         job.append(&text[plain_start..], 0.0, fmt(HL_PLAIN));
     }
     job
+}
+
+/// If `cursor` (a char index) sits in the kind-argument slot of a generic
+/// query — `closest(` or `exists(`, then an optional partial word — return
+/// (partial start char index, partial word, function name).
+fn kind_arg_context(text: &str, cursor: usize) -> Option<(usize, String, &'static str)> {
+    let chars: Vec<char> = text.chars().collect();
+    let cursor = cursor.min(chars.len());
+    // Walk back over the partial identifier under the caret.
+    let mut i = cursor;
+    while i > 0 && (chars[i - 1].is_ascii_alphanumeric() || chars[i - 1] == '_') {
+        i -= 1;
+    }
+    let partial: String = chars[i..cursor].iter().collect();
+    // Before it (spaces allowed): the opening paren...
+    let mut j = i;
+    while j > 0 && chars[j - 1] == ' ' {
+        j -= 1;
+    }
+    if j == 0 || chars[j - 1] != '(' {
+        return None;
+    }
+    j -= 1;
+    // ...of one of the kind-taking query functions.
+    let mut k = j;
+    while k > 0 && (chars[k - 1].is_ascii_alphanumeric() || chars[k - 1] == '_') {
+        k -= 1;
+    }
+    let func: String = chars[k..j].iter().collect();
+    ["closest", "exists"]
+        .into_iter()
+        .find(|name| func == *name)
+        .map(|name| (i, partial, name))
+}
+
+fn char_to_byte(text: &str, char_idx: usize) -> usize {
+    text.char_indices().nth(char_idx).map_or(text.len(), |(b, _)| b)
 }
 
 fn editor_ui(
@@ -1728,13 +1803,60 @@ fn editor_ui(
             job.wrap.max_width = wrap_width;
             ui.fonts(|fonts| fonts.layout_job(job))
         };
-        ui.add(
-            egui::TextEdit::multiline(&mut editor.code)
-                .font(egui::TextStyle::Monospace)
-                .desired_rows(14)
-                .desired_width(f32::INFINITY)
-                .layouter(&mut layouter),
-        );
+        let output = egui::TextEdit::multiline(&mut editor.code)
+            .font(egui::TextStyle::Monospace)
+            .desired_rows(14)
+            .desired_width(f32::INFINITY)
+            .layouter(&mut layouter)
+            .show(ui);
+
+        // Kind-argument completion: with the cursor in the argument slot of
+        // `closest(` / `exists(`, list the kinds; click one to insert it.
+        if let Some(cursor_range) = output.cursor_range
+            && let Some((partial_start, partial, func)) =
+                kind_arg_context(&editor.code, cursor_range.primary.ccursor.index)
+        {
+            let suggestions: Vec<&str> = sim::host::KINDS
+                .iter()
+                .copied()
+                .filter(|k| k.starts_with(&partial) && *k != partial)
+                .collect();
+            if !suggestions.is_empty() {
+                let caret = output.galley.pos_from_cursor(&cursor_range.primary);
+                let pos = output.galley_pos + caret.left_bottom().to_vec2() + egui::vec2(0.0, 4.0);
+                egui::Area::new(output.response.id.with("kind_complete"))
+                    .fixed_pos(pos)
+                    .order(egui::Order::Foreground)
+                    .show(ui.ctx(), |ui| {
+                        egui::Frame::popup(ui.style()).show(ui, |ui| {
+                            ui.small(format!("{func} takes a kind:"));
+                            for kind in suggestions {
+                                let label = egui::RichText::new(kind)
+                                    .monospace()
+                                    .color(HL_VARIABLE);
+                                if ui.selectable_label(false, label).clicked() {
+                                    let from = char_to_byte(&editor.code, partial_start);
+                                    let to = char_to_byte(
+                                        &editor.code,
+                                        cursor_range.primary.ccursor.index,
+                                    );
+                                    editor.code.replace_range(from..to, kind);
+                                    // Park the caret after the inserted kind and
+                                    // hand focus back to the editor.
+                                    let mut state = output.state.clone();
+                                    state.cursor.set_char_range(Some(
+                                        egui::text::CCursorRange::one(egui::text::CCursor::new(
+                                            partial_start + kind.chars().count(),
+                                        )),
+                                    ));
+                                    state.store(ui.ctx(), output.response.id);
+                                    output.response.request_focus();
+                                }
+                            }
+                        });
+                    });
+            }
+        }
         ui.horizontal(|ui| {
             for (label, color) in [("Deploy Green", BotColor::GREEN), ("Deploy Red", BotColor::RED)] {
                 if ui.button(label).clicked() {
@@ -1875,6 +1997,43 @@ mod tests {
         assert!(got.contains(&("n".into(), HL_VARIABLE)));
         assert!(got.contains(&("\"oops".into(), HL_STRING)));
         assert!(got.contains(&("return".into(), HL_KEYWORD)));
+    }
+
+    #[test]
+    fn kind_context_detected_after_open_paren() {
+        let src = "move_to(closest(";
+        assert_eq!(
+            kind_arg_context(src, src.chars().count()),
+            Some((src.chars().count(), String::new(), "closest"))
+        );
+    }
+
+    #[test]
+    fn kind_context_carries_the_partial_word() {
+        let src = "if exists(blu";
+        assert_eq!(kind_arg_context(src, src.chars().count()), Some((10, "blu".into(), "exists")));
+    }
+
+    #[test]
+    fn kind_context_ignores_other_calls_and_positions() {
+        for (src, cursor) in [
+            ("wait(", 5),            // not a kind-taking function
+            ("closest(ore)", 12),    // cursor past the closing paren
+            ("closest", 7),          // no paren yet
+            ("closest(ore, ", 14),   // second argument slot
+        ] {
+            assert_eq!(kind_arg_context(src, cursor), None, "src {src:?}");
+        }
+    }
+
+    #[test]
+    fn kind_context_survives_multibyte_text() {
+        let src = "log(\"héllo…\")\nclosest( d";
+        assert_eq!(
+            kind_arg_context(src, src.chars().count()),
+            Some((src.chars().count() - 1, "d".into(), "closest"))
+        );
+        assert_eq!(char_to_byte(src, src.chars().count()), src.len());
     }
 
     #[test]

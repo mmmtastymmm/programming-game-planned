@@ -23,7 +23,12 @@ const TILES: &[&str] = &[
     "tile_water",
     "tile_mountain",
     "tile_terraform",
+    "tile_depot",
+    "tile_wreck",
 ];
+
+/// Atlased 6-face bodies: (svg prefix, output prefix).
+const ATLASES: &[(&str, &str)] = &[("bot_face", "bot_atlas"), ("printer_face", "printer_atlas")];
 
 /// (face, atlas column, atlas row)
 const FACES: &[(&str, u32, u32)] = &[
@@ -39,11 +44,13 @@ const FACES: &[(&str, u32, u32)] = &[
 const MASTER: [&str; 3] = ["#39d98a", "#2aa86b", "#c8ffe6"];
 
 /// (atlas name, [accent, accent-dark, highlight]) — indices match
-/// `sim::world::Color` (0 = green, 1 = red, 2+ = blue).
+/// `sim::world::Color` (0 = green, 1 = red, 2+ = blue). "ruined" is the
+/// dead-gray swap used for wrecked structures.
 const TEAMS: &[(&str, [&str; 3])] = &[
     ("green", ["#39d98a", "#2aa86b", "#c8ffe6"]),
     ("red", ["#f24c40", "#c03227", "#ffd8d3"]),
     ("blue", ["#4fa3f2", "#2f7fd1", "#d9ecff"]),
+    ("ruined", ["#5a5f6a", "#4a4e57", "#8a8e99"]),
 ];
 
 fn render(svg: &str, px: u32) -> tiny_skia::Pixmap {
@@ -69,26 +76,28 @@ fn main() {
             .expect("save tile png");
     }
 
-    for (team, colors) in TEAMS {
-        let mut atlas = tiny_skia::Pixmap::new(SIZE * 3, SIZE * 2).expect("atlas alloc");
-        for (face, col, row) in FACES {
-            let mut svg = fs::read_to_string(art.join(format!("bot_face_{face}.svg")))
-                .expect("face svg");
-            for (master, team_color) in MASTER.iter().zip(colors) {
-                svg = svg.replace(master, team_color);
+    for (svg_prefix, out_prefix) in ATLASES {
+        for (team, colors) in TEAMS {
+            let mut atlas = tiny_skia::Pixmap::new(SIZE * 3, SIZE * 2).expect("atlas alloc");
+            for (face, col, row) in FACES {
+                let mut svg = fs::read_to_string(art.join(format!("{svg_prefix}_{face}.svg")))
+                    .expect("face svg");
+                for (master, team_color) in MASTER.iter().zip(colors) {
+                    svg = svg.replace(master, team_color);
+                }
+                let face_px = render(&svg, SIZE);
+                atlas.draw_pixmap(
+                    (col * SIZE) as i32,
+                    (row * SIZE) as i32,
+                    face_px.as_ref(),
+                    &tiny_skia::PixmapPaint::default(),
+                    tiny_skia::Transform::identity(),
+                    None,
+                );
             }
-            let face_px = render(&svg, SIZE);
-            atlas.draw_pixmap(
-                (col * SIZE) as i32,
-                (row * SIZE) as i32,
-                face_px.as_ref(),
-                &tiny_skia::PixmapPaint::default(),
-                tiny_skia::Transform::identity(),
-                None,
-            );
+            atlas
+                .save_png(out.join(format!("{out_prefix}_{team}.png")))
+                .expect("save atlas png");
         }
-        atlas
-            .save_png(out.join(format!("bot_atlas_{team}.png")))
-            .expect("save atlas png");
     }
 }
