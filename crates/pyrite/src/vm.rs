@@ -170,6 +170,9 @@ pub struct Vm {
     state: State,
     current_line: u32,
     last_fault: Option<String>,
+    /// Total faults so far (crash dumps AND handled traps) — lets the
+    /// outside world observe fault *events*, not just the latest message.
+    fault_count: u64,
 }
 
 impl Vm {
@@ -190,6 +193,7 @@ impl Vm {
             state: State::Running,
             current_line: 0,
             last_fault: None,
+            fault_count: 0,
         }
     }
 
@@ -209,6 +213,11 @@ impl Vm {
 
     pub fn last_fault(&self) -> Option<&str> {
         self.last_fault.as_deref()
+    }
+
+    /// Monotone count of faults (unhandled and handled alike).
+    pub fn fault_count(&self) -> u64 {
+        self.fault_count
     }
 
     pub fn budget(&self) -> i64 {
@@ -449,6 +458,7 @@ impl Vm {
     /// The unified fault path (docs/01-language.md "Errors & Signals").
     fn fault(&mut self, msg: String, host: &mut dyn Host, costs: &CostTable) {
         self.last_fault = Some(msg.clone());
+        self.fault_count += 1;
         if self.engine_interrupt || self.phase != Phase::Main {
             // Double handle — including a fault inside `on death:`.
             self.state = State::Exploded;

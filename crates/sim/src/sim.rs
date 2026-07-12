@@ -1170,6 +1170,7 @@ impl Sim {
             }
             if let Some(vm) = &bot.vm {
                 h.write_i64(vm.budget());
+                h.write_u64(vm.fault_count());
                 h.write_u32(vm.current_line());
                 h.write_u8(vm.is_blocked() as u8);
                 h.write_u8(vm.is_dead() as u8);

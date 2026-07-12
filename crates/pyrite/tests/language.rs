@@ -392,6 +392,7 @@ fn crash_dump_cost_is_charged_as_debt() {
     vm.run(&mut host, &costs);
     assert!(call_names(&host).contains(&"upload_crash_dump"));
     assert!(vm.budget() < 0, "crash dump must leave the bot in cycle debt");
+    assert_eq!(vm.fault_count(), 1, "one fault, one count");
 }
 
 #[test]

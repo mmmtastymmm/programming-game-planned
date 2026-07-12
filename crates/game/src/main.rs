@@ -66,7 +66,19 @@ struct Pose {
     prev: Vec3,
     curr: Vec3,
     grid: TilePos,
+    /// Last fault_count seen; a rise triggers the fault hop.
+    fault_seen: u64,
+    /// Fixed ticks since the last fault.
+    fault_age: u32,
 }
+
+/// The translucent placement ghost (slab + one-way chevron children).
+#[derive(Component)]
+struct PreviewSlab;
+#[derive(Component)]
+struct PreviewStrip;
+#[derive(Component)]
+struct PreviewTip;
 
 /// Marks a bot view's carry-indicator child (slot index).
 #[derive(Component)]
@@ -115,6 +127,9 @@ struct Palette {
     ruined_mat: Handle<StandardMaterial>,
     bridge_mat: Handle<StandardMaterial>,
     tile_slab: Handle<Mesh>,
+    preview_valid_mat: Handle<StandardMaterial>,
+    preview_invalid_mat: Handle<StandardMaterial>,
+    preview_chevron_mat: Handle<StandardMaterial>,
 }
 
 #[derive(Resource)]
@@ -278,6 +293,7 @@ fn main() {
                 editor_ui,
                 orbit_camera,
                 place_blueprint,
+                build_preview,
                 sync_view,
                 interpolate,
                 spin,
@@ -377,6 +393,22 @@ fn setup_scene(
             ..default()
         }),
         tile_slab: meshes.add(Cuboid::new(0.96, 0.12, 0.96)),
+        preview_valid_mat: materials.add(StandardMaterial {
+            base_color: Color::srgba(0.85, 0.95, 1.0, 0.45),
+            alpha_mode: AlphaMode::Blend,
+            ..default()
+        }),
+        preview_invalid_mat: materials.add(StandardMaterial {
+            base_color: Color::srgba(1.0, 0.25, 0.2, 0.45),
+            alpha_mode: AlphaMode::Blend,
+            ..default()
+        }),
+        preview_chevron_mat: materials.add(StandardMaterial {
+            base_color: Color::srgba(1.0, 0.85, 0.2, 0.7),
+            emissive: LinearRgba::new(0.5, 0.35, 0.05, 1.0),
+            alpha_mode: AlphaMode::Blend,
+            ..default()
+        }),
     };
 
     // Terrain slabs (0.96 with grout lines, prototype-style).
@@ -448,6 +480,32 @@ fn setup_scene(
     let cam = OrbitCam { focus: Vec3::ZERO, distance: 22.0, yaw: 0.0, pitch: 0.85 };
     let transform = orbit_transform(&cam);
     commands.spawn((Camera3d::default(), transform, cam));
+
+    // Placement ghost: follows the cursor while a build item is armed.
+    commands
+        .spawn((
+            PreviewSlab,
+            Mesh3d(palette.tile_slab.clone()),
+            MeshMaterial3d(palette.preview_valid_mat.clone()),
+            Transform::from_xyz(0.0, 0.08, 0.0),
+            Visibility::Hidden,
+        ))
+        .with_children(|parent| {
+            parent.spawn((
+                PreviewStrip,
+                Mesh3d(palette.nose_cube.clone()),
+                MeshMaterial3d(palette.preview_chevron_mat.clone()),
+                Transform::from_xyz(0.0, 0.12, 0.0),
+                Visibility::Hidden,
+            ));
+            parent.spawn((
+                PreviewTip,
+                Mesh3d(palette.nose_cube.clone()),
+                MeshMaterial3d(palette.preview_chevron_mat.clone()),
+                Transform::from_xyz(0.0, 0.12, 0.0).with_scale(Vec3::new(1.4, 1.2, 1.4)),
+                Visibility::Hidden,
+            ));
+        });
 
     commands.insert_resource(palette);
 }
@@ -526,25 +584,120 @@ fn place_blueprint(
     if contexts.try_ctx_mut().is_some_and(|ctx| ctx.wants_pointer_input()) {
         return;
     }
-    let Ok(window) = windows.single() else { return };
-    let Some(cursor) = window.cursor_position() else { return };
-    let Ok((camera, cam_transform)) = cams.single() else { return };
-    let Ok(ray) = camera.viewport_to_world(cam_transform, cursor) else { return };
-    if ray.direction.y.abs() < 1e-4 {
+    let world = &game.0.world;
+    let Some(pos) = cursor_tile(&windows, &cams, world.grid.width, world.grid.height) else {
         return;
+    };
+    if world.grid.in_bounds(pos) {
+        let _ = game.0.apply(&Command::PlaceBlueprint { pos, kind });
+    }
+}
+
+/// Cursor ray onto the ground plane -> tile coordinates.
+fn cursor_tile(
+    windows: &Query<&Window>,
+    cams: &Query<(&Camera, &GlobalTransform), With<Camera3d>>,
+    grid_w: i32,
+    grid_h: i32,
+) -> Option<TilePos> {
+    let window = windows.single().ok()?;
+    let cursor = window.cursor_position()?;
+    let (camera, cam_transform) = cams.single().ok()?;
+    let ray = camera.viewport_to_world(cam_transform, cursor).ok()?;
+    if ray.direction.y.abs() < 1e-4 {
+        return None;
     }
     let t = -ray.origin.y / ray.direction.y;
     if t < 0.0 {
-        return;
+        return None;
     }
     let hit = ray.origin + *ray.direction * t;
+    Some(TilePos::new(
+        (hit.x + grid_w as f32 / 2.0).round() as i32,
+        (hit.z + grid_h as f32 / 2.0).round() as i32,
+    ))
+}
+
+/// The translucent ghost: follows the hovered tile while armed, tinted by
+/// placement validity; the one-way chevron shows which way traffic will
+/// flow (R rotates it live).
+#[allow(clippy::type_complexity, clippy::too_many_arguments)]
+fn build_preview(
+    mut contexts: EguiContexts,
+    editor: Res<EditorState>,
+    windows: Query<&Window>,
+    cams: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
+    game: NonSend<GameSim>,
+    palette: Res<Palette>,
+    mut slab: Query<
+        (&mut Transform, &mut Visibility, &mut MeshMaterial3d<StandardMaterial>),
+        With<PreviewSlab>,
+    >,
+    mut strip: Query<
+        (&mut Transform, &mut Visibility),
+        (With<PreviewStrip>, Without<PreviewSlab>),
+    >,
+    mut tip: Query<
+        (&mut Transform, &mut Visibility),
+        (With<PreviewTip>, Without<PreviewSlab>, Without<PreviewStrip>),
+    >,
+) {
+    let Ok((mut slab_tf, mut slab_vis, mut slab_mat)) = slab.single_mut() else { return };
+    let Ok((mut strip_tf, mut strip_vis)) = strip.single_mut() else { return };
+    let Ok((mut tip_tf, mut tip_vis)) = tip.single_mut() else { return };
+    let hide = |a: &mut Visibility, b: &mut Visibility, c: &mut Visibility| {
+        (*a, *b, *c) = (Visibility::Hidden, Visibility::Hidden, Visibility::Hidden);
+    };
+
+    let over_ui = contexts.try_ctx_mut().is_some_and(|ctx| ctx.wants_pointer_input());
     let world = &game.0.world;
-    let pos = TilePos::new(
-        (hit.x + world.grid.width as f32 / 2.0).round() as i32,
-        (hit.z + world.grid.height as f32 / 2.0).round() as i32,
-    );
-    if world.grid.in_bounds(pos) {
-        let _ = game.0.apply(&Command::PlaceBlueprint { pos, kind });
+    let (Some(kind), false) = (editor.selected_build, over_ui) else {
+        hide(&mut slab_vis, &mut strip_vis, &mut tip_vis);
+        return;
+    };
+    let Some(pos) = cursor_tile(&windows, &cams, world.grid.width, world.grid.height) else {
+        hide(&mut slab_vis, &mut strip_vis, &mut tip_vis);
+        return;
+    };
+    if !world.grid.in_bounds(pos) {
+        hide(&mut slab_vis, &mut strip_vis, &mut tip_vis);
+        return;
+    }
+
+    let cost = match kind {
+        BlueprintKind::Bridge | BlueprintKind::BridgeOneWay(_) => game.0.tuning.bridge_cost_ore,
+    };
+    let valid = world.grid.get(pos) == Some(sim::TileKind::Water)
+        && !world.blueprints.values().any(|b| b.pos == pos)
+        && world.stockpile_ore >= cost;
+
+    slab_tf.translation = tile_xyz(world, pos, 0.08);
+    *slab_vis = Visibility::Visible;
+    slab_mat.0 = if valid {
+        palette.preview_valid_mat.clone()
+    } else {
+        palette.preview_invalid_mat.clone()
+    };
+
+    match kind {
+        BlueprintKind::BridgeOneWay(d) => {
+            let (dx, dz) = d.delta();
+            let along = Vec3::new(dx as f32, 0.0, dz as f32);
+            let strip_size = if dx != 0 {
+                Vec3::new(0.6, 0.06, 0.16)
+            } else {
+                Vec3::new(0.16, 0.06, 0.6)
+            };
+            strip_tf.scale = strip_size / 0.22;
+            strip_tf.translation = Vec3::Y * 0.12;
+            tip_tf.translation = along * 0.34 + Vec3::Y * 0.12;
+            *strip_vis = Visibility::Visible;
+            *tip_vis = Visibility::Visible;
+        }
+        BlueprintKind::Bridge => {
+            *strip_vis = Visibility::Hidden;
+            *tip_vis = Visibility::Hidden;
+        }
     }
 }
 
@@ -573,6 +726,18 @@ fn update_poses(
             if age < 5.0 {
                 y += 0.3 * (std::f32::consts::PI * (age + 1.0) / 6.0).sin();
             }
+        }
+        // Fault jump: any entry into error handling (crash dump or
+        // on error: trap) makes the bot visibly startle.
+        let faults = bot.vm.as_ref().map(|v| v.fault_count()).unwrap_or(pose.fault_seen);
+        if faults > pose.fault_seen {
+            pose.fault_seen = faults;
+            pose.fault_age = 0;
+        } else {
+            pose.fault_age = pose.fault_age.saturating_add(1);
+        }
+        if pose.fault_age < 5 {
+            y += 0.3 * (std::f32::consts::PI * (pose.fault_age as f32 + 1.0) / 6.0).sin();
         }
         let target = tile_xyz(world, bot.data.pos, y);
         pose.prev = pose.curr;
@@ -768,7 +933,13 @@ fn sync_view(
                 Mesh3d(palette.unit_cube.clone()),
                 MeshMaterial3d(palette.bot_mats[&bot.data.color.0.min(2)].clone()),
                 Transform::from_translation(start),
-                Pose { prev: start, curr: start, grid: bot.data.pos },
+                Pose {
+                    prev: start,
+                    curr: start,
+                    grid: bot.data.pos,
+                    fault_seen: bot.vm.as_ref().map(|v| v.fault_count()).unwrap_or(0),
+                    fault_age: u32::MAX,
+                },
             ))
             .with_children(|parent| {
                 parent.spawn((
