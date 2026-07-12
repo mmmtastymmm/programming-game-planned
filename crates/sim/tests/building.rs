@@ -314,3 +314,50 @@ fn prebuilt_bridges_are_passable_from_the_start() {
     }
     assert!(sim.world.stockpile_ore > 20, "miner crosses immediately; stockpile {}", sim.world.stockpile_ore);
 }
+
+#[test]
+fn kill_command_wrecks_bot_and_spills_cargo() {
+    let mut sim = Sim::new(&MapSpec::empty(6, 6));
+    let bot = spawn(&mut sim, TilePos::new(3, 3), "log(7)\nwait(3)\n");
+    for _ in 0..6 {
+        sim.step();
+    }
+    // Give it cargo by hand, then pull the plug.
+    sim.world.bots.get_mut(&bot).unwrap().data.cargo = 2;
+    sim.apply(&Command::KillBot { bot }).unwrap();
+    sim.step();
+
+    assert!(!sim.world.bots.contains_key(&bot), "killed bot is gone");
+    let wreck = sim.world.wrecks.get(&bot).expect("manual kill leaves a wreck");
+    assert!(wreck.logs.iter().any(|l| l == "7"), "logs ride in the wreck");
+    let spilled: u32 = sim
+        .world
+        .ore_nodes
+        .values()
+        .filter(|n| n.pos.chebyshev(TilePos::new(3, 3)) <= 1)
+        .map(|n| n.amount)
+        .sum();
+    assert_eq!(spilled, 2, "cargo spills to the ground next to the wreck");
+}
+
+#[test]
+fn spilled_cargo_is_recoverable_by_miners() {
+    // A dead hauler's spilled ore is just an ore node: another bot mines
+    // it and delivers — closest(ore) finds it, no new mechanics needed.
+    let mut spec = MapSpec::empty(8, 4);
+    spec.depots.push(TilePos::new(0, 1));
+    let mut sim = Sim::new(&spec);
+    let mule = spawn(&mut sim, TilePos::new(6, 2), "wait(50)\n");
+    sim.world.bots.get_mut(&mule).unwrap().data.cargo = 2;
+    sim.apply(&Command::KillBot { bot: mule }).unwrap();
+    sim.step();
+    spawn(
+        &mut sim,
+        TilePos::new(1, 1),
+        "move_to(closest(ore).expect())\nmine()\nmove_to(closest(depot).expect())\ndeposit()\n",
+    );
+    for _ in 0..400 {
+        sim.step();
+    }
+    assert!(sim.world.stockpile_ore >= 2, "spilled cargo makes it home; got {}", sim.world.stockpile_ore);
+}

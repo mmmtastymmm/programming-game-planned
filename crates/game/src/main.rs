@@ -44,8 +44,6 @@ struct GameSim(Sim);
 // ---------------------------------------------------------------- palette
 // Lifted from the original prototype (see docs of that repo).
 const CLEAR: Color = Color::srgb(0.05, 0.06, 0.09);
-const RUBBLE: Color = Color::srgb(0.45, 0.46, 0.50);
-const WATER: Color = Color::srgb(0.10, 0.28, 0.55);
 const ORE_GOLD: Color = Color::srgb(1.0, 0.85, 0.15);
 const DEPOT_BLUE: Color = Color::srgb(0.30, 0.55, 0.75);
 const PRINT_GLOW: Color = Color::srgb(0.25, 0.55, 0.95);
@@ -152,9 +150,13 @@ struct Palette {
     bot_tex_mats: HashMap<u8, Handle<StandardMaterial>>,
     /// Terrain slab: full tile texture on top, dark trim on the sides.
     tex_slab: Handle<Mesh>,
+    /// The "tech" tile — terraformed ground (unused by natural terrain).
     ground_tex_mat: Handle<StandardMaterial>,
     bridge_tex_mat: Handle<StandardMaterial>,
     oneway_tex_mat: Handle<StandardMaterial>,
+    grass_tex_mat: Handle<StandardMaterial>,
+    water_tex_mat: Handle<StandardMaterial>,
+    mountain_tex_mat: Handle<StandardMaterial>,
     preview_valid_mat: Handle<StandardMaterial>,
     preview_invalid_mat: Handle<StandardMaterial>,
     preview_chevron_mat: Handle<StandardMaterial>,
@@ -202,6 +204,8 @@ enum ToolKind {
     Overlay(Option<OverlayKind>),
     /// Instant cosmetic tile paint (drag to paint); None = eraser.
     Paint(Option<u8>),
+    /// Emergency stop: click a bot to wreck it (logs kept, cargo spills).
+    Kill,
 }
 
 struct BuildItem {
@@ -228,6 +232,7 @@ const BUILD_CATEGORIES: &[(&str, &[BuildItem])] = &[
             BuildItem { name: "Clear Overlay", kind: ToolKind::Overlay(None) },
         ],
     ),
+    ("Command", &[BuildItem { name: "Kill Bot", kind: ToolKind::Kill }]),
     (
         "Paint",
         &[
@@ -301,6 +306,21 @@ fn build_icon(name: &str) -> egui::ColorImage {
         for x in 4..44 {
             for y in 4..44 {
                 img[(x, y)] = c;
+            }
+        }
+    }
+    if name == "Kill Bot" {
+        let bg = egui::Color32::from_rgb(40, 20, 22);
+        for x in 0..s {
+            for y in 0..s {
+                img[(x, y)] = bg;
+            }
+        }
+        let red = egui::Color32::from_rgb(235, 60, 45);
+        for i in 6..42usize {
+            for w in 0..4usize {
+                img[(i, (i + w).min(47))] = red;
+                img[(i, (47usize.saturating_sub(i) + w).min(47))] = red;
             }
         }
     }
@@ -559,19 +579,26 @@ fn setup_scene(
             }),
         );
     }
-    let tile_tex_mat = |materials: &mut Assets<StandardMaterial>, tex: Handle<Image>| {
-        materials.add(StandardMaterial {
-            base_color_texture: Some(tex),
-            perceptual_roughness: 0.85,
-            ..default()
-        })
-    };
+    let tile_tex_mat =
+        |materials: &mut Assets<StandardMaterial>, tex: Handle<Image>, rough: f32| {
+            materials.add(StandardMaterial {
+                base_color_texture: Some(tex),
+                perceptual_roughness: rough,
+                ..default()
+            })
+        };
     let ground_tex_mat =
-        tile_tex_mat(&mut materials, asset_server.load("textures/tile_ground.png"));
+        tile_tex_mat(&mut materials, asset_server.load("textures/tile_ground.png"), 0.85);
     let bridge_tex_mat =
-        tile_tex_mat(&mut materials, asset_server.load("textures/tile_bridge.png"));
+        tile_tex_mat(&mut materials, asset_server.load("textures/tile_bridge.png"), 0.85);
     let oneway_tex_mat =
-        tile_tex_mat(&mut materials, asset_server.load("textures/tile_oneway.png"));
+        tile_tex_mat(&mut materials, asset_server.load("textures/tile_oneway.png"), 0.85);
+    let grass_tex_mat =
+        tile_tex_mat(&mut materials, asset_server.load("textures/tile_grass.png"), 0.95);
+    let water_tex_mat =
+        tile_tex_mat(&mut materials, asset_server.load("textures/tile_water.png"), 0.35);
+    let mountain_tex_mat =
+        tile_tex_mat(&mut materials, asset_server.load("textures/tile_mountain.png"), 0.95);
     let palette = Palette {
         unit_cube: meshes.add(Cuboid::new(0.7, 0.7, 0.7)),
         nose_cube: meshes.add(Cuboid::new(0.22, 0.22, 0.22)),
@@ -626,6 +653,9 @@ fn setup_scene(
         ground_tex_mat,
         bridge_tex_mat,
         oneway_tex_mat,
+        grass_tex_mat,
+        water_tex_mat,
+        mountain_tex_mat,
         preview_valid_mat: materials.add(StandardMaterial {
             base_color: Color::srgba(0.85, 0.95, 1.0, 0.45),
             alpha_mode: AlphaMode::Blend,
@@ -669,32 +699,20 @@ fn setup_scene(
         }),
     };
 
-    // Terrain slabs (0.96 with grout lines, prototype-style). Plains get
-    // the baked circuit tile; rubble/water stay flat colors.
-    let rubble_mat = materials.add(StandardMaterial {
-        base_color: RUBBLE,
-        metallic: 0.05,
-        perceptual_roughness: 0.9,
-        ..default()
-    });
-    let water_mat = materials.add(StandardMaterial {
-        base_color: WATER,
-        perceptual_roughness: 0.3,
-        ..default()
-    });
+    // Terrain slabs (0.96 with grout lines, prototype-style). The default
+    // world is natural — grass, water, mountains; the circuit "tech" tile
+    // is what terraforming turns ground into.
     for y in 0..world.grid.height {
         for x in 0..world.grid.width {
             let pos = TilePos::new(x, y);
             let kind = world.grid.get(pos).expect("in bounds");
             let (mat, y_off) = match kind {
-                TileKind::Plains => (palette.ground_tex_mat.clone(), 0.0),
-                TileKind::Rubble => (rubble_mat.clone(), 0.04),
-                TileKind::Water => (water_mat.clone(), -0.05),
+                TileKind::Plains => (palette.grass_tex_mat.clone(), 0.0),
+                TileKind::Rubble => (palette.mountain_tex_mat.clone(), 0.04),
+                TileKind::Water => (palette.water_tex_mat.clone(), -0.05),
                 // Bridges only exist after terraforming; at startup none do
                 // (sync_view overlays planks when they appear).
-                TileKind::Bridge => {
-                    (palette.ground_tex_mat.clone(), 0.0)
-                }
+                TileKind::Bridge => (palette.ground_tex_mat.clone(), 0.0),
             };
             commands.spawn((
                 Mesh3d(palette.tex_slab.clone()),
@@ -869,6 +887,20 @@ fn place_blueprint(
                 let _ = game.0.apply(&Command::PlacePaint { pos, color });
             }
         }
+        ToolKind::Kill => {
+            // Lowest-id bot standing on the clicked tile.
+            let victim = game
+                .0
+                .world
+                .bots
+                .values()
+                .filter(|b| b.data.pos == pos && !b.data.dying)
+                .map(|b| b.data.id)
+                .min();
+            if let Some(bot) = victim {
+                let _ = game.0.apply(&Command::KillBot { bot });
+            }
+        }
     }
 }
 
@@ -955,6 +987,9 @@ fn build_preview(
             (world.stockpile_ore >= game.0.tuning.overlay_cost_ore, None)
         }
         ToolKind::Overlay(None) | ToolKind::Paint(None) => (true, None),
+        ToolKind::Kill => {
+            (world.bots.values().any(|b| b.data.pos == pos && !b.data.dying), None)
+        }
         ToolKind::Paint(Some(c)) => (true, Some(palette.paint_mats[c as usize % 4].clone())),
     };
 
@@ -1562,7 +1597,7 @@ fn editor_ui(
                 let cost = match item.kind {
                     ToolKind::Building(BlueprintKind::Bridge) => game.0.tuning.bridge_cost_ore,
                     ToolKind::Overlay(Some(_)) => game.0.tuning.overlay_cost_ore,
-                    ToolKind::Overlay(None) | ToolKind::Paint(_) => 0,
+                    ToolKind::Overlay(None) | ToolKind::Paint(_) | ToolKind::Kill => 0,
                 };
                 let affordable = game.0.world.stockpile_ore >= cost;
                 if !editor.icons.contains_key(item.name) {
@@ -1618,6 +1653,9 @@ fn editor_ui(
                         }
                         ToolKind::Paint(None) => {
                             ui.label("Click or drag to erase paint — Esc/RMB cancels");
+                        }
+                        ToolKind::Kill => {
+                            ui.label("Click a bot to shut it down — Esc/RMB cancels");
                         }
                     }
                 } else {

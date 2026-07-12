@@ -15,7 +15,14 @@ use std::path::Path;
 /// Pixels per face / per tile texture.
 const SIZE: u32 = 256;
 
-const TILES: &[&str] = &["tile_ground", "tile_bridge", "tile_oneway"];
+const TILES: &[&str] = &[
+    "tile_ground",
+    "tile_bridge",
+    "tile_oneway",
+    "tile_grass",
+    "tile_water",
+    "tile_mountain",
+];
 
 /// (face, atlas column, atlas row)
 const FACES: &[(&str, u32, u32)] = &[

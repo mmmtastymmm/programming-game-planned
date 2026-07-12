@@ -98,6 +98,10 @@ pub enum Command {
     PlaceOverlay { pos: TilePos, overlay: Option<OverlayKind> },
     /// Set or clear cosmetic tile paint (free).
     PlacePaint { pos: TilePos, color: Option<u8> },
+    /// Emergency stop for a stuck bot: straight to wreck (no death
+    /// handler — the owner pulled the plug). Logs ride in the wreck;
+    /// carried cargo spills onto the ground.
+    KillBot { bot: BotId },
 }
 
 pub struct Sim {
@@ -208,6 +212,12 @@ impl Sim {
                             self.world.overlays.remove(pos);
                         }
                     }
+                }
+                Ok(None)
+            }
+            Command::KillBot { bot } => {
+                if let Some(b) = self.world.bots.get_mut(bot) {
+                    b.data.dying = true;
                 }
                 Ok(None)
             }
@@ -338,8 +348,10 @@ impl Sim {
             let bot = self.world.bots.remove(&id).expect("checked above");
             let data = bot.data;
             self.world.bot_entities.remove(&data.entity);
+            // Carried cargo spills to the ground rather than entombing.
+            self.drop_cargo_to_ground(data.pos, data.cargo);
             // Disabled: an inert wreck (self-destruct countdown comes later).
-            self.world.wrecks.insert(id, Wreck { pos: data.pos, cargo: data.cargo, logs: data.log_buf });
+            self.world.wrecks.insert(id, Wreck { pos: data.pos, cargo: 0, logs: data.log_buf });
         }
 
         // --- phase 6: economy (printers: jobs, rebalancing, capacity) ---
@@ -641,6 +653,37 @@ impl Sim {
         }
     }
 
+    /// Spilled cargo becomes a small ore node on a random adjacent
+    /// passable tile (seeded RNG; falls back to the bot's own tile),
+    /// merging with any node already there — closest(ore)/mine() recover it.
+    fn drop_cargo_to_ground(&mut self, pos: TilePos, amount: u32) {
+        if amount == 0 {
+            return;
+        }
+        let mut candidates: Vec<TilePos> = [(0, -1), (1, 0), (0, 1), (-1, 0)]
+            .iter()
+            .map(|(dx, dy)| TilePos::new(pos.x + dx, pos.y + dy))
+            .filter(|&p| self.world.grid.get(p).is_some_and(|t| t.move_ticks().is_some()))
+            .collect();
+        candidates.push(pos);
+        let drop_at = candidates[(self.world.next_rand() % candidates.len() as u64) as usize];
+        let existing = self
+            .world
+            .ore_nodes
+            .iter()
+            .find(|(_, n)| n.pos == drop_at)
+            .map(|(id, _)| *id);
+        match existing {
+            Some(id) => {
+                self.world.ore_nodes.get_mut(&id).expect("just found").amount += amount;
+            }
+            None => {
+                let id = self.world.alloc_entity();
+                self.world.ore_nodes.insert(id, crate::world::OreNode { pos: drop_at, amount });
+            }
+        }
+    }
+
     /// Phase 4.5: engine-driven state — boot countdowns and recall walks.
     fn advance_engine(&mut self, id: BotId) {
         let Some(bot) = self.world.bots.get_mut(&id) else { return };
@@ -752,6 +795,8 @@ impl Sim {
     fn scrap_bot(&mut self, id: BotId) {
         let Some(bot) = self.world.bots.remove(&id) else { return };
         self.world.bot_entities.remove(&bot.data.entity);
+        // Orderly recycling at the printer: carried cargo goes to stores.
+        self.world.stockpile_ore += bot.data.cargo as u64;
         let tick = self.world.tick;
         for text in bot.data.log_buf {
             self.world.archive.push(ArchiveEntry {
@@ -1140,6 +1185,7 @@ impl Sim {
     fn explode(&mut self, id: BotId, vm: &Vm) {
         if let Some(bot) = self.world.bots.remove(&id) {
             self.world.bot_entities.remove(&bot.data.entity);
+            self.drop_cargo_to_ground(bot.data.pos, bot.data.cargo);
             self.world.black_boxes.push(BlackBox {
                 tick: self.world.tick,
                 bot: id,

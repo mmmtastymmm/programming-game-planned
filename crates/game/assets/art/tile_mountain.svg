@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <!-- mountain/rubble: twin peaks, sun-lit west faces, shaded east faces -->
+  <rect width="64" height="64" fill="#565a63"/>
+  <!-- back peak -->
+  <path d="M44 10 L26 58 L44 58 Z" fill="#7d818c"/>
+  <path d="M44 10 L44 58 L60 58 Z" fill="#4a4e57"/>
+  <!-- front peak -->
+  <path d="M20 18 L6 56 L20 56 Z" fill="#888c97"/>
+  <path d="M20 18 L20 56 L34 56 Z" fill="#50545e"/>
+  <!-- snow caps -->
+  <path d="M44 10 L40 21 L44 24 L48 21 Z" fill="#b9bdc7"/>
+  <path d="M20 18 L17 27 L20 29 L23 27 Z" fill="#aeb2bc"/>
+  <!-- scattered stones on the flats -->
+  <g fill="#666a74">
+    <circle cx="10" cy="12" r="1.8"/>
+    <circle cx="56" cy="30" r="1.6"/>
+    <circle cx="30" cy="8" r="1.4"/>
+  </g>
+  <g fill="#4d515a">
+    <ellipse cx="52" cy="60" rx="3" ry="1.6"/>
+    <ellipse cx="12" cy="61" rx="2.4" ry="1.4"/>
+  </g>
+</svg>
