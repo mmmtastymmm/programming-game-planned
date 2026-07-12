@@ -1777,23 +1777,61 @@ const HL_STRING: egui::Color32 = egui::Color32::from_rgb(206, 145, 120);
 const HL_COMMENT: egui::Color32 = egui::Color32::from_rgb(106, 153, 85);
 const HL_PLAIN: egui::Color32 = egui::Color32::from_rgb(212, 212, 212);
 
+const HL_ERROR: egui::Color32 = egui::Color32::from_rgb(235, 80, 70);
+
+/// Append `text[range]` to the job in `color`, red-underlining wherever the
+/// range overlaps `squiggle` (splitting into up to three sections).
+fn append_span(
+    job: &mut egui::text::LayoutJob,
+    text: &str,
+    range: std::ops::Range<usize>,
+    color: egui::Color32,
+    font_id: &egui::FontId,
+    squiggle: &Option<std::ops::Range<usize>>,
+) {
+    let fmt = |underline: bool| egui::text::TextFormat {
+        font_id: font_id.clone(),
+        color,
+        underline: if underline {
+            egui::Stroke::new(1.5, HL_ERROR)
+        } else {
+            egui::Stroke::NONE
+        },
+        ..Default::default()
+    };
+    let mut cuts = vec![range.start, range.end];
+    if let Some(s) = squiggle {
+        for b in [s.start, s.end] {
+            if b > range.start && b < range.end {
+                cuts.push(b);
+            }
+        }
+    }
+    cuts.sort_unstable();
+    cuts.dedup();
+    for w in cuts.windows(2) {
+        let underlined = squiggle.as_ref().is_some_and(|s| w[0] < s.end && w[1] > s.start);
+        job.append(&text[w[0]..w[1]], 0.0, fmt(underlined));
+    }
+}
+
 /// Best-effort Pyrite highlighting for the editor. Unlike `pyrite::lexer`
 /// this never fails, so half-typed programs still get colored. Keywords come
 /// from the lexer's own table (`pyrite::token::keyword`) so the two can't
-/// drift.
-fn highlight_pyrite(text: &str, font_id: egui::FontId) -> egui::text::LayoutJob {
-    use egui::text::{LayoutJob, TextFormat};
+/// drift. `squiggle` is a byte range to underline in red (the live parse
+/// error, if any).
+fn highlight_pyrite(
+    text: &str,
+    font_id: egui::FontId,
+    squiggle: Option<std::ops::Range<usize>>,
+) -> egui::text::LayoutJob {
+    use egui::text::LayoutJob;
 
     let chars: Vec<(usize, char)> = text.char_indices().collect();
     let byte_at =
         |i: usize| chars.get(i).map_or(text.len(), |&(b, _)| b);
 
     let mut job = LayoutJob::default();
-    let fmt = |color: egui::Color32| TextFormat {
-        font_id: font_id.clone(),
-        color,
-        ..Default::default()
-    };
 
     let n = chars.len();
     let mut plain_start = 0; // byte offset of pending uncolored text
@@ -1840,15 +1878,67 @@ fn highlight_pyrite(text: &str, font_id: egui::FontId) -> egui::text::LayoutJob 
             continue;
         };
         if plain_start < start {
-            job.append(&text[plain_start..start], 0.0, fmt(HL_PLAIN));
+            append_span(&mut job, text, plain_start..start, HL_PLAIN, &font_id, &squiggle);
         }
-        job.append(&text[start..end], 0.0, fmt(color));
+        append_span(&mut job, text, start..end, color, &font_id, &squiggle);
         plain_start = end;
     }
     if plain_start < text.len() {
-        job.append(&text[plain_start..], 0.0, fmt(HL_PLAIN));
+        append_span(&mut job, text, plain_start..text.len(), HL_PLAIN, &font_id, &squiggle);
     }
     job
+}
+
+/// Byte range to squiggle for a parse error at 1-based (line, col): from the
+/// error column to the end of that line; whole line when the column is past
+/// its end; the last character for errors past the final line (EOF).
+fn error_byte_range(text: &str, line: u32, col: u32) -> std::ops::Range<usize> {
+    let line_idx = (line as usize).saturating_sub(1);
+    let mut offset = 0;
+    for (i, l) in text.split('\n').enumerate() {
+        if i == line_idx {
+            let start = offset
+                + l.char_indices().nth((col as usize).saturating_sub(1)).map_or(l.len(), |(b, _)| b);
+            let end = offset + l.len();
+            if start < end {
+                return start..end;
+            }
+            if !l.is_empty() {
+                return offset..end;
+            }
+            break;
+        }
+        offset += l.len() + 1;
+    }
+    // EOF (or an empty error line): squiggle the last visible character —
+    // a trailing newline would render nothing.
+    text.char_indices()
+        .rev()
+        .find(|(_, c)| *c != '\n')
+        .map_or(0..0, |(b, c)| b..b + c.len_utf8())
+}
+
+/// The identifier under (or immediately left of) char index `idx`.
+fn word_at(text: &str, idx: usize) -> Option<String> {
+    let chars: Vec<char> = text.chars().collect();
+    let is_ident = |c: &char| c.is_ascii_alphanumeric() || *c == '_';
+    let mut i = idx.min(chars.len());
+    if !chars.get(i).is_some_and(|c| is_ident(c)) {
+        if i > 0 && chars.get(i - 1).is_some_and(|c| is_ident(c)) {
+            i -= 1;
+        } else {
+            return None;
+        }
+    }
+    let mut start = i;
+    while start > 0 && is_ident(&chars[start - 1]) {
+        start -= 1;
+    }
+    let mut end = i + 1;
+    while end < chars.len() && is_ident(&chars[end]) {
+        end += 1;
+    }
+    Some(chars[start..end].iter().collect())
 }
 
 /// If `cursor` (a char index) sits in the kind-argument slot of a generic
@@ -2063,8 +2153,16 @@ fn editor_ui(
     egui::SidePanel::left("editor").exact_width(300.0).show(ctx, |ui| {
         ui.heading("Pyrite");
         let mut layouter = |ui: &egui::Ui, text: &str, wrap_width: f32| {
-            let mut job =
-                highlight_pyrite(text, egui::TextStyle::Monospace.resolve(ui.style()));
+            // Live parse of the in-progress text: the error location gets a
+            // red squiggle. (Programs are tiny; parsing per relayout is fine.)
+            let squiggle = pyrite::parse(text, &pyrite::UnlockSet::all())
+                .err()
+                .map(|e| error_byte_range(text, e.line, e.col));
+            let mut job = highlight_pyrite(
+                text,
+                egui::TextStyle::Monospace.resolve(ui.style()),
+                squiggle,
+            );
             job.wrap.max_width = wrap_width;
             ui.fonts(|fonts| fonts.layout_job(job))
         };
@@ -2169,6 +2267,59 @@ fn editor_ui(
             if !output.response.has_focus() && !area.response.contains_pointer() {
                 editor.completion_cursor = None;
             }
+        }
+
+        // Hover docs: an identifier under the pointer that names a builtin
+        // (or a kind constant) gets a tooltip with signature, summary, and
+        // its cost from the live cost table.
+        if let Some(pointer) = output.response.hover_pos() {
+            let rel = pointer - output.galley_pos;
+            let cursor = output.galley.cursor_from_pos(rel);
+            let caret = output.galley.pos_from_cursor(&cursor);
+            // cursor_from_pos snaps to the nearest column — require the
+            // pointer to actually be on the glyph, not in the blank space
+            // right of the line.
+            let on_text = caret
+                .expand2(egui::vec2(8.0, 2.0))
+                .contains(egui::pos2(rel.x, rel.y));
+            if on_text && let Some(word) = word_at(&editor.code, cursor.ccursor.index) {
+                let costs = &game.0.costs;
+                if let Some(doc) = sim::host::builtin_doc(&word) {
+                    // upload_crash_dump is costed by its dedicated field.
+                    let cost = if doc.name == "upload_crash_dump" {
+                        costs.crash_dump
+                    } else {
+                        costs.builtin_cost(doc.name)
+                    };
+                    egui::show_tooltip_at_pointer(
+                        ui.ctx(),
+                        ui.layer_id(),
+                        editor_id.with("hover_doc"),
+                        |ui| {
+                            ui.monospace(egui::RichText::new(doc.signature).color(HL_FUNCTION));
+                            ui.label(doc.summary);
+                            ui.small(format!("cost: {cost} cycles{}", doc.cost_note));
+                        },
+                    );
+                } else if sim::host::KINDS.contains(&word.as_str()) {
+                    egui::show_tooltip_at_pointer(
+                        ui.ctx(),
+                        ui.layer_id(),
+                        editor_id.with("hover_doc"),
+                        |ui| {
+                            ui.monospace(
+                                egui::RichText::new(format!("{word} — entity kind")).color(HL_VARIABLE),
+                            );
+                            ui.label("A kind constant: pass it to closest() or exists().");
+                        },
+                    );
+                }
+            }
+        }
+
+        // Live parse status, so squiggles come with words.
+        if let Err(e) = pyrite::parse(&editor.code, &pyrite::UnlockSet::all()) {
+            ui.colored_label(HL_ERROR, format!("parse error: {e}"));
         }
         ui.horizontal(|ui| {
             for (label, color) in [("Deploy Green", BotColor::GREEN), ("Deploy Red", BotColor::RED)] {
@@ -2276,7 +2427,7 @@ mod tests {
     use super::*;
 
     fn spans(text: &str) -> Vec<(String, egui::Color32)> {
-        highlight_pyrite(text, egui::FontId::monospace(12.0))
+        highlight_pyrite(text, egui::FontId::monospace(12.0), None)
             .sections
             .iter()
             .map(|s| (text[s.byte_range.clone()].to_string(), s.format.color))
@@ -2352,12 +2503,62 @@ mod tests {
     #[test]
     fn highlight_covers_every_byte_exactly_once() {
         let text = "move_to(closest(ore).expect())\n# comment\nwhile True:\n    x = x + 1\n";
-        let job = highlight_pyrite(text, egui::FontId::monospace(12.0));
+        let job = highlight_pyrite(text, egui::FontId::monospace(12.0), Some(8..15));
         let mut pos = 0;
         for s in &job.sections {
             assert_eq!(s.byte_range.start, pos, "gap or overlap at byte {pos}");
             pos = s.byte_range.end;
         }
         assert_eq!(pos, text.len());
+    }
+
+    #[test]
+    fn squiggle_underlines_exactly_the_error_range() {
+        let text = "move_to(closest(ore))\n";
+        let job = highlight_pyrite(text, egui::FontId::monospace(12.0), Some(8..15));
+        for s in &job.sections {
+            let overlaps = s.byte_range.start < 15 && s.byte_range.end > 8;
+            assert_eq!(
+                s.format.underline != egui::Stroke::NONE,
+                overlaps,
+                "section {:?} ({})",
+                s.byte_range,
+                &text[s.byte_range.clone()]
+            );
+        }
+    }
+
+    #[test]
+    fn error_ranges_map_line_and_column_to_bytes() {
+        // Line 2, col 3 → from 'f' to that line's end.
+        assert_eq!(error_byte_range("abc\ndef ghi\nx", 2, 3), 6..11);
+        // Column past the line end → the whole line.
+        assert_eq!(error_byte_range("ab\ncd\n", 1, 9), 0..2);
+        // Line past EOF → the last character.
+        assert_eq!(error_byte_range("ab\ncd", 7, 1), 4..5);
+        // Multi-byte text: never split a char.
+        let r = error_byte_range("é\n", 5, 1);
+        assert_eq!(r, 0..2);
+    }
+
+    #[test]
+    fn parse_errors_squiggle_live_programs() {
+        // `if` needs a colon — the parser reports somewhere on line 1.
+        let err = pyrite::parse("if cargo_full()\n    mine()\n", &pyrite::UnlockSet::all())
+            .unwrap_err();
+        let range = error_byte_range("if cargo_full()\n    mine()\n", err.line, err.col);
+        assert!(!range.is_empty(), "error range must be visible");
+    }
+
+    #[test]
+    fn word_under_pointer() {
+        let src = "move_to(closest(ore))";
+        assert_eq!(word_at(src, 0), Some("move_to".into()));
+        assert_eq!(word_at(src, 3), Some("move_to".into()));
+        assert_eq!(word_at(src, 7), Some("move_to".into())); // on the '('
+        assert_eq!(word_at(src, 10), Some("closest".into()));
+        assert_eq!(word_at(src, 16), Some("ore".into()));
+        assert_eq!(word_at(src, src.len()), None); // after the final ')'
+        assert_eq!(word_at("  ", 1), None);
     }
 }

@@ -41,6 +41,8 @@ pub struct Tuning {
     pub capacity: u32,
     /// Freeze duration after bumping into an occupied tile (50 = 5s @10Hz).
     pub bump_freeze_ticks: u32,
+    /// Collisions are accidents: BOTH bots take this chassis damage.
+    pub bump_damage: i64,
     pub bridge_cost_ore: u64,
     /// Builder-ticks of labor a bridge takes.
     pub bridge_build_ticks: u32,
@@ -67,6 +69,7 @@ impl Default for Tuning {
             printed_cargo_cap: 2,
             capacity: 10_000,
             bump_freeze_ticks: 50,
+            bump_damage: 2,
             bridge_cost_ore: 3,
             bridge_build_ticks: 20,
             overlay_cost_ore: 1,
@@ -549,8 +552,8 @@ impl Sim {
                     let dodges = self.sidestep_candidates(id, from, entered, &goals);
                     if dodges.is_empty() {
                         let bot = self.world.bots.get_mut(&id).expect("bot exists");
-                        bot.data.bump_frozen = self.tuning.bump_freeze_ticks;
                         bot.data.action = Some(Action::Move { path, ticks_left: 1, goals });
+                        self.bump_both(id, entered);
                     } else {
                         let pick = (self.world.next_rand() % dodges.len() as u64) as usize;
                         let step = dodges[pick];
@@ -765,9 +768,9 @@ impl Sim {
             let entered = recall.path[0];
             if self.world.tile_occupied(entered, id) {
                 let bot = self.world.bots.get_mut(&id).expect("bot exists");
-                bot.data.bump_frozen = self.tuning.bump_freeze_ticks;
                 recall.ticks_left = 1;
                 bot.data.recall = Some(recall);
+                self.bump_both(id, entered);
                 return;
             }
             let bot = self.world.bots.get_mut(&id).expect("bot exists");
@@ -1048,6 +1051,33 @@ impl Sim {
         bot.data.recall = Some(Recall { path, ticks_left, home, purpose });
         if let Some(vm) = bot.vm.as_mut() {
             vm.set_engine_interrupt(true);
+        }
+    }
+
+    /// A collision: both parties recoil, freeze, and take chassis damage
+    /// (routed through apply_damage, so signals — and the double-handle
+    /// rule during boots/recalls — apply as for any other damage).
+    fn bump_both(&mut self, mover: BotId, tile: TilePos) {
+        let blocker = self
+            .world
+            .bots
+            .values()
+            .filter(|b| b.data.id != mover && !b.data.dying && b.data.pos == tile)
+            .map(|b| b.data.id)
+            .min();
+        let freeze = self.tuning.bump_freeze_ticks;
+        if let Some(bot) = self.world.bots.get_mut(&mover) {
+            bot.data.bump_frozen = freeze;
+        }
+        if let Some(blocker) = blocker
+            && let Some(bot) = self.world.bots.get_mut(&blocker)
+        {
+            bot.data.bump_frozen = freeze;
+        }
+        let damage = self.tuning.bump_damage;
+        self.apply_damage(mover, damage);
+        if let Some(blocker) = blocker {
+            self.apply_damage(blocker, damage);
         }
     }
 

@@ -323,14 +323,8 @@ impl Vm {
         host: &mut dyn Host,
         costs: &CostTable,
     ) -> RaiseOutcome {
-        match self.state {
-            State::Dead | State::Exploded => return RaiseOutcome::Ignored,
-            State::Blocked => {
-                // Handlers fire while blocked; the pending action is
-                // abandoned (the sim should cancel it).
-                self.state = State::Running;
-            }
-            State::Running => {}
+        if matches!(self.state, State::Dead | State::Exploded) {
+            return RaiseOutcome::Ignored;
         }
         if self.engine_interrupt || self.phase != Phase::Main {
             self.state = State::Exploded;
@@ -342,7 +336,13 @@ impl Vm {
         };
         let Some(handler) = self.program.handlers.get(&kind) else {
             return match signal {
-                Signal::Hurt => RaiseOutcome::Ignored,
+                Signal::Hurt => {
+                    // No handler: nothing happens — and critically, a
+                    // Blocked VM STAYS blocked (its pending action result
+                    // is still owed; un-blocking here would desync the
+                    // work/value stacks — the underflow bug).
+                    RaiseOutcome::Ignored
+                }
                 Signal::Death => {
                     // No death handler: straight to the forced call.
                     let _ = host.call("become_disabled", &[], self.ctx());
@@ -351,6 +351,9 @@ impl Vm {
                 }
             };
         };
+        // Entering a handler abandons any pending action (the sim cancels
+        // the world side); only now is un-blocking sound.
+        self.state = State::Running;
         let body = handler.body.clone();
         // Variables are preserved while a handler runs; work/values are not.
         self.work = Self::block_work(&body);

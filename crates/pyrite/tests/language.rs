@@ -714,3 +714,19 @@ fn kind_constants_are_shadowable_and_survive_the_wrap() {
         host.calls.iter().filter(|(n, _)| n == "log").map(|(_, a)| &a[0]).collect();
     assert_eq!(logged[2], &Value::Str("ore".into()), "wrap restores the constant");
 }
+
+#[test]
+fn ignored_signal_does_not_unblock_a_pending_action() {
+    // Regression: hurt with NO handler while blocked on an action must
+    // leave the VM blocked — un-blocking desynced the work/value stacks
+    // (stack underflow on the next run).
+    let (mut vm, mut host, costs) = vm_for("move_to(5)\nlog(1)\nhalt()\n");
+    host.blocking.insert("move_to".into());
+    vm.grant(100);
+    assert_eq!(vm.run(&mut host, &costs), Outcome::Blocked);
+    assert_eq!(vm.raise(Signal::Hurt, &mut host, &costs), RaiseOutcome::Ignored);
+    assert!(vm.is_blocked(), "ignored signal must not unblock");
+    vm.resolve_action(Ok(Value::Unit), &mut host, &costs);
+    vm.run(&mut host, &costs);
+    assert!(call_names(&host).contains(&"log"), "program continues cleanly");
+}

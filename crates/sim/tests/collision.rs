@@ -33,6 +33,7 @@ fn bots_never_overlap_and_bumps_freeze() {
     }
     spec.depots.push(TilePos::new(0, 1));
     let mut sim = Sim::new(&spec);
+    sim.tuning.bump_damage = 0; // freeze/replan semantics test
     let blocker = spawn(&mut sim, TilePos::new(1, 1), IDLER);
     let mover = spawn(&mut sim, TilePos::new(4, 1), "move_to(closest(depot).expect())\n");
 
@@ -62,6 +63,7 @@ fn frozen_bots_do_not_think() {
     }
     spec.depots.push(TilePos::new(0, 1));
     let mut sim = Sim::new(&spec);
+    sim.tuning.bump_damage = 0; // frozen-brain semantics test
     spawn(&mut sim, TilePos::new(1, 1), IDLER);
     let mover = spawn(&mut sim, TilePos::new(3, 1), "move_to(closest(depot).expect())\nlog(9)\n");
 
@@ -168,5 +170,62 @@ fn wait_idles_for_the_requested_ticks() {
     assert!(
         !sim.world.bots[&bot].data.log_buf.is_empty(),
         "log runs once the wait completes"
+    );
+}
+
+#[test]
+fn bumps_hurt_both_parties() {
+    // One-tile corridor: mover repeatedly bumps the idler. Both bleed.
+    let mut spec = MapSpec::empty(7, 3);
+    for x in 0..7 {
+        spec.water.push(TilePos::new(x, 0));
+        spec.water.push(TilePos::new(x, 2));
+    }
+    spec.depots.push(TilePos::new(0, 1));
+    let mut sim = Sim::new(&spec);
+    let blocker = spawn(&mut sim, TilePos::new(1, 1), IDLER);
+    let mover = spawn(&mut sim, TilePos::new(3, 1), "move_to(closest(depot).expect())\n");
+    for _ in 0..200 {
+        sim.step();
+    }
+    let blocker_hp = sim.world.bots[&blocker].data.hp;
+    let mover_hp = sim.world.bots[&mover].data.hp;
+    assert!(blocker_hp < 100, "the bumped bot takes damage too ({blocker_hp})");
+    assert!(mover_hp < 100, "the bumper takes damage ({mover_hp})");
+    assert_eq!(blocker_hp, mover_hp, "collisions are symmetric");
+    // The blocker also recoils: it was frozen at some point.
+    // (both frozen simultaneously right after each bump)
+}
+
+#[test]
+fn corridor_deadlock_ends_in_mutual_destruction() {
+    // Two movers head-on in a one-tile corridor, nowhere to dodge: they
+    // grind each other down and both die — the deadlock self-clears the
+    // expensive way (wrecks don't block).
+    let mut spec = MapSpec::empty(8, 3);
+    for x in 0..8 {
+        spec.water.push(TilePos::new(x, 0));
+        spec.water.push(TilePos::new(x, 2));
+    }
+    spec.depots.push(TilePos::new(0, 1));
+    spec.ore_nodes.push((TilePos::new(7, 1), 50));
+    let mut sim = Sim::new(&spec);
+    sim.tuning.fault_damage = 0; // isolate bump damage
+    let east = spawn(&mut sim, TilePos::new(2, 1), "move_to(closest(ore).expect())\nmine()\n");
+    let west = spawn(&mut sim, TilePos::new(5, 1), "move_to(closest(depot).expect())\n");
+    // Low hp so the grind finishes within the test.
+    sim.world.bots.get_mut(&east).unwrap().data.hp = 10;
+    sim.world.bots.get_mut(&east).unwrap().data.max_hp = 10;
+    sim.world.bots.get_mut(&west).unwrap().data.hp = 10;
+    sim.world.bots.get_mut(&west).unwrap().data.max_hp = 10;
+    for _ in 0..1500 {
+        sim.step();
+        if !sim.world.bots.contains_key(&east) && !sim.world.bots.contains_key(&west) {
+            break;
+        }
+    }
+    assert!(
+        !sim.world.bots.contains_key(&east) && !sim.world.bots.contains_key(&west),
+        "head-on deadlock must end in mutual destruction"
     );
 }
