@@ -71,7 +71,7 @@ impl Default for Tuning {
             bridge_build_ticks: 20,
             overlay_cost_ore: 1,
             fault_damage: 5,
-            regen_interval_ticks: 5,
+            regen_interval_ticks: 1000,
             regen_amount: 1,
         }
     }

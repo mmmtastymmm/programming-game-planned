@@ -261,6 +261,7 @@ on hurt:
 wait(2)
 ";
     let mut sim = Sim::new(&MapSpec::empty(5, 5));
+    sim.tuning.regen_interval_ticks = 5; // fast regen: this test pins the mechanism, not the rate
     let bot = spawn(&mut sim, TilePos::new(2, 2), hurt_src, 0, 100);
     for _ in 0..4 {
         sim.step();

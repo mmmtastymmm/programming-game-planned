@@ -11,6 +11,140 @@ use pyrite::{HostCall, Value};
 /// every bot VM (see `Sim::new`), so programs write `closest(ore)` bare.
 pub const KINDS: &[&str] = &["blueprint", "depot", "enemy", "ore"];
 
+/// Editor-facing documentation for one callable (builtin or the `.expect()`
+/// method). Cycle costs are deliberately NOT written here — the editor reads
+/// them from the live cost table, so tuning changes can't leave docs stale.
+pub struct BuiltinDoc {
+    pub name: &'static str,
+    pub signature: &'static str,
+    pub summary: &'static str,
+    /// What the base cost excludes, e.g. " + travel" (empty when flat).
+    pub cost_note: &'static str,
+}
+
+/// Docs for every builtin the host implements (plus `.expect()`). Shown in
+/// the editor on hover.
+pub const BUILTIN_DOCS: &[BuiltinDoc] = &[
+    BuiltinDoc {
+        name: "closest",
+        signature: "closest(kind) -> Result",
+        summary: "Nearest entity of a kind (blueprint / depot / enemy / ore). \
+                  Gives Result.Ok(entity), or Result.Err(msg) when none exist — \
+                  unwrap with .expect() or handle with match.",
+        cost_note: "",
+    },
+    BuiltinDoc {
+        name: "exists",
+        signature: "exists(kind) -> bool",
+        summary: "True while at least one entity of the kind exists.",
+        cost_note: "",
+    },
+    BuiltinDoc {
+        name: "expect",
+        signature: "result.expect() -> entity",
+        summary: "Unwrap a Result: Ok gives the value; Err faults with the \
+                  carried message (crash dump unless an error handler is installed).",
+        cost_note: "",
+    },
+    BuiltinDoc {
+        name: "move_to",
+        signature: "move_to(entity)",
+        summary: "Pathfind to the target and walk there. Blocks until arrival; \
+                  faults if no route exists.",
+        cost_note: " + travel",
+    },
+    BuiltinDoc {
+        name: "mine",
+        signature: "mine()",
+        summary: "Extract ore from a node in range into cargo. Blocks; faults \
+                  with no ore in range.",
+        cost_note: " + action",
+    },
+    BuiltinDoc {
+        name: "deposit",
+        signature: "deposit()",
+        summary: "Unload all cargo into a depot in range. Blocks; faults with \
+                  no depot in range.",
+        cost_note: " + action",
+    },
+    BuiltinDoc {
+        name: "build",
+        signature: "build()",
+        summary: "Work the nearest blueprint in range, 1 progress per tick. \
+                  Blocks; faults when none is in range.",
+        cost_note: " + action",
+    },
+    BuiltinDoc {
+        name: "attack",
+        signature: "attack(entity)",
+        summary: "Strike the target while adjacent. Blocks for the swing.",
+        cost_note: " + action",
+    },
+    BuiltinDoc {
+        name: "wait",
+        signature: "wait(n)",
+        summary: "Idle for n ticks — deliberate pacing, the Tier-0 traffic tool.",
+        cost_note: " + n idle ticks",
+    },
+    BuiltinDoc {
+        name: "rng",
+        signature: "rng(n) -> int",
+        summary: "Uniform random integer in [0, n) from the sim's seeded \
+                  stream (identical programs can desync on purpose: wait(rng(20))).",
+        cost_note: "",
+    },
+    BuiltinDoc {
+        name: "cargo_full",
+        signature: "cargo_full() -> bool",
+        summary: "True when cargo is at capacity.",
+        cost_note: "",
+    },
+    BuiltinDoc {
+        name: "health_low",
+        signature: "health_low() -> bool",
+        summary: "True below 50% hp — the Damaged threshold.",
+        cost_note: "",
+    },
+    BuiltinDoc {
+        name: "last_error",
+        signature: "last_error() -> string",
+        summary: "The most recent fault message; mainly for on error: handlers.",
+        cost_note: "",
+    },
+    BuiltinDoc {
+        name: "log",
+        signature: "log(value, ...)",
+        summary: "Append one line to the bot's local ring buffer (drops the \
+                  oldest line when full).",
+        cost_note: "",
+    },
+    BuiltinDoc {
+        name: "upload_log",
+        signature: "upload_log()",
+        summary: "Transmit the log buffer to the colony cloud and clear it.",
+        cost_note: " + size",
+    },
+    BuiltinDoc {
+        name: "upload_crash_dump",
+        signature: "upload_crash_dump()",
+        summary: "File a full debug report to the cloud. The engine force-calls \
+                  this on any unhandled fault.",
+        cost_note: "",
+    },
+    BuiltinDoc {
+        name: "become_disabled",
+        signature: "become_disabled()",
+        summary: "Wreck this bot and start its self-destruct countdown — a \
+                  deliberate scuttle. Also forced at the end of on death:.",
+        cost_note: "",
+    },
+];
+
+/// Doc entry for a builtin or method, by name.
+pub fn builtin_doc(name: &str) -> Option<&'static BuiltinDoc> {
+    BUILTIN_DOCS.iter().find(|d| d.name == name)
+}
+
 pub struct BotHost<'a> {
     pub world: &'a mut World,
     pub bot: BotId,
@@ -174,6 +308,32 @@ impl pyrite::Host for BotHost<'_> {
             }
 
             other => HostCall::Fault(format!("unknown function {other}()")),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::BTreeSet;
+
+    #[test]
+    fn builtin_docs_are_unique_and_costed() {
+        let costs = pyrite::CostTable::default();
+        let mut seen = BTreeSet::new();
+        for doc in BUILTIN_DOCS {
+            assert!(seen.insert(doc.name), "duplicate doc for {}", doc.name);
+            // The editor shows a live cost next to each doc — every entry
+            // must exist in the cost table or the display lies.
+            // (upload_crash_dump is costed by the dedicated crash_dump field.)
+            assert!(
+                doc.name == "upload_crash_dump" || costs.builtins.contains_key(doc.name),
+                "{} documented but missing from the cost table",
+                doc.name
+            );
+        }
+        for name in ["closest", "exists", "expect"] {
+            assert!(builtin_doc(name).is_some(), "{name} needs docs");
         }
     }
 }

@@ -15,7 +15,7 @@
 //! Run: `cargo run -p game`
 
 use bevy::asset::RenderAssetUsages;
-use bevy::input::mouse::{MouseMotion, MouseWheel};
+use bevy::input::mouse::MouseWheel;
 use bevy::prelude::*;
 use bevy::render::mesh::Indices;
 use bevy::render::render_resource::PrimitiveTopology;
@@ -888,7 +888,8 @@ fn orbit_camera(
     mut gesture: ResMut<LmbGesture>,
     buttons: Res<ButtonInput<MouseButton>>,
     keys: Res<ButtonInput<KeyCode>>,
-    mut motion: EventReader<MouseMotion>,
+    windows: Query<&Window>,
+    mut last_cursor: Local<Option<Vec2>>,
     mut wheel: EventReader<MouseWheel>,
     mut cams: Query<(&mut OrbitCam, &mut Transform)>,
 ) {
@@ -897,19 +898,15 @@ fn orbit_camera(
     let over_ui = contexts.try_ctx_mut().is_some_and(|ctx| ctx.wants_pointer_input());
     let Ok((mut cam, mut transform)) = cams.single_mut() else { return };
 
-    let delta: Vec2 = motion.read().map(|m| m.delta).sum();
-    if buttons.pressed(MouseButton::Left) || buttons.just_released(MouseButton::Left) {
-        eprintln!(
-            "DBG lmb pressed={} released={} delta={:?} over_ui={} armed={} travel={:?} panning={}",
-            buttons.pressed(MouseButton::Left),
-            buttons.just_released(MouseButton::Left),
-            delta,
-            contexts.try_ctx_mut().is_some_and(|c| c.wants_pointer_input()),
-            editor.selected_build.is_some(),
-            gesture.travel,
-            gesture.panning,
-        );
-    }
+    // Cursor-position deltas rather than raw MouseMotion: identical for a
+    // mouse, but also correct for tablets/synthetic input, and it is the
+    // cursor the pan is anchored to anyway.
+    let cursor = windows.single().ok().and_then(|w| w.cursor_position());
+    let delta = match (cursor, *last_cursor) {
+        (Some(now), Some(before)) => now - before,
+        _ => Vec2::ZERO,
+    };
+    *last_cursor = cursor;
     let scroll: f32 = wheel.read().map(|w| w.y).sum();
 
     // LMB click-vs-drag: releasing inside the dead zone is the armed
