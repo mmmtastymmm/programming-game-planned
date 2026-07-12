@@ -27,6 +27,9 @@ pub const ATTACK_DAMAGE: i64 = 10;
 #[derive(Debug, Clone)]
 pub struct Tuning {
     pub print_ticks: u32,
+    /// Ore per print. DEFAULT FREE: a colony must never be soft-locked out
+    /// of bots (no ore + no bots = dead end). Maps/servers can set a cost;
+    /// population is bounded by dials and capacity either way.
     pub print_cost_ore: u64,
     pub repair_cost_ore: u64,
     pub scrap_refund_ore: u64,
@@ -64,9 +67,10 @@ impl Default for Tuning {
     fn default() -> Self {
         Self {
             print_ticks: 5,
-            print_cost_ore: 2,
+            print_cost_ore: 0,
             repair_cost_ore: 5,
-            scrap_refund_ore: 1,
+            // Zero while prints are free — otherwise print+scrap mints ore.
+            scrap_refund_ore: 0,
             boot_ticks: 2,
             printed_hp: 30,
             printed_cpu: 2,

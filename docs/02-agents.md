@@ -102,6 +102,7 @@ Levels are visible to **everyone** (pillar 2: transparency) — a veteran bot ha
 ## Reprinting Economics
 
 - Reprint cost = original print cost (no discount) — the *sting* is XP, not extra resources.
+- **Print cost is a match setting, default FREE** — a colony must never be soft-locked (no resources + no bots = no way to gather resources). Population stays bounded by printer dials and colony capacity; when a map does price prints, scrap refunds may be nonzero too (never exceeding print cost, or scrapping mints resources).
 - Fabricators keep a **blueprint registry**: destroyed bots appear in a "reprint queue" UI with one-click requeue.
 - Possible later unlock: *Backup Core* module — expensive, preserves 50% XP on destruction. Gated late so early losses stay meaningful ([06-progression.md](06-progression.md)).
 
