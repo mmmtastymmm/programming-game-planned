@@ -34,7 +34,7 @@ fn bots_never_overlap_and_bumps_freeze() {
     spec.depots.push(TilePos::new(0, 1));
     let mut sim = Sim::new(&spec);
     let blocker = spawn(&mut sim, TilePos::new(1, 1), IDLER);
-    let mover = spawn(&mut sim, TilePos::new(4, 1), "move_to(nearest_depot())\n");
+    let mover = spawn(&mut sim, TilePos::new(4, 1), "move_to(closest(depot).expect())\n");
 
     let mut saw_freeze = false;
     for _ in 0..300 {
@@ -63,7 +63,7 @@ fn frozen_bots_do_not_think() {
     spec.depots.push(TilePos::new(0, 1));
     let mut sim = Sim::new(&spec);
     spawn(&mut sim, TilePos::new(1, 1), IDLER);
-    let mover = spawn(&mut sim, TilePos::new(3, 1), "move_to(nearest_depot())\nlog(9)\n");
+    let mover = spawn(&mut sim, TilePos::new(3, 1), "move_to(closest(depot).expect())\nlog(9)\n");
 
     for _ in 0..40 {
         sim.step();
@@ -111,8 +111,8 @@ fn collision_world_is_deterministic() {
         spec.depots.push(TilePos::new(0, 1));
         let mut sim = Sim::new(&spec);
         spawn(&mut sim, TilePos::new(1, 1), IDLER);
-        spawn(&mut sim, TilePos::new(4, 1), "move_to(nearest_depot())\n");
-        spawn(&mut sim, TilePos::new(6, 1), "move_to(nearest_depot())\n");
+        spawn(&mut sim, TilePos::new(4, 1), "move_to(closest(depot).expect())\n");
+        spawn(&mut sim, TilePos::new(6, 1), "move_to(closest(depot).expect())\n");
         sim
     };
     let mut a = build();
@@ -132,7 +132,7 @@ fn sidestep_dodges_blocker_without_freezing() {
     spec.depots.push(TilePos::new(0, 1));
     let mut sim = Sim::new(&spec);
     let blocker = spawn(&mut sim, TilePos::new(2, 1), IDLER);
-    let mover = spawn(&mut sim, TilePos::new(4, 1), "move_to(nearest_depot())\n");
+    let mover = spawn(&mut sim, TilePos::new(4, 1), "move_to(closest(depot).expect())\n");
 
     for _ in 0..150 {
         sim.step();

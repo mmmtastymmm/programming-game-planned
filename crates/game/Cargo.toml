@@ -9,3 +9,7 @@ sim = { path = "../sim" }
 pyrite = { path = "../pyrite" }
 bevy = "0.16"
 bevy_egui = "0.34"
+
+# build.rs bakes assets/art/*.svg into assets/textures/*.png
+[build-dependencies]
+resvg = "0.45"

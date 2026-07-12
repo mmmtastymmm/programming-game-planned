@@ -244,6 +244,9 @@ impl World {
         for &pos in &spec.water {
             grid.set(pos, TileKind::Water);
         }
+        for &pos in &spec.bridges {
+            grid.set(pos, TileKind::Bridge);
+        }
         let mut world = Self {
             tick: 0,
             grid,

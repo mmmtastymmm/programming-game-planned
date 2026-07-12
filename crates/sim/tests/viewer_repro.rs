@@ -6,8 +6,8 @@ use sim::sim::{Command, Sim};
 use sim::world::{BlueprintKind, Color};
 use sim::TilePos;
 
-const MINER: &str = "if blueprint_exists():\n    move_to(nearest_blueprint())\n    build()\nmove_to(nearest_ore())\nmine()\nmove_to(nearest_depot())\ndeposit()\n";
-const BUILDER: &str = "move_to(nearest_blueprint())\nbuild()\nmove_to(nearest_depot())\n";
+const MINER: &str = "if exists(blueprint):\n    move_to(closest(blueprint).expect())\n    build()\nmove_to(closest(ore).expect())\nmine()\nmove_to(closest(depot).expect())\ndeposit()\n";
+const BUILDER: &str = "move_to(closest(blueprint).expect())\nbuild()\nmove_to(closest(depot).expect())\n";
 
 fn viewer_map() -> MapSpec {
     let mut spec = MapSpec::empty(24, 14);

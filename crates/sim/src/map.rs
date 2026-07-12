@@ -168,6 +168,8 @@ pub struct MapSpec {
     pub starting_ore: u64,
     /// Seed for the sim's RNG stream (dodge picks, later wander/combat).
     pub seed: u64,
+    /// Pre-built bridge tiles (placed over water at world build).
+    pub bridges: Vec<TilePos>,
 }
 
 /// A printer placed by the map (docs/03: colonies start with a working
@@ -194,6 +196,7 @@ impl MapSpec {
             printers: Vec::new(),
             starting_ore: 0,
             seed: 0x5EED_0001,
+            bridges: Vec::new(),
         }
     }
 }

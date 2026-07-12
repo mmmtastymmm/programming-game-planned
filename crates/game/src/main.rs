@@ -2,7 +2,7 @@
 //! bright emissive primitives on a dark void, orbit camera, and a live
 //! Pyrite editor panel on the left. No 3D models — bots are cubes whose six
 //! faces sample a baked SVG atlas, and terrain slabs sample baked SVG tiles
-//! (`assets/art/*.svg` -> `cargo bake` -> `assets/textures/*.png`). Team
+//! (`assets/art/*.svg` -> build.rs bake -> `assets/textures/*.png`). Team
 //! identity is a palette swap done at bake time.
 //!
 //! The sim steps on `FixedUpdate` at 10 Hz (docs/07 tick rate); rendering
@@ -30,12 +30,12 @@ use std::collections::{HashMap, HashSet};
 /// (Uses `if` — the dev sandbox runs with all constructs unlocked; the
 /// doc's true Tier-0 starter is the four mining lines alone.)
 const DEFAULT_PROGRAM: &str = "\
-if blueprint_exists():
-    move_to(nearest_blueprint())
+if exists(blueprint):
+    move_to(closest(blueprint).expect())
     build()
-move_to(nearest_ore())
+move_to(closest(ore).expect())
 mine()
-move_to(nearest_depot())
+move_to(closest(depot).expect())
 deposit()
 ";
 
@@ -82,6 +82,13 @@ struct Pose {
     fault_age: u32,
 }
 
+/// World-space progress bar over anything being built: root billboards
+/// toward the camera; the fill scales with progress (left-anchored).
+#[derive(Component)]
+struct BillboardBar;
+#[derive(Component)]
+struct ProgressFill;
+
 /// The translucent placement ghost (slab + one-way chevron children).
 #[derive(Component)]
 struct PreviewSlab;
@@ -118,6 +125,8 @@ struct ViewIndex {
     blueprints: HashMap<u64, Entity>,
     bridges: HashSet<(i32, i32)>,
     overlays: HashMap<(i32, i32), (Entity, OverlayKind)>,
+    /// Blueprint id -> its progress-bar fill entity.
+    blueprint_fills: HashMap<u64, Entity>,
     paint: HashMap<(i32, i32), (Entity, u8)>,
 }
 
@@ -150,6 +159,9 @@ struct Palette {
     preview_invalid_mat: Handle<StandardMaterial>,
     preview_chevron_mat: Handle<StandardMaterial>,
     paint_mats: [Handle<StandardMaterial>; 4],
+    bar_mesh: Handle<Mesh>,
+    bar_bg_mat: Handle<StandardMaterial>,
+    bar_fill_mat: Handle<StandardMaterial>,
 }
 
 #[derive(Resource)]
@@ -343,6 +355,11 @@ fn build_colony() -> Sim {
     }
     // Modest west-side ore keeps the colony alive pre-bridge.
     spec.ore_nodes.push((TilePos::new(8, 3), 25));
+    // Four ready-made crossings so every session doesn't start with
+    // bridge chores; add arrows to make lanes, or build more.
+    for y in [2, 5, 8, 11] {
+        spec.bridges.push(TilePos::new(16, y));
+    }
     spec.ore_nodes.push((TilePos::new(20, 3), 60));
     spec.ore_nodes.push((TilePos::new(19, 11), 40));
     spec.depots.push(TilePos::new(3, 7));
@@ -396,6 +413,8 @@ fn main() {
                 orbit_camera,
                 place_blueprint,
                 build_preview,
+                update_progress_bars,
+                billboard_bars,
                 sync_view,
                 interpolate,
                 spin,
@@ -615,6 +634,18 @@ fn setup_scene(
             base_color: Color::srgba(1.0, 0.85, 0.2, 0.7),
             emissive: LinearRgba::new(0.5, 0.35, 0.05, 1.0),
             alpha_mode: AlphaMode::Blend,
+            ..default()
+        }),
+        bar_mesh: meshes.add(Cuboid::new(0.9, 0.12, 0.02)),
+        bar_bg_mat: materials.add(StandardMaterial {
+            base_color: Color::srgb(0.07, 0.07, 0.10),
+            unlit: true,
+            ..default()
+        }),
+        bar_fill_mat: materials.add(StandardMaterial {
+            base_color: Color::srgb(0.3, 0.95, 0.35),
+            emissive: LinearRgba::new(0.1, 0.7, 0.12, 1.0),
+            unlit: true,
             ..default()
         }),
         paint_mats: PAINT_COLORS.map(|(r, gc, b)| {
@@ -1221,27 +1252,45 @@ fn sync_view(
         }
     });
 
-    // Blueprints: glowing ghost slabs that rise with build progress.
+    // Blueprints: glowing ghost slabs with a billboarded progress bar.
     for (id, bp) in &world.blueprints {
-        let grown = 0.15 + 0.85 * (bp.progress as f32 / bp.needed as f32);
-        match index.blueprints.get(&id.0) {
-            Some(&entity) => {
-                if let Ok(mut transform) = transforms.get_mut(entity) {
-                    transform.scale = Vec3::new(1.0, grown, 1.0);
-                }
-            }
-            None => {
-                let entity = commands
-                    .spawn((
-                        Mesh3d(palette.tile_slab.clone()),
-                        MeshMaterial3d(palette.print_glow_mat.clone()),
-                        Transform::from_translation(tile_xyz(world, bp.pos, 0.05))
-                            .with_scale(Vec3::new(1.0, grown, 1.0)),
-                    ))
-                    .id();
-                index.blueprints.insert(id.0, entity);
-            }
+        if index.blueprints.contains_key(&id.0) {
+            continue;
         }
+        let mut fill_entity = Entity::PLACEHOLDER;
+        let entity = commands
+            .spawn((
+                Mesh3d(palette.tile_slab.clone()),
+                MeshMaterial3d(palette.print_glow_mat.clone()),
+                Transform::from_translation(tile_xyz(world, bp.pos, 0.05)),
+            ))
+            .with_children(|parent| {
+                parent
+                    .spawn((
+                        BillboardBar,
+                        Transform::from_xyz(0.0, 0.9, 0.0),
+                        Visibility::default(),
+                    ))
+                    .with_children(|bar| {
+                        bar.spawn((
+                            Mesh3d(palette.bar_mesh.clone()),
+                            MeshMaterial3d(palette.bar_bg_mat.clone()),
+                            Transform::default(),
+                        ));
+                        fill_entity = bar
+                            .spawn((
+                                ProgressFill,
+                                Mesh3d(palette.bar_mesh.clone()),
+                                MeshMaterial3d(palette.bar_fill_mat.clone()),
+                                Transform::from_xyz(0.0, 0.0, 0.011)
+                                    .with_scale(Vec3::new(0.02, 0.8, 1.0)),
+                            ))
+                            .id();
+                    });
+            })
+            .id();
+        index.blueprints.insert(id.0, entity);
+        index.blueprint_fills.insert(id.0, fill_entity);
     }
     index.blueprints.retain(|id, entity| {
         if world.blueprints.contains_key(&sim::EntityId(*id)) {
@@ -1251,6 +1300,9 @@ fn sync_view(
             false
         }
     });
+    index
+        .blueprint_fills
+        .retain(|id, _| world.blueprints.contains_key(&sim::EntityId(*id)));
 
     // Finished bridges: baked plank tiles over the water. (Direction
     // arrows are an overlay layer now — see below.)
@@ -1362,6 +1414,32 @@ fn sync_view(
             Transform::from_translation(tile_xyz(world, bb.pos, 0.12)),
         ));
         index.black_boxes += 1;
+    }
+}
+
+/// Grow each blueprint's progress fill (left-anchored).
+fn update_progress_bars(
+    game: NonSend<GameSim>,
+    index: Res<ViewIndex>,
+    mut fills: Query<&mut Transform, With<ProgressFill>>,
+) {
+    for (id, bp) in &game.0.world.blueprints {
+        let Some(&fill) = index.blueprint_fills.get(&id.0) else { continue };
+        let Ok(mut transform) = fills.get_mut(fill) else { continue };
+        let p = (bp.progress as f32 / bp.needed as f32).clamp(0.02, 1.0);
+        transform.scale = Vec3::new(p, 0.8, 1.0);
+        transform.translation.x = -(0.9 * (1.0 - p)) / 2.0;
+    }
+}
+
+/// Progress bars always face the camera.
+fn billboard_bars(
+    cams: Query<&Transform, (With<Camera3d>, Without<BillboardBar>)>,
+    mut bars: Query<&mut Transform, (With<BillboardBar>, Without<Camera3d>)>,
+) {
+    let Ok(cam) = cams.single() else { return };
+    for mut bar in &mut bars {
+        bar.rotation = cam.rotation;
     }
 }
 
@@ -1542,7 +1620,7 @@ fn editor_ui(
                 let pending = game.0.world.blueprints.len();
                 if pending > 0 {
                     ui.small(format!(
-                        "{pending} blueprint(s) waiting for builders (nearest_blueprint / build)"
+                        "{pending} blueprint(s) waiting for builders (closest(blueprint) / build)"
                     ));
                 }
             });
@@ -1708,7 +1786,7 @@ mod tests {
 
     #[test]
     fn highlight_covers_every_byte_exactly_once() {
-        let text = "move_to(nearest_ore())\n# comment\nwhile True:\n    x = x + 1\n";
+        let text = "move_to(closest(ore).expect())\n# comment\nwhile True:\n    x = x + 1\n";
         let job = highlight_pyrite(text, egui::FontId::monospace(12.0));
         let mut pos = 0;
         for s in &job.sections {

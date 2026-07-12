@@ -519,7 +519,10 @@ impl Vm {
         {
             return Some(v.clone());
         }
-        self.globals.get(name).cloned()
+        if let Some(v) = self.globals.get(name) {
+            return Some(v.clone());
+        }
+        self.config.constants.get(name).cloned()
     }
 
     fn store(&mut self, name: String, value: Value) {

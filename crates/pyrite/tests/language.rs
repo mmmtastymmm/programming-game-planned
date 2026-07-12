@@ -54,7 +54,7 @@ fn call_names(host: &TestHost) -> Vec<&str> {
 
 #[test]
 fn tier0_program_parses_with_no_unlocks() {
-    let src = "move_to(nearest_ore())\nmine()\ndeposit()\n";
+    let src = "move_to(closest(ore).expect())\nmine()\ndeposit()\n";
     assert!(parse(src, &UnlockSet::none()).is_ok());
 }
 

@@ -30,7 +30,7 @@ Function blocks are **learned from Template Caches**: ruined installations holdi
 
 ```mermaid
 flowchart TD
-    START([Game start:<br/>straight-line programs +<br/>move_to, mine, deposit, nearest_ore])
+    START([Game start:<br/>straight-line programs +<br/>move_to, mine, deposit, closest(ore)])
 
     subgraph Constructs["Language constructs (one-time Data cost, PERMANENT)"]
         VAR["Variables — 10"]
@@ -48,7 +48,7 @@ flowchart TD
     subgraph Functions["Function blocks (found at Caches — number ≈ cache depth)"]
         F_SENSE["cargo_full, health_low — 5"]
         F_LOG["log, upload_log, last_error — 10"]
-        F_ATK["attack, nearest_enemy — 15"]
+        F_ATK["attack, closest(enemy) — 15"]
         F_BUILD["build, repair — 20"]
         F_SCAN["scan_enemies, scan_resources — 40"]
         F_AN["analyze — 30"]

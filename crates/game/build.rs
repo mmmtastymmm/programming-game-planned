@@ -1,11 +1,12 @@
-//! Asset bake: rasterize the SVG sources in `crates/game/assets/art` into
-//! the PNG textures the game loads from `crates/game/assets/textures`.
-//! Run with `cargo bake` (alias in .cargo/config.toml).
+//! Asset bake: rasterize the SVG sources in `assets/art` into the PNG
+//! textures the game loads from `assets/textures`. Runs automatically when
+//! anything under `assets/art` changes (`cargo bake` is an alias for a
+//! plain build of this crate).
 //!
 //! Bot faces are authored once in the green master palette; team variants
-//! are string-level palette swaps of the accent hexes, baked into one
-//! 3x2 atlas per team (front/right/back over left/top/bottom — the same
-//! layout `bot_cube_mesh` in the game crate maps UVs to).
+//! are string-level palette swaps of the accent hexes, baked into one 3x2
+//! atlas per team (front/right/back over left/top/bottom — the same layout
+//! `bot_cube_mesh` in main.rs maps UVs to).
 
 use resvg::{tiny_skia, usvg};
 use std::fs;
@@ -46,22 +47,22 @@ fn render(svg: &str, px: u32) -> tiny_skia::Pixmap {
 }
 
 fn main() {
-    // xtask lives at <workspace>/xtask.
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().expect("workspace root");
-    let art = root.join("crates/game/assets/art");
-    let out = root.join("crates/game/assets/textures");
+    println!("cargo:rerun-if-changed=assets/art");
+
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let art = root.join("assets/art");
+    let out = root.join("assets/textures");
     fs::create_dir_all(&out).expect("create textures dir");
 
     for tile in TILES {
         let svg = fs::read_to_string(art.join(format!("{tile}.svg"))).expect("tile svg");
-        let path = out.join(format!("{tile}.png"));
-        render(&svg, SIZE).save_png(&path).expect("save tile png");
-        println!("baked {}", path.display());
+        render(&svg, SIZE)
+            .save_png(out.join(format!("{tile}.png")))
+            .expect("save tile png");
     }
 
     for (team, colors) in TEAMS {
-        let mut atlas =
-            tiny_skia::Pixmap::new(SIZE * 3, SIZE * 2).expect("atlas alloc");
+        let mut atlas = tiny_skia::Pixmap::new(SIZE * 3, SIZE * 2).expect("atlas alloc");
         for (face, col, row) in FACES {
             let mut svg = fs::read_to_string(art.join(format!("bot_face_{face}.svg")))
                 .expect("face svg");
@@ -78,8 +79,8 @@ fn main() {
                 None,
             );
         }
-        let path = out.join(format!("bot_atlas_{team}.png"));
-        atlas.save_png(&path).expect("save atlas png");
-        println!("baked {}", path.display());
+        atlas
+            .save_png(out.join(format!("bot_atlas_{team}.png")))
+            .expect("save atlas png");
     }
 }

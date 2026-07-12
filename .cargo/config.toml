@@ -1,3 +1,4 @@
 [alias]
 # Rasterize crates/game/assets/art/*.svg -> crates/game/assets/textures/*.png
-bake = "run -p xtask"
+# (game's build.rs does the bake; it reruns whenever assets/art changes)
+bake = "build -p game"

@@ -9,9 +9,9 @@ use sim::TilePos;
 
 /// The doc's Tier-0 starter program, verbatim (docs/01-language.md).
 const MINER: &str = "\
-move_to(nearest_ore())
+move_to(closest(ore).expect())
 mine()
-move_to(nearest_depot())
+move_to(closest(depot).expect())
 deposit()
 ";
 
@@ -93,7 +93,7 @@ fn hash_sequences_match_tick_by_tick() {
 
 #[test]
 fn ore_depletes_then_program_faults_into_crash_dumps() {
-    // 10 ore, cargo trips of 3: eventually nearest_ore() faults ("no ore
+    // 10 ore, cargo trips of 3: eventually closest(ore).expect() faults ("no ore
     // anywhere") → forced crash dump in the archive. Requirement: the
     // failure is *visible*, not silent.
     let sim = run_mining_sim(3000);

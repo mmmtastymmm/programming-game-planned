@@ -92,7 +92,7 @@ on error:
 
 on hurt:
     drop_cargo()
-    move_to(nearest_repair_bay())
+    move_to(closest(repair_bay).expect())
 
 on death:
     log(position())
@@ -163,9 +163,9 @@ Constructs are unlocked in tiers ([06-progression.md](06-progression.md) owns th
 Only sequential calls to unlocked function blocks. No state, no branching.
 
 ```python
-move_to(nearest_ore())
+move_to(closest(ore).expect())
 mine()
-move_to(nearest_depot())
+move_to(closest(depot).expect())
 deposit()
 # program loops back to line 1
 ```
@@ -173,7 +173,7 @@ deposit()
 ### Tier 1 — Variables & arithmetic
 
 ```python
-target = nearest_ore()
+target = closest(ore).expect()
 move_to(target)
 mine()
 ```
@@ -182,7 +182,7 @@ mine()
 
 ```python
 if cargo_full():
-    move_to(nearest_depot())
+    move_to(closest(depot).expect())
     deposit()
 else:
     mine()
@@ -207,7 +207,7 @@ The big one: reusable subroutines, shareable across your colony as a **program l
 
 ```python
 def haul_home():
-    move_to(nearest_depot())
+    move_to(closest(depot).expect())
     deposit()
 ```
 
@@ -311,6 +311,19 @@ Intel wrinkle: a ghost fleet can still be salvaged toward its color's decryption
 
 Deliberately small: `int` (i64), `bool`, `string` (labels/channels only, no manipulation initially), `entity` (opaque handle to a world object), `list`, and `enum` values (user-declared sum types with associated data, Tier 6). **No floats** — all world math is fixed-point internally and exposed to Pyrite as scaled integers (e.g. positions in millitiles).
 
+Two builtin conventions ride on these types:
+
+- **Kind constants** — `ore`, `depot`, `enemy`, `blueprint` (later `repair_bay`, …) are pre-bound global constants naming entity kinds. The generic queries take them as arguments: `closest(ore)`, `exists(blueprint)`. Assignments may shadow them (they're ordinary names), and they survive post-fault restarts.
+- **`Result`** — a builtin enum for fallible queries: `Result.Ok(entity)` / `Result.Err(msg)`. Unwrap with `.expect()` (returns the entity, or faults with the carried message) or handle the miss fault-free with `match`:
+
+```python
+match closest(ore):
+    case Result.Ok(t):
+        move_to(t)
+    case Result.Err(msg):
+        wait(10)
+```
+
 ## Built-in Function Blocks (starter set)
 
 The full catalog and unlock order live in [06-progression.md](06-progression.md). Signature style:
@@ -320,7 +333,9 @@ The full catalog and unlock order live in [06-progression.md](06-progression.md)
 | `move_to(entity\|pos)` | 2 + travel | Pathfind and move; blocks until arrival or failure |
 | `mine()` | 2 + action | Extract from resource node in range |
 | `deposit()` | 1 + action | Unload cargo to depot in range |
-| `nearest_ore()` → entity | 3 | Query, sensor-range limited |
+| `closest(kind)` → `Result` | 3 | Generic nearest-of-kind query, sensor-range limited; `Result.Ok(entity)` / `Result.Err(msg)` |
+| `exists(kind)` → bool | 1 | Any entity of `kind` in sensor range? |
+| `.expect()` (method on `Result`) | 1 | Unwrap: `Ok` → the entity; `Err` → faults with the message |
 | `cargo_full()` → bool | 1 | |
 | `attack(entity)` | 2 + action | |
 | `scan_enemies()` → list | 4 | Requires Tier 5 |
@@ -338,11 +353,9 @@ The full catalog and unlock order live in [06-progression.md](06-progression.md)
 | `recover_black_box(entity)` | 2 + action | Pick up a Black Box and bank its contents to the cloud |
 | `last_error()` → string | 1 | Most recent fault; mainly for handlers |
 | `drop_cargo()` | 1 + action | Dump cargo on current tile (grabbable by others) |
-| `nearest_repair_bay()` → entity | 3 | |
 | `wait(n)` | 1 + n idle ticks | Deliberate idling; the Tier-0 traffic tool |
 | `rng(n)` → int | 1 | Uniform in [0, n) from the sim's seeded stream — `wait(rng(20))` desyncs identical programs |
-| `nearest_blueprint()` → entity | 3 | Player-placed terraform sites ([05-terrain.md](05-terrain.md)) |
-| `build()` | 2 + action | Work the nearest in-range blueprint, 1 progress/tick; earns Building XP |
+| `build()` | 2 + action | Work the nearest in-range blueprint (a `blueprint`-kind entity, [05-terrain.md](05-terrain.md)), 1 progress/tick; earns Building XP |
 
 ## Editor & Player Experience
 
@@ -364,6 +377,7 @@ The full catalog and unlock order live in [06-progression.md](06-progression.md)
 - **Recall** — the fifth signal, engine-fixed and un-writable: printers over their desired max recall the lowest-XP bot of their color for re-coloring (XP kept); an over-capacity colony recalls its lowest-XP bot for scrap. Recall is an interrupt context — double-handle applies all the way home.
 - **Logging is ordinary functions** — `log`, `upload_log`, `upload_crash_dump` are costed builtins, so telemetry and black boxes are player-built, not engine magic (with the forced crash dump as the guaranteed floor).
 - **Loops** — `while` + `break`/`continue` at Tier 3; Python-style `for x in container` with containers at Tier 5. Implicit program loop stays; `while True:` legal but redundant.
+- **Generic fallible queries** — `exists(kind)` / `closest(kind)` with bare kind constants (`ore`, `depot`, `enemy`, `blueprint`, …) replace the old `nearest_*` / `*_exists` builtin family. `closest` returns the builtin `Result` enum (`Result.Ok(entity)` / `Result.Err(msg)`); unwrap with the `.expect()` method (faults with the message on `Err` — same behavior the old builtins had on a miss) or handle fault-free with `match`. Kind constants are host-bound names, shadowable, and survive post-fault restarts.
 
 - **Messaging is blocking channels, not signals** — a 2×2 API: `send`/`try_send` (one receiver) and `broadcast`/`try_broadcast` (all receivers), each blocking-with-timeout or fire-and-forget (unheard messages are lost); `receive(timeout)`/`try_receive` on the other end. No queues. Timeouts fault. **Blocking burns cycles** — waiting is what the CPU is doing, so listening posts and rendezvous have real compute cost. Any value travels; enums + `match` (Tier 6) make channel traffic into typed protocols.
 - **Enums & `match`** — Rust-style sum types with associated data, Tier 6 construct.

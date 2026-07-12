@@ -91,7 +91,7 @@ pub enum Command {
     /// Fix a ruined printer (Data cost; ore stands in until Data exists).
     RepairPrinter { printer: EntityId },
     /// Designate a terraform site (the build UI's output). Bots do the
-    /// labor via nearest_blueprint()/build().
+    /// labor via closest(blueprint).expect()/build().
     PlaceBlueprint { pos: TilePos, kind: BlueprintKind },
     /// Set or clear a traffic overlay on any tile — instant signage, not
     /// construction (small ore cost to place; clearing is free).
@@ -109,10 +109,17 @@ pub struct Sim {
 
 impl Sim {
     pub fn new(spec: &MapSpec) -> Self {
+        let mut vm_config = VmConfig::default();
+        // Entity-kind constants for the generic queries: `closest(ore)`,
+        // `exists(blueprint)`, ... They live in the config (not globals) so
+        // they survive the post-fault VM reset; assignments can shadow them.
+        for kind in crate::host::KINDS {
+            vm_config.constants.insert(kind.to_string(), Value::Str(kind.to_string()));
+        }
         Self {
             world: World::from_spec(spec),
             costs: CostTable::default(),
-            vm_config: VmConfig::default(),
+            vm_config,
             tuning: Tuning::default(),
         }
     }

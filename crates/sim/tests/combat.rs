@@ -8,7 +8,7 @@ use sim::world::Color;
 use sim::TilePos;
 
 /// A stationary attacker: hits the nearest enemy forever.
-const BRAWLER: &str = "attack(nearest_enemy())\n";
+const BRAWLER: &str = "attack(closest(enemy).expect())\n";
 
 /// A harmless idler.
 const IDLER: &str = "log(1)\n";
@@ -81,10 +81,13 @@ log(1)
 ";
     let mut sim = Sim::new(&MapSpec::empty(5, 5));
     spawn(&mut sim, TilePos::new(1, 1), BRAWLER, 1, 100);
-    let victim = spawn(&mut sim, TilePos::new(2, 1), victim_src, 0, 100);
+    // Generous hp: the gap between "hurt fires" (<20% = 40hp) and death
+    // must fit the whole handler regardless of attack cadence — this test
+    // is about the threshold, not the double-handle race.
+    let victim = spawn(&mut sim, TilePos::new(2, 1), victim_src, 0, 200);
 
     let mut hp_at_fire = None;
-    for _ in 0..600 {
+    for _ in 0..900 {
         sim.step();
         if hp_at_fire.is_none() && sim.world.archive.iter().any(|e| e.text.contains("late")) {
             hp_at_fire = sim.world.bots.get(&victim).map(|b| b.data.hp);
@@ -92,7 +95,7 @@ log(1)
         }
     }
     let hp = hp_at_fire.expect("custom-threshold hurt handler must fire");
-    assert!(hp < 20, "on hurt(20) fires below 20% — fired at hp {hp}");
+    assert!(hp * 100 < 20 * 200, "on hurt(20) fires below 20% — fired at hp {hp}");
 }
 
 #[test]
@@ -123,12 +126,12 @@ log(1)
 
 #[test]
 fn fault_inside_hurt_handler_is_double_handle_no_wreck() {
-    // The hurt handler calls nearest_depot() on a map with no depot: the
+    // The hurt handler calls closest(depot).expect() on a map with no depot: the
     // fault inside the handler is a double handle — instant destruction,
     // no wreck, but a Black Box with the cause.
     let victim_src = "\
 on hurt:
-    move_to(nearest_depot())
+    move_to(closest(depot).expect())
 
 log(1)
 ";
@@ -158,7 +161,7 @@ fn lethal_damage_during_hurt_handler_explodes() {
     // brawler keeps swinging — death mid-handler is a double handle.
     let victim_src = "\
 on hurt:
-    move_to(nearest_depot())
+    move_to(closest(depot).expect())
 
 log(1)
 ";

@@ -7,7 +7,7 @@ use sim::world::{Color, PrinterState};
 use sim::{EntityId, TilePos};
 
 const IDLER: &str = "log(1)\n";
-const BRAWLER: &str = "attack(nearest_enemy())\n";
+const BRAWLER: &str = "attack(closest(enemy).expect())\n";
 
 /// Base map: a working Green printer and a ruined Red one (the doc's
 /// starting state), plus seed ore.

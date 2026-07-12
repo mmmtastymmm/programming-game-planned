@@ -6,6 +6,11 @@ use crate::world::{ActionRequest, ArchiveEntry, ArchiveKind, BotId, EntityId, Wo
 use pyrite::vm::CallCtx;
 use pyrite::{HostCall, Value};
 
+/// Entity kinds understood by the generic queries (`exists(kind)`,
+/// `closest(kind)`). Each is bound as a global constant of the same name in
+/// every bot VM (see `Sim::new`), so programs write `closest(ore)` bare.
+pub const KINDS: &[&str] = &["blueprint", "depot", "enemy", "ore"];
+
 pub struct BotHost<'a> {
     pub world: &'a mut World,
     pub bot: BotId,
@@ -17,6 +22,31 @@ impl BotHost<'_> {
         bot.data.requested = Some(req);
         HostCall::Block
     }
+
+    /// Nearest entity of `kind` to this bot, or None if none exist.
+    fn find_kind(&self, kind: &str) -> Option<EntityId> {
+        let bot = &self.world.bots[&self.bot].data;
+        match kind {
+            "blueprint" => self.world.nearest_blueprint(bot.pos),
+            "depot" => self.world.nearest_depot(bot.pos),
+            "enemy" => self.world.nearest_enemy(bot.pos, bot.faction),
+            "ore" => self.world.nearest_ore(bot.pos),
+            _ => unreachable!("kind_arg only admits KINDS"),
+        }
+    }
+}
+
+/// Validate the single kind argument of a generic query.
+fn kind_arg<'v>(func: &str, args: &'v [Value]) -> Result<&'v str, HostCall> {
+    match args {
+        [Value::Str(s)] if KINDS.contains(&s.as_str()) => Ok(s),
+        [other] => Err(HostCall::Fault(format!(
+            "{func} requires a kind ({}), got {}",
+            KINDS.join("/"),
+            other
+        ))),
+        _ => Err(HostCall::Fault(format!("{func} takes 1 kind argument"))),
+    }
 }
 
 impl pyrite::Host for BotHost<'_> {
@@ -26,24 +56,21 @@ impl pyrite::Host for BotHost<'_> {
         let bot_pos = self.world.bots.get(&bot_id).expect("bot exists").data.pos;
         match name {
             // --- instant queries ---
-            "nearest_ore" => match self.world.nearest_ore(bot_pos) {
-                Some(id) => HostCall::Ready(Value::Entity(id.0)),
-                None => HostCall::Fault("no ore anywhere".into()),
+            // Generic fallible query: closest(kind) -> Result.Ok(entity) / Result.Err(msg).
+            "closest" => match kind_arg("closest", args) {
+                Ok(kind) => HostCall::Ready(match self.find_kind(kind) {
+                    Some(id) => Value::result_ok(Value::Entity(id.0)),
+                    None => Value::result_err(format!("no {kind} anywhere")),
+                }),
+                Err(fault) => fault,
             },
-            "nearest_depot" => match self.world.nearest_depot(bot_pos) {
-                Some(id) => HostCall::Ready(Value::Entity(id.0)),
-                None => HostCall::Fault("no depot anywhere".into()),
+            "exists" => match kind_arg("exists", args) {
+                Ok(kind) => HostCall::Ready(Value::Bool(self.find_kind(kind).is_some())),
+                Err(fault) => fault,
             },
             "cargo_full" => {
                 let data = &self.world.bots[&bot_id].data;
                 HostCall::Ready(Value::Bool(data.cargo >= data.cargo_cap))
-            }
-            "nearest_enemy" => {
-                let faction = self.world.bots[&bot_id].data.faction;
-                match self.world.nearest_enemy(bot_pos, faction) {
-                    Some(id) => HostCall::Ready(Value::Entity(id.0)),
-                    None => HostCall::Fault("no enemy anywhere".into()),
-                }
             }
             "health_low" => {
                 let data = &self.world.bots[&bot_id].data;
@@ -77,13 +104,6 @@ impl pyrite::Host for BotHost<'_> {
                 }
                 [Value::Int(_)] => HostCall::Fault("rng requires a positive bound".into()),
                 _ => HostCall::Fault("rng takes 1 integer argument".into()),
-            },
-            "blueprint_exists" => {
-                HostCall::Ready(Value::Bool(!self.world.blueprints.is_empty()))
-            }
-            "nearest_blueprint" => match self.world.nearest_blueprint(bot_pos) {
-                Some(id) => HostCall::Ready(Value::Entity(id.0)),
-                None => HostCall::Fault("no blueprint anywhere".into()),
             },
             "build" => {
                 // Work on the nearest blueprint in range.

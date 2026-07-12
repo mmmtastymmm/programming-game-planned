@@ -1,5 +1,5 @@
 //! Terraforming via blueprints: the player designates (PlaceBlueprint
-//! command), bots do the labor (nearest_blueprint()/build()) — docs/05.
+//! command), bots do the labor (closest(blueprint).expect()/build()) — docs/05.
 //! Plus rng(n): sanctioned randomness from the sim's seeded stream.
 
 use sim::map::{Direction, MapSpec, OverlayKind, TileKind};
@@ -34,12 +34,12 @@ fn walled_map() -> MapSpec {
 }
 
 // The trailing move_to matters: a builder that parks beside the finished
-// bridge (crash-looping on nearest_blueprint) blocks the crossing it just
+// bridge (crash-looping on closest(blueprint)) blocks the crossing it just
 // built — the corridor problem, self-inflicted. Go home after work.
 const BUILDER: &str = "\
-move_to(nearest_blueprint())
+move_to(closest(blueprint).expect())
 build()
-move_to(nearest_depot())
+move_to(closest(depot).expect())
 ";
 
 #[test]
@@ -70,7 +70,7 @@ fn bridge_opens_the_route_for_miners() {
     let mut sim = Sim::new(&walled_map());
     spawn(&mut sim, TilePos::new(1, 2), BUILDER);
     // The miner faults ("unreachable") until the bridge exists, then works.
-    spawn(&mut sim, TilePos::new(1, 1), "move_to(nearest_ore())\nmine()\nmove_to(nearest_depot())\ndeposit()\n");
+    spawn(&mut sim, TilePos::new(1, 1), "move_to(closest(ore).expect())\nmine()\nmove_to(closest(depot).expect())\ndeposit()\n");
     sim.apply(&Command::PlaceBlueprint {
         pos: TilePos::new(4, 2),
         kind: BlueprintKind::Bridge,
@@ -135,7 +135,7 @@ fn one_way_bridge_only_crosses_with_the_arrow() {
     let miner = spawn(
         &mut sim,
         TilePos::new(1, 1),
-        "move_to(nearest_ore())\nmine()\nmove_to(nearest_depot())\ndeposit()\n",
+        "move_to(closest(ore).expect())\nmine()\nmove_to(closest(depot).expect())\ndeposit()\n",
     );
     sim.apply(&Command::PlaceBlueprint {
         pos: TilePos::new(4, 2),
@@ -177,7 +177,7 @@ fn opposing_one_way_bridges_make_a_round_trip() {
     spawn(
         &mut sim,
         TilePos::new(1, 1),
-        "move_to(nearest_ore())\nmine()\nmove_to(nearest_depot())\ndeposit()\n",
+        "move_to(closest(ore).expect())\nmine()\nmove_to(closest(depot).expect())\ndeposit()\n",
     );
     // Return bridge FIRST (placement order = build order here): if the
     // outbound bridge finishes first, the miner crosses, fills its cargo,
@@ -225,7 +225,7 @@ fn arrow_overlay_works_on_plain_ground() {
         overlay: Some(OverlayKind::Arrow(Direction::East)),
     })
     .unwrap();
-    let bot = spawn(&mut sim, TilePos::new(5, 1), "move_to(nearest_depot())\n");
+    let bot = spawn(&mut sim, TilePos::new(5, 1), "move_to(closest(depot).expect())\n");
     for _ in 0..80 {
         sim.step();
     }
@@ -281,9 +281,9 @@ fn deploy_hot_swaps_live_bots() {
 }
 
 #[test]
-fn blueprint_exists_predicate() {
+fn exists_blueprint_predicate() {
     let mut sim = Sim::new(&walled_map());
-    let bot = spawn(&mut sim, TilePos::new(1, 1), "log(blueprint_exists())\nwait(2)\n");
+    let bot = spawn(&mut sim, TilePos::new(1, 1), "log(exists(blueprint))\nwait(2)\n");
     for _ in 0..12 {
         sim.step();
     }
@@ -301,4 +301,16 @@ fn blueprint_exists_predicate() {
         "predicate must flip once a blueprint exists: {:?}",
         sim.world.bots[&bot].data.log_buf
     );
+}
+
+#[test]
+fn prebuilt_bridges_are_passable_from_the_start() {
+    let mut spec = walled_map();
+    spec.bridges.push(TilePos::new(4, 2));
+    let mut sim = Sim::new(&spec);
+    spawn(&mut sim, TilePos::new(1, 2), "move_to(closest(ore).expect())\nmine()\nmove_to(closest(depot).expect())\ndeposit()\n");
+    for _ in 0..400 {
+        sim.step();
+    }
+    assert!(sim.world.stockpile_ore > 20, "miner crosses immediately; stockpile {}", sim.world.stockpile_ore);
 }
