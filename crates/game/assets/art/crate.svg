@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <!-- wooden depot crate: planks, frame boards, X brace. Wraps every face
+       of a plain cuboid, so the design reads from any side and the top. -->
+  <rect width="64" height="64" fill="#7a5a36"/>
+  <!-- plank seams -->
+  <g stroke="#5d4326" stroke-width="2">
+    <line x1="0" y1="16" x2="64" y2="16"/>
+    <line x1="0" y1="32" x2="64" y2="32"/>
+    <line x1="0" y1="48" x2="64" y2="48"/>
+  </g>
+  <!-- plank grain -->
+  <g stroke="#6d4f2f" stroke-width="1.2" opacity="0.7">
+    <line x1="10" y1="8" x2="26" y2="8"/>
+    <line x1="38" y1="24" x2="54" y2="24"/>
+    <line x1="8" y1="40" x2="22" y2="40"/>
+    <line x1="40" y1="56" x2="52" y2="56"/>
+  </g>
+  <!-- X brace -->
+  <g stroke="#2a1f14" stroke-width="11" stroke-linecap="round">
+    <line x1="8" y1="8" x2="56" y2="56"/>
+    <line x1="56" y1="8" x2="8" y2="56"/>
+  </g>
+  <g stroke="#85643c" stroke-width="8" stroke-linecap="round">
+    <line x1="8" y1="8" x2="56" y2="56"/>
+    <line x1="56" y1="8" x2="8" y2="56"/>
+  </g>
+  <!-- frame boards -->
+  <g fill="#8a683f" stroke="#2a1f14" stroke-width="2">
+    <rect x="-2" y="-2" width="68" height="9"/>
+    <rect x="-2" y="57" width="68" height="9"/>
+    <rect x="-2" y="-2" width="9" height="68"/>
+    <rect x="57" y="-2" width="9" height="68"/>
+  </g>
+  <!-- nails -->
+  <g fill="#3f2f1c">
+    <circle cx="3.5" cy="3.5" r="1.6"/>
+    <circle cx="60.5" cy="3.5" r="1.6"/>
+    <circle cx="3.5" cy="60.5" r="1.6"/>
+    <circle cx="60.5" cy="60.5" r="1.6"/>
+    <circle cx="32" cy="32" r="2"/>
+  </g>
+</svg>

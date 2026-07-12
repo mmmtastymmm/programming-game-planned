@@ -1,19 +1,25 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
-  <!-- printer front: output door with blue print-slot glow, team band.
-       Face is squashed to 0.9x0.5 in-world: favor horizontal bands. -->
+  <!-- printer front, office-printer styling: output slot with the sheet's
+       edge, control panel, intake vents. Squashed to 0.9x0.5 in-world. -->
   <rect width="64" height="64" fill="#2c3542"/>
   <rect width="64" height="8" fill="#4a5668"/>
   <rect y="8" width="64" height="6" fill="#39d98a"/>
   <rect y="14" width="64" height="2" fill="#2aa86b"/>
-  <!-- output door -->
-  <rect x="16" y="24" width="32" height="32" rx="2" fill="#151a21" stroke="#0e1116" stroke-width="2"/>
-  <rect x="20" y="36" width="24" height="5" rx="1" fill="#3d8cf2"/>
-  <rect x="20" y="34" width="24" height="1.5" fill="#78b4f7" opacity="0.8"/>
-  <!-- status lights -->
-  <circle cx="55" cy="28" r="2.2" fill="#39d98a"/>
-  <circle cx="55" cy="36" r="2.2" fill="#1c232c"/>
-  <circle cx="55" cy="44" r="2.2" fill="#1c232c"/>
-  <!-- bolts -->
+  <!-- output slot with paper edge peeking out -->
+  <rect x="16" y="23" width="32" height="4" fill="#eef0e9"/>
+  <rect x="12" y="26" width="40" height="7" rx="1.5" fill="#0e1116"/>
+  <rect x="10" y="33" width="44" height="4" rx="1.5" fill="#1c232c"/>
+  <!-- control panel -->
+  <rect x="40" y="42" width="16" height="12" rx="2" fill="#151a21" stroke="#0e1116" stroke-width="1.5"/>
+  <circle cx="45" cy="46.5" r="1.8" fill="#39d98a"/>
+  <circle cx="51" cy="46.5" r="1.8" fill="#f2b23e"/>
+  <rect x="43" y="50" width="10" height="2" rx="1" fill="#2e3844"/>
+  <!-- intake vents -->
+  <g fill="#1c232c">
+    <rect x="8" y="44" width="24" height="2.5" rx="1.25"/>
+    <rect x="8" y="48.5" width="24" height="2.5" rx="1.25"/>
+    <rect x="8" y="53" width="24" height="2.5" rx="1.25"/>
+  </g>
   <circle cx="6" cy="58" r="2" fill="#1c232c"/>
   <circle cx="58" cy="58" r="2" fill="#1c232c"/>
   <rect x="1" y="1" width="62" height="62" fill="none" stroke="#0e1116" stroke-width="2"/>

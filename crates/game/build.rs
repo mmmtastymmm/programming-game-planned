@@ -23,8 +23,12 @@ const TILES: &[&str] = &[
     "tile_water",
     "tile_mountain",
     "tile_terraform",
-    "tile_depot",
     "tile_wreck",
+    "crate",
+    "paper",
+    "scribble_0",
+    "scribble_1",
+    "scribble_2",
 ];
 
 /// Atlased 6-face bodies: (svg prefix, output prefix).

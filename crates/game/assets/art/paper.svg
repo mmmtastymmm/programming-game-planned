@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <!-- the sheet emerging from a printer: pale paper with printed "code" -->
+  <rect width="64" height="64" fill="#eef0e9"/>
+  <rect x="60" y="0" width="4" height="64" fill="#dadcd3"/>
+  <rect x="0" y="60" width="64" height="4" fill="#dadcd3"/>
+  <!-- printed lines (a Pyrite program, obviously) -->
+  <g fill="#b4b9ac">
+    <rect x="8" y="8" width="34" height="3" rx="1.5"/>
+    <rect x="12" y="15" width="40" height="3" rx="1.5"/>
+    <rect x="12" y="22" width="26" height="3" rx="1.5"/>
+    <rect x="8" y="29" width="38" height="3" rx="1.5"/>
+    <rect x="8" y="36" width="20" height="3" rx="1.5"/>
+  </g>
+  <!-- the bot schematic being printed -->
+  <g fill="none" stroke="#2aa86b" stroke-width="2">
+    <rect x="22" y="44" width="20" height="14" rx="2"/>
+    <circle cx="32" cy="51" r="3"/>
+  </g>
+</svg>

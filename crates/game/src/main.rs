@@ -84,6 +84,10 @@ struct Pose {
 struct BillboardBar;
 #[derive(Component)]
 struct ProgressFill;
+/// Angry scribble cloud over a bump-frozen bot (baked SVG frames).
+#[derive(Component)]
+struct ScribbleCloud;
+
 /// Red health fill on a bot's billboarded bar.
 #[derive(Component)]
 struct HealthFill;
@@ -136,6 +140,8 @@ struct ViewIndex {
     printer_fills: HashMap<u64, (Entity, Entity)>,
     /// Bot id -> (bar root, red fill, damage-ghost trail).
     bot_health: HashMap<u32, (Entity, Entity, Entity)>,
+    /// Bot id -> its scribble-cloud entity.
+    bot_scribbles: HashMap<u32, Entity>,
     paint: HashMap<(i32, i32), (Entity, u8)>,
 }
 
@@ -158,9 +164,15 @@ struct Palette {
     printer_box: Handle<Mesh>,
     printer_tex_mats: HashMap<u8, Handle<StandardMaterial>>,
     printer_ruined_mat: Handle<StandardMaterial>,
-    /// Sub-tile textured slab for depot pads and wrecks.
+    /// The sheet rising from a working printer's top slot.
+    paper_sheet: Handle<Mesh>,
+    paper_mat: Handle<StandardMaterial>,
+    /// Depot: a low wooden crate (bots stand on the depot tile, so it
+    /// stays pallet-height).
+    crate_box: Handle<Mesh>,
+    crate_mat: Handle<StandardMaterial>,
+    /// Sub-tile textured slab for wrecks.
     pad_slab: Handle<Mesh>,
-    depot_tex_mat: Handle<StandardMaterial>,
     wreck_tex_mat: Handle<StandardMaterial>,
     /// Terrain slab: full tile texture on top, dark trim on the sides.
     tex_slab: Handle<Mesh>,
@@ -181,6 +193,8 @@ struct Palette {
     /// Health-fill gradient bins: index 0 = empty/red .. last = full/green.
     bar_health_grad: Vec<Handle<StandardMaterial>>,
     bar_trail_mat: Handle<StandardMaterial>,
+    scribble_quad: Handle<Mesh>,
+    scribble_mats: Vec<Handle<StandardMaterial>>,
 }
 
 /// LMB click-vs-drag disambiguation while a tool is armed: a press is the
@@ -495,6 +509,7 @@ fn main() {
                 build_preview,
                 update_progress_bars,
                 update_health_bars,
+                update_scribbles,
                 billboard_bars,
                 sync_view,
                 interpolate,
@@ -650,14 +665,16 @@ fn setup_scene(
         tile_tex_mat(&mut materials, asset_server.load("textures/tile_mountain.png"), 0.95);
     let wreck_tex_mat =
         tile_tex_mat(&mut materials, asset_server.load("textures/tile_wreck.png"), 0.95);
-    // Depot pad glows: reuse its own texture as the emissive map.
-    let depot_tex: Handle<Image> = asset_server.load("textures/tile_depot.png");
-    let depot_tex_mat = materials.add(StandardMaterial {
-        base_color_texture: Some(depot_tex.clone()),
-        emissive: LinearRgba::new(0.45, 0.45, 0.45, 1.0),
-        emissive_texture: Some(depot_tex),
-        metallic: 0.2,
-        perceptual_roughness: 0.5,
+    let crate_mat =
+        tile_tex_mat(&mut materials, asset_server.load("textures/crate.png"), 0.9);
+    // Paper stays readable in shadow: its own texture doubles as a faint
+    // emissive map.
+    let paper_tex: Handle<Image> = asset_server.load("textures/paper.png");
+    let paper_mat = materials.add(StandardMaterial {
+        base_color_texture: Some(paper_tex.clone()),
+        emissive: LinearRgba::new(0.25, 0.25, 0.25, 1.0),
+        emissive_texture: Some(paper_tex),
+        perceptual_roughness: 0.9,
         ..default()
     });
     let palette = Palette {
@@ -700,8 +717,11 @@ fn setup_scene(
         printer_box: meshes.add(atlas_box_mesh(Vec3::new(0.45, 0.25, 0.45))),
         printer_tex_mats,
         printer_ruined_mat,
+        paper_sheet: meshes.add(Cuboid::new(0.36, 0.26, 0.02)),
+        paper_mat,
+        crate_box: meshes.add(Cuboid::new(0.78, 0.3, 0.78)),
+        crate_mat,
         pad_slab: meshes.add(textured_slab_mesh(Vec3::new(0.425, 0.07, 0.425))),
-        depot_tex_mat,
         wreck_tex_mat,
         tex_slab: meshes.add(textured_slab_mesh(Vec3::new(0.48, 0.05, 0.48))),
         ground_tex_mat,
@@ -763,6 +783,19 @@ fn setup_scene(
             unlit: true,
             ..default()
         }),
+        scribble_quad: meshes.add(Rectangle::new(0.75, 0.6)),
+        scribble_mats: (0..3)
+            .map(|i| {
+                materials.add(StandardMaterial {
+                    base_color_texture: Some(
+                        asset_server.load(format!("textures/scribble_{i}.png")),
+                    ),
+                    alpha_mode: AlphaMode::Blend,
+                    unlit: true,
+                    ..default()
+                })
+            })
+            .collect(),
         paint_mats: PAINT_COLORS.map(|(r, gc, b)| {
             materials.add(StandardMaterial {
                 base_color: Color::srgba(
@@ -801,12 +834,12 @@ fn setup_scene(
         }
     }
 
-    // Depots: glowing drop-off pads.
+    // Depots: low wooden crates.
     for depot in world.depots.values() {
         commands.spawn((
-            Mesh3d(palette.pad_slab.clone()),
-            MeshMaterial3d(palette.depot_tex_mat.clone()),
-            Transform::from_translation(tile_xyz(world, depot.pos, 0.07)),
+            Mesh3d(palette.crate_box.clone()),
+            MeshMaterial3d(palette.crate_mat.clone()),
+            Transform::from_translation(tile_xyz(world, depot.pos, 0.15)),
         ));
     }
 
@@ -1328,10 +1361,22 @@ fn sync_view(
                 .spawn((
                     Mesh3d(palette.printer_box.clone()),
                     MeshMaterial3d(mat),
+                    // Face the default camera (the atlas front is -Z).
                     Transform::from_translation(tile_xyz(world, printer.pos, 0.25))
+                        .with_rotation(Quat::from_rotation_y(std::f32::consts::PI))
                         .with_scale(scale),
                 ))
                 .with_children(|parent| {
+                    // The sheet rising out of the top slot; dead machines
+                    // don't print.
+                    if printer.state == PrinterState::Working {
+                        parent.spawn((
+                            Mesh3d(palette.paper_sheet.clone()),
+                            MeshMaterial3d(palette.paper_mat.clone()),
+                            Transform::from_xyz(0.0, 0.33, 0.0)
+                                .with_rotation(Quat::from_rotation_z(0.06)),
+                        ));
+                    }
                     parent.spawn((
                         JobCube,
                         Mesh3d(palette.unit_cube.clone()),
@@ -1499,6 +1544,18 @@ fn sync_view(
             .id();
         index.bots.insert(id.0, entity);
         index.bot_health.insert(id.0, (bar_root, health_fill, health_trail));
+        let scribble = commands
+            .spawn((
+                ScribbleCloud,
+                BillboardBar, // camera-facing, parent-rotation compensated
+                Mesh3d(palette.scribble_quad.clone()),
+                MeshMaterial3d(palette.scribble_mats[0].clone()),
+                Transform::from_xyz(0.0, 1.75, 0.0),
+                Visibility::Hidden,
+            ))
+            .id();
+        commands.entity(entity).add_child(scribble);
+        index.bot_scribbles.insert(id.0, scribble);
     }
     index.bots.retain(|id, entity| {
         if seen.contains(id) {
@@ -1509,6 +1566,7 @@ fn sync_view(
         }
     });
     index.bot_health.retain(|id, _| seen.contains(id));
+    index.bot_scribbles.retain(|id, _| seen.contains(id));
 
     // Blueprints: glowing ghost slabs with a billboarded progress bar.
     for (id, bp) in &world.blueprints {
@@ -1757,6 +1815,37 @@ fn update_health_bars(
             if material.0 != bins[bin] {
                 material.0 = bins[bin].clone();
             }
+        }
+    }
+}
+
+/// Frustration clouds: visible while bump-frozen, cycling scribble frames
+/// with a little scale pulse — thinking, angrily.
+fn update_scribbles(
+    time: Res<Time>,
+    game: NonSend<GameSim>,
+    index: Res<ViewIndex>,
+    palette: Res<Palette>,
+    mut clouds: Query<
+        (&mut Visibility, &mut MeshMaterial3d<StandardMaterial>, &mut Transform),
+        With<ScribbleCloud>,
+    >,
+) {
+    let t = time.elapsed_secs();
+    let frame = ((t * 8.0) as usize) % palette.scribble_mats.len();
+    for (id, bot) in &game.0.world.bots {
+        let Some(&cloud) = index.bot_scribbles.get(&id.0) else { continue };
+        let Ok((mut visibility, mut material, mut transform)) = clouds.get_mut(cloud) else {
+            continue;
+        };
+        if bot.data.bump_frozen > 0 {
+            *visibility = Visibility::Visible;
+            if material.0 != palette.scribble_mats[frame] {
+                material.0 = palette.scribble_mats[frame].clone();
+            }
+            transform.scale = Vec3::splat(1.0 + 0.08 * (t * 9.0).sin());
+        } else {
+            *visibility = Visibility::Hidden;
         }
     }
 }
@@ -2100,31 +2189,6 @@ fn editor_ui(
                 });
             }
 
-            // Time controls.
-            ui.separator();
-            ui.vertical(|ui| {
-                ui.strong("Time");
-                ui.horizontal(|ui| {
-                    let pause_label = if editor.paused { "▶ resume" } else { "⏸ pause" };
-                    if ui.selectable_label(editor.paused, pause_label).clicked() {
-                        editor.paused = !editor.paused;
-                    }
-                });
-                ui.horizontal(|ui| {
-                    for (label, mult) in
-                        [("¼×", 0.25f32), ("½×", 0.5), ("1×", 1.0), ("2×", 2.0), ("4×", 4.0)]
-                    {
-                        if ui
-                            .selectable_label((editor.speed - mult).abs() < 0.01, label)
-                            .clicked()
-                        {
-                            editor.speed = mult;
-                        }
-                    }
-                });
-                ui.small("Space pauses");
-            });
-
             // Status / hints on the right.
             ui.separator();
             ui.vertical(|ui| {
@@ -2429,6 +2493,28 @@ fn editor_ui(
         }
         ui.separator();
         ui.small("LMB / MMB drag: pan · RMB drag: orbit · scroll: zoom");
+    });
+
+    // Bar across the top of the world view (added after the editor panel,
+    // so it spans only the world). Time controls sit in its top right.
+    egui::TopBottomPanel::top("world_bar").exact_height(28.0).show(ctx, |ui| {
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            // right_to_left: first added is rightmost.
+            ui.small("Space pauses");
+            ui.separator();
+            for (label, mult) in
+                [("4×", 4.0f32), ("2×", 2.0), ("1×", 1.0), ("½×", 0.5), ("¼×", 0.25)]
+            {
+                if ui.selectable_label((editor.speed - mult).abs() < 0.01, label).clicked() {
+                    editor.speed = mult;
+                }
+            }
+            ui.separator();
+            let pause_label = if editor.paused { "▶ resume" } else { "⏸ pause" };
+            if ui.selectable_label(editor.paused, pause_label).clicked() {
+                editor.paused = !editor.paused;
+            }
+        });
     });
 }
 
