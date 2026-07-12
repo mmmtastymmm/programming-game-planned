@@ -49,6 +49,7 @@ stateDiagram-v2
     end note
 ```
 
+- **HP sources of loss**: combat damage and **unhandled faults** (each crash chips the chassis, [01-language.md](01-language.md)) — a buggy program is a slow suicide.
 - **Damaged** (< 50% HP): visible sparks; speed and cycle budget reduced 25%. Crossing this threshold fires the `on hurt:` signal ([01-language.md](01-language.md)) — the canonical handler drops cargo and retreats to a Repair Bay ([03-resources.md](03-resources.md)). Pre-handler-unlock, polling `if health_low():` does the same job, worse.
 - **Disabled** (0 HP): the `on death:` signal runs (10-cycle black-box budget), then the engine force-calls `become_disabled()` — the same forced-ordinary-function pattern as `upload_crash_dump()` on unhandled errors; every death exits through that function. It puts the bot into an inert wreck state with a **self-destruct countdown that scales with total XP** (base ~30s + per-XP bonus, tuning constants): rookies pop fast, veterans linger — the more a bot was worth, the longer the window to save it (and the longer the enemy has to salvage-snipe it; the race gets richer exactly when the stakes are highest). Before it ends, the wreck can be:
   - **field-repaired** (Artisan-class) → enters **Boot Sequence**, **XP preserved** — rescue missions are a real play;

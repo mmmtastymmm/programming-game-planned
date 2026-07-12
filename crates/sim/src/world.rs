@@ -147,6 +147,8 @@ pub struct BotData {
     pub xp_hauling: u64,
     pub xp_combat: u64,
     pub xp_building: u64,
+    /// Last VM crash_count charged for (fault-damage bookkeeping).
+    pub crash_seen: u64,
 }
 
 #[derive(Debug)]

@@ -121,7 +121,7 @@ Persistent *telemetry* is player-built infrastructure — a colony with good log
 - **Handlers are the graduation.** Forced dump (~25) → your own handler (~5 + lean code of your choice): the error system itself has a skill curve. The overtime tax (ops ×2 past the grace window) keeps `on error:` a recovery mechanism, not a second program.
 - **Hurt's freedom is priced in risk, not cycles.** Unlimited handler time, but every extra tick is another tick you can be double-handled. A slow limp to the Repair Bay is legal; it's also a bet.
 - **Rescue denial is combat depth.** Every destruction drops a Black Box — the owner will always learn *what happened*. What double-handling a retreating veteran denies is the *rescue*: no wreck, no countdown, no field-repair, XP gone. You always get the story; you don't always get the bot.
-- **Fault loops are legal and visible.** A program broken at line 1 faults forever — blinking on the field, dutifully uploading crash dumps it can't afford.
+- **Fault loops are legal, visible — and lethal.** Every *unhandled* fault also chips the chassis (tuning); a program broken at line 1 crash-loops itself to death, wreck and all. `on error:` handlers are literal armor: handled faults cost no health. Debug it or bury it.
 - Reading an **unset variable** is a fault (variables don't survive restarts), so state must be re-derived each pass.
 
 ## Cycle Costs (base table — moddable per map/biome)

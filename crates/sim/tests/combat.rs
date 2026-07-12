@@ -34,6 +34,9 @@ fn attacker_kills_defenseless_bot_into_wreck() {
     let victim = spawn(&mut sim, TilePos::new(2, 1), IDLER, 0, 30);
     for _ in 0..200 {
         sim.step();
+        if !sim.world.bots.contains_key(&victim) {
+            break; // stop before the now-idle brawler crash-loops to death
+        }
     }
     assert!(!sim.world.bots.contains_key(&victim), "victim must die");
     assert!(sim.world.wrecks.contains_key(&victim), "no death handler → clean wreck");
@@ -206,4 +209,42 @@ fn combat_is_deterministic_tick_by_tick() {
         b.step();
         assert_eq!(a.state_hash(), b.state_hash(), "desync at tick {tick}");
     }
+}
+
+#[test]
+fn crash_loops_are_lethal() {
+    // No ore anywhere: .expect() faults every program pass. Each unhandled
+    // crash chips the chassis; the bot dies into a wreck.
+    let mut sim = Sim::new(&MapSpec::empty(5, 5));
+    let bot = spawn(&mut sim, TilePos::new(2, 2), "move_to(closest(ore).expect())\n", 0, 20);
+    for _ in 0..400 {
+        sim.step();
+        if !sim.world.bots.contains_key(&bot) {
+            break;
+        }
+    }
+    assert!(!sim.world.bots.contains_key(&bot), "crash loop must eventually kill");
+    assert!(sim.world.wrecks.contains_key(&bot), "fault death is a clean death: wreck");
+    assert!(
+        sim.world.archive.iter().filter(|e| e.kind == ArchiveKind::CrashDump).count() >= 4,
+        "the crashes that killed it are all in the cloud"
+    );
+}
+
+#[test]
+fn error_handlers_are_armor() {
+    // Same faulting call, but handled: no crashes, no chassis damage.
+    let src = "\
+on error:
+    wait(1)
+
+move_to(closest(ore).expect())
+";
+    let mut sim = Sim::new(&MapSpec::empty(5, 5));
+    let bot = spawn(&mut sim, TilePos::new(2, 2), src, 0, 20);
+    for _ in 0..400 {
+        sim.step();
+    }
+    let b = &sim.world.bots[&bot];
+    assert_eq!(b.data.hp, 20, "handled faults must cost no health");
 }

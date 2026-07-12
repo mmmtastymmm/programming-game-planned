@@ -10,7 +10,8 @@
 //! lives in `sim::Sim` (NonSend — the VMs hold `Rc`s); the UI only ever
 //! mutates it through `Command`s, like any other lockstep peer.
 //!
-//! Camera: RMB drag = orbit · Shift+RMB / MMB = pan · scroll = zoom.
+//! Camera: LMB (no tool armed) / MMB / Shift+RMB drag = pan · RMB drag =
+//! orbit · scroll = zoom.
 //! Run: `cargo run -p game`
 
 use bevy::asset::RenderAssetUsages;
@@ -69,6 +70,9 @@ struct Pose {
     fault_seen: u64,
     /// Fixed ticks since the last fault.
     fault_age: u32,
+    /// Last hp seen; a change shows the health bar for a few seconds.
+    hp_seen: i64,
+    hp_age: u32,
 }
 
 /// World-space progress bar over anything being built: root billboards
@@ -77,6 +81,9 @@ struct Pose {
 struct BillboardBar;
 #[derive(Component)]
 struct ProgressFill;
+/// Red health fill on a bot's billboarded bar.
+#[derive(Component)]
+struct HealthFill;
 
 /// The translucent placement ghost (slab + one-way chevron children).
 #[derive(Component)]
@@ -118,6 +125,8 @@ struct ViewIndex {
     blueprint_fills: HashMap<u64, Entity>,
     /// Printer id -> (bar root, fill) for print-job progress.
     printer_fills: HashMap<u64, (Entity, Entity)>,
+    /// Bot id -> (bar root, fill) for the health bar.
+    bot_health: HashMap<u32, (Entity, Entity)>,
     paint: HashMap<(i32, i32), (Entity, u8)>,
 }
 
@@ -160,6 +169,7 @@ struct Palette {
     bar_mesh: Handle<Mesh>,
     bar_bg_mat: Handle<StandardMaterial>,
     bar_fill_mat: Handle<StandardMaterial>,
+    bar_health_mat: Handle<StandardMaterial>,
 }
 
 #[derive(Resource)]
@@ -178,6 +188,15 @@ struct EditorState {
     build_category: usize,
     /// Procedurally-drawn item icons, keyed by item name.
     icons: HashMap<&'static str, egui::TextureHandle>,
+    /// Caret position (char index) for kind-argument completion. Cached
+    /// across frames: on the frame a popup entry is clicked, the TextEdit
+    /// has already lost focus (no live cursor), so insertion needs this.
+    completion_cursor: Option<usize>,
+    /// Row highlighted in the completion popup (↑↓ moves, Enter accepts).
+    completion_selected: usize,
+    /// Context dismissed with Esc — (partial_start, partial). The popup
+    /// stays closed until typing changes the partial word.
+    completion_muted: Option<(usize, String)>,
 }
 
 impl Default for EditorState {
@@ -192,6 +211,9 @@ impl Default for EditorState {
             speed: 1.0,
             build_category: 0,
             icons: HashMap::new(),
+            completion_cursor: None,
+            completion_selected: 0,
+            completion_muted: None,
         }
     }
 }
@@ -442,6 +464,7 @@ fn main() {
                 place_blueprint,
                 build_preview,
                 update_progress_bars,
+                update_health_bars,
                 billboard_bars,
                 sync_view,
                 interpolate,
@@ -685,6 +708,12 @@ fn setup_scene(
             unlit: true,
             ..default()
         }),
+        bar_health_mat: materials.add(StandardMaterial {
+            base_color: Color::srgb(0.95, 0.25, 0.2),
+            emissive: LinearRgba::new(0.7, 0.08, 0.06, 1.0),
+            unlit: true,
+            ..default()
+        }),
         paint_mats: PAINT_COLORS.map(|(r, gc, b)| {
             materials.add(StandardMaterial {
                 base_color: Color::srgba(
@@ -809,6 +838,7 @@ fn orbit_transform(cam: &OrbitCam) -> Transform {
 
 fn orbit_camera(
     mut contexts: EguiContexts,
+    editor: Res<EditorState>,
     buttons: Res<ButtonInput<MouseButton>>,
     keys: Res<ButtonInput<KeyCode>>,
     mut motion: EventReader<MouseMotion>,
@@ -826,8 +856,11 @@ fn orbit_camera(
         return;
     }
 
+    // LMB drag pans only while no tool is armed — an armed tool owns LMB
+    // for placing/painting.
     let panning = buttons.pressed(MouseButton::Middle)
-        || (buttons.pressed(MouseButton::Right) && keys.pressed(KeyCode::ShiftLeft));
+        || (buttons.pressed(MouseButton::Right) && keys.pressed(KeyCode::ShiftLeft))
+        || (buttons.pressed(MouseButton::Left) && editor.selected_build.is_none());
     if panning && delta != Vec2::ZERO {
         let right = transform.right();
         let up = transform.up();
@@ -1075,6 +1108,13 @@ fn update_poses(
         if pose.fault_age < 5 {
             y += 0.3 * (std::f32::consts::PI * (pose.fault_age as f32 + 1.0) / 6.0).sin();
         }
+        // Health-bar recency clock.
+        if bot.data.hp != pose.hp_seen {
+            pose.hp_seen = bot.data.hp;
+            pose.hp_age = 0;
+        } else {
+            pose.hp_age = pose.hp_age.saturating_add(1);
+        }
         let target = tile_xyz(world, bot.data.pos, y);
         pose.prev = pose.curr;
         pose.curr = target;
@@ -1295,6 +1335,8 @@ fn sync_view(
             continue;
         }
         let start = tile_xyz(world, bot.data.pos, 0.45);
+        let mut bar_root = Entity::PLACEHOLDER;
+        let mut health_fill = Entity::PLACEHOLDER;
         let entity = commands
             .spawn((
                 Mesh3d(palette.bot_cube.clone()),
@@ -1306,6 +1348,8 @@ fn sync_view(
                     grid: bot.data.pos,
                     fault_seen: bot.vm.as_ref().map(|v| v.fault_count()).unwrap_or(0),
                     fault_age: u32::MAX,
+                    hp_seen: bot.data.hp,
+                    hp_age: u32::MAX,
                 },
             ))
             .with_children(|parent| {
@@ -1314,6 +1358,30 @@ fn sync_view(
                     MeshMaterial3d(palette.nose_mat.clone()),
                     Transform::from_xyz(0.0, 0.05, -0.45),
                 ));
+                // Health bar: shown for a few seconds after any hp change.
+                bar_root = parent
+                    .spawn((
+                        BillboardBar,
+                        Transform::from_xyz(0.0, 1.2, 0.0),
+                        Visibility::Hidden,
+                    ))
+                    .with_children(|bar| {
+                        bar.spawn((
+                            Mesh3d(palette.bar_mesh.clone()),
+                            MeshMaterial3d(palette.bar_bg_mat.clone()),
+                            Transform::default().with_scale(Vec3::new(0.8, 0.7, 1.0)),
+                        ));
+                        health_fill = bar
+                            .spawn((
+                                HealthFill,
+                                Mesh3d(palette.bar_mesh.clone()),
+                                MeshMaterial3d(palette.bar_health_mat.clone()),
+                                Transform::from_xyz(0.0, 0.0, 0.011)
+                                    .with_scale(Vec3::new(0.02, 0.55, 1.0)),
+                            ))
+                            .id();
+                    })
+                    .id();
                 for (slot, y) in [(0u32, 0.55), (1u32, 0.85)] {
                     parent.spawn((
                         CarrySlot(slot),
@@ -1326,6 +1394,7 @@ fn sync_view(
             })
             .id();
         index.bots.insert(id.0, entity);
+        index.bot_health.insert(id.0, (bar_root, health_fill));
     }
     index.bots.retain(|id, entity| {
         if seen.contains(id) {
@@ -1335,6 +1404,7 @@ fn sync_view(
             false
         }
     });
+    index.bot_health.retain(|id, _| seen.contains(id));
 
     // Blueprints: glowing ghost slabs with a billboarded progress bar.
     for (id, bp) in &world.blueprints {
@@ -1535,6 +1605,31 @@ fn update_progress_bars(
     }
 }
 
+/// Health bars: visible while the hp change is recent, red fill = hp
+/// fraction (left-anchored, slightly narrower than build bars).
+fn update_health_bars(
+    game: NonSend<GameSim>,
+    index: Res<ViewIndex>,
+    poses: Query<&Pose>,
+    mut fills: Query<&mut Transform, With<HealthFill>>,
+    mut roots: Query<&mut Visibility, With<BillboardBar>>,
+) {
+    for (id, bot) in &game.0.world.bots {
+        let Some(&(root, fill)) = index.bot_health.get(&id.0) else { continue };
+        let Some(&view) = index.bots.get(&id.0) else { continue };
+        let Ok(pose) = poses.get(view) else { continue };
+        let Ok(mut visibility) = roots.get_mut(root) else { continue };
+        // ~3 s at 10 Hz; permanent while below half (Damaged).
+        let recent = pose.hp_age < 30 || bot.data.hp * 2 < bot.data.max_hp;
+        *visibility = if recent { Visibility::Visible } else { Visibility::Hidden };
+        if recent && let Ok(mut transform) = fills.get_mut(fill) {
+            let p = (bot.data.hp as f32 / bot.data.max_hp as f32).clamp(0.02, 1.0);
+            transform.scale = Vec3::new(p * 0.8, 0.55, 1.0);
+            transform.translation.x = -(0.9 * 0.8 * (1.0 - p)) / 2.0;
+        }
+    }
+}
+
 /// Progress bars always face the camera.
 fn billboard_bars(
     cams: Query<&Transform, (With<Camera3d>, Without<BillboardBar>)>,
@@ -1670,6 +1765,53 @@ fn char_to_byte(text: &str, char_idx: usize) -> usize {
     text.char_indices().nth(char_idx).map_or(text.len(), |(b, _)| b)
 }
 
+/// A live kind-argument completion: where it is, what's typed, what fits.
+struct Completion {
+    cursor: usize,
+    partial_start: usize,
+    partial: String,
+    func: &'static str,
+    suggestions: Vec<&'static str>,
+}
+
+fn completion_at(code: &str, cursor: usize) -> Option<Completion> {
+    let (partial_start, partial, func) = kind_arg_context(code, cursor)?;
+    let suggestions: Vec<&'static str> = sim::host::KINDS
+        .iter()
+        .copied()
+        .filter(|k| k.starts_with(&partial) && *k != partial)
+        .collect();
+    if suggestions.is_empty() {
+        return None;
+    }
+    Some(Completion { cursor, partial_start, partial, func, suggestions })
+}
+
+/// Replace the partial word `[partial_start, cursor)` with `kind`, park the
+/// caret right after it, and keep focus on the editor. Returns the caret's
+/// new char index.
+fn insert_kind(
+    code: &mut String,
+    ctx: &egui::Context,
+    editor_id: egui::Id,
+    partial_start: usize,
+    cursor: usize,
+    kind: &str,
+) -> usize {
+    let from = char_to_byte(code, partial_start);
+    let to = char_to_byte(code, cursor);
+    code.replace_range(from..to, kind);
+    let after = partial_start + kind.chars().count();
+    if let Some(mut state) = egui::text_edit::TextEditState::load(ctx, editor_id) {
+        state
+            .cursor
+            .set_char_range(Some(egui::text::CCursorRange::one(egui::text::CCursor::new(after))));
+        state.store(ctx, editor_id);
+    }
+    ctx.memory_mut(|m| m.request_focus(editor_id));
+    after
+}
+
 fn editor_ui(
     mut contexts: EguiContexts,
     mut game: NonSendMut<GameSim>,
@@ -1803,58 +1945,105 @@ fn editor_ui(
             job.wrap.max_width = wrap_width;
             ui.fonts(|fonts| fonts.layout_job(job))
         };
+        let editor_id = egui::Id::new("pyrite_editor");
+
+        // Completion keys must be taken BEFORE the TextEdit runs — it would
+        // otherwise eat ArrowUp/Down (caret moves) and Enter (newline).
+        let mut completion = editor
+            .completion_cursor
+            .and_then(|cursor| completion_at(&editor.code, cursor))
+            .filter(|c| editor.completion_muted != Some((c.partial_start, c.partial.clone())));
+        if let Some(c) = &completion
+            && ui.ctx().memory(|m| m.has_focus(editor_id))
+        {
+            let n = c.suggestions.len();
+            editor.completion_selected %= n;
+            let (mut down, mut up, mut accept, mut dismiss) = (false, false, false, false);
+            ui.input_mut(|i| {
+                down = i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown);
+                up = i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp);
+                accept = i.consume_key(egui::Modifiers::NONE, egui::Key::Enter)
+                    || i.consume_key(egui::Modifiers::NONE, egui::Key::Tab);
+                dismiss = i.consume_key(egui::Modifiers::NONE, egui::Key::Escape);
+            });
+            if down {
+                editor.completion_selected = (editor.completion_selected + 1) % n;
+            }
+            if up {
+                editor.completion_selected = (editor.completion_selected + n - 1) % n;
+            }
+            if dismiss {
+                // Mute this exact context so the popup doesn't reopen until
+                // the user types (which changes the partial word).
+                editor.completion_muted = Some((c.partial_start, c.partial.clone()));
+                editor.completion_cursor = None;
+                completion = None;
+            } else if accept {
+                let kind = c.suggestions[editor.completion_selected];
+                let after =
+                    insert_kind(&mut editor.code, ui.ctx(), editor_id, c.partial_start, c.cursor, kind);
+                editor.completion_cursor = Some(after);
+                completion = None;
+            }
+        }
+
         let output = egui::TextEdit::multiline(&mut editor.code)
+            .id(editor_id)
             .font(egui::TextStyle::Monospace)
             .desired_rows(14)
             .desired_width(f32::INFINITY)
             .layouter(&mut layouter)
             .show(ui);
 
-        // Kind-argument completion: with the cursor in the argument slot of
-        // `closest(` / `exists(`, list the kinds; click one to insert it.
-        if let Some(cursor_range) = output.cursor_range
-            && let Some((partial_start, partial, func)) =
-                kind_arg_context(&editor.code, cursor_range.primary.ccursor.index)
-        {
-            let suggestions: Vec<&str> = sim::host::KINDS
-                .iter()
-                .copied()
-                .filter(|k| k.starts_with(&partial) && *k != partial)
-                .collect();
-            if !suggestions.is_empty() {
-                let caret = output.galley.pos_from_cursor(&cursor_range.primary);
-                let pos = output.galley_pos + caret.left_bottom().to_vec2() + egui::vec2(0.0, 4.0);
-                egui::Area::new(output.response.id.with("kind_complete"))
-                    .fixed_pos(pos)
-                    .order(egui::Order::Foreground)
-                    .show(ui.ctx(), |ui| {
-                        egui::Frame::popup(ui.style()).show(ui, |ui| {
-                            ui.small(format!("{func} takes a kind:"));
-                            for kind in suggestions {
-                                let label = egui::RichText::new(kind)
-                                    .monospace()
-                                    .color(HL_VARIABLE);
-                                if ui.selectable_label(false, label).clicked() {
-                                    let from = char_to_byte(&editor.code, partial_start);
-                                    let to = char_to_byte(
-                                        &editor.code,
-                                        cursor_range.primary.ccursor.index,
-                                    );
-                                    editor.code.replace_range(from..to, kind);
-                                    // Park the caret after the inserted kind and
-                                    // hand focus back to the editor.
-                                    let mut state = output.state.clone();
-                                    state.cursor.set_char_range(Some(
-                                        egui::text::CCursorRange::one(egui::text::CCursor::new(
-                                            partial_start + kind.chars().count(),
-                                        )),
-                                    ));
-                                    state.store(ui.ctx(), output.response.id);
-                                    output.response.request_focus();
-                                }
+        // Kind-argument completion popup: with the caret in the argument
+        // slot of `closest(` / `exists(`, list the kinds — ↑↓ + Enter or a
+        // click inserts one. The caret is cached in EditorState because on
+        // the frame a popup entry is clicked the TextEdit has lost focus and
+        // reports no cursor — the popup must persist through that frame for
+        // the click to land.
+        if output.response.has_focus() {
+            editor.completion_cursor = output.cursor_range.map(|c| c.primary.ccursor.index);
+            // Re-derive from this frame's text so the popup tracks typing.
+            completion = editor
+                .completion_cursor
+                .and_then(|cursor| completion_at(&editor.code, cursor))
+                .filter(|c| editor.completion_muted != Some((c.partial_start, c.partial.clone())));
+        }
+        if let Some(c) = completion {
+            editor.completion_selected %= c.suggestions.len();
+            let caret = output
+                .galley
+                .pos_from_cursor(&output.galley.from_ccursor(egui::text::CCursor::new(c.cursor)));
+            let pos = output.galley_pos + caret.left_bottom().to_vec2() + egui::vec2(0.0, 4.0);
+            let area = egui::Area::new(editor_id.with("kind_complete"))
+                .fixed_pos(pos)
+                .order(egui::Order::Foreground)
+                .show(ui.ctx(), |ui| {
+                    egui::Frame::popup(ui.style()).show(ui, |ui| {
+                        ui.small(format!("{} takes a kind — ↑↓ Enter", c.func));
+                        for (i, kind) in c.suggestions.iter().enumerate() {
+                            let label = egui::RichText::new(*kind).monospace().color(HL_VARIABLE);
+                            if ui
+                                .selectable_label(i == editor.completion_selected, label)
+                                .clicked()
+                            {
+                                let after = insert_kind(
+                                    &mut editor.code,
+                                    ui.ctx(),
+                                    editor_id,
+                                    c.partial_start,
+                                    c.cursor,
+                                    kind,
+                                );
+                                editor.completion_cursor = Some(after);
                             }
-                        });
+                        }
                     });
+                });
+            // Editor unfocused and pointer not on the popup: dismiss, so it
+            // doesn't linger after clicking elsewhere.
+            if !output.response.has_focus() && !area.response.contains_pointer() {
+                editor.completion_cursor = None;
             }
         }
         ui.horizontal(|ui| {
@@ -1954,7 +2143,7 @@ fn editor_ui(
             ui.small(format!("[{}] bot{}: {}", entry.tick, entry.bot.0, entry.text));
         }
         ui.separator();
-        ui.small("RMB drag: orbit · Shift+RMB / MMB: pan · scroll: zoom");
+        ui.small("LMB / MMB drag: pan · RMB drag: orbit · scroll: zoom");
     });
 }
 

@@ -131,6 +131,7 @@ fn one_way_bridge_only_crosses_with_the_arrow() {
     // to the ore; nothing can come back — including the loaded miner, whose
     // return trip faults unreachable. Directionality bites both ways.
     let mut sim = Sim::new(&walled_map());
+    sim.tuning.fault_damage = 0; // stranded-miner routing test, not a health test
     spawn(&mut sim, TilePos::new(1, 2), BUILDER);
     let miner = spawn(
         &mut sim,

@@ -393,6 +393,7 @@ fn crash_dump_cost_is_charged_as_debt() {
     assert!(call_names(&host).contains(&"upload_crash_dump"));
     assert!(vm.budget() < 0, "crash dump must leave the bot in cycle debt");
     assert_eq!(vm.fault_count(), 1, "one fault, one count");
+    assert_eq!(vm.crash_count(), 1, "unhandled fault counts as a crash");
 }
 
 #[test]
@@ -409,6 +410,7 @@ boom(1 // 0)
     let names = call_names(&host);
     assert!(names.contains(&"handled"));
     assert!(!names.contains(&"upload_crash_dump"));
+    assert_eq!(vm.crash_count(), 0, "handled faults are not crashes");
 }
 
 #[test]

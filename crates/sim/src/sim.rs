@@ -46,6 +46,9 @@ pub struct Tuning {
     pub bridge_build_ticks: u32,
     /// Placing a traffic overlay (arrow) — instant signage.
     pub overlay_cost_ore: u64,
+    /// Chassis damage per UNHANDLED fault: crash loops are lethal, and
+    /// `on error:` handlers are literal armor (handled faults are free).
+    pub fault_damage: i64,
 }
 
 impl Default for Tuning {
@@ -64,6 +67,7 @@ impl Default for Tuning {
             bridge_cost_ore: 3,
             bridge_build_ticks: 20,
             overlay_cost_ore: 1,
+            fault_damage: 5,
         }
     }
 }
@@ -286,6 +290,7 @@ impl Sim {
                     xp_hauling: 0,
                     xp_combat: 0,
                     xp_building: 0,
+                    crash_seen: 0,
                 },
                 vm: Some(vm),
             },
@@ -337,6 +342,23 @@ impl Sim {
         // --- phase 4.5: engine-driven movement (boot countdowns, recalls) ---
         for id in ids.iter().copied() {
             self.advance_engine(id);
+        }
+
+        // --- phase 4.7: fault damage — every unhandled crash this tick
+        // (from stepping or action resolution) chips the chassis. Routed
+        // through apply_damage so hurt/death signals fire normally.
+        for id in ids.iter().copied() {
+            let Some(bot) = self.world.bots.get_mut(&id) else { continue };
+            if bot.data.dying {
+                continue;
+            }
+            let Some(vm) = bot.vm.as_ref() else { continue };
+            let crashes = vm.crash_count();
+            let delta = crashes.saturating_sub(bot.data.crash_seen);
+            if delta > 0 {
+                bot.data.crash_seen = crashes;
+                self.apply_damage(id, delta as i64 * self.tuning.fault_damage);
+            }
         }
 
         // --- phase 5: deaths ---
@@ -1278,6 +1300,7 @@ impl Sim {
             if let Some(vm) = &bot.vm {
                 h.write_i64(vm.budget());
                 h.write_u64(vm.fault_count());
+                h.write_u64(vm.crash_count());
                 h.write_u32(vm.current_line());
                 h.write_u8(vm.is_blocked() as u8);
                 h.write_u8(vm.is_dead() as u8);

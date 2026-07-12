@@ -178,6 +178,9 @@ pub struct Vm {
     /// Total faults so far (crash dumps AND handled traps) — lets the
     /// outside world observe fault *events*, not just the latest message.
     fault_count: u64,
+    /// UNHANDLED faults only (crash-dump path). The sim charges chassis
+    /// damage per crash — handlers are armor.
+    crash_count: u64,
     /// A redeployed program, installed at the next loop boundary
     /// (docs/01: "redeploy takes effect at each bot's next loop boundary").
     pending_program: Option<Rc<Program>>,
@@ -202,6 +205,7 @@ impl Vm {
             current_line: 0,
             last_fault: None,
             fault_count: 0,
+            crash_count: 0,
             pending_program: None,
         }
     }
@@ -227,6 +231,11 @@ impl Vm {
     /// Monotone count of faults (unhandled and handled alike).
     pub fn fault_count(&self) -> u64 {
         self.fault_count
+    }
+
+    /// Monotone count of UNHANDLED faults (those that crash-dumped).
+    pub fn crash_count(&self) -> u64 {
+        self.crash_count
     }
 
     /// Queue a redeployed program; it takes effect at the next loop
@@ -500,6 +509,7 @@ impl Vm {
         } else {
             // Unhandled: the engine force-calls upload_crash_dump() — an
             // ordinary builtin, charged as cycle debt — then restarts.
+            self.crash_count += 1;
             self.budget -= costs.crash_dump as i64;
             let ctx = CallCtx { line: self.current_line, last_fault: Some(msg.as_str()) };
             let _ = host.call("upload_crash_dump", &[Value::Str(msg.clone())], ctx);

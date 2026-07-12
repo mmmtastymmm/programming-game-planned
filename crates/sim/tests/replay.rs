@@ -123,6 +123,7 @@ fn unreachable_target_faults() {
     }
     spec.depots.push(TilePos::new(0, 0));
     let mut sim = Sim::new(&spec);
+    sim.tuning.fault_damage = 0; // unreachable-loop routing test, not a health test
     sim.apply(&Command::SpawnBot {
         pos: TilePos::new(0, 0),
         source: MINER.into(),
