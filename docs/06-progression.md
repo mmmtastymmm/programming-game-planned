@@ -39,6 +39,7 @@ flowchart TD
         SIG1["on error: handler — 40"]
         SIG2["on hurt: / on death: — 55"]
         HURT_T["custom hurt threshold on hurt(n): — 25"]
+        BUMP_H["on bump: / on bumped: — 30"]
         DEF["def / return — 50"]
         LIST["lists + for-in — 60"]
         ENUM["enum + match — 70"]
@@ -72,6 +73,7 @@ flowchart TD
     IF --> F_BUILD
     WHILE --> DEF
     SIG2 --> HURT_T
+    SIG1 --> BUMP_H
     F_BUILD --> F_AN
     F_BUILD --> F_TERRA
     F_AN --> F_HIJACK

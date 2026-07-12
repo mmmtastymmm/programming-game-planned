@@ -159,6 +159,14 @@ pub struct Bot {
     pub vm: Option<Vm>,
 }
 
+impl Bot {
+    /// Is the VM currently executing any signal handler (error, hurt,
+    /// death, bump, bumped)? Drives the viewer's frustration cloud.
+    pub fn in_signal_handler(&self) -> bool {
+        self.vm.as_ref().is_some_and(|vm| vm.phase() != pyrite::Phase::Main)
+    }
+}
+
 /// A player-designated terraform site (docs/05): the player places it
 /// (a lockstep Command); bots do the labor via `build()`.
 #[derive(Debug, Clone, PartialEq)]

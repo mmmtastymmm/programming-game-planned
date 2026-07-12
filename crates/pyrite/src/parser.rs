@@ -151,12 +151,14 @@ impl<'a> Parser<'a> {
 
     fn parse_handler(&mut self) -> Result<(), PyriteError> {
         let on_tok = self.expect(Tok::On, "on")?;
-        let which = self.expect_ident("signal name (error, hurt, death)")?;
+        let which = self.expect_ident("signal name (error, hurt, death, bump, bumped)")?;
         let (kind, construct) = match which.as_str() {
             "error" => (SignalKind::Error, Construct::OnError),
             "hurt" => (SignalKind::Hurt, Construct::OnHurtDeath),
             "death" => (SignalKind::Death, Construct::OnHurtDeath),
-            _ => return Err(self.unexpected("error, hurt, or death")),
+            "bump" => (SignalKind::Bump, Construct::OnBump),
+            "bumped" => (SignalKind::Bumped, Construct::OnBump),
+            _ => return Err(self.unexpected("error, hurt, death, bump, or bumped")),
         };
         self.require(construct)?;
         let mut hurt_threshold = None;

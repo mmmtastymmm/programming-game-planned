@@ -1838,7 +1838,9 @@ fn update_scribbles(
         let Ok((mut visibility, mut material, mut transform)) = clouds.get_mut(cloud) else {
             continue;
         };
-        if bot.data.bump_frozen > 0 {
+        // Frustrated while stunned by a bump OR while any signal handler
+        // (error/hurt/death/bump/bumped) is running.
+        if bot.data.bump_frozen > 0 || bot.in_signal_handler() {
             *visibility = Visibility::Visible;
             if material.0 != palette.scribble_mats[frame] {
                 material.0 = palette.scribble_mats[frame].clone();
@@ -2429,18 +2431,6 @@ fn editor_ui(
         ui.colored_label(status_color, &editor.status);
         ui.separator();
 
-        let (tick, ore, bots, wrecks, cloud) = {
-            let w = &game.0.world;
-            (w.tick, w.stockpile_ore, w.bots.len(), w.wrecks.len(), w.archive.len())
-        };
-        ui.heading("Colony");
-        ui.monospace(format!("tick   {tick}"));
-        ui.monospace(format!("ore    {ore}"));
-        ui.monospace(format!("bots   {bots}"));
-        ui.monospace(format!("wrecks {wrecks}"));
-        ui.monospace(format!("cloud  {cloud}"));
-        ui.separator();
-
         ui.heading("Printers");
         let printer_ids: Vec<_> = game.0.world.printers.keys().copied().collect();
         let repair_cost = game.0.tuning.repair_cost_ore;
@@ -2496,24 +2486,42 @@ fn editor_ui(
     });
 
     // Bar across the top of the world view (added after the editor panel,
-    // so it spans only the world). Time controls sit in its top right.
+    // so it spans only the world). Colony counters on the left; time
+    // controls in the top right. The cloud stream stays in the side panel.
     egui::TopBottomPanel::top("world_bar").exact_height(28.0).show(ctx, |ui| {
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            // right_to_left: first added is rightmost.
-            ui.small("Space pauses");
-            ui.separator();
-            for (label, mult) in
-                [("4×", 4.0f32), ("2×", 2.0), ("1×", 1.0), ("½×", 0.5), ("¼×", 0.25)]
-            {
-                if ui.selectable_label((editor.speed - mult).abs() < 0.01, label).clicked() {
-                    editor.speed = mult;
+        ui.horizontal_centered(|ui| {
+            let (tick, ore, bots, wrecks, cloud) = {
+                let w = &game.0.world;
+                (w.tick, w.stockpile_ore, w.bots.len(), w.wrecks.len(), w.archive.len())
+            };
+            for text in [
+                format!("tick {tick}"),
+                format!("ore {ore}"),
+                format!("bots {bots}"),
+                format!("wrecks {wrecks}"),
+                format!("cloud {cloud}"),
+            ] {
+                ui.monospace(text);
+                ui.separator();
+            }
+
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                // right_to_left: first added is rightmost.
+                ui.small("Space pauses");
+                ui.separator();
+                for (label, mult) in
+                    [("4×", 4.0f32), ("2×", 2.0), ("1×", 1.0), ("½×", 0.5), ("¼×", 0.25)]
+                {
+                    if ui.selectable_label((editor.speed - mult).abs() < 0.01, label).clicked() {
+                        editor.speed = mult;
+                    }
                 }
-            }
-            ui.separator();
-            let pause_label = if editor.paused { "▶ resume" } else { "⏸ pause" };
-            if ui.selectable_label(editor.paused, pause_label).clicked() {
-                editor.paused = !editor.paused;
-            }
+                ui.separator();
+                let pause_label = if editor.paused { "▶ resume" } else { "⏸ pause" };
+                if ui.selectable_label(editor.paused, pause_label).clicked() {
+                    editor.paused = !editor.paused;
+                }
+            });
         });
     });
 }

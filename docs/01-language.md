@@ -37,7 +37,7 @@ Key rules:
 
 ## Errors & Signals
 
-**Any** runtime failure is a fault: stack overflow, type error, unsupported operation, invalid argument, a failed action (`mine()` with no ore in range). There are **five signal kinds** — four with player-facing handling models, plus the engine-owned `recall`. (All numbers below are cost-table constants — tuning values, not commitments.)
+**Any** runtime failure is a fault: stack overflow, type error, unsupported operation, invalid argument, a failed action (`mine()` with no ore in range). There are **seven signal kinds** — six with player-facing handling models, plus the engine-owned `recall`. (All numbers below are cost-table constants — tuning values, not commitments.)
 
 ```mermaid
 stateDiagram-v2
@@ -63,6 +63,8 @@ stateDiagram-v2
 | **Handled error** | fault, `on error:` installed | trap cost (~5), then a **10-tick grace window**; after it, **every operation costs ×2** until the handler ends | The overtime tax keeps handlers as *recovery*, not a place to live. Write your own lean crash logging and beat the default. |
 | **Hurt** | HP crosses below the Damaged threshold (edge-triggered, re-arms above it). A separate unlock allows a custom threshold: `on hurt(30):` ([06-progression.md](06-progression.md)) | **unlimited** | But see the double-handle rule. Unbounded time makes long retreats-to-Repair-Bay legal — at a risk. |
 | **Death** | HP hits 0 | **10 cycles**, hard | Black-box budget: a couple of `log()`s + `upload_log()`. When it completes (or the budget runs out) the engine **force-calls `become_disabled()`** — every death exits through that function. It starts the wreck's **self-destruct countdown**: field-repair in time rescues the bot (XP intact); expiry means explosion ([02-agents.md](02-agents.md)). |
+| **Bump** | this bot rammed an occupied tile | normal costs (hurt-like) | Unhandled default: the engine's long at-fault stun + chassis damage. A handler *replaces* the stun — your own collision response — then restart from line 1. |
+| **Bumped** | something rammed this bot | normal costs | Unhandled default: a short stagger + chassis damage. Handler replaces the stagger. Double-handle applies: being rammed mid-handler/boot/recall explodes you. |
 | **Recall** | printer rebalancing or colony over-capacity | n/a — handler is **engine-fixed, not player-writable** | Suspend program, walk home, re-color (XP kept) or scrap (see Program Colors below). The one signal you can't customize. |
 
 ### The double-handle rule

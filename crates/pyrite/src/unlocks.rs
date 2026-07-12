@@ -26,6 +26,8 @@ pub enum Construct {
     OnHurtDeath,
     /// `on hurt(n):` custom threshold (separate research, docs/06).
     HurtThreshold,
+    /// `on bump:` / `on bumped:` collision handlers.
+    OnBump,
 }
 
 impl Construct {
@@ -40,10 +42,11 @@ impl Construct {
             Construct::OnError => "on error: handler",
             Construct::OnHurtDeath => "on hurt: / on death: handlers",
             Construct::HurtThreshold => "custom hurt threshold",
+            Construct::OnBump => "on bump: / on bumped: handlers",
         }
     }
 
-    pub const ALL: [Construct; 9] = [
+    pub const ALL: [Construct; 10] = [
         Construct::Variables,
         Construct::If,
         Construct::WhileLoop,
@@ -53,6 +56,7 @@ impl Construct {
         Construct::OnError,
         Construct::OnHurtDeath,
         Construct::HurtThreshold,
+        Construct::OnBump,
     ];
 }
 

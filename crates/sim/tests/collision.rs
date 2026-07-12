@@ -253,3 +253,83 @@ fn rammer_freezes_longer_than_the_rammed() {
     }
     panic!("no bump observed");
 }
+
+#[test]
+fn bump_handlers_replace_the_freeze() {
+    // Rammer with `on bump:`: no stun — its handler logs, program restarts.
+    // Victim with `on bumped:`: same, no stagger freeze.
+    let rammer_src = "\
+on bump:
+    log(\"ow-my-front\")
+
+move_to(closest(depot).expect())
+";
+    let victim_src = "\
+on bumped:
+    log(\"hey-watch-it\")
+
+wait(3)
+";
+    let mut spec = MapSpec::empty(7, 3);
+    for x in 0..7 {
+        spec.water.push(TilePos::new(x, 0));
+        spec.water.push(TilePos::new(x, 2));
+    }
+    spec.depots.push(TilePos::new(0, 1));
+    let mut sim = Sim::new(&spec);
+    let victim = spawn(&mut sim, TilePos::new(1, 1), victim_src);
+    let rammer = spawn(&mut sim, TilePos::new(3, 1), rammer_src);
+    let mut rammer_handled = false;
+    let mut victim_handled = false;
+    for _ in 0..200 {
+        sim.step();
+        let r = &sim.world.bots[&rammer];
+        let v = &sim.world.bots[&victim];
+        assert_eq!(r.data.bump_frozen, 0, "handled bump must not freeze the rammer");
+        assert_eq!(v.data.bump_frozen, 0, "handled bumped must not freeze the victim");
+        rammer_handled |= r.data.log_buf.iter().any(|l| l.contains("ow-my-front"));
+        victim_handled |= v.data.log_buf.iter().any(|l| l.contains("hey-watch-it"));
+        if rammer_handled && victim_handled {
+            return;
+        }
+    }
+    panic!("both bump handlers must run (rammer {rammer_handled}, victim {victim_handled})");
+}
+
+#[test]
+fn bumped_during_a_handler_is_a_double_handle() {
+    // The victim is mid-`on bumped:` (blocking wait) when a second bump
+    // lands: any signal during a handler explodes — no wreck, black box.
+    let victim_src = "\
+on bumped:
+    wait(40)
+
+wait(3)
+";
+    // A plus-shaped intersection: the victim sits at the crossing, and
+    // both rammers' only routes to the depot pass through its tile.
+    let mut spec = MapSpec::empty(5, 5);
+    for x in 0..5 {
+        for y in 0..5 {
+            if x != 2 && y != 2 {
+                spec.water.push(TilePos::new(x, y));
+            }
+        }
+    }
+    spec.depots.push(TilePos::new(0, 2));
+    let mut sim = Sim::new(&spec);
+    sim.tuning.bump_damage = 0; // isolate the signal mechanics
+    let victim = spawn(&mut sim, TilePos::new(2, 2), victim_src);
+    // Two rammers on different arms: the second bump lands mid-handler.
+    spawn(&mut sim, TilePos::new(4, 2), "move_to(closest(depot).expect())\n");
+    spawn(&mut sim, TilePos::new(2, 0), "move_to(closest(depot).expect())\n");
+    for _ in 0..300 {
+        sim.step();
+        if !sim.world.bots.contains_key(&victim) {
+            break;
+        }
+    }
+    assert!(!sim.world.bots.contains_key(&victim), "second bump mid-handler must explode");
+    assert!(!sim.world.wrecks.contains_key(&victim), "double handle: no wreck");
+    assert!(sim.world.black_boxes.iter().any(|b| b.bot == victim));
+}

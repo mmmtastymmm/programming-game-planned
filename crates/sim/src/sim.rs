@@ -558,7 +558,7 @@ impl Sim {
                     if dodges.is_empty() {
                         let bot = self.world.bots.get_mut(&id).expect("bot exists");
                         bot.data.action = Some(Action::Move { path, ticks_left: 1, goals });
-                        self.bump_both(id, entered);
+                        self.bump_both(id, entered, true);
                     } else {
                         let pick = (self.world.next_rand() % dodges.len() as u64) as usize;
                         let step = dodges[pick];
@@ -775,7 +775,7 @@ impl Sim {
                 let bot = self.world.bots.get_mut(&id).expect("bot exists");
                 recall.ticks_left = 1;
                 bot.data.recall = Some(recall);
-                self.bump_both(id, entered);
+                self.bump_both(id, entered, false);
                 return;
             }
             let bot = self.world.bots.get_mut(&id).expect("bot exists");
@@ -1059,10 +1059,15 @@ impl Sim {
         }
     }
 
-    /// A collision: both parties recoil, freeze, and take chassis damage
-    /// (routed through apply_damage, so signals — and the double-handle
-    /// rule during boots/recalls — apply as for any other damage).
-    fn bump_both(&mut self, mover: BotId, tile: TilePos) {
+    /// A collision, routed through the signal system (docs/01):
+    /// the rammer gets `bump`, the victim `bumped` — signal first (impact),
+    /// then chassis damage (crunch). A handler is the bot's own response;
+    /// the engine's asymmetric freeze is only the UNHANDLED default. The
+    /// double-handle rule applies as for any signal: colliding with (or as)
+    /// a bot that's mid-handler/boot/recall explodes it.
+    /// `raise_on_mover` is false for engine-driven walks (recall): the
+    /// engine's own driving is not the program's exception.
+    fn bump_both(&mut self, mover: BotId, tile: TilePos, raise_on_mover: bool) {
         let blocker = self
             .world
             .bots
@@ -1070,17 +1075,29 @@ impl Sim {
             .filter(|b| b.data.id != mover && !b.data.dying && b.data.pos == tile)
             .map(|b| b.data.id)
             .min();
-        // Asymmetric blame: the rammer freezes long, the victim staggers
-        // briefly and clears the scene. Freezes never downgrade.
-        if let Some(bot) = self.world.bots.get_mut(&mover) {
+
+        let mover_outcome = if raise_on_mover {
+            self.raise_signal(mover, Signal::Bump)
+        } else {
+            RaiseOutcome::Ignored
+        };
+        if mover_outcome == RaiseOutcome::Ignored
+            && let Some(bot) = self.world.bots.get_mut(&mover)
+        {
+            // Unhandled default: the long at-fault stun (never downgrades).
             bot.data.bump_frozen = bot.data.bump_frozen.max(self.tuning.bump_freeze_ticks);
         }
-        if let Some(blocker) = blocker
-            && let Some(bot) = self.world.bots.get_mut(&blocker)
-        {
-            bot.data.bump_frozen =
-                bot.data.bump_frozen.max(self.tuning.bump_victim_freeze_ticks);
+
+        if let Some(blocker) = blocker {
+            let blocker_outcome = self.raise_signal(blocker, Signal::Bumped);
+            if blocker_outcome == RaiseOutcome::Ignored
+                && let Some(bot) = self.world.bots.get_mut(&blocker)
+            {
+                bot.data.bump_frozen =
+                    bot.data.bump_frozen.max(self.tuning.bump_victim_freeze_ticks);
+            }
         }
+
         let damage = self.tuning.bump_damage;
         self.apply_damage(mover, damage);
         if let Some(blocker) = blocker {
@@ -1246,8 +1263,8 @@ impl Sim {
         }
     }
 
-    fn raise_signal(&mut self, id: BotId, signal: Signal) {
-        let Some(bot) = self.world.bots.get_mut(&id) else { return };
+    fn raise_signal(&mut self, id: BotId, signal: Signal) -> RaiseOutcome {
+        let Some(bot) = self.world.bots.get_mut(&id) else { return RaiseOutcome::Ignored };
         let mut vm = bot.vm.take().expect("vm present between phases");
         let outcome = {
             let mut host = BotHost { world: &mut self.world, bot: id };
@@ -1270,6 +1287,7 @@ impl Sim {
             }
             RaiseOutcome::Exploded => self.explode(id, &vm),
         }
+        outcome
     }
 
     /// Double handle: instant destruction — no wreck, but every destruction

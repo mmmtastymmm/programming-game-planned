@@ -83,6 +83,10 @@ pub enum RaiseOutcome {
 pub enum Signal {
     Hurt,
     Death,
+    /// This bot rammed something.
+    Bump,
+    /// Something rammed this bot.
+    Bumped,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -333,10 +337,12 @@ impl Vm {
         let kind = match signal {
             Signal::Hurt => SignalKind::Hurt,
             Signal::Death => SignalKind::Death,
+            Signal::Bump => SignalKind::Bump,
+            Signal::Bumped => SignalKind::Bumped,
         };
         let Some(handler) = self.program.handlers.get(&kind) else {
             return match signal {
-                Signal::Hurt => {
+                Signal::Hurt | Signal::Bump | Signal::Bumped => {
                     // No handler: nothing happens — and critically, a
                     // Blocked VM STAYS blocked (its pending action result
                     // is still owed; un-blocking here would desync the

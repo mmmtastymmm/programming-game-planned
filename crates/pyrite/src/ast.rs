@@ -130,6 +130,10 @@ pub enum SignalKind {
     Error,
     Hurt,
     Death,
+    /// This bot rammed something (it was the mover).
+    Bump,
+    /// Something rammed this bot (it was standing there).
+    Bumped,
 }
 
 #[derive(Debug, Clone, PartialEq)]
