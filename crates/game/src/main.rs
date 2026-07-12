@@ -84,6 +84,10 @@ struct Pose {
 struct BillboardBar;
 #[derive(Component)]
 struct ProgressFill;
+/// The in-world ring under the inspected bot.
+#[derive(Component)]
+struct SelMarker;
+
 /// Angry scribble cloud over a bump-frozen bot (baked SVG frames).
 #[derive(Component)]
 struct ScribbleCloud;
@@ -195,6 +199,8 @@ struct Palette {
     bar_trail_mat: Handle<StandardMaterial>,
     scribble_quad: Handle<Mesh>,
     scribble_mats: Vec<Handle<StandardMaterial>>,
+    sel_ring: Handle<Mesh>,
+    sel_mat: Handle<StandardMaterial>,
 }
 
 /// LMB click-vs-drag disambiguation while a tool is armed: a press is the
@@ -224,6 +230,10 @@ struct EditorState {
     selected_build: Option<ToolKind>,
     /// Last tile painted during a drag (avoids re-sending every frame).
     last_paint_tile: Option<TilePos>,
+    /// Inspected bot (click a bot with no tool armed).
+    selected_bot: Option<u32>,
+    /// LMB press position, for click-vs-drag discrimination.
+    press_pos: Option<Vec2>,
     /// Sim time controls (viewer-local; multiplayer will vote — docs/08).
     paused: bool,
     speed: f32,
@@ -250,6 +260,8 @@ impl Default for EditorState {
             status_ok: true,
             selected_build: None,
             last_paint_tile: None,
+            selected_bot: None,
+            press_pos: None,
             paused: false,
             speed: 1.0,
             build_category: 0,
@@ -503,9 +515,12 @@ fn main() {
             Update,
             (
                 editor_ui,
+                inspector_ui,
                 time_controls,
                 orbit_camera,
                 place_blueprint,
+                select_bot,
+                update_sel_marker,
                 build_preview,
                 update_progress_bars,
                 update_health_bars,
@@ -784,6 +799,14 @@ fn setup_scene(
             ..default()
         }),
         scribble_quad: meshes.add(Rectangle::new(0.75, 0.6)),
+        sel_ring: meshes.add(Cylinder::new(0.55, 0.05)),
+        sel_mat: materials.add(StandardMaterial {
+            base_color: Color::srgba(0.55, 0.95, 1.0, 0.65),
+            emissive: LinearRgba::new(0.2, 0.6, 0.8, 1.0),
+            alpha_mode: AlphaMode::Blend,
+            unlit: true,
+            ..default()
+        }),
         scribble_mats: (0..3)
             .map(|i| {
                 materials.add(StandardMaterial {
@@ -884,6 +907,14 @@ fn setup_scene(
                 Visibility::Hidden,
             ));
         });
+
+    commands.spawn((
+        SelMarker,
+        Mesh3d(palette.sel_ring.clone()),
+        MeshMaterial3d(palette.sel_mat.clone()),
+        Transform::from_xyz(0.0, 0.02, 0.0),
+        Visibility::Hidden,
+    ));
 
     commands.insert_resource(palette);
 }
@@ -1867,6 +1898,217 @@ fn billboard_bars(
             .unwrap_or(Quat::IDENTITY);
         // World rotation = parent * local; we want world == camera.
         bar.rotation = parent_rotation.inverse() * cam.rotation;
+    }
+}
+
+/// Click a bot (no tool armed, click-not-drag) to inspect it; click empty
+/// ground or press Esc to deselect.
+fn select_bot(
+    mut contexts: EguiContexts,
+    mut editor: ResMut<EditorState>,
+    buttons: Res<ButtonInput<MouseButton>>,
+    keys: Res<ButtonInput<KeyCode>>,
+    windows: Query<&Window>,
+    cams: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
+    game: NonSend<GameSim>,
+) {
+    let typing = contexts.try_ctx_mut().is_some_and(|ctx| ctx.wants_keyboard_input());
+    if !typing && keys.just_pressed(KeyCode::Escape) && editor.selected_build.is_none() {
+        editor.selected_bot = None;
+    }
+    if editor.selected_build.is_some() {
+        return; // armed tools own the mouse
+    }
+    let over_ui = contexts.try_ctx_mut().is_some_and(|ctx| ctx.wants_pointer_input());
+    let cursor = windows.single().ok().and_then(|w| w.cursor_position());
+    if buttons.just_pressed(MouseButton::Left) && !over_ui {
+        editor.press_pos = cursor;
+    }
+    if buttons.just_released(MouseButton::Left) {
+        let Some(press) = editor.press_pos.take() else { return };
+        if over_ui {
+            return;
+        }
+        let Some(now) = cursor else { return };
+        if press.distance(now) > 6.0 {
+            return; // that was a pan, not a click
+        }
+        let world = &game.0.world;
+        let Some(tile) = cursor_tile(&windows, &cams, world.grid.width, world.grid.height)
+        else {
+            return;
+        };
+        editor.selected_bot = world
+            .bots
+            .values()
+            .find(|b| b.data.pos == tile && !b.data.dying)
+            .map(|b| b.data.id.0);
+    }
+}
+
+/// The cyan ring tracks the inspected bot (interpolated view position).
+fn update_sel_marker(
+    editor: Res<EditorState>,
+    index: Res<ViewIndex>,
+    time: Res<Time>,
+    views: Query<&Transform, Without<SelMarker>>,
+    mut marker: Query<(&mut Transform, &mut Visibility), With<SelMarker>>,
+) {
+    let Ok((mut transform, mut visibility)) = marker.single_mut() else { return };
+    let target = editor
+        .selected_bot
+        .and_then(|id| index.bots.get(&id))
+        .and_then(|&e| views.get(e).ok());
+    match target {
+        Some(view) => {
+            transform.translation = Vec3::new(view.translation.x, 0.06, view.translation.z);
+            transform.rotate_y(1.5 * time.delta_secs());
+            *visibility = Visibility::Visible;
+        }
+        None => *visibility = Visibility::Hidden,
+    }
+}
+
+/// The inspector: live program with the executing line highlighted, VM
+/// state, vitals, XP, and logs — the transparency pillar as UI.
+fn inspector_ui(
+    mut contexts: EguiContexts,
+    mut editor: ResMut<EditorState>,
+    game: NonSend<GameSim>,
+) {
+    let Some(bot_id) = editor.selected_bot else { return };
+    let Some(ctx) = contexts.try_ctx_mut() else { return };
+    let world = &game.0.world;
+    let mut open = true;
+
+    egui::SidePanel::right("inspector").exact_width(320.0).show(ctx, |ui| {
+        let Some(bot) = world.bots.get(&sim::world::BotId(bot_id)) else {
+            // The bot is gone: wreck or total destruction.
+            if let Some(wreck) = world.wrecks.get(&sim::world::BotId(bot_id)) {
+                ui.heading(format!("Bot {bot_id} — WRECKED"));
+                ui.label(format!("at ({}, {})", wreck.pos.x, wreck.pos.y));
+                ui.separator();
+                ui.strong("recovered logs");
+                for line in &wreck.logs {
+                    ui.monospace(line);
+                }
+            } else {
+                ui.heading(format!("Bot {bot_id} — DESTROYED"));
+                ui.small("No wreck. Check the black boxes and the cloud.");
+            }
+            if ui.button("close").clicked() {
+                open = false;
+            }
+            return;
+        };
+        let data = &bot.data;
+        let color_name = match data.color {
+            BotColor::GREEN => "Green",
+            BotColor::RED => "Red",
+            _ => "Blue",
+        };
+        ui.horizontal(|ui| {
+            ui.heading(format!("Bot {bot_id} — {color_name}"));
+            if ui.button("✕").clicked() {
+                open = false;
+            }
+        });
+
+        // Status line.
+        let status = if data.booting.is_some() {
+            "booting".to_string()
+        } else if data.recall.is_some() {
+            "recalled (engine)".to_string()
+        } else if data.bump_frozen > 0 {
+            format!("bump-frozen ({} ticks)", data.bump_frozen)
+        } else if bot.in_signal_handler() {
+            "handling a signal".to_string()
+        } else if bot.vm.as_ref().is_some_and(|vm| vm.is_blocked()) {
+            match &data.action {
+                Some(sim::world::Action::Move { path, .. }) => {
+                    format!("moving ({} tiles left)", path.len())
+                }
+                Some(sim::world::Action::Mine { .. }) => "mining".into(),
+                Some(sim::world::Action::Deposit { .. }) => "depositing".into(),
+                Some(sim::world::Action::Attack { .. }) => "attacking".into(),
+                Some(sim::world::Action::Wait { ticks_left }) => {
+                    format!("waiting ({ticks_left} ticks)")
+                }
+                Some(sim::world::Action::Build { .. }) => "building".into(),
+                None => "blocked".into(),
+            }
+        } else {
+            "thinking".to_string()
+        };
+        ui.label(status);
+        ui.monospace(format!(
+            "hp {}/{}   cargo {}/{}   at ({}, {})",
+            data.hp, data.max_hp, data.cargo, data.cargo_cap, data.pos.x, data.pos.y
+        ));
+        ui.monospace(format!(
+            "xp  mine {}  haul {}  fight {}  build {}",
+            data.xp_mining, data.xp_hauling, data.xp_combat, data.xp_building
+        ));
+        ui.separator();
+
+        // VM state.
+        if let Some(vm) = &bot.vm {
+            ui.monospace(format!(
+                "line {}   budget {}   faults {} ({} crashes)",
+                vm.current_line(),
+                vm.budget(),
+                vm.fault_count(),
+                vm.crash_count()
+            ));
+            if let Some(fault) = vm.last_fault() {
+                ui.colored_label(egui::Color32::from_rgb(240, 120, 100), format!("last: {fault}"));
+            }
+            ui.separator();
+
+            // The program, current line highlighted.
+            ui.strong("program");
+            let source = world
+                .color_programs
+                .get(&(data.faction, data.color.0))
+                .map(|cp| cp.source.clone());
+            match source {
+                Some(source) => {
+                    let current = vm.current_line() as usize;
+                    egui::ScrollArea::vertical().max_height(260.0).show(ui, |ui| {
+                        for (i, line) in source.lines().enumerate() {
+                            let n = i + 1;
+                            let text = format!("{n:>3} {line}");
+                            if n == current {
+                                ui.label(
+                                    egui::RichText::new(text)
+                                        .monospace()
+                                        .background_color(egui::Color32::from_rgb(60, 70, 30))
+                                        .color(egui::Color32::from_rgb(230, 255, 200)),
+                                );
+                            } else {
+                                ui.monospace(text);
+                            }
+                        }
+                    });
+                }
+                None => {
+                    ui.small("(no deployed source for this color)");
+                }
+            }
+        }
+        ui.separator();
+
+        ui.strong("local logs");
+        if data.log_buf.is_empty() {
+            ui.small("(empty)");
+        }
+        for line in &data.log_buf {
+            ui.monospace(line);
+        }
+    });
+
+    if !open {
+        editor.selected_bot = None;
     }
 }
 
