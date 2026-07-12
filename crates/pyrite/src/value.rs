@@ -26,6 +26,26 @@ pub struct EnumValue {
 }
 
 impl Value {
+    /// Name of the builtin fallible-query enum: `Result.Ok(v)` / `Result.Err(msg)`.
+    /// Constructed by hosts, consumed by `.expect()` or `match`.
+    pub const RESULT_ENUM: &'static str = "Result";
+
+    pub fn result_ok(value: Value) -> Value {
+        Value::Enum(EnumValue {
+            enum_name: Self::RESULT_ENUM.to_string(),
+            variant: "Ok".to_string(),
+            fields: vec![value],
+        })
+    }
+
+    pub fn result_err(msg: impl Into<String>) -> Value {
+        Value::Enum(EnumValue {
+            enum_name: Self::RESULT_ENUM.to_string(),
+            variant: "Err".to_string(),
+            fields: vec![Value::Str(msg.into())],
+        })
+    }
+
     pub fn type_name(&self) -> &'static str {
         match self {
             Value::Int(_) => "int",

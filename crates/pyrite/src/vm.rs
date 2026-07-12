@@ -103,11 +103,15 @@ enum State {
 pub struct VmConfig {
     /// Max user-function call depth (base 4; +4 per Stack module).
     pub stack_depth: usize,
+    /// Host-defined named constants (e.g. entity kinds: `ore`, `depot`).
+    /// Read-only fallback below globals — assignments shadow them, and they
+    /// survive the reset after a fault (globals don't).
+    pub constants: BTreeMap<String, Value>,
 }
 
 impl Default for VmConfig {
     fn default() -> Self {
-        Self { stack_depth: 4 }
+        Self { stack_depth: 4, constants: BTreeMap::new() }
     }
 }
 
@@ -134,6 +138,7 @@ enum Work {
     MatchBegin { stmt: StmtId },
     MatchArm { stmt: StmtId, value: EnumValue, case: usize },
     CallExec { name: String, argc: usize, line: u32 },
+    MethodExec { name: String, argc: usize, line: u32 },
     EnumCtorExec { enum_name: String, variant: String, argc: usize },
     MakeList { count: usize },
     IndexGet,
@@ -463,6 +468,7 @@ impl Vm {
                     costs.builtin_cost(name)
                 }
             }
+            Work::MethodExec { name, .. } => costs.builtin_cost(name),
             Work::EnumCtorExec { .. } => costs.enum_ctor,
             Work::MakeList { .. } => costs.list_op,
             Work::IndexGet => costs.list_op,
@@ -630,6 +636,14 @@ impl Vm {
                         for &arg in args.iter().rev() {
                             self.work.push(Work::Eval(arg));
                         }
+                    }
+                    Expr::MethodCall { base, name, args, line } => {
+                        self.current_line = line;
+                        self.work.push(Work::MethodExec { name, argc: args.len(), line });
+                        for &arg in args.iter().rev() {
+                            self.work.push(Work::Eval(arg));
+                        }
+                        self.work.push(Work::Eval(base));
                     }
                     Expr::Unary { op, operand } => {
                         self.work.push(Work::Unary(op));
@@ -849,6 +863,40 @@ impl Vm {
                         HostCall::Ready(v) => self.values.push(v),
                         HostCall::Block => self.state = State::Blocked,
                         HostCall::Fault(msg) => self.fault(msg, host, costs),
+                    }
+                }
+            }
+
+            Work::MethodExec { name, argc, line } => {
+                self.current_line = line;
+                let args: Vec<Value> = self.values.split_off(self.values.len() - argc);
+                let base = self.pop_value();
+                match (name.as_str(), base) {
+                    ("expect", Value::Enum(e)) if e.enum_name == Value::RESULT_ENUM => {
+                        if !args.is_empty() {
+                            self.fault("expect() takes no arguments".into(), host, costs);
+                        } else if e.variant == "Ok" {
+                            let v = e.fields.into_iter().next().unwrap_or(Value::Unit);
+                            self.values.push(v);
+                        } else {
+                            // Err: fault with the carried message.
+                            let msg = match e.fields.first() {
+                                Some(Value::Str(s)) => s.clone(),
+                                Some(other) => other.to_string(),
+                                None => "expect() on Result.Err".to_string(),
+                            };
+                            self.fault(msg, host, costs);
+                        }
+                    }
+                    ("expect", other) => {
+                        self.fault(
+                            format!("expect() requires a Result, got {}", other.type_name()),
+                            host,
+                            costs,
+                        );
+                    }
+                    (_, _) => {
+                        self.fault(format!("unknown method {name}()"), host, costs);
                     }
                 }
             }

@@ -157,7 +157,7 @@ struct EditorState {
     code: String,
     status: String,
     status_ok: bool,
-    /// Armed build-bar tool (Esc cancels).
+    /// Armed build-bar tool (Esc/RMB cancels).
     selected_build: Option<ToolKind>,
     /// Last tile painted during a drag (avoids re-sending every frame).
     last_paint_tile: Option<TilePos>,
@@ -787,8 +787,12 @@ fn place_blueprint(
     cams: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
     mut game: NonSendMut<GameSim>,
 ) {
-    if keys.just_pressed(KeyCode::Escape) {
+    if keys.just_pressed(KeyCode::Escape)
+        || (editor.selected_build.is_some() && buttons.just_pressed(MouseButton::Right))
+    {
         editor.selected_build = None;
+        editor.last_paint_tile = None;
+        return;
     }
     if keys.just_pressed(KeyCode::KeyR)
         && let Some(ToolKind::Overlay(Some(OverlayKind::Arrow(d)))) = editor.selected_build
@@ -1514,22 +1518,22 @@ fn editor_ui(
                 if let Some(kind) = editor.selected_build {
                     match kind {
                         ToolKind::Building(BlueprintKind::Bridge) => {
-                            ui.label("Click a water tile to place — Esc to cancel");
+                            ui.label("Click a water tile to place — Esc/RMB cancels");
                         }
                         ToolKind::Overlay(Some(OverlayKind::Arrow(d))) => {
                             ui.label(format!(
-                                "Click any tile to set {} — R rotates, Esc cancels",
+                                "Click any tile to set {} — R rotates, Esc/RMB cancels",
                                 d.arrow()
                             ));
                         }
                         ToolKind::Overlay(None) => {
-                            ui.label("Click a tile to clear its overlay — Esc cancels");
+                            ui.label("Click a tile to clear its overlay — Esc/RMB cancels");
                         }
                         ToolKind::Paint(Some(_)) => {
-                            ui.label("Click or drag to paint tiles — Esc cancels");
+                            ui.label("Click or drag to paint tiles — Esc/RMB cancels");
                         }
                         ToolKind::Paint(None) => {
-                            ui.label("Click or drag to erase paint — Esc cancels");
+                            ui.label("Click or drag to erase paint — Esc/RMB cancels");
                         }
                     }
                 } else {

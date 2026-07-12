@@ -56,6 +56,9 @@ pub enum Expr {
     /// `f(a, b)` — user function or builtin; resolved by the VM against the
     /// program's function table, falling back to the Host.
     Call { name: String, args: Vec<ExprId>, line: u32 },
+    /// `e.expect()` — postfix method call, dispatched by the VM. Today the
+    /// only method is `expect` on builtin `Result` values.
+    MethodCall { base: ExprId, name: String, args: Vec<ExprId>, line: u32 },
     Unary { op: UnOp, operand: ExprId },
     Binary { op: BinOp, lhs: ExprId, rhs: ExprId },
 }

@@ -524,6 +524,7 @@ impl<'a> Parser<'a> {
         let mut expr = self.parse_atom()?;
         loop {
             if self.check(&Tok::Dot) {
+                let dot_line = self.peek().line;
                 self.advance();
                 let name = self.expect_ident("attribute name")?;
                 // `EnumName.Variant` / `EnumName.Variant(args)` resolve at
@@ -569,6 +570,23 @@ impl<'a> Parser<'a> {
                         }
                         expr = self.add_expr(Expr::EnumUnit { enum_name, variant: name });
                     }
+                } else if self.eat(&Tok::LParen) {
+                    let mut args = Vec::new();
+                    if !self.check(&Tok::RParen) {
+                        loop {
+                            args.push(self.parse_expr()?);
+                            if !self.eat(&Tok::Comma) {
+                                break;
+                            }
+                        }
+                    }
+                    self.expect(Tok::RParen, ")")?;
+                    expr = self.add_expr(Expr::MethodCall {
+                        base: expr,
+                        name,
+                        args,
+                        line: dot_line,
+                    });
                 } else {
                     expr = self.add_expr(Expr::Attr { base: expr, name });
                 }
