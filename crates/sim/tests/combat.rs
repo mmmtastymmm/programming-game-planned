@@ -30,6 +30,7 @@ fn spawn(sim: &mut Sim, pos: TilePos, source: &str, faction: u8, hp: i64) -> sim
 #[test]
 fn attacker_kills_defenseless_bot_into_wreck() {
     let mut sim = Sim::new(&MapSpec::empty(5, 5));
+    sim.tuning.regen_amount = 0; // exact XP math needs static hp
     let attacker = spawn(&mut sim, TilePos::new(1, 1), BRAWLER, 1, 100);
     let victim = spawn(&mut sim, TilePos::new(2, 1), IDLER, 0, 30);
     for _ in 0..200 {
@@ -171,6 +172,8 @@ log(1)
     let mut spec = MapSpec::empty(20, 3);
     spec.depots.push(TilePos::new(19, 1)); // far away: the retreat takes a while
     let mut sim = Sim::new(&spec);
+    sim.tuning.regen_amount = 0; // the double-handle race needs static hp
+    sim.tuning.fault_damage = 0; // and the chasing brawler must not crash out
     spawn(&mut sim, TilePos::new(1, 1), BRAWLER, 1, 100);
     // Victim stands next to the attacker; hurt fires at hp<15 (hp 30).
     let victim = spawn(&mut sim, TilePos::new(2, 1), victim_src, 0, 30);
@@ -247,4 +250,40 @@ move_to(closest(ore).expect())
     }
     let b = &sim.world.bots[&bot];
     assert_eq!(b.data.hp, 20, "handled faults must cost no health");
+}
+
+#[test]
+fn bots_regenerate_and_hurt_rearms() {
+    let hurt_src = "\
+on hurt:
+    log(\"ouch\")
+
+wait(2)
+";
+    let mut sim = Sim::new(&MapSpec::empty(5, 5));
+    let bot = spawn(&mut sim, TilePos::new(2, 2), hurt_src, 0, 100);
+    for _ in 0..4 {
+        sim.step();
+    }
+    // First wound below 50%: hurt fires once.
+    sim.world.bots.get_mut(&bot).unwrap().data.hp = 60;
+    sim.apply_damage_for_test(bot, 20); // 40 -> below threshold
+    for _ in 0..40 {
+        sim.step();
+    }
+    let logs = sim.world.bots[&bot].data.log_buf.clone();
+    assert_eq!(logs.iter().filter(|l| *l == "\"ouch\"").count(), 1, "hurt fired once: {logs:?}");
+    // Regen climbs hp back over 50% (re-arming) and toward max.
+    for _ in 0..400 {
+        sim.step();
+    }
+    assert_eq!(sim.world.bots[&bot].data.hp, 100, "regen must reach max");
+    assert!(!sim.world.bots[&bot].data.hurt_fired, "hurt re-armed above threshold");
+    // A second dip below threshold fires hurt again.
+    sim.apply_damage_for_test(bot, 60);
+    for _ in 0..40 {
+        sim.step();
+    }
+    let logs = sim.world.bots[&bot].data.log_buf.clone();
+    assert_eq!(logs.iter().filter(|l| *l == "\"ouch\"").count(), 2, "hurt re-fired: {logs:?}");
 }

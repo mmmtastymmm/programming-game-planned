@@ -84,6 +84,12 @@ struct ProgressFill;
 /// Red health fill on a bot's billboarded bar.
 #[derive(Component)]
 struct HealthFill;
+/// Pale "damage ghost" behind the red fill: holds the pre-hit fraction and
+/// drains toward it, so each hit reads as a shrinking chunk.
+#[derive(Component)]
+struct HealthTrail {
+    frac: f32,
+}
 
 /// The translucent placement ghost (slab + one-way chevron children).
 #[derive(Component)]
@@ -125,8 +131,8 @@ struct ViewIndex {
     blueprint_fills: HashMap<u64, Entity>,
     /// Printer id -> (bar root, fill) for print-job progress.
     printer_fills: HashMap<u64, (Entity, Entity)>,
-    /// Bot id -> (bar root, fill) for the health bar.
-    bot_health: HashMap<u32, (Entity, Entity)>,
+    /// Bot id -> (bar root, red fill, damage-ghost trail).
+    bot_health: HashMap<u32, (Entity, Entity, Entity)>,
     paint: HashMap<(i32, i32), (Entity, u8)>,
 }
 
@@ -170,7 +176,26 @@ struct Palette {
     bar_bg_mat: Handle<StandardMaterial>,
     bar_fill_mat: Handle<StandardMaterial>,
     bar_health_mat: Handle<StandardMaterial>,
+    bar_trail_mat: Handle<StandardMaterial>,
 }
+
+/// LMB click-vs-drag disambiguation while a tool is armed: a press is the
+/// tool's click only if the cursor stays inside the dead zone; traveling
+/// past it turns the gesture into a camera pan instead.
+#[derive(Resource, Default)]
+struct LmbGesture {
+    /// Accumulated cursor travel (px) since LMB went down over the world;
+    /// None while released or when the press began over the UI.
+    travel: Option<f32>,
+    /// The press outgrew the dead zone and owns the rest of the drag.
+    panning: bool,
+    /// Set for exactly the frame LMB was released inside the dead zone —
+    /// the armed tool's "click" (consumed by place_blueprint).
+    clicked: bool,
+}
+
+/// Cursor travel (px) that separates a click from a pan.
+const LMB_DRAG_THRESHOLD: f32 = 6.0;
 
 #[derive(Resource)]
 struct EditorState {
@@ -453,6 +478,7 @@ fn main() {
         .insert_resource(Time::<Fixed>::from_hz(10.0))
         .insert_resource(ViewIndex::default())
         .insert_resource(EditorState::default())
+        .insert_resource(LmbGesture::default())
         .add_systems(Startup, (setup_sim, setup_scene).chain())
         .add_systems(FixedUpdate, (step_sim, update_poses).chain())
         .add_systems(
@@ -714,6 +740,12 @@ fn setup_scene(
             unlit: true,
             ..default()
         }),
+        bar_trail_mat: materials.add(StandardMaterial {
+            base_color: Color::srgb(0.98, 0.85, 0.55),
+            emissive: LinearRgba::new(0.6, 0.45, 0.2, 1.0),
+            unlit: true,
+            ..default()
+        }),
         paint_mats: PAINT_COLORS.map(|(r, gc, b)| {
             materials.add(StandardMaterial {
                 base_color: Color::srgba(
@@ -839,6 +871,7 @@ fn orbit_transform(cam: &OrbitCam) -> Transform {
 fn orbit_camera(
     mut contexts: EguiContexts,
     editor: Res<EditorState>,
+    mut gesture: ResMut<LmbGesture>,
     buttons: Res<ButtonInput<MouseButton>>,
     keys: Res<ButtonInput<KeyCode>>,
     mut motion: EventReader<MouseMotion>,
@@ -851,16 +884,54 @@ fn orbit_camera(
     let Ok((mut cam, mut transform)) = cams.single_mut() else { return };
 
     let delta: Vec2 = motion.read().map(|m| m.delta).sum();
+    if buttons.pressed(MouseButton::Left) || buttons.just_released(MouseButton::Left) {
+        eprintln!(
+            "DBG lmb pressed={} released={} delta={:?} over_ui={} armed={} travel={:?} panning={}",
+            buttons.pressed(MouseButton::Left),
+            buttons.just_released(MouseButton::Left),
+            delta,
+            contexts.try_ctx_mut().is_some_and(|c| c.wants_pointer_input()),
+            editor.selected_build.is_some(),
+            gesture.travel,
+            gesture.panning,
+        );
+    }
     let scroll: f32 = wheel.read().map(|w| w.y).sum();
+
+    // LMB click-vs-drag: releasing inside the dead zone is the armed
+    // tool's click (place_blueprint runs after us and consumes it);
+    // outgrowing the dead zone hands the drag to the camera as a pan.
+    gesture.clicked = false;
+    if buttons.just_released(MouseButton::Left) {
+        gesture.clicked = gesture.travel.is_some() && !gesture.panning;
+        gesture.travel = None;
+        gesture.panning = false;
+    }
     if over_ui {
         return;
     }
+    if buttons.just_pressed(MouseButton::Left) {
+        gesture.travel = Some(0.0);
+    }
+    if buttons.pressed(MouseButton::Left)
+        && let Some(travel) = &mut gesture.travel
+    {
+        *travel += delta.length();
+        if *travel > LMB_DRAG_THRESHOLD {
+            gesture.panning = true;
+        }
+    }
 
-    // LMB drag pans only while no tool is armed — an armed tool owns LMB
-    // for placing/painting.
+    // Paint keeps its LMB drag (drag = paint an area); with any other tool
+    // — or none — a clear drag pans. With no tool armed there is no click
+    // to protect, so the pan starts immediately.
+    let paint_armed = matches!(editor.selected_build, Some(ToolKind::Paint(_)));
+    let lmb_pan = buttons.pressed(MouseButton::Left)
+        && !paint_armed
+        && (editor.selected_build.is_none() || gesture.panning);
     let panning = buttons.pressed(MouseButton::Middle)
         || (buttons.pressed(MouseButton::Right) && keys.pressed(KeyCode::ShiftLeft))
-        || (buttons.pressed(MouseButton::Left) && editor.selected_build.is_none());
+        || lmb_pan;
     if panning && delta != Vec2::ZERO {
         let right = transform.right();
         let up = transform.up();
@@ -881,6 +952,7 @@ fn orbit_camera(
 fn place_blueprint(
     mut contexts: EguiContexts,
     mut editor: ResMut<EditorState>,
+    gesture: Res<LmbGesture>,
     buttons: Res<ButtonInput<MouseButton>>,
     keys: Res<ButtonInput<KeyCode>>,
     windows: Query<&Window>,
@@ -900,13 +972,14 @@ fn place_blueprint(
         editor.selected_build = Some(ToolKind::Overlay(Some(OverlayKind::Arrow(d.clockwise()))));
     }
     let Some(kind) = editor.selected_build else { return };
-    // Paint drags; everything else places on click.
+    // Paint drags; everything else places on a dead-zone click (a longer
+    // LMB drag belongs to the camera pan — see LmbGesture).
     let painting = matches!(kind, ToolKind::Paint(_));
     if painting && !buttons.pressed(MouseButton::Left) {
         editor.last_paint_tile = None;
         return;
     }
-    if !painting && !buttons.just_pressed(MouseButton::Left) {
+    if !painting && !gesture.clicked {
         return;
     }
     if contexts.try_ctx_mut().is_some_and(|ctx| ctx.wants_pointer_input()) {
@@ -1337,6 +1410,7 @@ fn sync_view(
         let start = tile_xyz(world, bot.data.pos, 0.45);
         let mut bar_root = Entity::PLACEHOLDER;
         let mut health_fill = Entity::PLACEHOLDER;
+        let mut health_trail = Entity::PLACEHOLDER;
         let entity = commands
             .spawn((
                 Mesh3d(palette.bot_cube.clone()),
@@ -1371,6 +1445,15 @@ fn sync_view(
                             MeshMaterial3d(palette.bar_bg_mat.clone()),
                             Transform::default().with_scale(Vec3::new(0.8, 0.7, 1.0)),
                         ));
+                        health_trail = bar
+                            .spawn((
+                                HealthTrail { frac: 1.0 },
+                                Mesh3d(palette.bar_mesh.clone()),
+                                MeshMaterial3d(palette.bar_trail_mat.clone()),
+                                Transform::from_xyz(0.0, 0.0, 0.0105)
+                                    .with_scale(Vec3::new(0.8, 0.55, 1.0)),
+                            ))
+                            .id();
                         health_fill = bar
                             .spawn((
                                 HealthFill,
@@ -1394,7 +1477,7 @@ fn sync_view(
             })
             .id();
         index.bots.insert(id.0, entity);
-        index.bot_health.insert(id.0, (bar_root, health_fill));
+        index.bot_health.insert(id.0, (bar_root, health_fill, health_trail));
     }
     index.bots.retain(|id, entity| {
         if seen.contains(id) {
@@ -1608,24 +1691,41 @@ fn update_progress_bars(
 /// Health bars: visible while the hp change is recent, red fill = hp
 /// fraction (left-anchored, slightly narrower than build bars).
 fn update_health_bars(
+    time: Res<Time>,
     game: NonSend<GameSim>,
     index: Res<ViewIndex>,
     poses: Query<&Pose>,
-    mut fills: Query<&mut Transform, With<HealthFill>>,
+    mut fills: Query<&mut Transform, (With<HealthFill>, Without<HealthTrail>)>,
+    mut trails: Query<(&mut Transform, &mut HealthTrail), Without<HealthFill>>,
     mut roots: Query<&mut Visibility, With<BillboardBar>>,
 ) {
+    // Left-anchored bar segment within the 0.9-wide mesh scaled by 0.8.
+    let place = |transform: &mut Transform, frac: f32, height: f32| {
+        let frac = frac.clamp(0.02, 1.0);
+        transform.scale = Vec3::new(frac * 0.8, height, 1.0);
+        transform.translation.x = -(0.9 * 0.8 * (1.0 - frac)) / 2.0;
+    };
     for (id, bot) in &game.0.world.bots {
-        let Some(&(root, fill)) = index.bot_health.get(&id.0) else { continue };
+        let Some(&(root, fill, trail)) = index.bot_health.get(&id.0) else { continue };
         let Some(&view) = index.bots.get(&id.0) else { continue };
         let Ok(pose) = poses.get(view) else { continue };
         let Ok(mut visibility) = roots.get_mut(root) else { continue };
+        let p = (bot.data.hp as f32 / bot.data.max_hp as f32).clamp(0.0, 1.0);
         // ~3 s at 10 Hz; permanent while below half (Damaged).
         let recent = pose.hp_age < 30 || bot.data.hp * 2 < bot.data.max_hp;
         *visibility = if recent { Visibility::Visible } else { Visibility::Hidden };
+        if let Ok((mut transform, mut ghost)) = trails.get_mut(trail) {
+            if recent {
+                // Ghost drains toward the real fraction; heals snap it up.
+                ghost.frac = ghost.frac.max(p);
+                ghost.frac = (ghost.frac - 0.35 * time.delta_secs()).max(p);
+                place(&mut transform, ghost.frac, 0.55);
+            } else {
+                ghost.frac = p; // no stale chunk on the next reveal
+            }
+        }
         if recent && let Ok(mut transform) = fills.get_mut(fill) {
-            let p = (bot.data.hp as f32 / bot.data.max_hp as f32).clamp(0.02, 1.0);
-            transform.scale = Vec3::new(p * 0.8, 0.55, 1.0);
-            transform.translation.x = -(0.9 * 0.8 * (1.0 - p)) / 2.0;
+            place(&mut transform, p, 0.55);
         }
     }
 }
@@ -2020,7 +2120,8 @@ fn editor_ui(
                 .order(egui::Order::Foreground)
                 .show(ui.ctx(), |ui| {
                     egui::Frame::popup(ui.style()).show(ui, |ui| {
-                        ui.small(format!("{} takes a kind — ↑↓ Enter", c.func));
+                        // Plain words: egui's default font has no ↑/↓ glyphs.
+                        ui.small(format!("{} takes a kind — arrows + Enter", c.func));
                         for (i, kind) in c.suggestions.iter().enumerate() {
                             let label = egui::RichText::new(*kind).monospace().color(HL_VARIABLE);
                             if ui

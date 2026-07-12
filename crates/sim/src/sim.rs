@@ -49,6 +49,9 @@ pub struct Tuning {
     /// Chassis damage per UNHANDLED fault: crash loops are lethal, and
     /// `on error:` handlers are literal armor (handled faults are free).
     pub fault_damage: i64,
+    /// Passive self-repair: +regen_amount hp every regen_interval_ticks.
+    pub regen_interval_ticks: u64,
+    pub regen_amount: i64,
 }
 
 impl Default for Tuning {
@@ -68,6 +71,8 @@ impl Default for Tuning {
             bridge_build_ticks: 20,
             overlay_cost_ore: 1,
             fault_damage: 5,
+            regen_interval_ticks: 5,
+            regen_amount: 1,
         }
     }
 }
@@ -358,6 +363,29 @@ impl Sim {
             if delta > 0 {
                 bot.data.crash_seen = crashes;
                 self.apply_damage(id, delta as i64 * self.tuning.fault_damage);
+            }
+        }
+
+        // --- phase 4.8: passive regen — and the hurt signal re-arms when
+        // health climbs back above its threshold (docs/02: edge-triggered).
+        if self.world.tick % self.tuning.regen_interval_ticks == 0 {
+            let amount = self.tuning.regen_amount;
+            for id in ids.iter().copied() {
+                let Some(bot) = self.world.bots.get_mut(&id) else { continue };
+                if bot.data.dying || bot.data.hp >= bot.data.max_hp {
+                    continue;
+                }
+                bot.data.hp = (bot.data.hp + amount).min(bot.data.max_hp);
+                if bot.data.hurt_fired {
+                    let threshold = bot
+                        .vm
+                        .as_ref()
+                        .and_then(|vm| vm.hurt_threshold())
+                        .unwrap_or(50);
+                    if bot.data.hp * 100 >= bot.data.max_hp * threshold {
+                        bot.data.hurt_fired = false;
+                    }
+                }
             }
         }
 
@@ -1144,6 +1172,11 @@ impl Sim {
                 }
             }
         }
+    }
+
+    /// Test hook: drive the damage pipeline directly (signals included).
+    pub fn apply_damage_for_test(&mut self, id: BotId, amount: i64) {
+        self.apply_damage(id, amount);
     }
 
     /// Damage pipeline: hp change, then signals per docs/01-language.md.
