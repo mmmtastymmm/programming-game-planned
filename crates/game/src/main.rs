@@ -1753,14 +1753,21 @@ fn update_health_bars(
     }
 }
 
-/// Progress bars always face the camera.
+/// Progress/health bars always face the camera, level and consistent —
+/// compensating for the parent's rotation (bots turn; their bars must not).
 fn billboard_bars(
     cams: Query<&Transform, (With<Camera3d>, Without<BillboardBar>)>,
-    mut bars: Query<&mut Transform, (With<BillboardBar>, Without<Camera3d>)>,
+    parents: Query<&Transform, (Without<BillboardBar>, Without<Camera3d>)>,
+    mut bars: Query<(&mut Transform, Option<&ChildOf>), With<BillboardBar>>,
 ) {
     let Ok(cam) = cams.single() else { return };
-    for mut bar in &mut bars {
-        bar.rotation = cam.rotation;
+    for (mut bar, child_of) in &mut bars {
+        let parent_rotation = child_of
+            .and_then(|c| parents.get(c.parent()).ok())
+            .map(|t| t.rotation)
+            .unwrap_or(Quat::IDENTITY);
+        // World rotation = parent * local; we want world == camera.
+        bar.rotation = parent_rotation.inverse() * cam.rotation;
     }
 }
 
