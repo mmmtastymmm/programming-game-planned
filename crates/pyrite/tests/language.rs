@@ -625,3 +625,90 @@ fn queued_program_installs_at_the_loop_boundary() {
         host.calls.iter().filter(|(n, _)| n == "log").map(|(_, a)| &a[0]).collect();
     assert_eq!(logged.last(), Some(&&Value::Int(2)), "new program runs after the wrap");
 }
+
+// --- Result / .expect() / kind constants (generic queries) ---
+
+/// vm_for, but with `ore` bound as a kind constant and `closest` returning
+/// the given Result value.
+fn vm_with_closest(source: &str, closest: Value) -> (Vm, TestHost, CostTable) {
+    let program = parse(source, &UnlockSet::all()).expect("parse failed");
+    let mut host = TestHost::default();
+    host.blocking.insert("halt".into());
+    host.returns.insert("closest".into(), closest);
+    let mut config = VmConfig::default();
+    config.constants.insert("ore".into(), Value::Str("ore".into()));
+    (Vm::new(Rc::new(program), config), host, CostTable::default())
+}
+
+#[test]
+fn expect_unwraps_ok() {
+    let (mut vm, mut host, costs) =
+        vm_with_closest("move_to(closest(ore).expect())\nhalt()\n", Value::result_ok(Value::Entity(7)));
+    vm.grant(100);
+    vm.run(&mut host, &costs);
+    // The kind constant arrives at the host as its string value.
+    assert_eq!(host.calls[0], ("closest".to_string(), vec![Value::Str("ore".into())]));
+    assert_eq!(host.calls[1], ("move_to".to_string(), vec![Value::Entity(7)]));
+}
+
+#[test]
+fn expect_on_err_faults_with_the_carried_message() {
+    let (mut vm, mut host, costs) = vm_with_closest(
+        "move_to(closest(ore).expect())\n",
+        Value::result_err("no ore anywhere"),
+    );
+    vm.grant(100);
+    vm.run(&mut host, &costs);
+    let dump = host
+        .calls
+        .iter()
+        .find(|(n, _)| n == "upload_crash_dump")
+        .expect("Err.expect() must fault into a crash dump");
+    assert_eq!(dump.1, vec![Value::Str("no ore anywhere".into())]);
+    assert!(!call_names(&host).contains(&"move_to"), "move_to must not run");
+}
+
+#[test]
+fn match_handles_result_miss_without_fault() {
+    let src = "\
+match closest(ore):
+    case Result.Ok(t):
+        move_to(t)
+    case Result.Err(msg):
+        log(msg)
+halt()
+";
+    let (mut vm, mut host, costs) = vm_with_closest(src, Value::result_err("no ore anywhere"));
+    vm.grant(100);
+    vm.run(&mut host, &costs);
+    assert!(call_names(&host).contains(&"log"), "Err arm must run, got {:?}", call_names(&host));
+    assert!(!call_names(&host).contains(&"upload_crash_dump"), "no fault on the match path");
+}
+
+#[test]
+fn expect_on_non_result_faults() {
+    let (mut vm, mut host, costs) = vm_for("log(5.expect())\n");
+    vm.grant(100);
+    vm.run(&mut host, &costs);
+    let dump = host.calls.iter().find(|(n, _)| n == "upload_crash_dump").expect("must fault");
+    assert_eq!(dump.1, vec![Value::Str("expect() requires a Result, got int".into())]);
+}
+
+#[test]
+fn kind_constants_are_shadowable_and_survive_the_wrap() {
+    // Shadow `ore` on pass 1; the wrap clears globals, so pass 2 reads the
+    // constant again — constants live below globals and survive resets.
+    let (mut vm, mut host, costs) =
+        vm_with_closest("log(ore)\nore = 5\nlog(ore)\n", Value::Unit);
+    vm.grant(11); // pass: log(3) + assign(2) + log(3) = 8, wrap(1), log(3) → 12 lands mid
+    vm.run(&mut host, &costs);
+    let logged: Vec<&Value> =
+        host.calls.iter().filter(|(n, _)| n == "log").map(|(_, a)| &a[0]).collect();
+    assert_eq!(logged[0], &Value::Str("ore".into()), "constant read");
+    assert_eq!(logged[1], &Value::Int(5), "assignment shadows the constant");
+    vm.grant(100);
+    vm.run(&mut host, &costs);
+    let logged: Vec<&Value> =
+        host.calls.iter().filter(|(n, _)| n == "log").map(|(_, a)| &a[0]).collect();
+    assert_eq!(logged[2], &Value::Str("ore".into()), "wrap restores the constant");
+}

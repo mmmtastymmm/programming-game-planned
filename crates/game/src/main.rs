@@ -355,11 +355,7 @@ fn build_colony() -> Sim {
     }
     // Modest west-side ore keeps the colony alive pre-bridge.
     spec.ore_nodes.push((TilePos::new(8, 3), 25));
-    // Four ready-made crossings so every session doesn't start with
-    // bridge chores; add arrows to make lanes, or build more.
-    for y in [2, 5, 8, 11] {
-        spec.bridges.push(TilePos::new(16, y));
-    }
+
     spec.ore_nodes.push((TilePos::new(20, 3), 60));
     spec.ore_nodes.push((TilePos::new(19, 11), 40));
     spec.depots.push(TilePos::new(3, 7));
@@ -386,6 +382,16 @@ fn build_colony() -> Sim {
         source: DEFAULT_PROGRAM.into(),
     })
     .expect("miner program parses");
+    // Four bridge blueprints across the wall: the default program services
+    // blueprints first, so the opening minutes are the colony building its
+    // own crossings — progress bars and all — before mining east.
+    for y in [2, 5, 8, 11] {
+        game.apply(&Command::PlaceBlueprint {
+            pos: TilePos::new(16, y),
+            kind: BlueprintKind::Bridge,
+        })
+        .expect("blueprint placement");
+    }
     game
 }
 
