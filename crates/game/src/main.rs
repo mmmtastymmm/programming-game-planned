@@ -1105,6 +1105,91 @@ fn sync_view(
 
 // --------------------------------------------------------------------- ui
 
+// ------------------------------------------------------ syntax highlighting
+
+// Editor colors, tuned for egui's dark theme.
+const HL_KEYWORD: egui::Color32 = egui::Color32::from_rgb(197, 134, 192);
+const HL_FUNCTION: egui::Color32 = egui::Color32::from_rgb(220, 220, 130);
+const HL_VARIABLE: egui::Color32 = egui::Color32::from_rgb(156, 220, 254);
+const HL_NUMBER: egui::Color32 = egui::Color32::from_rgb(181, 206, 168);
+const HL_STRING: egui::Color32 = egui::Color32::from_rgb(206, 145, 120);
+const HL_COMMENT: egui::Color32 = egui::Color32::from_rgb(106, 153, 85);
+const HL_PLAIN: egui::Color32 = egui::Color32::from_rgb(212, 212, 212);
+
+/// Best-effort Pyrite highlighting for the editor. Unlike `pyrite::lexer`
+/// this never fails, so half-typed programs still get colored. Keywords come
+/// from the lexer's own table (`pyrite::token::keyword`) so the two can't
+/// drift.
+fn highlight_pyrite(text: &str, font_id: egui::FontId) -> egui::text::LayoutJob {
+    use egui::text::{LayoutJob, TextFormat};
+
+    let chars: Vec<(usize, char)> = text.char_indices().collect();
+    let byte_at =
+        |i: usize| chars.get(i).map_or(text.len(), |&(b, _)| b);
+
+    let mut job = LayoutJob::default();
+    let fmt = |color: egui::Color32| TextFormat {
+        font_id: font_id.clone(),
+        color,
+        ..Default::default()
+    };
+
+    let n = chars.len();
+    let mut plain_start = 0; // byte offset of pending uncolored text
+    let mut i = 0;
+    while i < n {
+        let (start, c) = chars[i];
+        let (end, color) = if c == '#' {
+            while i < n && chars[i].1 != '\n' {
+                i += 1;
+            }
+            (byte_at(i), HL_COMMENT)
+        } else if c == '"' {
+            i += 1;
+            while i < n && chars[i].1 != '"' && chars[i].1 != '\n' {
+                i += if chars[i].1 == '\\' { 2 } else { 1 };
+            }
+            if i < n && chars[i].1 == '"' {
+                i += 1;
+            }
+            (byte_at(i), HL_STRING)
+        } else if c.is_ascii_digit() {
+            while i < n && chars[i].1.is_ascii_digit() {
+                i += 1;
+            }
+            (byte_at(i), HL_NUMBER)
+        } else if c.is_ascii_alphabetic() || c == '_' {
+            while i < n && (chars[i].1.is_ascii_alphanumeric() || chars[i].1 == '_') {
+                i += 1;
+            }
+            let end = byte_at(i);
+            let color = if pyrite::token::keyword(&text[start..end]).is_some() {
+                HL_KEYWORD
+            } else {
+                // A call (or `def` header) if the next non-space char is `(`.
+                let mut j = i;
+                while j < n && chars[j].1 == ' ' {
+                    j += 1;
+                }
+                if j < n && chars[j].1 == '(' { HL_FUNCTION } else { HL_VARIABLE }
+            };
+            (end, color)
+        } else {
+            i += 1;
+            continue;
+        };
+        if plain_start < start {
+            job.append(&text[plain_start..start], 0.0, fmt(HL_PLAIN));
+        }
+        job.append(&text[start..end], 0.0, fmt(color));
+        plain_start = end;
+    }
+    if plain_start < text.len() {
+        job.append(&text[plain_start..], 0.0, fmt(HL_PLAIN));
+    }
+    job
+}
+
 fn editor_ui(
     mut contexts: EguiContexts,
     mut game: NonSendMut<GameSim>,
@@ -1191,11 +1276,18 @@ fn editor_ui(
 
     egui::SidePanel::left("editor").exact_width(300.0).show(ctx, |ui| {
         ui.heading("Pyrite");
+        let mut layouter = |ui: &egui::Ui, text: &str, wrap_width: f32| {
+            let mut job =
+                highlight_pyrite(text, egui::TextStyle::Monospace.resolve(ui.style()));
+            job.wrap.max_width = wrap_width;
+            ui.fonts(|fonts| fonts.layout_job(job))
+        };
         ui.add(
             egui::TextEdit::multiline(&mut editor.code)
                 .font(egui::TextStyle::Monospace)
                 .desired_rows(14)
-                .desired_width(f32::INFINITY),
+                .desired_width(f32::INFINITY)
+                .layouter(&mut layouter),
         );
         ui.horizontal(|ui| {
             for (label, color) in [("Deploy Green", BotColor::GREEN), ("Deploy Red", BotColor::RED)] {

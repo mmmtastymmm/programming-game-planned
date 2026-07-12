@@ -55,3 +55,56 @@ fn viewer_demo_crossing_works() {
         "eastern ore must get mined after the bridges exist"
     );
 }
+
+#[test]
+fn bridges_added_long_after_pathfinding_failures_still_work() {
+    // The user-reported scenario: miners fault "unreachable" for hundreds
+    // of ticks FIRST; only then are blueprints placed and built. Retries
+    // must pick up the new tiles — no stale pathfinding state.
+    let mut sim = Sim::new(&viewer_map());
+    sim.apply(&Command::DeployProgram { faction: 0, color: Color::GREEN, source: MINER.into() }).unwrap();
+    let builder = sim
+        .apply(&Command::SpawnBot {
+            pos: TilePos::new(4, 7),
+            source: BUILDER.into(),
+            cpu: 4,
+            cargo_cap: 1,
+            faction: 0,
+            hp: 100,
+            color: Color::GREEN,
+        })
+        .unwrap()
+        .unwrap();
+    // Drain the west ore quickly so miners are already fault-looping on the
+    // unreachable east nodes well before any blueprint exists.
+    sim.world.ore_nodes.values_mut().find(|n| n.pos.x < 16).unwrap().amount = 2;
+
+    for _ in 0..600 {
+        sim.step();
+    }
+    let unreachable_faults = sim
+        .world
+        .archive
+        .iter()
+        .filter(|e| e.text.contains("unreachable"))
+        .count();
+    assert!(
+        unreachable_faults > 5,
+        "miners must have been failing for a while first ({unreachable_faults})"
+    );
+
+    // NOW the player bridges the wall (return lane first).
+    sim.apply(&Command::PlaceBlueprint { pos: TilePos::new(16, 8), kind: BlueprintKind::BridgeOneWay(Direction::West) }).unwrap();
+    sim.apply(&Command::PlaceBlueprint { pos: TilePos::new(16, 5), kind: BlueprintKind::BridgeOneWay(Direction::East) }).unwrap();
+
+    for _ in 0..2500 {
+        sim.step();
+    }
+    println!("stockpile {}", sim.world.stockpile_ore);
+    println!("builder pos {:?}", sim.world.bots.get(&builder).map(|b| b.data.pos));
+    println!("east ore {:?}", sim.world.ore_nodes.values().filter(|n| n.pos.x > 16).map(|n| n.amount).collect::<Vec<_>>());
+    assert!(
+        sim.world.ore_nodes.values().any(|n| n.pos.x > 16 && n.amount < 60),
+        "late bridges must still unlock the east; east ore untouched"
+    );
+}

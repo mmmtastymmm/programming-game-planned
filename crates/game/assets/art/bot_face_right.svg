@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <!-- bot cube right (+X). Image-right = bot front: marker light on the right edge -->
+  <rect width="64" height="64" fill="#333c4b"/>
+  <rect width="64" height="10" fill="#4a5668"/>
+  <rect y="10" width="64" height="6" fill="#39d98a"/>
+  <rect y="16" width="64" height="2" fill="#2aa86b"/>
+  <rect x="4" y="44" width="56" height="14" rx="7" fill="#151a21"/>
+  <circle cx="16" cy="51" r="4" fill="#2e3844"/>
+  <circle cx="32" cy="51" r="4" fill="#2e3844"/>
+  <circle cx="48" cy="51" r="4" fill="#2e3844"/>
+  <rect x="54" y="26" width="6" height="10" rx="2" fill="#c8ffe6" opacity="0.9"/>
+  <rect x="1" y="1" width="62" height="62" fill="none" stroke="#0e1116" stroke-width="2"/>
+</svg>

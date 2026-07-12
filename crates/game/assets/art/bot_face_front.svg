@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <!-- bot cube front (-Z, nose side): sensor eye, team accent band -->
+  <rect width="64" height="64" fill="#333c4b"/>
+  <rect width="64" height="10" fill="#4a5668"/>
+  <rect y="10" width="64" height="8" fill="#39d98a"/>
+  <rect y="18" width="64" height="2" fill="#2aa86b"/>
+  <circle cx="32" cy="38" r="12" fill="#0e1116"/>
+  <circle cx="32" cy="38" r="8" fill="#39d98a"/>
+  <circle cx="29" cy="35" r="2.5" fill="#c8ffe6"/>
+  <rect x="8" y="52" width="14" height="3" rx="1.5" fill="#1c232c"/>
+  <rect x="42" y="52" width="14" height="3" rx="1.5" fill="#1c232c"/>
+  <rect x="1" y="1" width="62" height="62" fill="none" stroke="#0e1116" stroke-width="2"/>
+</svg>

@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <!-- bot cube back (+Z): exhaust vents, tail light -->
+  <rect width="64" height="64" fill="#333c4b"/>
+  <rect width="64" height="10" fill="#4a5668"/>
+  <rect y="10" width="64" height="3" fill="#2aa86b"/>
+  <g fill="#1c232c">
+    <rect x="10" y="22" width="19" height="4" rx="2"/>
+    <rect x="10" y="30" width="19" height="4" rx="2"/>
+    <rect x="10" y="38" width="19" height="4" rx="2"/>
+    <rect x="35" y="22" width="19" height="4" rx="2"/>
+    <rect x="35" y="30" width="19" height="4" rx="2"/>
+    <rect x="35" y="38" width="19" height="4" rx="2"/>
+  </g>
+  <rect x="26" y="48" width="12" height="6" rx="2" fill="#39d98a"/>
+  <rect x="1" y="1" width="62" height="62" fill="none" stroke="#0e1116" stroke-width="2"/>
+</svg>

@@ -60,7 +60,9 @@ pub struct Token {
     pub col: u32,
 }
 
-pub(crate) fn keyword(s: &str) -> Option<Tok> {
+/// Map a word to its keyword token, if it is one. Public so tooling
+/// (e.g. the editor's syntax highlighter) shares the lexer's keyword table.
+pub fn keyword(s: &str) -> Option<Tok> {
     Some(match s {
         "if" => Tok::If,
         "elif" => Tok::Elif,
