@@ -70,6 +70,12 @@ stateDiagram-v2
 | **Bumped** | something rammed this bot | normal costs | Unhandled default: a short stagger + chassis damage. Handler replaces the stagger. Double-handle applies: being rammed mid-handler/boot/recall explodes you. |
 | **Recall** | printer rebalancing or colony over-capacity | n/a — handler is **engine-fixed, not player-writable** | Suspend program, walk home, re-color (XP kept) or scrap (see Program Colors below). The one signal you can't customize. |
 
+### Engine defaults are real code
+
+When a signal has no player handler, the engine doesn't run hidden machinery — it runs its own tiny **Pyrite program** on the same VM: `on error:` defaults to `upload_crash_dump()`, `on death:` to `become_disabled()`, `on bump:`/`on bumped:` to `wait(n)` (the collision stuns). Default handlers are inspectable and line-highlighted like any code — a crash-looping bot visibly *sits inside* its crash-dump call. They're costed normally, and the crash still chips the chassis (handlers are armor; defaults are not).
+
+One asymmetry: **defaults are humble.** A new signal *interrupts* a running default (processed fresh) instead of double-handling — the double-handle price is reserved for *your* handler code claiming the bot. Consequence: dying mid-crash-dump means the final report never uploads.
+
 ### The double-handle rule
 
 **While a handler — or the Boot Sequence — is running, any event that would start another handler destroys the bot instantly — in any combination, no exceptions.** No wreck, no rescue window, no death handler — a **double-handle explosion**, straight to Destroyed ([02-agents.md](02-agents.md)). What *does* remain is the **Black Box** (see below): every destruction drops one, so you'll know what happened — you just don't get the bot back.

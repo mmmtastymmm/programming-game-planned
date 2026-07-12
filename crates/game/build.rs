@@ -113,4 +113,23 @@ fn main() {
                 .expect("save atlas png");
         }
     }
+
+    // Side-by-side pairs: (left svg, right svg, output). The mountain
+    // block samples its top from the left cell and its sides from the
+    // right (see `mountain_block_mesh` in main.rs).
+    for (left, right, name) in [("tile_mountain", "rock_face", "mountain_atlas")] {
+        let mut pair = tiny_skia::Pixmap::new(SIZE * 2, SIZE).expect("pair alloc");
+        for (i, src) in [left, right].into_iter().enumerate() {
+            let svg = fs::read_to_string(art.join(format!("{src}.svg"))).expect("pair svg");
+            pair.draw_pixmap(
+                (i as u32 * SIZE) as i32,
+                0,
+                render(&svg, SIZE).as_ref(),
+                &tiny_skia::PixmapPaint::default(),
+                tiny_skia::Transform::identity(),
+                None,
+            );
+        }
+        pair.save_png(out.join(format!("{name}.png"))).expect("save pair png");
+    }
 }

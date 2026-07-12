@@ -134,7 +134,28 @@ pub struct Sim {
 
 impl Sim {
     pub fn new(spec: &MapSpec) -> Self {
+        let tuning = Tuning::default();
         let mut vm_config = VmConfig::default();
+        // Engine default handlers are REAL Pyrite (docs/01): watchable,
+        // line-highlighted, costed. The wait() defaults replace the old
+        // hard-coded bump freezes; error/death route the forced calls
+        // through code.
+        for (kind, source) in [
+            (pyrite::ast::SignalKind::Error, "upload_crash_dump()\n".to_string()),
+            (pyrite::ast::SignalKind::Death, "become_disabled()\n".to_string()),
+            (pyrite::ast::SignalKind::Bump, format!("wait({})\n", tuning.bump_freeze_ticks)),
+            (
+                pyrite::ast::SignalKind::Bumped,
+                format!("wait({})\n", tuning.bump_victim_freeze_ticks),
+            ),
+        ] {
+            let program = pyrite::parse(&source, &UnlockSet::all())
+                .expect("engine default handlers parse");
+            vm_config.default_handlers.insert(
+                kind,
+                pyrite::vm::DefaultHandler { source, program: Rc::new(program) },
+            );
+        }
         // Entity-kind constants for the generic queries: `closest(ore)`,
         // `exists(blueprint)`, ... They live in the config (not globals) so
         // they survive the post-fault VM reset; assignments can shadow them.
@@ -145,7 +166,7 @@ impl Sim {
             world: World::from_spec(spec),
             costs: CostTable::default(),
             vm_config,
-            tuning: Tuning::default(),
+            tuning,
         }
     }
 

@@ -228,9 +228,12 @@ fn crash_loops_are_lethal() {
     }
     assert!(!sim.world.bots.contains_key(&bot), "crash loop must eventually kill");
     assert!(sim.world.wrecks.contains_key(&bot), "fault death is a clean death: wreck");
+    // One fewer dump than crashes: the fatal fault kills the bot INSIDE
+    // the default error handler, before its upload_crash_dump() finishes
+    // paying — the last report never makes it out.
     assert!(
-        sim.world.archive.iter().filter(|e| e.kind == ArchiveKind::CrashDump).count() >= 4,
-        "the crashes that killed it are all in the cloud"
+        sim.world.archive.iter().filter(|e| e.kind == ArchiveKind::CrashDump).count() >= 3,
+        "the earlier crashes are all in the cloud"
     );
 }
 

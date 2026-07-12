@@ -111,11 +111,31 @@ pub struct VmConfig {
     /// Read-only fallback below globals — assignments shadow them, and they
     /// survive the reset after a fault (globals don't).
     pub constants: BTreeMap<String, Value>,
+    /// Engine default handlers, as REAL Pyrite programs: when a signal has
+    /// no player handler, the VM runs the default's body on this same VM —
+    /// visible, line-highlighted, costed like any code. Empty by default
+    /// (the host installs them); absent kinds fall back to the built-in
+    /// hard behaviors (crash dump / become_disabled / ignore).
+    pub default_handlers: BTreeMap<SignalKind, DefaultHandler>,
+}
+
+/// A default handler: its source (for inspectors) and parsed program.
+#[derive(Debug, Clone)]
+pub struct DefaultHandler {
+    pub source: String,
+    pub program: Rc<Program>,
+}
+
+impl PartialEq for DefaultHandler {
+    fn eq(&self, other: &Self) -> bool {
+        // Source is canonical (the program is derived from it).
+        self.source == other.source
+    }
 }
 
 impl Default for VmConfig {
     fn default() -> Self {
-        Self { stack_depth: 4, constants: BTreeMap::new() }
+        Self { stack_depth: 4, constants: BTreeMap::new(), default_handlers: BTreeMap::new() }
     }
 }
 
@@ -160,6 +180,9 @@ struct Frame {
 #[derive(Debug)]
 pub struct Vm {
     program: Rc<Program>,
+    /// The program the work stack currently indexes into: the main program,
+    /// or a default handler's program while one runs.
+    active: Rc<Program>,
     config: VmConfig,
     work: Vec<Work>,
     values: Vec<Value>,
@@ -169,6 +192,9 @@ pub struct Vm {
     /// this negative — that is cycle debt, repaid before the next op runs.
     budget: i64,
     phase: Phase,
+    /// Is the running handler an engine default? Defaults are HUMBLE:
+    /// a new signal interrupts them instead of double-handling.
+    handler_is_default: bool,
     /// Ticks spent in the current `on error:` handler (for the grace window).
     handler_ticks: u32,
     /// Remaining black-box budget while in the death handler.
@@ -194,6 +220,7 @@ impl Vm {
     pub fn new(program: Rc<Program>, config: VmConfig) -> Self {
         let work = Self::block_work(&program.body);
         Self {
+            active: Rc::clone(&program),
             program,
             config,
             work,
@@ -202,6 +229,7 @@ impl Vm {
             globals: BTreeMap::new(),
             budget: 0,
             phase: Phase::Main,
+            handler_is_default: false,
             handler_ticks: 0,
             death_budget: 0,
             engine_interrupt: false,
@@ -264,6 +292,17 @@ impl Vm {
         self.state == State::Blocked
     }
 
+    /// Is the currently running handler an engine default?
+    pub fn handler_is_default(&self) -> bool {
+        self.phase != Phase::Main && self.handler_is_default
+    }
+
+    /// The engine default handler for `kind` (source + program), if the
+    /// host installed one.
+    pub fn default_handler(&self, kind: SignalKind) -> Option<&DefaultHandler> {
+        self.config.default_handlers.get(&kind)
+    }
+
     /// Source line of the program's handler for `kind`, if installed.
     pub fn handler_line(&self, kind: SignalKind) -> Option<u32> {
         self.program.handlers.get(&kind).map(|h| h.line)
@@ -291,12 +330,28 @@ impl Vm {
         self.engine_interrupt = active;
     }
 
+    /// Enter a handler: player handlers index the main program's arena;
+    /// default handlers swap the active program to the default's.
+    fn enter_handler(&mut self, kind: SignalKind, body: Vec<StmtId>, default: bool) {
+        self.work = body.into_iter().rev().map(Work::Stmt).collect();
+        self.values.clear();
+        self.frames.clear();
+        self.phase = Phase::Handler(kind);
+        self.handler_is_default = default;
+        self.handler_ticks = 0;
+        if kind == SignalKind::Death {
+            // Black-box budget applies to player and default death alike.
+        }
+    }
+
     /// Full reset: line 1, variables cleared. Used by the sim at boot.
     /// A queued redeploy installs here — every reset is a loop boundary.
     pub fn reset(&mut self) {
         if let Some(program) = self.pending_program.take() {
             self.program = program;
         }
+        self.active = Rc::clone(&self.program);
+        self.handler_is_default = false;
         self.work = Self::block_work(&self.program.body.clone());
         self.values.clear();
         self.frames.clear();
@@ -335,9 +390,18 @@ impl Vm {
         if matches!(self.state, State::Dead | State::Exploded) {
             return RaiseOutcome::Ignored;
         }
-        if self.engine_interrupt || self.phase != Phase::Main {
+        if self.engine_interrupt {
             self.state = State::Exploded;
             return RaiseOutcome::Exploded;
+        }
+        if self.phase != Phase::Main {
+            if !self.handler_is_default {
+                // Double handle: YOUR handler claimed the bot.
+                self.state = State::Exploded;
+                return RaiseOutcome::Exploded;
+            }
+            // Engine defaults are humble: the new signal interrupts the
+            // default response and is processed fresh below.
         }
         let kind = match signal {
             Signal::Hurt => SignalKind::Hurt,
@@ -345,37 +409,43 @@ impl Vm {
             Signal::Bump => SignalKind::Bump,
             Signal::Bumped => SignalKind::Bumped,
         };
-        let Some(handler) = self.program.handlers.get(&kind) else {
-            return match signal {
-                Signal::Hurt | Signal::Bump | Signal::Bumped => {
-                    // No handler: nothing happens — and critically, a
-                    // Blocked VM STAYS blocked (its pending action result
-                    // is still owed; un-blocking here would desync the
-                    // work/value stacks — the underflow bug).
-                    RaiseOutcome::Ignored
-                }
-                Signal::Death => {
-                    // No death handler: straight to the forced call.
-                    let _ = host.call("become_disabled", &[], self.ctx());
-                    self.state = State::Dead;
-                    RaiseOutcome::Died
-                }
-            };
-        };
-        // Entering a handler abandons any pending action (the sim cancels
-        // the world side); only now is un-blocking sound.
-        self.state = State::Running;
-        let body = handler.body.clone();
-        // Variables are preserved while a handler runs; work/values are not.
-        self.work = Self::block_work(&body);
-        self.values.clear();
-        self.frames.clear();
-        self.phase = Phase::Handler(kind);
-        self.handler_ticks = 0;
-        if kind == SignalKind::Death {
-            self.death_budget = costs.blackbox_budget as i64;
+        if let Some(handler) = self.program.handlers.get(&kind) {
+            // Player handler: abandon any pending action (the sim cancels
+            // the world side); only now is un-blocking sound.
+            self.state = State::Running;
+            let body = handler.body.clone();
+            self.enter_handler(kind, body, false);
+            if kind == SignalKind::Death {
+                self.death_budget = costs.blackbox_budget as i64;
+            }
+            return RaiseOutcome::Handled;
         }
-        RaiseOutcome::Handled
+        if let Some(default) = self.config.default_handlers.get(&kind) {
+            // Engine default: real Pyrite, watchable and costed.
+            self.state = State::Running;
+            let program = Rc::clone(&default.program);
+            let body = program.body.clone();
+            self.active = program;
+            self.enter_handler(kind, body, true);
+            if kind == SignalKind::Death {
+                self.death_budget = costs.blackbox_budget as i64;
+            }
+            return RaiseOutcome::Handled;
+        }
+        match signal {
+            Signal::Hurt | Signal::Bump | Signal::Bumped => {
+                // No handler at all: nothing happens — and critically, a
+                // Blocked VM STAYS blocked (its pending action result is
+                // still owed; un-blocking would desync the stacks).
+                RaiseOutcome::Ignored
+            }
+            Signal::Death => {
+                // No death handler: straight to the forced call.
+                let _ = host.call("become_disabled", &[], self.ctx());
+                self.state = State::Dead;
+                RaiseOutcome::Died
+            }
+        }
     }
 
     /// Step until the budget runs out, an action blocks, or the bot dies.
@@ -410,6 +480,7 @@ impl Vm {
                         if let Some(program) = self.pending_program.take() {
                             self.program = program; // redeploy lands here
                         }
+                        self.active = Rc::clone(&self.program);
                         self.globals.clear();
                         self.values.clear();
                         self.frames.clear();
@@ -452,7 +523,7 @@ impl Vm {
 
     fn cost_of(&self, work: &Work, costs: &CostTable) -> u64 {
         match work {
-            Work::Stmt(id) => match self.program.stmt(*id) {
+            Work::Stmt(id) => match self.active.stmt(*id) {
                 Stmt::Expr { .. } => costs.statement,
                 Stmt::Assign { .. } => 0, // StoreVar charges `assign`
                 Stmt::If { .. } => 0,     // IfArm charges per arm
@@ -485,7 +556,7 @@ impl Vm {
             Work::MatchBegin { .. } => 0,
             Work::MatchArm { .. } => costs.match_arm,
             Work::CallExec { name, .. } => {
-                if self.program.functions.contains_key(name) {
+                if self.active.functions.contains_key(name) {
                     costs.user_call
                 } else {
                     costs.builtin_cost(name)
@@ -505,8 +576,10 @@ impl Vm {
     fn fault(&mut self, msg: String, host: &mut dyn Host, costs: &CostTable) {
         self.last_fault = Some(msg.clone());
         self.fault_count += 1;
-        if self.engine_interrupt || self.phase != Phase::Main {
-            // Double handle — including a fault inside `on death:`.
+        if self.engine_interrupt || (self.phase != Phase::Main && !self.handler_is_default) {
+            // Double handle — including a fault inside `on death:`. Faults
+            // inside an engine DEFAULT are not yours; they fall through to
+            // fresh handling below (humble defaults).
             self.state = State::Exploded;
             return;
         }
@@ -515,14 +588,20 @@ impl Vm {
             // code. Variables preserved; work/values cleared.
             let body = handler.body.clone();
             self.budget -= costs.trap_cost as i64;
-            self.work = Self::block_work(&body);
-            self.values.clear();
-            self.frames.clear();
-            self.phase = Phase::Handler(SignalKind::Error);
-            self.handler_ticks = 0;
+            self.active = Rc::clone(&self.program);
+            self.enter_handler(SignalKind::Error, body, false);
+        } else if let Some(default) = self.config.default_handlers.get(&SignalKind::Error) {
+            // Engine default as real code: the crash-dump program runs on
+            // this VM, watchable line by line. Still counts as a crash
+            // (fault damage keys off crash_count — handlers are armor,
+            // defaults are not).
+            self.crash_count += 1;
+            let program = Rc::clone(&default.program);
+            let body = program.body.clone();
+            self.active = program;
+            self.enter_handler(SignalKind::Error, body, true);
         } else {
-            // Unhandled: the engine force-calls upload_crash_dump() — an
-            // ordinary builtin, charged as cycle debt — then restarts.
+            // No default configured (bare VM): the hard fallback.
             self.crash_count += 1;
             self.budget -= costs.crash_dump as i64;
             let ctx = CallCtx { line: self.current_line, last_fault: Some(msg.as_str()) };
@@ -572,7 +651,7 @@ impl Vm {
     }
 
     fn execute(&mut self, work: Work, host: &mut dyn Host, costs: &CostTable) {
-        let program = Rc::clone(&self.program);
+        let program = Rc::clone(&self.active);
         match work {
             Work::Stmt(id) => {
                 let stmt = program.stmt(id).clone();

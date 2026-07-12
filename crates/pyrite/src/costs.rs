@@ -68,6 +68,10 @@ impl Default for CostTable {
             ("exists", 1),
             // `.expect()` method: total = call_base alone.
             ("expect", 0),
+            // Priced here too now that the default error handler calls it
+            // as ordinary code (the crash_dump field covers the bare-VM
+            // forced-call fallback).
+            ("upload_crash_dump", 25),
             ("build", 2),
             ("cargo_full", 1),
             ("health_low", 1),

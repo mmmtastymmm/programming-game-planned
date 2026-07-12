@@ -181,6 +181,25 @@ impl Bot {
         }
     }
 
+    /// Is the running handler an engine default?
+    pub fn in_default_handler(&self) -> bool {
+        self.vm.as_ref().is_some_and(|vm| vm.handler_is_default())
+    }
+
+    /// Engine-default handler source for a signal name, if installed.
+    pub fn default_handler_source(&self, signal: &str) -> Option<&str> {
+        use pyrite::ast::SignalKind;
+        let kind = match signal {
+            "error" => SignalKind::Error,
+            "hurt" => SignalKind::Hurt,
+            "death" => SignalKind::Death,
+            "bump" => SignalKind::Bump,
+            "bumped" => SignalKind::Bumped,
+            _ => return None,
+        };
+        self.vm.as_ref().and_then(|vm| vm.default_handler(kind)).map(|d| d.source.as_str())
+    }
+
     /// (signal name, handler's source line if the program installed one) —
     /// for every player-facing signal, inspector-ready.
     pub fn handler_summary(&self) -> [(&'static str, Option<u32>); 5] {

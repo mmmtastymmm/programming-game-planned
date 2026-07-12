@@ -37,17 +37,21 @@ fn bots_never_overlap_and_bumps_freeze() {
     let blocker = spawn(&mut sim, TilePos::new(1, 1), IDLER);
     let mover = spawn(&mut sim, TilePos::new(4, 1), "move_to(closest(depot).expect())\n");
 
-    let mut saw_freeze = false;
+    let mut saw_bump_handler = false;
     for _ in 0..300 {
         sim.step();
         let a = sim.world.bots[&blocker].data.pos;
         let b = sim.world.bots[&mover].data.pos;
         assert_ne!(a, b, "two bots must never share a tile");
-        if sim.world.bots[&mover].data.bump_frozen > 0 {
-            saw_freeze = true;
+        if sim.world.bots[&mover].handler_name() == Some("bump") {
+            saw_bump_handler = true;
+            assert!(
+                sim.world.bots[&mover].in_default_handler(),
+                "no player handler installed: this is the engine default, as code"
+            );
         }
     }
-    assert!(saw_freeze, "bumping must freeze the mover");
+    assert!(saw_bump_handler, "bumping must drop the mover into the default bump handler");
     // The mover parked next to the blocker, still short of the depot.
     assert_eq!(sim.world.bots[&mover].data.pos, TilePos::new(2, 1));
 }
@@ -71,7 +75,7 @@ fn frozen_bots_do_not_think() {
         sim.step();
     }
     let bot = &sim.world.bots[&mover];
-    assert!(bot.data.bump_frozen > 0, "should be mid-freeze at tick 40");
+    assert_eq!(bot.handler_name(), Some("bump"), "mid default bump handler at tick 40");
     assert!(
         bot.data.log_buf.is_empty(),
         "move_to never completed, so log(9) must not have run"
@@ -241,13 +245,29 @@ fn rammer_freezes_longer_than_the_rammed() {
     let mut sim = Sim::new(&spec);
     let blocker = spawn(&mut sim, TilePos::new(1, 1), IDLER);
     let rammer = spawn(&mut sim, TilePos::new(3, 1), "move_to(closest(depot).expect())\n");
-    for _ in 0..200 {
+    for tick in 0..200 {
         sim.step();
-        let r = sim.world.bots[&rammer].data.bump_frozen;
-        let b = sim.world.bots[&blocker].data.bump_frozen;
-        if r > 0 {
-            assert!(b > 0, "victim staggers too");
-            assert!(r > b, "the at-fault rammer sits longer ({r} vs {b})");
+        if sim.world.bots[&rammer].handler_name() == Some("bump") {
+            assert_eq!(
+                sim.world.bots[&blocker].handler_name(),
+                Some("bumped"),
+                "victim handles `bumped` at the same impact"
+            );
+            // Asymmetric blame in code: wait(50) vs wait(15) — the victim
+            // finishes long before the rammer.
+            for _ in 0..25 {
+                sim.step();
+            }
+            assert_eq!(
+                sim.world.bots[&blocker].handler_name(),
+                None,
+                "victim's short default is done"
+            );
+            assert_eq!(
+                sim.world.bots[&rammer].handler_name(),
+                Some("bump"),
+                "rammer still serving its long default at tick {tick}+25"
+            );
             return;
         }
     }

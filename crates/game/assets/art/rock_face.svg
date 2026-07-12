@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <!-- mountain block side: layered strata, no peaks. Bands run edge to
+       edge so adjacent blocks tile seamlessly. -->
+  <rect width="64" height="64" fill="#565a63"/>
+  <!-- strata bands -->
+  <path d="M0 10 L14 13 L30 9 L46 13 L64 10 L64 20 L48 23 L28 19 L12 23 L0 20 Z" fill="#4a4e57"/>
+  <path d="M0 30 L18 33 L36 29 L52 33 L64 30 L64 38 L46 41 L26 37 L10 41 L0 38 Z" fill="#60646e"/>
+  <path d="M0 48 L16 51 L34 47 L50 51 L64 48 L64 58 L44 61 L24 57 L8 61 L0 58 Z" fill="#4d515a"/>
+  <!-- top seat shadow, under the summit face -->
+  <rect width="64" height="4" fill="#43464e"/>
+  <!-- cracks -->
+  <g stroke="#3a3d45" stroke-width="1.6" stroke-linecap="round" fill="none">
+    <path d="M20 4 L22 14 L18 24"/>
+    <path d="M44 22 L42 32 L46 42"/>
+    <path d="M30 44 L32 54 L29 62"/>
+  </g>
+  <!-- embedded stones -->
+  <g fill="#6f737e">
+    <ellipse cx="10" cy="27" rx="2.6" ry="1.8"/>
+    <ellipse cx="54" cy="44" rx="2.4" ry="1.6"/>
+    <ellipse cx="38" cy="14" rx="2" ry="1.4"/>
+  </g>
+</svg>

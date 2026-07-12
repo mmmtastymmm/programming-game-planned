@@ -187,6 +187,8 @@ struct Palette {
     grass_tex_mat: Handle<StandardMaterial>,
     water_tex_mat: Handle<StandardMaterial>,
     mountain_tex_mat: Handle<StandardMaterial>,
+    /// Full-height block for mountain (Rubble) tiles.
+    mountain_block: Handle<Mesh>,
     preview_valid_mat: Handle<StandardMaterial>,
     preview_invalid_mat: Handle<StandardMaterial>,
     preview_chevron_mat: Handle<StandardMaterial>,
@@ -623,6 +625,33 @@ fn textured_slab_mesh(half: Vec3) -> Mesh {
     box_with_face_uvs(half, [EDGE, EDGE, EDGE, EDGE, [0.0, 0.0, 1.0, 1.0], EDGE])
 }
 
+/// Render height of a mountain (Rubble) block's top face; other terrain
+/// tops sit at 0.0 (water slightly below). Bots, overlays, and paint all
+/// ride the terrain they're on.
+const MOUNTAIN_TOP: f32 = 0.25;
+
+/// Top surface of the tile at `pos` in render space.
+fn terrain_top(world: &sim::World, pos: TilePos) -> f32 {
+    match world.grid.get(pos) {
+        Some(TileKind::Rubble) => MOUNTAIN_TOP,
+        Some(TileKind::Water) => -0.05,
+        _ => 0.0,
+    }
+}
+
+/// Mountain block, mapped into the baked `mountain_atlas` (peaks in the
+/// left cell, rock-face strata in the right): summit art on top, strata on
+/// every side (the bottom face is never seen).
+fn mountain_block_mesh() -> Mesh {
+    const TOP: [f32; 4] = [0.0, 0.0, 0.5, 1.0];
+    const SIDE: [f32; 4] = [0.5, 0.0, 1.0, 1.0];
+    const EDGE: [f32; 4] = [0.51, 0.45, 0.53, 0.55];
+    box_with_face_uvs(
+        Vec3::new(0.48, MOUNTAIN_TOP / 2.0 + 0.025, 0.48),
+        [SIDE, SIDE, SIDE, SIDE, TOP, EDGE],
+    )
+}
+
 fn setup_scene(
     mut commands: Commands,
     game: NonSend<GameSim>,
@@ -678,7 +707,7 @@ fn setup_scene(
     let water_tex_mat =
         tile_tex_mat(&mut materials, asset_server.load("textures/tile_water.png"), 0.35);
     let mountain_tex_mat =
-        tile_tex_mat(&mut materials, asset_server.load("textures/tile_mountain.png"), 0.95);
+        tile_tex_mat(&mut materials, asset_server.load("textures/mountain_atlas.png"), 0.95);
     let wreck_tex_mat =
         tile_tex_mat(&mut materials, asset_server.load("textures/tile_wreck.png"), 0.95);
     let crate_mat =
@@ -740,6 +769,7 @@ fn setup_scene(
         pad_slab: meshes.add(textured_slab_mesh(Vec3::new(0.425, 0.07, 0.425))),
         wreck_tex_mat,
         tex_slab: meshes.add(textured_slab_mesh(Vec3::new(0.48, 0.05, 0.48))),
+        mountain_block: meshes.add(mountain_block_mesh()),
         ground_tex_mat,
         bridge_tex_mat,
         oneway_tex_mat,
@@ -854,16 +884,28 @@ fn setup_scene(
         for x in 0..world.grid.width {
             let pos = TilePos::new(x, y);
             let kind = world.grid.get(pos).expect("in bounds");
-            let (mat, y_off) = match kind {
-                TileKind::Plains => (palette.grass_tex_mat.clone(), 0.0),
-                TileKind::Rubble => (palette.mountain_tex_mat.clone(), 0.04),
-                TileKind::Water => (palette.water_tex_mat.clone(), -0.05),
+            let (mesh, mat, y_off) = match kind {
+                TileKind::Plains => {
+                    (palette.tex_slab.clone(), palette.grass_tex_mat.clone(), 0.0)
+                }
+                // Mountains rise a full block: crossing costs double, and
+                // the silhouette should say so.
+                TileKind::Rubble => (
+                    palette.mountain_block.clone(),
+                    palette.mountain_tex_mat.clone(),
+                    MOUNTAIN_TOP - 0.10,
+                ),
+                TileKind::Water => {
+                    (palette.tex_slab.clone(), palette.water_tex_mat.clone(), -0.05)
+                }
                 // Bridges only exist after terraforming; at startup none do
                 // (sync_view overlays planks when they appear).
-                TileKind::Bridge => (palette.ground_tex_mat.clone(), 0.0),
+                TileKind::Bridge => {
+                    (palette.tex_slab.clone(), palette.ground_tex_mat.clone(), 0.0)
+                }
             };
             commands.spawn((
-                Mesh3d(palette.tex_slab.clone()),
+                Mesh3d(mesh),
                 MeshMaterial3d(mat),
                 Transform::from_translation(tile_xyz(world, pos, y_off - 0.05)),
             ));
@@ -1252,6 +1294,8 @@ fn update_poses(
         } else {
             0.45
         };
+        // Ride the terrain: mountains lift the bot, water (bridges) don't.
+        y += terrain_top(world, bot.data.pos);
         // Bump recoil: a hop whenever the freeze counter RISES (covers the
         // rammer's long freeze and the victim's short stagger alike).
         if bot.data.bump_frozen > pose.freeze_seen {
@@ -1701,7 +1745,12 @@ fn sync_view(
             .spawn((
                 Mesh3d(palette.tex_slab.clone()),
                 MeshMaterial3d(palette.oneway_tex_mat.clone()),
-                Transform::from_translation(tile_xyz(world, *pos, 0.08)).with_rotation(rot),
+                Transform::from_translation(tile_xyz(
+                    world,
+                    *pos,
+                    terrain_top(world, *pos) + 0.08,
+                ))
+                .with_rotation(rot),
             ))
             .id();
         index.overlays.insert(key, (entity, *overlay));
@@ -1729,8 +1778,12 @@ fn sync_view(
             .spawn((
                 Mesh3d(palette.tile_slab.clone()),
                 MeshMaterial3d(palette.paint_mats[*color as usize % 4].clone()),
-                Transform::from_translation(tile_xyz(world, *pos, 0.02))
-                    .with_scale(Vec3::new(1.0, 0.25, 1.0)),
+                Transform::from_translation(tile_xyz(
+                    world,
+                    *pos,
+                    terrain_top(world, *pos) + 0.02,
+                ))
+                .with_scale(Vec3::new(1.0, 0.25, 1.0)),
             ))
             .id();
         index.paint.insert(key, (entity, *color));
@@ -2045,7 +2098,11 @@ fn inspector_ui(
         } else if data.bump_frozen > 0 {
             format!("bump-frozen ({} ticks)", data.bump_frozen)
         } else if let Some(signal) = bot.handler_name() {
-            format!("handling: on {signal}:")
+            if bot.in_default_handler() {
+                format!("handling: on {signal}: (engine default)")
+            } else {
+                format!("handling: on {signal}:")
+            }
         } else if bot.vm.as_ref().is_some_and(|vm| vm.is_blocked()) {
             match &data.action {
                 Some(sim::world::Action::Move { path, .. }) => {
@@ -2088,7 +2145,35 @@ fn inspector_ui(
             }
             ui.separator();
 
-            // The program, current line highlighted.
+            // While an engine default handler runs, show ITS code with the
+            // executing line highlighted — the engine's response is real
+            // Pyrite, debuggable like anything else.
+            let default_running = bot.in_default_handler();
+            if default_running
+                && let Some(signal) = bot.handler_name()
+                && let Some(src) = bot.default_handler_source(signal)
+            {
+                ui.strong(format!("engine default: on {signal}:"));
+                let current = vm.current_line() as usize;
+                for (i, line) in src.lines().enumerate() {
+                    let n = i + 1;
+                    let text = format!("{n:>3} {line}");
+                    if n == current {
+                        ui.label(
+                            egui::RichText::new(text)
+                                .monospace()
+                                .background_color(egui::Color32::from_rgb(70, 45, 25))
+                                .color(egui::Color32::from_rgb(255, 230, 200)),
+                        );
+                    } else {
+                        ui.monospace(text);
+                    }
+                }
+                ui.separator();
+            }
+
+            // The program, current line highlighted (only meaningful while
+            // the main program is executing).
             ui.strong("program");
             let source = world
                 .color_programs
@@ -2096,7 +2181,8 @@ fn inspector_ui(
                 .map(|cp| cp.source.clone());
             match source {
                 Some(source) => {
-                    let current = vm.current_line() as usize;
+                    let current =
+                        if default_running { 0 } else { vm.current_line() as usize };
                     egui::ScrollArea::vertical().max_height(260.0).show(ui, |ui| {
                         for (i, line) in source.lines().enumerate() {
                             let n = i + 1;
@@ -2130,26 +2216,21 @@ fn inspector_ui(
                 Some(n) => {
                     ui.monospace(format!("on {signal}: — line {n}"));
                 }
-                None => {
-                    let default = match signal {
-                        "error" => format!(
-                            "crash dump, -{} hp, restart",
-                            tuning.fault_damage
-                        ),
-                        "hurt" => "nothing (keep running)".to_string(),
-                        "death" => "become a wreck".to_string(),
-                        "bump" => format!(
-                            "freeze {}t, -{} hp",
-                            tuning.bump_freeze_ticks, tuning.bump_damage
-                        ),
-                        "bumped" => format!(
-                            "freeze {}t, -{} hp",
-                            tuning.bump_victim_freeze_ticks, tuning.bump_damage
-                        ),
-                        _ => unreachable!(),
-                    };
-                    ui.monospace(format!("on {signal}: (engine) {default}"));
-                }
+                None => match bot.default_handler_source(signal) {
+                    // The engine default IS code — show it.
+                    Some(src) => {
+                        let code = src.trim_end();
+                        let note = match signal {
+                            "error" => format!("  (+crash: -{} hp)", tuning.fault_damage),
+                            "bump" | "bumped" => format!("  (-{} hp)", tuning.bump_damage),
+                            _ => String::new(),
+                        };
+                        ui.monospace(format!("on {signal}: (engine) {code}{note}"));
+                    }
+                    None => {
+                        ui.monospace(format!("on {signal}: (engine) nothing"));
+                    }
+                },
             }
         }
         ui.separator();

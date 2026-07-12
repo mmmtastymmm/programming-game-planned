@@ -730,3 +730,77 @@ fn ignored_signal_does_not_unblock_a_pending_action() {
     vm.run(&mut host, &costs);
     assert!(call_names(&host).contains(&"log"), "program continues cleanly");
 }
+
+// --- engine default handlers as real code ---
+
+fn config_with_default(kind: pyrite::ast::SignalKind, source: &str) -> VmConfig {
+    let mut config = VmConfig::default();
+    let program = parse(source, &UnlockSet::all()).unwrap();
+    config.default_handlers.insert(
+        kind,
+        pyrite::vm::DefaultHandler { source: source.to_string(), program: Rc::new(program) },
+    );
+    config
+}
+
+#[test]
+fn default_error_handler_runs_as_watchable_code() {
+    use pyrite::ast::SignalKind;
+    let program = parse("boom(1 // 0)\n", &UnlockSet::all()).unwrap();
+    let config = config_with_default(SignalKind::Error, "upload_crash_dump()\n");
+    let mut vm = Vm::new(Rc::new(program), config);
+    let mut host = TestHost::default();
+    let costs = CostTable::default();
+    // Enough to reach the fault, not enough to finish the default handler:
+    // the VM sits INSIDE it, visibly (that's the point).
+    vm.grant(5);
+    vm.run(&mut host, &costs);
+    assert!(vm.handler_is_default(), "should be mid default handler");
+    assert_eq!(vm.crash_count(), 1, "default error handling still counts as a crash");
+    // Finish it: the dump call happens FROM CODE, then restart + refault...
+    vm.grant(60);
+    vm.run(&mut host, &costs);
+    assert!(call_names(&host).contains(&"upload_crash_dump"));
+}
+
+#[test]
+fn default_handlers_are_humble_not_double_handles() {
+    use pyrite::ast::SignalKind;
+    let program = parse("boom(1 // 0)\n", &UnlockSet::all()).unwrap();
+    let config = config_with_default(SignalKind::Error, "upload_crash_dump()\n");
+    let mut vm = Vm::new(Rc::new(program), config);
+    let mut host = TestHost::default();
+    let costs = CostTable::default();
+    vm.grant(5);
+    vm.run(&mut host, &costs);
+    assert!(vm.handler_is_default());
+    // A signal arriving mid-DEFAULT does not explode; with no hurt handler
+    // it is simply ignored and the default continues.
+    assert_eq!(vm.raise(Signal::Hurt, &mut host, &costs), RaiseOutcome::Ignored);
+    assert!(!vm.is_dead());
+    // Death mid-default is processed normally (wreck, not explosion).
+    assert_eq!(vm.raise(Signal::Death, &mut host, &costs), RaiseOutcome::Died);
+    assert!(call_names(&host).contains(&"become_disabled"));
+}
+
+#[test]
+fn default_bump_handler_waits_in_code() {
+    use pyrite::ast::SignalKind;
+    let program = parse("work()\n", &UnlockSet::all()).unwrap();
+    let config = config_with_default(SignalKind::Bump, "wait(50)\n");
+    let mut vm = Vm::new(Rc::new(program), config);
+    let mut host = TestHost::default();
+    host.blocking.insert("wait".into());
+    let costs = CostTable::default();
+    assert_eq!(vm.raise(Signal::Bump, &mut host, &costs), RaiseOutcome::Handled);
+    assert!(vm.handler_is_default());
+    vm.grant(20);
+    assert_eq!(vm.run(&mut host, &costs), Outcome::Blocked, "waiting inside the default");
+    assert!(call_names(&host).contains(&"wait"));
+    // Resolve the wait: default completes, program restarts.
+    vm.resolve_action(Ok(Value::Unit), &mut host, &costs);
+    vm.grant(20);
+    vm.run(&mut host, &costs);
+    assert!(call_names(&host).contains(&"work"), "program restarts after the default");
+}
+
