@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- bumped handler cloud: grey dizzy swirl, sparks still flying -->
+  <g fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <path stroke="#878da0" stroke-width="4.5" d="M32 45
+      A 17 17 0 0 1 17 29
+      A 15 15 0 0 1 32 14
+      A 13 13 0 0 1 45 30
+      A 11 11 0 0 1 32 41
+      A 9 9 0 0 1 23 30
+      A 7 7 0 0 1 32 23
+      A 5.5 5.5 0 0 1 37 29"/>
+    <g stroke="#23242a" stroke-width="3">
+      <path d="M10 12 L10 22 M5 17 L15 17"/>
+      <path d="M54 41 L54 51 M49 46 L59 46"/>
+    </g>
+  </g>
+</svg>

@@ -1,7 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <!-- hurt handler cloud: red impact starburst -->
+  <!-- hurt handler cloud: amber impact starburst -->
   <g fill="none" stroke-linecap="round">
-    <g stroke="#d43728" stroke-width="4.5">
+    <g stroke="#f2b23e" stroke-width="4.5">
       <line x1="32" y1="18" x2="32" y2="8"/>
       <line x1="44" y1="24" x2="52" y2="17"/>
       <line x1="46" y1="36" x2="57" y2="39"/>

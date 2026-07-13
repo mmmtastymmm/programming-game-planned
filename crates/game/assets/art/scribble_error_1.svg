@@ -2,9 +2,9 @@
   <g fill="none" stroke-linecap="round" stroke-linejoin="round">
     <polyline stroke="#23242a" stroke-width="3" points="10,42 16,36 12,48"/>
     <polyline stroke="#23242a" stroke-width="3" points="50,14 56,10 53,20"/>
-    <path stroke="#f2b23e" stroke-width="5" d="M22 14 L20 35"/>
-    <path stroke="#f2b23e" stroke-width="5" d="M20 44 L20 45"/>
-    <path stroke="#f2b23e" stroke-width="4.5" d="M33 20 Q39 9 47 17 Q52 23 44 28 Q41 31 41 36"/>
-    <path stroke="#f2b23e" stroke-width="5" d="M41 46 L41 47"/>
+    <path stroke="#d43728" stroke-width="5" d="M22 14 L20 35"/>
+    <path stroke="#d43728" stroke-width="5" d="M20 44 L20 45"/>
+    <path stroke="#d43728" stroke-width="4.5" d="M33 20 Q39 9 47 17 Q52 23 44 28 Q41 31 41 36"/>
+    <path stroke="#d43728" stroke-width="5" d="M41 46 L41 47"/>
   </g>
 </svg>

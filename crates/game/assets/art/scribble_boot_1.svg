@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- boot cloud: white power-on symbol, ink-outlined so it reads on the
+       white thought bubble -->
+  <g fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <g stroke="#23242a" stroke-width="8">
+      <path d="M25.5 26.3 A13 13 0 1 0 40.5 26.3"/>
+      <path d="M33 13 L32.5 31"/>
+    </g>
+    <g stroke="#ffffff" stroke-width="4">
+      <path d="M25.5 26.3 A13 13 0 1 0 40.5 26.3"/>
+      <path d="M33 13 L32.5 31"/>
+    </g>
+    <g stroke="#23242a" stroke-width="3">
+      <line x1="15" y1="16" x2="20" y2="19"/>
+      <line x1="49" y1="16" x2="44" y2="19"/>
+      <line x1="32" y1="5" x2="32.5" y2="9"/>
+    </g>
+  </g>
+</svg>

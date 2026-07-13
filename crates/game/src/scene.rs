@@ -36,32 +36,120 @@ pub(crate) fn build_colony() -> Sim {
         ruined: false,
         desired_max: 4,
     });
+    // Working but idle (dial 0): exists so the showcase scrap recall below
+    // has a nearby, boot-free home to walk to.
     spec.printers.push(PrinterSpec {
         pos: TilePos::new(2, 9),
         faction: 0,
         color: 1,
-        ruined: true,
+        ruined: false,
         desired_max: 0,
     });
     spec.starting_ore = 30;
 
+    // Signal-cloud showcase (docs/01 table): a sealed south strip where one
+    // bot per state holds its cloud for inspection. Water walls keep colony
+    // traffic out — a stray bump on a parked handler would double-handle it.
+    for x in 4..=15 {
+        spec.water.push(TilePos::new(x, 10));
+        spec.water.push(TilePos::new(x, 12));
+    }
+    spec.water.push(TilePos::new(3, 11));
+    spec.water.push(TilePos::new(9, 11));
+
     let mut game = Sim::new(&spec);
+    // Slow boots so the power-on cloud is watchable; capacity one below the
+    // steady-state population so exactly one scrap recall fires (the purple
+    // walk) and the chain stops there.
+    game.tuning.boot_ticks = 40;
+    game.tuning.capacity = 9;
     game.apply(&Command::DeployProgram {
         faction: 0,
         color: BotColor::GREEN,
         source: crate::editor::DEFAULT_PROGRAM.into(),
     })
     .expect("miner program parses");
-    // Four bridge blueprints across the wall: the default program services
+    // Bridge blueprints across the wall: the default program services
     // blueprints first, so the opening minutes are the colony building its
-    // own crossings — progress bars and all — before mining east.
-    for y in [2, 5, 8, 11] {
+    // own crossings — progress bars and all — before mining east. (No
+    // blueprint at y=11: its approach tile sits inside the showcase strip.)
+    for y in [2, 5, 8] {
         game.apply(&Command::PlaceBlueprint {
             pos: TilePos::new(16, y),
             kind: BlueprintKind::Bridge,
         })
         .expect("blueprint placement");
     }
+
+    // The showcase cast, one signal cloud each. `on signal(s): wait(...)`
+    // parks a bot inside whichever handler fires, holding its cloud.
+    // Spawn order matters: the scrap recall picks the lowest (XP, id) bot,
+    // and ties on the attackers' closest(enemy) break by id.
+    const IDLE: &str = "wait(100000)\n";
+    const PARK: &str = "on signal(s):\n    wait(100000)\n\nwait(100000)\n";
+    let mut spawn = |game: &mut Sim, pos, faction, color, hp, source: &str| {
+        game.apply(&Command::SpawnBot {
+            pos,
+            source: source.into(),
+            cpu: 4,
+            cargo_cap: 1,
+            faction,
+            hp,
+            color,
+        })
+        .expect("showcase bot parses");
+    };
+    let blue = BotColor(2);
+    // recall (purple): first-spawned = lowest id = the scrap victim once
+    // the 4th print pushes faction population past capacity. Placed nearer
+    // the idle south printer than the busy north one, so the walk home
+    // avoids the print landing zone (bumping a booting bot would abort it).
+    spawn(&mut game, TilePos::new(15, 13), 0, blue, 100, IDLE);
+    // bump (angry): chases the bait but the corridor is blocked — one ram,
+    // then parked in its bump handler.
+    spawn(
+        &mut game,
+        TilePos::new(4, 11),
+        0,
+        blue,
+        100,
+        "on signal(s):\n    wait(100000)\n\nmove_to(closest(enemy).expect())\n",
+    );
+    // bumped (dizzy): the blocker, parked in its bumped handler.
+    spawn(&mut game, TilePos::new(6, 11), 0, blue, 100, PARK);
+    // The bait: an enemy idler behind the blocker, out of reach.
+    spawn(&mut game, TilePos::new(8, 11), 1, BotColor::RED, 100, IDLE);
+    // hurt (amber): hp tuned so one 10-damage hit crosses the 50% line.
+    spawn(&mut game, TilePos::new(10, 11), 0, blue, 18, PARK);
+    // Its attacker: exactly one swing, then sleep.
+    spawn(
+        &mut game,
+        TilePos::new(11, 11),
+        1,
+        BotColor::RED,
+        100,
+        "wait(50)\nattack(closest(enemy).expect())\nwait(100000)\n",
+    );
+    // error (red ?!): mine() with no ore in range faults into the handler.
+    spawn(
+        &mut game,
+        TilePos::new(13, 11),
+        0,
+        blue,
+        100,
+        "on signal(s):\n    wait(100000)\n\nmine()\n",
+    );
+    // death (skull, then the wreck race): one hit from its neighbor kills.
+    spawn(&mut game, TilePos::new(14, 11), 0, blue, 10, IDLE);
+    // The executioner: waits half a minute so you can watch it happen.
+    spawn(
+        &mut game,
+        TilePos::new(15, 11),
+        1,
+        BotColor::RED,
+        100,
+        "wait(300)\nattack(closest(enemy).expect())\nwait(100000)\n",
+    );
     game
 }
 
@@ -251,7 +339,9 @@ pub(crate) fn setup_scene(
             unlit: true,
             ..default()
         }),
-        scribble_quad: meshes.add(Rectangle::new(0.75, 0.6)),
+        // Sized so the icon inside the thought bubble keeps its old
+        // on-screen size (icons render at ~0.58 of the texture now).
+        scribble_quad: meshes.add(Rectangle::new(1.05, 0.85)),
         sel_ring: meshes.add(Cylinder::new(0.55, 0.05)),
         sel_mat: materials.add(StandardMaterial {
             base_color: Color::srgba(0.55, 0.95, 1.0, 0.65),
@@ -267,6 +357,9 @@ pub(crate) fn setup_scene(
                 ("error", "scribble_error"),
                 ("hurt", "scribble_hurt"),
                 ("death", "scribble_death"),
+                ("bumped", "scribble_bumped"),
+                ("boot", "scribble_boot"),
+                ("recall", "scribble_recall"),
             ] {
                 let frames = (0..3)
                     .map(|i| {

@@ -1,11 +1,11 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <!-- error handler cloud: frantic ?! in warning amber -->
+  <!-- error handler cloud: frantic ?! in fault red -->
   <g fill="none" stroke-linecap="round" stroke-linejoin="round">
     <polyline stroke="#23242a" stroke-width="3" points="8,20 14,14 10,26"/>
     <polyline stroke="#23242a" stroke-width="3" points="52,44 58,38 55,50"/>
-    <path stroke="#f2b23e" stroke-width="5" d="M20 16 L21 36"/>
-    <path stroke="#f2b23e" stroke-width="5" d="M21 45 L21 46"/>
-    <path stroke="#f2b23e" stroke-width="4.5" d="M34 22 Q38 10 48 16 Q54 21 46 27 Q42 30 42 35"/>
-    <path stroke="#f2b23e" stroke-width="5" d="M42 45 L42 46"/>
+    <path stroke="#d43728" stroke-width="5" d="M20 16 L21 36"/>
+    <path stroke="#d43728" stroke-width="5" d="M21 45 L21 46"/>
+    <path stroke="#d43728" stroke-width="4.5" d="M34 22 Q38 10 48 16 Q54 21 46 27 Q42 30 42 35"/>
+    <path stroke="#d43728" stroke-width="5" d="M42 45 L42 46"/>
   </g>
 </svg>

@@ -69,12 +69,13 @@ fn main() {
                 view::update_progress_bars,
                 view::update_health_bars,
                 view::update_scribbles,
+                view::interpolate,
                 view::billboard_bars,
                 view::sync_view,
-                view::interpolate,
                 view::spin,
                 view::animate_job_cubes,
                 view::animate_explosions,
+                view::animate_disassembly,
             )
                 .chain(),
         )

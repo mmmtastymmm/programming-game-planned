@@ -4,7 +4,7 @@
       points="10,24 24,40 14,42 32,18 24,46 42,18 34,42 50,22 46,42 55,34"/>
     <polyline stroke="#23242a" stroke-width="3.5"
       points="16,32 30,18 40,34 52,30"/>
-    <polyline stroke="#d43728" stroke-width="3.5"
+    <polyline stroke="#f5d928" stroke-width="3.5"
       points="12,40 26,24 38,44 48,28"/>
   </g>
 </svg>

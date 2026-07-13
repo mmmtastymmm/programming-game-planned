@@ -19,6 +19,10 @@ use crate::scene::*;
 pub(crate) struct Pose {
     pub(crate) prev: Vec3,
     pub(crate) curr: Vec3,
+    /// Facing across the last tick boundary; a turn takes exactly one
+    /// tick, slerped per frame like the position lerp.
+    pub(crate) yaw_prev: Quat,
+    pub(crate) yaw: Quat,
     pub(crate) grid: TilePos,
     /// Was the bot in a handler last tick (hop on entry)?
     pub(crate) was_in_handler: bool,
@@ -74,6 +78,12 @@ pub(crate) struct Explosion {
     pub(crate) age: f32,
 }
 
+/// A scrapped bot being taken apart at the printer: spin, shrink, sink.
+#[derive(Component)]
+pub(crate) struct Disassembling {
+    pub(crate) age: f32,
+}
+
 #[derive(Resource, Default)]
 pub(crate) struct ViewIndex {
     pub(crate) bots: HashMap<u32, Entity>,
@@ -92,6 +102,9 @@ pub(crate) struct ViewIndex {
     pub(crate) bot_health: HashMap<u32, (Entity, Entity, Entity)>,
     /// Bot id -> its scribble-cloud entity.
     pub(crate) bot_scribbles: HashMap<u32, Entity>,
+    /// Bots currently on a recall walk: a vanish while recalling is the
+    /// printer disassembling them (scrap), not a death.
+    pub(crate) bot_recalling: HashSet<u32>,
     pub(crate) paint: HashMap<(i32, i32), (Entity, u8)>,
 }
 
@@ -102,12 +115,12 @@ pub(crate) struct ViewIndex {
 pub(crate) fn update_poses(
     game: NonSend<GameSim>,
     index: Res<ViewIndex>,
-    mut poses: Query<(&mut Pose, &mut Transform)>,
+    mut poses: Query<&mut Pose>,
 ) {
     let world = &game.0.world;
     for (id, bot) in &world.bots {
         let Some(&entity) = index.bots.get(&id.0) else { continue };
-        let Ok((mut pose, mut transform)) = poses.get_mut(entity) else { continue };
+        let Ok(mut pose) = poses.get_mut(entity) else { continue };
         let mut y = if bot.data.booting.is_some() {
             0.1 // rising out of the printer
         } else {
@@ -151,12 +164,19 @@ pub(crate) fn update_poses(
         let target = tile_xyz(world, bot.data.pos, y);
         pose.prev = pose.curr;
         pose.curr = target;
+        pose.yaw_prev = pose.yaw;
         // Face the tile currently being attempted (so a bumped bot stares
-        // at whatever it walked into for the whole freeze), else the tile
-        // just entered.
+        // at whatever it walked into for the whole freeze), else the thing
+        // being worked on (miners face their node — diagonally if that's
+        // where it is), else the tile just entered.
+        use sim::world::Action;
         let next_tile = match (&bot.data.action, &bot.data.recall) {
-            (Some(sim::world::Action::Move { path, .. }), _) if !path.is_empty() => Some(path[0]),
+            (Some(Action::Move { path, .. }), _) if !path.is_empty() => Some(path[0]),
             (_, Some(recall)) if !recall.path.is_empty() => Some(recall.path[0]),
+            (Some(Action::Mine { node, .. }), _) => world.entity_pos(*node),
+            (Some(Action::Deposit { depot, .. }), _) => world.entity_pos(*depot),
+            (Some(Action::Attack { target, .. }), _) => world.entity_pos(*target),
+            (Some(Action::Build { blueprint }), _) => world.entity_pos(*blueprint),
             _ => None,
         };
         let face_from_to = match next_tile {
@@ -168,17 +188,20 @@ pub(crate) fn update_poses(
             let dx = (to.x - from.x) as f32;
             let dz = (to.y - from.y) as f32;
             // Nose is on the local -Z face; lead with it.
-            transform.rotation = Quat::from_rotation_y((-dx).atan2(-dz));
+            pose.yaw = Quat::from_rotation_y((-dx).atan2(-dz));
         }
         pose.grid = bot.data.pos;
     }
 }
 
-/// Per-frame smoothing between fixed ticks.
+/// Per-frame smoothing between fixed ticks: positions lerp and noses
+/// slerp between the tick-boundary targets, so a turn takes exactly one
+/// tick (shortest way around) and scales with game speed like movement.
 pub(crate) fn interpolate(fixed: Res<Time<Fixed>>, mut q: Query<(&Pose, &mut Transform)>) {
     let a = fixed.overstep_fraction();
     for (pose, mut transform) in &mut q {
         transform.translation = pose.prev.lerp(pose.curr, a);
+        transform.rotation = pose.yaw_prev.slerp(pose.yaw, a);
     }
 }
 
@@ -231,6 +254,46 @@ pub(crate) fn animate_explosions(
             transform.scale = Vec3::splat(1.0 - t);
             transform.rotate_y(6.0 * time.delta_secs());
         }
+    }
+}
+
+/// The printer taking a scrapped bot apart: an accelerating spin as the
+/// fasteners come out, shrinking while being drawn down into the machine.
+pub(crate) fn animate_disassembly(
+    time: Res<Time>,
+    game: NonSend<GameSim>,
+    mut commands: Commands,
+    mut q: Query<(Entity, &mut Disassembling, &mut Transform)>,
+) {
+    let world = &game.0.world;
+    for (entity, mut d, mut transform) in &mut q {
+        d.age += time.delta_secs();
+        let t = d.age / 1.4;
+        if t >= 1.0 {
+            commands.entity(entity).despawn();
+            continue;
+        }
+        transform.scale = Vec3::splat(1.0 - t * t);
+        // Drawn into the nearest printer (the bot was scrapped standing
+        // beside it), sinking into the bed as it goes.
+        let target = world
+            .printers
+            .values()
+            .map(|p| tile_xyz(world, p.pos, 0.15))
+            .min_by(|a, b| {
+                let (da, db) = (
+                    a.distance_squared(transform.translation),
+                    b.distance_squared(transform.translation),
+                );
+                da.partial_cmp(&db).expect("distances are finite")
+            });
+        if let Some(target) = target {
+            let a = 1.0 - (-time.delta_secs() * 1.6).exp();
+            transform.translation = transform.translation.lerp(target, a);
+        } else {
+            transform.translation.y -= 0.3 * time.delta_secs();
+        }
+        transform.rotate_y((2.0 + 14.0 * t) * time.delta_secs());
     }
 }
 
@@ -364,6 +427,11 @@ pub(crate) fn sync_view(
     let mut seen: Vec<u32> = Vec::new();
     for (id, bot) in &world.bots {
         seen.push(id.0);
+        if bot.data.recall.is_some() {
+            index.bot_recalling.insert(id.0);
+        } else {
+            index.bot_recalling.remove(&id.0);
+        }
         if let Some(&entity) = index.bots.get(&id.0) {
             // Carry indicators track cargo.
             if let Ok(kids) = children.get(entity) {
@@ -391,6 +459,8 @@ pub(crate) fn sync_view(
                 Pose {
                     prev: start,
                     curr: start,
+                    yaw_prev: Quat::IDENTITY,
+                    yaw: Quat::IDENTITY,
                     grid: bot.data.pos,
                     was_in_handler: false,
                     fault_seen: bot.vm.as_ref().map(|v| v.fault_count()).unwrap_or(0),
@@ -459,6 +529,7 @@ pub(crate) fn sync_view(
             .spawn((
                 ScribbleCloud,
                 BillboardBar, // camera-facing, parent-rotation compensated
+                bevy::pbr::NotShadowCaster, // a thought casts no shadow
                 Mesh3d(palette.scribble_quad.clone()),
                 MeshMaterial3d(palette.scribble_mats["angry"][0].clone()),
                 Transform::from_xyz(0.0, 1.75, 0.0),
@@ -468,16 +539,28 @@ pub(crate) fn sync_view(
         commands.entity(entity).add_child(scribble);
         index.bot_scribbles.insert(id.0, scribble);
     }
-    index.bots.retain(|id, entity| {
+    let ViewIndex { bots, bot_recalling, .. } = &mut *index;
+    bots.retain(|id, entity| {
         if seen.contains(id) {
             true
         } else {
-            commands.entity(*entity).despawn();
+            if bot_recalling.contains(id) {
+                // Scrapped at the printer: play the take-apart instead of
+                // blinking out. Pose goes too, or interpolate would keep
+                // re-planting the transform every frame.
+                commands
+                    .entity(*entity)
+                    .remove::<Pose>()
+                    .insert(Disassembling { age: 0.0 });
+            } else {
+                commands.entity(*entity).despawn();
+            }
             false
         }
     });
     index.bot_health.retain(|id, _| seen.contains(id));
     index.bot_scribbles.retain(|id, _| seen.contains(id));
+    index.bot_recalling.retain(|id| seen.contains(id));
 
     // Blueprints: glowing ghost slabs with a billboarded progress bar.
     for (id, bp) in &world.blueprints {
@@ -757,15 +840,20 @@ pub(crate) fn update_scribbles(
         let Ok((mut visibility, mut material, mut transform)) = clouds.get_mut(cloud) else {
             continue;
         };
-        // The cloud reads *why* the bot is upset: angry squiggle for bump
-        // stun and collision handlers, ?! for error, starburst for hurt,
-        // skull for the death handler.
+        // The cloud reads the bot's current state: angry squiggle for the
+        // rammer's bump, dizzy stars for the bumped victim, ?! for error,
+        // starburst for hurt, skull for death, power-on for boot, home
+        // arrow for the recall walk (docs/01 signal table).
         let mood = if bot.data.bump_frozen > 0 {
             Some("angry")
+        } else if bot.data.recall.is_some() {
+            Some("recall")
+        } else if bot.data.booting.is_some() {
+            Some("boot")
         } else {
             bot.handler_name().map(|name| match name {
-                "error" | "hurt" | "death" => name,
-                _ => "angry", // bump / bumped share the collision squiggle
+                "error" | "hurt" | "death" | "bumped" => name,
+                _ => "angry", // bump keeps the collision squiggle
             })
         };
         if let Some(mood) = mood {

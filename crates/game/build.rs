@@ -38,6 +38,15 @@ const TILES: &[&str] = &[
     "scribble_death_0",
     "scribble_death_1",
     "scribble_death_2",
+    "scribble_bumped_0",
+    "scribble_bumped_1",
+    "scribble_bumped_2",
+    "scribble_boot_0",
+    "scribble_boot_1",
+    "scribble_boot_2",
+    "scribble_recall_0",
+    "scribble_recall_1",
+    "scribble_recall_2",
 ];
 
 /// Atlased 6-face bodies: (svg prefix, output prefix).
@@ -82,11 +91,31 @@ fn main() {
     let out = root.join("assets/textures");
     fs::create_dir_all(&out).expect("create textures dir");
 
+    // Scribble icons composite onto the shared white thought bubble; the
+    // icon shrinks into the bubble's body (the tail hangs bottom-left).
+    let bubble_svg =
+        fs::read_to_string(art.join("scribble_bubble.svg")).expect("bubble svg");
     for tile in TILES {
         let svg = fs::read_to_string(art.join(format!("{tile}.svg"))).expect("tile svg");
-        render(&svg, SIZE)
-            .save_png(out.join(format!("{tile}.png")))
-            .expect("save tile png");
+        let icon = render(&svg, SIZE);
+        let px = if tile.starts_with("scribble") {
+            let mut base = render(&bubble_svg, SIZE);
+            let scale = 0.58;
+            let tx = SIZE as f32 * (1.0 - scale) / 2.0;
+            let ty = tx - SIZE as f32 * 0.075; // bias up, away from the bottom tail
+            base.draw_pixmap(
+                0,
+                0,
+                icon.as_ref(),
+                &tiny_skia::PixmapPaint::default(),
+                tiny_skia::Transform::from_row(scale, 0.0, 0.0, scale, tx, ty),
+                None,
+            );
+            base
+        } else {
+            icon
+        };
+        px.save_png(out.join(format!("{tile}.png"))).expect("save tile png");
     }
 
     for (svg_prefix, out_prefix) in ATLASES {

@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- recall cloud: purple home, the long walk back -->
+  <g fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <path stroke="#9b6df2" stroke-width="4.5" d="M15 35 L29 23 L43 35"/>
+    <path stroke="#9b6df2" stroke-width="4" d="M19 36 L19 49 L39 49 L39 36"/>
+    <path stroke="#23242a" stroke-width="3" d="M53 9 Q43 5 36 12"/>
+    <polyline stroke="#23242a" stroke-width="3" points="42,12 36,13 38,6"/>
+  </g>
+</svg>
