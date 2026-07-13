@@ -12,7 +12,8 @@ use sim::map::OverlayKind;
 use sim::TilePos;
 use std::collections::HashMap;
 
-use crate::{build_icon, same_item, GameSim, ToolKind, BUILD_CATEGORIES};
+use crate::tools::{build_icon, same_item, ToolKind, BUILD_CATEGORIES};
+use crate::GameSim;
 use complete::{completion_at, insert_kind, word_at};
 use highlight::{error_byte_range, highlight_pyrite, HL_ERROR, HL_FUNCTION, HL_VARIABLE};
 
