@@ -2963,25 +2963,36 @@ fn editor_ui(
                     let target = editor.selected_bot;
                     let step_line = ui
                         .add_enabled(target.is_some(), egui::Button::new("⏭ line"))
-                        .on_hover_text("run until the inspected bot's line changes");
+                        .on_hover_text(
+                            "run until the inspected bot's line changes or an \
+                             interrupt fires (handler entry/exit, init ritual, \
+                             boot, recall)",
+                        );
                     if step_line.clicked()
                         && let Some(id) = target
                     {
                         let bot_id = sim::world::BotId(id);
-                        let vm_state = |game: &GameSim| {
-                            game.0
-                                .world
-                                .bots
-                                .get(&bot_id)
-                                .and_then(|b| b.vm.as_ref())
-                                .map(|vm| (vm.current_line(), vm.fault_count()))
+                        // Break on ANY observable execution-state change:
+                        // line, fault, handler entry/exit, the init ritual
+                        // starting or finishing, boot, recall. Interrupts
+                        // are breakpoints — stepping never skips a flinch.
+                        let probe = |game: &GameSim| {
+                            game.0.world.bots.get(&bot_id).map(|b| {
+                                (
+                                    b.vm.as_ref().map(|vm| (vm.current_line(), vm.fault_count())),
+                                    b.handler_name(),
+                                    b.in_handler_init(),
+                                    b.data.booting.is_some(),
+                                    b.data.recall.is_some(),
+                                )
+                            })
                         };
-                        let before = vm_state(&game);
+                        let before = probe(&game);
                         for _ in 0..300 {
                             game.0.step();
-                            let now = vm_state(&game);
+                            let now = probe(&game);
                             if now != before || now.is_none() {
-                                break; // line moved, fault fired, or bot died
+                                break;
                             }
                         }
                     }
