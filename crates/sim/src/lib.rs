@@ -8,7 +8,11 @@
 //! - [`sim`]: the fixed-tick phase loop and the `Command` input surface
 //! - [`hash`]: FNV-1a state hashing for desync detection / golden replays
 
+mod actions;
+mod damage;
 pub mod hash;
+mod movement;
+mod printers;
 pub mod host;
 pub mod map;
 pub mod sim;
