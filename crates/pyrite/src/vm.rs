@@ -162,6 +162,9 @@ enum Work {
     MatchBegin { stmt: StmtId },
     MatchArm { stmt: StmtId, value: EnumValue, case: usize },
     CallExec { name: String, argc: usize, line: u32 },
+    /// Marker popped when the forced handler_init() completes — flips the
+    /// VM out of "entry ritual" state (inspector visibility).
+    InitDone,
     MethodExec { name: String, argc: usize, line: u32 },
     EnumCtorExec { enum_name: String, variant: String, argc: usize },
     MakeList { count: usize },
@@ -198,6 +201,9 @@ pub struct Vm {
     /// Which signal the running handler is serving ("error" / "hurt" /
     /// "bump" / "bumped" / "death") — for inspectors and mood clouds.
     handler_signal: Option<&'static str>,
+    /// True from handler entry until the forced handler_init() resolves —
+    /// the visible flinch window.
+    handler_init_active: bool,
     /// Ticks spent in the current `on error:` handler (for the grace window).
     handler_ticks: u32,
     /// Remaining black-box budget while in the death handler.
@@ -234,6 +240,7 @@ impl Vm {
             phase: Phase::Main,
             handler_is_default: false,
             handler_signal: None,
+            handler_init_active: false,
             handler_ticks: 0,
             death_budget: 0,
             engine_interrupt: false,
@@ -301,6 +308,11 @@ impl Vm {
         self.phase != Phase::Main && self.handler_is_default
     }
 
+    /// Is the VM inside the forced handler-entry ritual (handler_init)?
+    pub fn in_handler_init(&self) -> bool {
+        self.phase != Phase::Main && self.handler_init_active
+    }
+
     /// Name of the signal the running handler is serving, if any.
     pub fn active_signal(&self) -> Option<&'static str> {
         if self.phase == Phase::Main {
@@ -354,12 +366,14 @@ impl Vm {
     ) {
         self.work = body.into_iter().rev().map(Work::Stmt).collect();
         if kind == SignalKind::Signal {
+            self.work.push(Work::InitDone);
             self.work.push(Work::Discard);
             self.work.push(Work::CallExec {
                 name: "handler_init".to_string(),
                 argc: 0,
                 line: 0,
             });
+            self.handler_init_active = true;
         }
         self.values.clear();
         self.frames.clear();
@@ -404,6 +418,7 @@ impl Vm {
         self.active = Rc::clone(&self.program);
         self.handler_is_default = false;
         self.handler_signal = None;
+        self.handler_init_active = false;
         self.work = Self::block_work(&self.program.body.clone());
         self.values.clear();
         self.frames.clear();
@@ -627,6 +642,7 @@ impl Vm {
             Work::AttrGet { .. } => costs.attr,
             Work::ReturnNow => 0,
             Work::FrameEnd => 0,
+            Work::InitDone => 0,
         }
     }
 
@@ -1162,6 +1178,9 @@ impl Vm {
                 let frame = self.frames.pop().expect("ReturnNow requires a frame");
                 self.values.truncate(frame.val_base);
                 self.values.push(value);
+            }
+            Work::InitDone => {
+                self.handler_init_active = false;
             }
             Work::FrameEnd => {
                 let frame = self.frames.pop().expect("FrameEnd requires a frame");

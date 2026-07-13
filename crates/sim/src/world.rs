@@ -173,6 +173,11 @@ impl Bot {
         self.vm.as_ref()?.active_signal()
     }
 
+    /// Is the bot inside the forced handler-entry ritual?
+    pub fn in_handler_init(&self) -> bool {
+        self.vm.as_ref().is_some_and(|vm| vm.in_handler_init())
+    }
+
     /// Is the running handler an engine default?
     pub fn in_default_handler(&self) -> bool {
         self.vm.as_ref().is_some_and(|vm| vm.handler_is_default())

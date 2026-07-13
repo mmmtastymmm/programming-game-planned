@@ -2103,6 +2103,13 @@ fn inspector_ui(
             "recalled (engine)".to_string()
         } else if data.bump_frozen > 0 {
             format!("bump-frozen ({} ticks)", data.bump_frozen)
+        } else if bot.in_handler_init() {
+            let ticks = match &bot.data.action {
+                Some(sim::world::Action::Wait { ticks_left }) => format!(" — {ticks_left} ticks left"),
+                _ => String::new(),
+            };
+            let signal = bot.handler_name().unwrap_or("?");
+            format!("flinching: handler_init() for `{signal}`{ticks}")
         } else if let Some(signal) = bot.handler_name() {
             if bot.in_default_handler() {
                 format!("handling: on {signal}: (engine default)")
@@ -2154,29 +2161,59 @@ fn inspector_ui(
             // While an engine default handler runs, show ITS code with the
             // executing line highlighted — the engine's response is real
             // Pyrite, debuggable like anything else.
+            let in_handler = bot.in_signal_handler();
+            let in_init = bot.in_handler_init();
             let default_running = bot.in_default_handler();
-            if default_running
-                && let Some(signal) = bot.handler_name()
-                && let Some(src) = bot.default_handler_source(if signal == "death" {
-                    "death"
+            // While ANY handler runs, show the full causal chain: the
+            // forced entry ritual first, then the handler code.
+            if in_handler && let Some(signal) = bot.handler_name() {
+                if default_running {
+                    ui.strong(format!("engine default: on {signal}:"));
                 } else {
-                    "signal"
-                })
-            {
-                ui.strong(format!("engine default: on {signal}:"));
-                let current = vm.current_line() as usize;
-                for (i, line) in src.lines().enumerate() {
-                    let n = i + 1;
-                    let text = format!("{n:>3} {line}");
-                    if n == current {
+                    ui.strong(format!("handler: on {signal}:"));
+                }
+                // The unskippable entry ritual, as its own visible step.
+                if signal != "death" {
+                    let ritual = "  ⚙ handler_init()   # forced entry ritual — the flinch";
+                    if in_init {
                         ui.label(
-                            egui::RichText::new(text)
+                            egui::RichText::new(ritual)
                                 .monospace()
-                                .background_color(egui::Color32::from_rgb(70, 45, 25))
-                                .color(egui::Color32::from_rgb(255, 230, 200)),
+                                .background_color(egui::Color32::from_rgb(85, 55, 20))
+                                .color(egui::Color32::from_rgb(255, 220, 160)),
                         );
                     } else {
-                        ui.monospace(text);
+                        ui.label(
+                            egui::RichText::new(ritual)
+                                .monospace()
+                                .color(egui::Color32::from_rgb(140, 130, 110)),
+                        );
+                    }
+                }
+                // Default handlers: show their own source with the line
+                // highlight (suppressed during init — the counter still
+                // points at the pre-fault line).
+                if default_running
+                    && let Some(src) = bot.default_handler_source(if signal == "death" {
+                        "death"
+                    } else {
+                        "signal"
+                    })
+                {
+                    let current = if in_init { 0 } else { vm.current_line() as usize };
+                    for (i, line) in src.lines().enumerate() {
+                        let n = i + 1;
+                        let text = format!("{n:>3} {line}");
+                        if n == current {
+                            ui.label(
+                                egui::RichText::new(text)
+                                    .monospace()
+                                    .background_color(egui::Color32::from_rgb(70, 45, 25))
+                                    .color(egui::Color32::from_rgb(255, 230, 200)),
+                            );
+                        } else {
+                            ui.monospace(text);
+                        }
                     }
                 }
                 ui.separator();
@@ -2191,8 +2228,11 @@ fn inspector_ui(
                 .map(|cp| cp.source.clone());
             match source {
                 Some(source) => {
-                    let current =
-                        if default_running { 0 } else { vm.current_line() as usize };
+                    let current = if default_running || in_init {
+                        0
+                    } else {
+                        vm.current_line() as usize
+                    };
                     egui::ScrollArea::vertical().max_height(260.0).show(ui, |ui| {
                         for (i, line) in source.lines().enumerate() {
                             let n = i + 1;
@@ -2220,6 +2260,10 @@ fn inspector_ui(
         // Handler coverage: player-installed ones point at their line;
         // the rest show the engine default in plain words.
         ui.strong("handlers");
+        ui.small(format!(
+            "every entry begins: handler_init() — wait {} ticks (engine, unskippable)",
+            game.0.tuning.handler_init_ticks
+        ));
         let tuning = &game.0.tuning;
         for (signal, line) in bot.handler_summary() {
             match line {

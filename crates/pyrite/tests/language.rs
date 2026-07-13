@@ -796,3 +796,29 @@ fn default_bump_handler_waits_in_code() {
     assert!(call_names(&host).contains(&"work"), "program restarts after the default");
 }
 
+
+#[test]
+fn handler_init_window_is_observable() {
+    use pyrite::ast::SignalKind;
+    let program = parse("work()\n", &UnlockSet::all()).unwrap();
+    let config = config_with_default(SignalKind::Signal, "wait(35)\n");
+    let mut vm = Vm::new(Rc::new(program), config);
+    let mut host = TestHost::default();
+    host.blocking.insert("handler_init".into());
+    host.blocking.insert("wait".into());
+    let costs = CostTable::default();
+
+    assert!(!vm.in_handler_init(), "quiet before the signal");
+    vm.raise(Signal::Bump, &mut host, &costs);
+    assert!(vm.in_handler_init(), "ritual pending from entry");
+    vm.grant(20);
+    assert_eq!(vm.run(&mut host, &costs), Outcome::Blocked, "blocked inside handler_init");
+    assert!(vm.in_handler_init(), "still flinching while the init wait runs");
+    // The init resolves: ritual over, handler body proceeds (to wait(35)).
+    vm.resolve_action(Ok(Value::Unit), &mut host, &costs);
+    vm.grant(20);
+    vm.run(&mut host, &costs);
+    assert!(!vm.in_handler_init(), "ritual complete — now in the handler body");
+    assert!(vm.active_signal().is_some(), "still handling the signal");
+    assert!(call_names(&host).contains(&"wait"), "the body's wait(35) issued");
+}
