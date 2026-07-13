@@ -102,7 +102,7 @@ All of this is first-pass flavor to tune; the mechanical skeleton (allegiance nu
 | 9 | The Hermit | Lone elites far from any nest; the nest itself is hidden and must be scouted to be ended. | Static, self-sufficient (long programs, big CPU) |
 | 10 | Wheel of Fortune | Chance: patrol routes, targets, even cycle budgets rolled from seeded RNG streams. Unreadable by pattern, only by code. | **Procedurally randomized parameters** per print |
 | 11 | Justice | The ledger: retaliates in proportion to each player's aggression — tit-for-tat tracked per player (multiplayer-aware). | Static but **stateful**: grudge counters in colony memory |
-| 12 | The Hanged Man | Sacrifice: scuttle-bombers that weaponize `become_disabled()` and `on death:` — its units *want* to die on your doorstep. | Static, handler-centric |
+| 12 | The Hanged Man | Sacrifice: scuttle-bombers that weaponize `become_disabled()` — deliberate scuttles that plant ticking wrecks on your doorstep: clear them in time or eat the countdown explosion. | Static, scuttle-centric |
 | 13 | Death | The recycler: **salvages every wreck on the field** — yours, other Ferals', its own — to fuel printing. Starves your salvage economy and eats your battlefields. | Static; salvage-centric |
 | 14 | Temperance | Balance: reads your army composition and prints proportional counters. The first nest that **researches** — its tech keeps pace with yours. | **Researches**; adaptive mix |
 | 15 | The Devil | Corruption: spreads Corruption biome tiles outward and **hijacks your bots** — reprogrammed veterans fight for it, XP intact. | Hijack-capable; terrain-altering |
@@ -122,7 +122,7 @@ All of this is first-pass flavor to tune; the mechanical skeleton (allegiance nu
 
 ## Capturing Wrecks (decided)
 
-`hijack()` (late-game function block, [06-progression.md](06-progression.md)): field-repair **any enemy wreck** — Feral *or* player, on harm-enabled servers — during its self-destruct countdown while flashing one of your **color programs** onto it. It passes through the standard Boot Sequence ([02-agents.md](02-agents.md)) and comes up as *your* bot, original chassis, **XP intact**. Boot-as-interrupt applies: a hijack under fire explodes the prize.
+`hijack()` (late-game function block, [06-progression.md](06-progression.md)): field-repair **any enemy wreck** — Feral *or* player, on harm-enabled servers — during its self-destruct countdown while flashing one of your **color programs** onto it. It passes through the standard Boot Sequence ([02-agents.md](02-agents.md)) and comes up as *your* bot, original chassis, **XP intact**. Boot-as-interrupt applies: a hijack under fire aborts the prize back into a wreck — the theft has to be covered, not just fast.
 
 - **Hijacked bots are never reprintable** by their new owner — no blueprint transfers. A stolen L5 veteran or captured Feral chassis is a unique prize; when it dies, it's gone.
 - The Hierophant (5) and the Devil (15) run the same play against *you* — protect your wrecks or lose them twice.
@@ -139,7 +139,7 @@ flowchart LR
 
 - Escalation is driven by **player footprint** (territory claimed, energy output, Ferals killed), not wall-clock — turtles stay calm, expanders get pressure. Escalation and Allegiance are orthogonal: **allegiance is who a nest is; escalation is how awake it is.** A provoked Fool nest just sends more fools; a provoked Magician mutates faster.
 - **Variants**: at high threat, nests with the mutation flag print archetypes with *modified programs* (e.g. a Stinger whose flee threshold is removed). Variants are flagged visually; the Codex diff view shows exactly what changed. Late-game reading comprehension test.
-- **Handler-tier Ferals**: the Stinger polls `if health_low():` — deliberately the *worse* pattern. Higher-tier variants replace it with an `on hurt:` handler (retreat fires instantly, mid-chase), previewing the signal-handler unlock ([06-progression.md](06-progression.md)) and demonstrating exactly why it's better: you watch a variant Stinger break off the *instant* your first shot lands.
+- **Handler-tier Ferals**: the Stinger polls `if health_low():` — deliberately the *worse* pattern. Higher-tier variants replace it with an `on hurt:` window (retreat fires instantly, mid-chase), previewing the signal-handler unlock ([06-progression.md](06-progression.md)) and demonstrating exactly why it's better: you watch a variant Stinger break off the *instant* your first shot lands.
 
 ## Co-op & PvP Role
 

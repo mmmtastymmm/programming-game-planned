@@ -20,7 +20,7 @@ sequenceDiagram
     Sim->>CPU: grant N cycles
     loop while cycles remain
         CPU->>VM: step one operation
-        VM-->>CPU: cost (may exceed remaining → carries debt)
+        VM-->>CPU: cost (unaffordable → pause & save up;<br/>forced charges → negative budget, debt)
         alt operation is an action (move, mine, ...)
             VM->>World: enqueue action
             Note over VM: action ops BLOCK until<br/>the action resolves
@@ -33,88 +33,85 @@ Key rules:
 
 - **Programs loop forever.** When the last line finishes, execution restarts at line 1. (Explicit `while True:` becomes redundant sugar once unlocked.)
 - **Actions block.** `move_to(...)` costs cycles to *issue*, then the bot is busy until the action completes in the world. Thinking and acting don't overlap (until a later unlock — see "Coprocessor" in [06-progression.md](06-progression.md)).
-- **Cycle debt.** An operation costing more than remaining cycles executes when enough cycles have accumulated. Nothing is free.
+- **Saving up.** An operation costing more than the remaining budget pauses the bot *in front of that operation*; grants accumulate tick by tick until it can pay, then it executes. A stock 1-cycle CPU takes four ticks to afford `closest(ore)` (cost 4) — the bot visibly sits there thinking, which is the point. Cheap ops batch: a 4-cycle CPU runs four cost-1 statements in one tick.
+- **Cycle debt.** Engine-*forced* charges don't wait to be affordable — the trap cost on a fault and the ~25-cycle crash dump execute immediately and drive the budget **negative**; the bot repays the debt before its next operation. A crash-looping bot spends most of its life working off dump debt at 1 cycle/tick.
+- **No banking while blocked.** A bot waiting on an action or a channel (`move_to` in flight, blocked `receive`) **burns** its per-tick budget — waiting is what its CPU is doing. Accumulation only happens while *running*, stuck in front of an unaffordable op; you can't idle for a minute and then execute 600 cycles in one tick.
+- **Bank cap.** The budget clamps to **`bank_cap`** (a cost-table entry, default = the most expensive base op — the crash dump's 25) after every grant. Saving up already can't overshoot the op you're waiting for; the cap makes that an enforced invariant no future mechanic (Coprocessor, anything) can accidentally break — and gives the inspector a bounded budget meter (debt shows as the bar going negative). Load-time rule: no overlay may push any op's effective cost above `bank_cap`, or a bot could freeze forever in front of an op it can never afford ([07-architecture.md](07-architecture.md)).
 
 ## Errors & Signals
 
-**Any** runtime failure is a fault: stack overflow, type error, unsupported operation, invalid argument, a failed action (`mine()` with no ore in range). There are **seven signal kinds** — six with player-facing handling models, plus the engine-owned `recall`. (All numbers below are cost-table constants — tuning values, not commitments.)
+**Any** runtime failure is a fault: stack overflow, type error, unsupported operation, invalid argument, a failed action (`mine()` with no ore in range). There are **seven reserved handlers** — five with a player-editable window, plus two fully engine-reserved ones, `abort` and `recall`. (All numbers below are cost-table constants — tuning values, not commitments.)
 
 ```mermaid
 stateDiagram-v2
-    Running --> CrashDump: fault, no "on error#colon;" →<br/>engine force-calls upload_crash_dump()
-    Running --> ErrHandler: fault, "on error#colon;" →<br/>trap cost, then normal code<br/>(ops ×2 after 10-tick grace)
-    Running --> HurtHandler: HP crosses Damaged →<br/>"on hurt#colon;", NO budget limit
-    Running --> DeathHandler: HP hits 0 →<br/>"on death#colon;", 10 cycles hard cap
-    Running --> BumpHandler: collision →<br/>"on bump#colon;" (rammer) /<br/>"on bumped#colon;" (victim)<br/>unhandled → engine stun
-    CrashDump --> Restart
-    ErrHandler --> Restart: completes
-    HurtHandler --> Restart: completes
-    BumpHandler --> Restart: completes
-    HurtHandler --> Exploded: any second handler<br/>→ DOUBLE HANDLE
-    ErrHandler --> Exploded: any second handler<br/>→ DOUBLE HANDLE
-    BumpHandler --> Exploded: any second handler<br/>→ DOUBLE HANDLE
-    DeathHandler --> Exploded: fault inside<br/>→ DOUBLE HANDLE
-    DeathHandler --> Wreck: completes or budget spent →<br/>forced become_disabled()<br/>starts self-destruct countdown
+    Running --> Prologue: signal fires →<br/>forced engine lines<br/>(handler_init() flinch, ~15 ticks)
+    Prologue --> Window: YOUR code —<br/>instruction-capped,<br/>signal-safe functions only
+    Window --> Epilogue: forced engine lines
+    Epilogue --> Restart: error / hurt / bump / bumped / boot
     Restart --> Running: line 1, variables +<br/>stack cleared
+    Running --> Abort: HP hits 0
+    Prologue --> Abort: second signal or fault<br/>→ ABORT
+    Window --> Abort: second signal or fault<br/>→ ABORT
+    Epilogue --> Abort: second signal or fault<br/>→ ABORT — no safe phase<br/>anywhere in the sandwich
+    Abort --> Wreck: FULLY RESERVED —<br/>forced upload_log() +<br/>become_disabled() →<br/>self-destruct countdown
+    Wreck --> Running: field-repaired in time →<br/>Boot Sequence, XP intact
+    Wreck --> Exploded: countdown expires —<br/>the ONLY path to explosion
 ```
 
-### The seven kinds
+### Reserved handler templates (redesign 2026-07-13)
 
-| Kind | Trigger | Budget / limit | Notes |
-|---|---|---|---|
-| **Unhandled error** | fault, no `on error:` installed | cost of `upload_crash_dump()` (~25 cycles) | The engine **always force-calls `upload_crash_dump()`** — full debug info (see Logging), then restart. Debuggability is guaranteed; you just pay full price for it. |
-| **Handled error** | fault, `on error:` installed | trap cost (~5), then a **10-tick grace window**; after it, **every operation costs ×2** until the handler ends | The overtime tax keeps handlers as *recovery*, not a place to live. Write your own lean crash logging and beat the default. |
-| **Hurt** | HP crosses below the Damaged threshold (edge-triggered, re-arms above it). A separate unlock allows a custom threshold: `on hurt(30):` ([06-progression.md](06-progression.md)) | **unlimited** | But see the double-handle rule. Unbounded time makes long retreats-to-Repair-Bay legal — at a risk. |
-| **Death** | HP hits 0 | **10 cycles**, hard | Black-box budget: a couple of `log()`s + `upload_log()`. When it completes (or the budget runs out) the engine **force-calls `become_disabled()`** — every death exits through that function. It starts the wreck's **self-destruct countdown**: field-repair in time rescues the bot (XP intact); expiry means explosion ([02-agents.md](02-agents.md)). |
-| **Bump** | this bot rammed an occupied tile | normal costs (hurt-like) | Unhandled default: the engine's long at-fault stun + chassis damage. A handler *replaces* the stun — your own collision response — then restart from line 1. |
-| **Bumped** | something rammed this bot | normal costs | Unhandled default: a short stagger + chassis damage. Handler replaces the stagger. Double-handle applies: being rammed mid-handler/boot/recall explodes you. |
-| **Recall** | printer rebalancing or colony over-capacity | n/a — handler is **engine-fixed, not player-writable** | Suspend program, walk home, re-color (XP kept) or scrap (see Program Colors below). The one signal you can't customize. |
+Every signal owns a **reserved handler template** — an engine-shaped sandwich, the same three layers for all seven:
 
-### One handler, one entry ritual (redesign 2026-07-12)
+1. **Forced prologue** — engine lines no program can skip. For most signals that's `handler_init()`, the ~15-tick flinch (the universal time punishment for having a problem, and a real vulnerability window: a bot under sustained fire can be aborted mid-ritual). Boot's prologue is the forced `upload_log()`.
+2. **Editable window** — your code, written as an `on <signal>:` block. Windows have a **max instruction count** (per-signal, see table) and may only call function blocks flagged **`signal_safe`** — the C/C++ async-signal-safety idea: a single per-function property in the registry (see the function table), the same set for every window, enforced at parse/deploy time and greyed out in the editor.
+3. **Forced epilogue** — engine lines that always end the handler. The extreme case is `abort`, which is *all* epilogue: `upload_log()` + `become_disabled()`, no player code at all — the logs always go home and every death exits through those calls, no exceptions.
 
-Handlers consolidated: there is **one** unified problem handler, `on signal(s):`, receiving every non-death signal as a builtin **`Signal` enum** value — `Signal.Error(msg)`, `Signal.Bump`, `Signal.Bumped`, `Signal.Hurt` — which the body `match`es (with Rust's `case _:` catch-all for everything you don't handle yet). `on death:` stays separate: the black box can't afford ceremony.
+The window ships with **factory contents** — the engine default, real replaceable Pyrite (error's factory window is `upload_crash_dump()`). Overwrite it, or delete it and leave the window empty; either way the forced lines still run. Factory code is inspectable and line-highlighted like any code — a crash-looping bot visibly *sits inside* its crash-dump call — and costed normally; unhandled crashes still chip the chassis (your handlers are armor; factory contents are not).
 
-**Every unified-handler entry begins with a forced `handler_init()`** — an engine wait (~15 ticks, tuning) no program can skip. It's the universal time punishment for having a problem, the moment the bot visibly flinches, and a real vulnerability window: a bot wounded under sustained fire may die mid-ritual before its handler body ever runs. Bot states, cleanly: **normal · boot · handler · low-health · death**.
+**Every handler has a fixed color and icon**, shown in the bot's **thought cloud** the moment it enters that state. The palette is global — the same seven colors/icons for every faction, deliberately distinct from program colors — so anyone with vision reads any bot's state at a glance (pillar 2: a wounded enemy *looks* wounded, a crash-looping enemy *looks* broken). Bot states, cleanly: **normal · boot · handler · low-health · abort**.
 
-### Engine defaults are real code
+Programs store only window contents (byte-exact source, [07-architecture.md](07-architecture.md)); forced lines are engine-owned and rendered in the editor as locked phantom lines around your block — you always see the whole sandwich, you can only type in the middle.
 
-When a signal has no player handler, the engine doesn't run hidden machinery — it runs its own **Pyrite program** on the same VM. The unified default is one big match (after the forced init):
+### The seven handlers
 
-```python
-match s:
-    case Signal.Error(msg):
-        upload_crash_dump()
-    case Signal.Bump:
-        wait(35)        # + the 15-tick init = the rammer's 50
-    case _:
-        wait(0)         # bumped/hurt: the init stagger was the response
-```
+First-pass table (colors/icons/caps are tuning values — the row *shapes* are the design). Windows may only call functions flagged **signal-safe** — a single per-function property, assigned in the function table below:
 
-and `on death:` defaults to `become_disabled()`. Default handlers are inspectable and line-highlighted like any code — a crash-looping bot visibly *sits inside* its crash-dump call. They're costed normally, and the crash still chips the chassis (handlers are armor; defaults are not).
+| Signal | Trigger | Cloud color · icon | Forced prologue | Window cap | Forced epilogue | Factory window |
+|---|---|---|---|---|---|---|
+| **error** | any runtime fault (trap cost ~5 to enter) | red · glitch/spark | `handler_init()` | ~8 instr | — (restart at line 1) | `upload_crash_dump()` — the guaranteed-debuggability floor; replace it with lean logging and beat the default |
+| **hurt** | HP crosses below the `hurt_line` env variable (default 50%; edge-triggered, re-arms above) | amber · sparks/cross | `handler_init()` | ~6 instr | — (resume via restart) | *(empty — the flinch is the reaction)* |
+| **bump** | this bot rammed an occupied tile | yellow · angry scribble | `handler_init()` | ~4 instr | — | `wait(35)` — + the 15-tick init = the rammer's 50-tick at-fault stun |
+| **bumped** | something rammed this bot | grey · dizzy stars | `handler_init()` | ~4 instr | — | *(empty — the init flinch is the stagger)* |
+| **abort** | HP hits 0, **or any second signal/fault while another template runs** (the double-handle) | black · skull | *(none)* | **0 instr — fully reserved** | **`upload_log()` + `become_disabled()`** — the logs *always* go home, then the wreck's self-destruct countdown starts; field-repair in time rescues the bot, XP intact ([02-agents.md](02-agents.md)) | — |
+| **boot** | print, rescue, or recall re-coloring completes | white · power-on | `upload_log()` if the local buffer is non-empty | ~4 instr | — (main program from line 1) | *(empty)* |
+| **recall** | printer rebalancing or colony over-capacity | purple · home arrow | suspend, walk home, transfer | **0 instr — fully reserved** | re-color (XP kept) or scrap → Boot | — |
 
-One asymmetry: **defaults are humble.** A new signal *interrupts* a running default (processed fresh) instead of double-handling — the double-handle price is reserved for *your* handler code claiming the bot. Consequence: dying mid-crash-dump means the final report never uploads.
+Abort and recall are the degenerate cases that prove the model: the same template shape with a zero-size window — the two handlers you can't customize at all. A consequence worth savoring: **your black box is whatever you logged while alive.** There are no last words at death — `log()` discipline during normal operation *is* your forensics. Chassis damage from bumps lands regardless of handling (the window replaces the *stun*, not the dent).
 
-### The double-handle rule
+Note the cap arithmetic: caps bound **worst-case instruction count, not wall time** — user-function calls count at their deploy-computed worst case (see Signal handlers), so the cap holds through any call chain. A blocking `move_to()` retreat is still *one instruction* that can run for a minute — hurt's small window allows a long limp to the Repair Bay. Time in a handler is priced by the double-handle rule, not by the cap.
 
-**While a handler — or the Boot Sequence — is running, any event that would start another handler destroys the bot instantly — in any combination, no exceptions.** No wreck, no rescue window, no death handler — a **double-handle explosion**, straight to Destroyed ([02-agents.md](02-agents.md)). What *does* remain is the **Black Box** (see below): every destruction drops one, so you'll know what happened — you just don't get the bot back.
+### The double-handle rule: abort
 
-- Mid-`on hurt:` retreat and damage takes you to 0? You don't get your death handler — you explode.
-- A fault inside *any* handler — `error`, `hurt`, even `death` — is a double handle. Handler code quality matters *more* than main-program quality.
-- This is the counterweight to hurt's unlimited budget: the longer your handler runs, the longer you're one event away from vaporization. Short, bulletproof handlers are the craft.
+**While any handler template — prologue, window, or epilogue, including boot and the recall walk, factory contents included — is running, any event that would start another handler forces the bot into `abort` — in any combination. There is no safe phase in the sandwich: a signal landing in a forced epilogue aborts exactly like one landing in your window.** The bot doesn't get the new signal's handler and doesn't finish the old one: abort's fully reserved sequence runs — `upload_log()` then `become_disabled()` — and the bot drops into a wreck on its self-destruct countdown ([02-agents.md](02-agents.md)).
+
+- Mid-hurt-handler retreat and damage takes you to 0? Straight to abort — the retreat is over, and the rescue race starts where the bot fell.
+- A fault inside *any* handler — `error`, `hurt`, a factory window — is a double handle. Abort itself can't be double-handled: it contains no player code to fault, and signals arriving during it are absorbed — the forced sequence always finishes, the logs always go home.
+- This is the counterweight to hurt's unlimited time: the longer your handler runs, the longer you're one event away from the bot dropping everything and dying where it stands. Short, bulletproof handlers are the craft.
+- **Explosion is now exactly one thing: the self-destruct countdown expiring on an unrescued wreck.** No signal combination vaporizes a bot on the spot — every downed bot becomes a wreck, and every wreck is a rescue race.
 
 ### Black Boxes & the Boot Sequence
 
 - **Every bot that reaches Destroyed — by any path — drops a Black Box** on its tile: a small persistent object containing the bot's local log ring buffer at the moment of destruction (plus id, position, tick, cause). Anyone with vision can click it to read; a bot can `recover_black_box()` it to bank the contents permanently to its colony's cloud. Enemies can grab it too — battlefield intel is physical.
-- **The stakes split cleanly: information always survives; XP is what's gambled.** Clean death vs. double-handle no longer differ in forensics — they differ in whether a rescue was possible at all.
-- **Rescued (and freshly printed) bots pass through a Boot Sequence** before running ([02-agents.md](02-agents.md)): step 1, if the local log buffer is non-empty, the engine **force-calls `upload_log()`** (the third forced-ordinary-function, after `upload_crash_dump` and `become_disabled`); step 2, the program starts from line 1, fresh state. A rescued veteran automatically files its own incident report before getting back to work.
-- **Boot is an interrupt context like any handler** — it participates in the double-handle rule. A signal arriving mid-boot (`hurt` from incoming fire, a fault in the forced upload, lethal damage) explodes the bot. Consequence: **rescues must be timed.** Field-repairing a veteran while it's still under fire hands the enemy a free erasure; secure the area first, or the boot itself is the kill window.
+- **The stakes split cleanly: information always survives; XP is what's gambled.** Doubly guaranteed now — abort's forced `upload_log()` sends the story home *and* the wreck (or explosion) drops the physical Black Box for whoever reaches it. What's at risk is never the forensics, only the rescue race.
+- **Rescued (and freshly printed) bots pass through a Boot Sequence** before running ([02-agents.md](02-agents.md)) — boot is itself a reserved handler template: prologue — if the local log buffer is non-empty, the engine **force-calls `upload_log()`** (the third forced-ordinary-function, after `upload_crash_dump` and `become_disabled`); then the optional **`on boot:` window** (set env variables, announce yourself — the bot's dotfile, see The Environment); then the program starts from line 1, fresh state. A rescued veteran automatically files its own incident report before getting back to work.
+- **Boot is an interrupt context like any handler** — it participates in the double-handle rule. A signal arriving mid-boot (`hurt` from incoming fire, a fault in the forced upload) aborts the bot: the freshly rescued veteran drops straight back into a wreck, countdown running again. Consequence: **rescues must be timed.** Field-repairing a veteran while it's still under fire just re-downs it and burns the rescue window; secure the area first, or the boot itself is the enemy's second chance.
 
 ### Signal handlers
 
-Top-level `on <signal>:` blocks — its own unlockable construct ([06-progression.md](06-progression.md)), independent of `def`:
+Top-level `on <signal>:` blocks — each signal's window is its own unlockable construct ([06-progression.md](06-progression.md)), independent of `def`. What you write is the *window*; the forced prologue/epilogue never appear in source:
 
 ```python
-on error:
+on error:               # window only — handler_init() runs before this, unskippable
     log(last_error())
     drop_cargo()
     upload_log()
@@ -123,34 +120,36 @@ on hurt:
     drop_cargo()
     move_to(closest(repair_bay).expect())
 
-on death:
-    log(position())
-    log(last_error())
-    upload_log()        # the black box / death report
+# there is no "on abort:" — abort is fully engine-reserved:
+# forced upload_log() + become_disabled(). Your black box is
+# whatever you logged while alive.
 ```
 
 Rules (all deterministic):
 
-- One handler per signal per program. Signals are checked at operation boundaries.
-- **Handler code is just code** — it pays per-op cycle costs and calls ordinary function blocks. Every constant here (trap cost, grace window, overtime multiplier, black-box budget, dump cost) is a cost-table entry, so biome overlays can tune them.
-- **Forced calls are ordinary functions.** The engine's mandatory behaviors are implemented as force-calls of the same builtins players can use: unhandled error → `upload_crash_dump()`; end of death → `become_disabled()`. One code path, one cost model — engine policy "isn't even different" from player code.
+- At most one block per signal per program. Signals are checked at operation boundaries.
+- **Windows are capped and signal-safe** (see the table): exceeding a signal's instruction cap or calling a non-safe function there is a parse/deploy error, greyed out in the editor before you ever ship it.
+- **User functions derive their safety.** A `def` is signal-safe iff everything it calls is signal-safe — builtins by their flag, other `def`s by this same rule — *and* its body is statically bounded: **no loops, no recursion** anywhere window-reachable. Boundedness is what makes "would this take too long?" a compile-time question: the deploy computes every def's **worst-case instruction count** (longest branch, calls expanded), and calling one from a window charges that worst case against the window's cap — you can't smuggle a long function through a short window. The editor badges each def with its derived safety and worst-case cost; an unsafe def names the offending call chain.
+- The net shape (resolves Q51): **window-reachable code is straight-line + `if`, all the way down.** Loops belong to the main program; handlers decide and delegate.
+- **Handler code is just code** — it pays per-op cycle costs and calls ordinary function blocks. Every constant here (trap cost, window caps, dump cost, `handler_init` ticks) is a cost-table entry, so biome overlays can tune them.
+- **Forced calls are ordinary functions.** The engine's mandatory behaviors are implemented as force-calls of the same builtins players can use: unhandled error → `upload_crash_dump()`; abort → `upload_log()` + `become_disabled()`. One code path, one cost model — engine policy "isn't even different" from player code.
 - Variables are **preserved while a handler runs** (so it can inspect state), then cleared on restart.
 
 ### Logging
 
-- `log(value)` — append to the bot's local ring buffer (cost 1). **Buffer size is a hardware stat**: base 8 entries, grown by Memory-bank modules ([06-progression.md](06-progression.md)).
-- `upload_log()` — transmit the buffer to **the cloud**: the colony's printers (cost 5 + size). **Printers always accept log traffic** — no extra structure required, no capacity limit; if you have a printer (and a colony without one is already dying), you have telemetry. Viewable in any printer's inspector.
-- `upload_crash_dump()` — the expensive one (~25): uploads a full structured debug report — **bot ID, position, inventory/cargo, error reason, faulting line, tick**. This is what the engine force-calls on unhandled errors; players can also call it themselves anywhere (it's just a function).
+- `log(value, level=info)` — append to the bot's local ring buffer (cost 1) at a **severity level**: `trace`, `debug`, `info`, `warn`, `error` — five pre-bound constants, same convention as the kind constants (ordinary shadowable names). `log(msg, level=error)` for the loud ones; bare `log(value)` stays `info`. **Buffer size is a hardware stat**: base 8 entries, grown by Memory-bank modules ([06-progression.md](06-progression.md)); each entry stores its level.
+- `upload_log()` — transmit the buffer to **the cloud**: the colony's printers (cost 5 + size), levels preserved. **Printers always accept log traffic** — no extra structure required, no capacity limit; if you have a printer (and a colony without one is already dying), you have telemetry. Viewable in any printer's inspector, **color-coded by level** (error red, warn amber, info neutral, debug/trace dimmed) and filterable — a colony's cloud reads like a real log aggregator. Black Boxes show levels the same way.
+- `upload_crash_dump()` — the expensive one (~25): uploads a full structured debug report — **bot ID, position, inventory/cargo, error reason, faulting line, tick** — filed at `error` level. This is what the engine force-calls on unhandled errors; players can also call it themselves anywhere (it's just a function).
 
 Persistent *telemetry* is player-built infrastructure — a colony with good logs is one someone programmed. But *crash* reporting has a guaranteed floor: unhandled errors always dump, so "why is that bot blinking?" always has an answer in the Archive. Logs are as inspectable as everything else (transparency pillar): allies — and in PvP, anyone who `analyze()`s your wreck — can read them.
 
 ### Consequences we *want*
 
 - **The forced crash dump is a tax on branchless code.** A Tier-0 program that blindly calls `mine()` faults when the vein is empty and pays ~25 cycles for a dump it didn't ask for — but that dump is also how a new player learns *why* the bot is stuck. The punishment is the tutorial.
-- **Handlers are the graduation.** Forced dump (~25) → your own handler (~5 + lean code of your choice): the error system itself has a skill curve. The overtime tax (ops ×2 past the grace window) keeps `on error:` a recovery mechanism, not a second program.
-- **Hurt's freedom is priced in risk, not cycles.** Unlimited handler time, but every extra tick is another tick you can be double-handled. A slow limp to the Repair Bay is legal; it's also a bet.
-- **Rescue denial is combat depth.** Every destruction drops a Black Box — the owner will always learn *what happened*. What double-handling a retreating veteran denies is the *rescue*: no wreck, no countdown, no field-repair, XP gone. You always get the story; you don't always get the bot.
-- **Fault loops are legal, visible — and lethal.** Every *unhandled* fault also chips the chassis (tuning); a program broken at line 1 crash-loops itself to death, wreck and all. `on error:` handlers are literal armor: handled faults cost no health. Debug it or bury it.
+- **Handlers are the graduation.** Factory dump (~25) → your own window (~5 trap + lean code of your choice): the error system itself has a skill curve. The instruction caps keep windows as *recovery*, not a second program — you can't move your main loop into a handler.
+- **Hurt's freedom is priced in risk, not cycles.** The cap bounds code length, not time — a one-instruction blocking `move_to` retreat can run for a minute, and every tick of it is another tick you can be double-handled. A slow limp to the Repair Bay is legal; it's also a bet.
+- **Rescue denial is combat depth.** Every downed bot becomes a wreck, so denial is now *physical*: double-handle a retreating veteran to down it early and deep in your territory, then guard the wreck until the countdown expires — or `salvage()` it first. You always get the story (forced logs + Black Box); you don't always get the bot.
+- **Fault loops are legal, visible — and lethal.** Every *unhandled* fault also chips the chassis (tuning); a program broken at line 1 crash-loops itself to death, wreck and all. Handlers are literal armor: handled faults cost no health. Debug it or bury it.
 - Reading an **unset variable** is a fault (variables don't survive restarts), so state must be re-derived each pass.
 
 ## Cycle Costs (base table — moddable per map/biome)
@@ -177,9 +176,9 @@ Base values:
 | `match` | 1 + 1 per arm checked | Arms checked top-to-bottom; destructuring bind is free |
 | Enum construction | 1 | `Order.Mine(target)` |
 | **`upload_crash_dump()`** | 25 | Force-called on unhandled errors; also player-callable |
-| **Trap cost** | 5 | Paid to enter an `on error:` handler |
-| **Handler grace window** | 10 ticks | Time in `on error:` at normal costs; past it, all ops ×2. Denominated in *ticks* on purpose: faster CPUs fit more recovery ops in the window — hardware buys handler capacity |
-| **Black-box budget** | 10 cycles | Hard cap for `on death:` before the bot goes down |
+| **Trap cost** | 5 | Paid to enter the `error` handler on a *fault* (signal-raised entries — hurt/bump/bumped — skip it) |
+| **Window caps** | per-signal | Max instructions in each handler's editable window (see the reserved-handler table). Caps replace the old grace-window/overtime tax: they bound code length at deploy time; handler *time* is priced by double-handle risk |
+| **`bank_cap`** | 25 | Max banked cycle budget (= the most expensive base op). Clamped after each grant; overlays are validated at load to never price an op above it (see Execution Model) |
 
 Design intent: **cycle costs are the balance dial.** Complex behavior should be *possible* early but *slow*, so hardware upgrades and code golf both feel rewarding.
 
@@ -234,6 +233,10 @@ The big one: reusable subroutines, shareable across your colony as a **program l
 
 **Recursion is allowed** — bounded by the bot's **call stack cap** (base **4 frames**, +4 per Stack module, see [06-progression.md](06-progression.md)). Exceeding the cap is a stack-overflow fault: penalty + restart, like every other error. Deep recursion on stock hardware is a self-inflicted fault loop; buying stack is what makes recursive style viable.
 
+`def` parameters follow the builtin convention: **optional parameters last, with Python-style defaults** — `def haul_to(target, drop=1):` — passed positionally or by keyword at the call site.
+
+Every `def` also gets a **derived signal-safety** at deploy (see Signal handlers): safe iff it only calls safe things and contains no loops or recursion — safe defs are callable from handler windows at their computed worst-case instruction cost. Writing your colony's library so the recovery verbs stay signal-safe is real API design.
+
 ```python
 def haul_home():
     move_to(closest(depot).expect())
@@ -279,16 +282,16 @@ Enum values are first-class: storable in variables and lists — and **sendable 
 
 | | Blocks until delivered | Fire-and-forget |
 |---|---|---|
-| **One receiver** | `send(ch, val[, timeout])` — rendezvous handoff to exactly one receiver | `try_send(ch, val)` → bool — delivers to one blocked receiver, else the message is **lost** |
-| **All receivers** | `broadcast(ch, val[, timeout])` — blocks until ≥1 receiver, then all blocked receivers get a copy | `try_broadcast(ch, val)` → bool — copies to all currently blocked, else **lost** |
+| **One receiver** | `send(ch, val, timeout=None)` — rendezvous handoff to exactly one receiver | `try_send(ch, val)` → bool — delivers to one blocked receiver, else the message is **lost** |
+| **All receivers** | `broadcast(ch, val, timeout=None)` — blocks until ≥1 receiver, then all blocked receivers get a copy | `try_broadcast(ch, val)` → bool — copies to all currently blocked, else **lost** |
 
-Receive side: `receive(channel)` **blocks** until a message arrives; `receive(channel, timeout_ticks)` blocks up to the timeout, then **faults** (the unified error model handles timeouts — write an `on error:`); `try_receive(channel)` returns the builtin `Recv.Got(v) / Recv.Empty` enum for non-blocking polls. Blocking sends time out the same way: fault, handle it or don't.
+Receive side: `receive(channel)` **blocks** until a message arrives (`timeout=None`, the default, means forever); `receive(channel, timeout=ticks)` blocks up to the timeout, then **faults** (timeouts are ordinary faults — write an `on error:` window); `try_receive(channel)` returns an `Option` — `Option.Some(v)` or `None` — for non-blocking polls. Blocking sends time out the same way: fault, handle it or don't.
 
 ```python
 on error:
     upload_log()        # a timeout landed here
 
-order = receive("orders", 100)   # block up to 100 ticks
+order = receive("orders", timeout=100)   # block up to 100 ticks
 match order:
     case Order.Mine(target):
         move_to(target)
@@ -323,7 +326,7 @@ You start with **one working printer: Green**. A **ruined Red printer** stands i
 1. **Rebalancing** — a printer is over its desired max *and* some other printer has headroom (desired > actual): the lowest-total-XP bot of the over-quota color is recalled and re-colored at the under-quota printer, **keeping all XP** (XP tracks live on the bot, not the color). No destination with headroom → no recall; surplus bots just keep working.
 2. **Over-capacity** — the colony exceeds what it can sustain ([02-agents.md](02-agents.md)): the lowest-total-XP bot in the whole colony is recalled **for scrap** (partial Metal refund).
 
-Recall is an interrupt context like any handler or boot: **double-handle applies for the entire walk home.** A recalled bot crossing a battlefield can be erased by a single hurt trigger — so *when* you turn the population dials is a tactical decision, not bookkeeping.
+Recall is an interrupt context like any handler or boot: **double-handle applies for the entire walk home.** A recalled bot crossing a battlefield can be dropped into a wreck by a single hurt trigger — so *when* you turn the population dials is a tactical decision, not bookkeeping.
 
 ### Dormant printers & ghost fleets
 
@@ -336,13 +339,26 @@ If the controlled nest backing a printer is lost ([04-enemies.md](04-enemies.md)
 
 Intel wrinkle: a ghost fleet can still be salvaged toward its color's decryption — and since the code can never be rewritten, whatever the enemy has learned about a dormant color is *permanently accurate*.
 
+## Modules & the Program Library
+
+Tier 4 promises a colony **program library**; modules are its formalization — Python-shaped, like everything else. (Proposal — open items in Q61; leak semantics decided below, answering Q62.)
+
+- **A module is a named source file of reusable code**: `def`s and `enum` declarations only, no top-level action statements — a module that *did* things on import would be a program. Stored byte-exact, like all source.
+- **`import haul` / `from haul import go_home`** — importing is a construct (unlock placement: Q61). A call to an imported function costs exactly what any `def` call costs (2 + body). The `import` line itself is free at runtime because it doesn't exist at runtime:
+- **Imports resolve at deploy, never at runtime.** Deploying a color assembles its **artifact**: the program, its handler windows, and every module function **transitively called** by them — tree-shaken at function granularity, so dead library code never ships (import cycles are a deploy error). The version hash covers exactly the artifact ([07-architecture.md](07-architecture.md)). No dynamic loading, no import faults mid-run: determinism by construction.
+- **Editing a module re-versions every color whose artifact contains a changed function.** Each such color gets a new version and hot-swaps at each bot's next loop boundary, exactly as if you'd edited its program directly; colors that import the module but never call the edited function are untouched (tree-shaking again). One bugfix in `haul` patches the whole colony; one bug in `haul` breaks it colony-wide. Shared code is shared blast radius — the library is powerful *because* it's dangerous.
+- **Handlers reuse modules like anything else**: a window may call an imported function if it's `signal_safe` (`on hurt: retreat()` with `from combat import retreat`), subject to the window's instruction cap as always. Handler *windows themselves* belong to programs, not modules — one block per signal per program, so modules export functions and enums, never `on <signal>:` blocks.
+- **Secrecy: what deploys is what leaks (DECIDED — answers Q62).** A color's decryption surface is its deployed artifact — the program, its handler windows, and the module functions they actually call. **Never-deployed functions are secrets forever.** A module function deployed by several colors rides in *each* color's artifact under each color's reveal mask ([08-multiplayer.md](08-multiplayer.md)) — and since different masks over identical text reveal different characters, cross-closure reading composes exactly like cross-version reading: shared code effectively leaks at the *sum of its exposures*. Hot libraries become public knowledge fastest; forking a private variant of a popular library is real opsec.
+- Whether *deployed* module functions count against per-bot **program memory** is part of Q61 — tree-shaking already exempts unused code, but a fat function you do call still bloats every artifact that calls it (inheriting Q52's deploy-fit problem).
+
 ## Types
 
 Deliberately small: `int` (i64), `bool`, `string` (labels/channels only, no manipulation initially), `entity` (opaque handle to a world object), `list`, and `enum` values (user-declared sum types with associated data, Tier 6). **No floats** — all world math is fixed-point internally and exposed to Pyrite as scaled integers (e.g. positions in millitiles).
 
-Two builtin conventions ride on these types:
+Three builtin conventions ride on these types:
 
-- **Kind constants** — `ore`, `depot`, `enemy`, `blueprint` (later `repair_bay`, …) are pre-bound global constants naming entity kinds. The generic queries take them as arguments: `closest(ore)`, `exists(blueprint)`. Assignments may shadow them (they're ordinary names), and they survive post-fault restarts.
+- **Kind constants** — `ore`, `depot`, `enemy`, `blueprint` (later `repair_bay`, …) are pre-bound global constants naming entity kinds. The generic queries take them as arguments: `closest(ore)`, `exists(blueprint)`. Assignments may shadow them (they're ordinary names — unlike the reserved `None`/`True`/`False`), and they survive post-fault restarts.
+- **`Option` and `None`** — Pyrite has **no null**; absence is an enum, exactly as in Rust: the builtin `Option.Some(v)` / `Option.None`, with **`None`** as sugar for `Option.None`. `None`, `True`, and `False` are **reserved words** (Python-style): assigning to them is a parse error — unlike the kind and level constants, which stay ordinary shadowable names. Optional-typed parameters accept the value or `None` — `send(ch, val, timeout=None)` means "no timeout." `.expect()` works on it (`Some` unwraps, `None` faults), `match` destructures it like any enum, and a bare `case None:` is accepted as sugar for `case Option.None:`.
 - **`Result`** — a builtin enum for fallible queries: `Result.Ok(entity)` / `Result.Err(msg)`. Unwrap with `.expect()` (returns the entity, or faults with the carried message) or handle the miss fault-free with `match`:
 
 ```python
@@ -353,64 +369,98 @@ match closest(ore):
         wait(10)
 ```
 
+## The Environment (env variables)
+
+Every bot carries a small **environment**: a `key → int` store of *policy* parameters the engine consults. It's the settable half of a bot's identity — the stat sheet ([02-agents.md](02-agents.md)) is what a bot *is*; the environment is what a bot has been *told*.
+
+- **Keys are engine-defined and pre-bound** (same convention as kind and level constants): a fixed, enumerable set with defaults and bounded ranges. `getenv(key)` never faults — unset means default.
+- **Env lives on the bot, exactly like XP**: it survives restarts, faults, redeploys, and recall re-colorings; it dies with the bot. This is deliberately *not* general persistent storage — ordinary variables still clear on every restart ("re-derive your state"); env is a settings panel with engine-defined slots (user-defined keys: Q59).
+- **`setenv` / `getenv` are ordinary costed builtins**, and both are `signal_safe` — a hurt handler may lower its own `hurt_line` mid-retreat so the signal doesn't re-arm and re-fire on the limp home.
+- **The `on boot:` window is your bot's dotfile.** Configuration at wake-up is the idiomatic pattern: print → boot window sets env → main program runs. Different colors can ship different profiles on identical chassis.
+
+Well-known keys (v1 set — grows like the function catalog):
+
+| Key | Default | Range | Engine behavior it parameterizes |
+|---|---|---|---|
+| `hurt_line` | 50 | 1–99 | The HP percentage where the `hurt` signal fires (edge-triggered; re-arms at the same line). Read live at each evaluation — moving it mid-flight is legal. Decoupled from the **Damaged** state penalty, which stays fixed at 50% ([02-agents.md](02-agents.md)) |
+| `log_min_level` | `trace` | `trace`–`error` | Minimum severity actually recorded to the ring buffer — lower entries are discarded before they consume a slot (the call still costs 1). A veteran runs quiet at `warn`; a bot under diagnosis runs at `trace` |
+
+Design rule: **env keys are policy, never stats.** A key may change *when* engine behaviors fire (thresholds, filters), never how strong, fast, or far-sensing the bot is — capability lives on the stat sheet and is paid for in hardware, XP, or quirks.
+
 ## Built-in Function Blocks (starter set)
 
-The full catalog and unlock order live in [06-progression.md](06-progression.md). Signature style:
+The full catalog and unlock order live in [06-progression.md](06-progression.md). Signature convention: **optional parameters come last and are Python-style keyword defaults** — `log(msg, level=warn)`, `receive(ch, timeout=100)`; omitted means the default (`timeout=None` = block forever; `None` is the builtin `Option.None` — see Types). **Every function block carries a `signal_safe` property** — a single flag, part of its registry entry ([07-architecture.md](07-architecture.md)) — and handler windows may only call safe functions: builtins by this flag, user `def`s by derivation (safe iff they only call safe things and are loop/recursion-free — see Signal handlers). The rough rule: *sensing, logging, retreating, and giving up are safe; work and combat are not.* First-pass assignments below (tuning — flags live in data with the costs):
 
-| Function | Cost | Effect |
-|---|---|---|
-| `move_to(entity\|pos)` | 2 + travel | Pathfind and move; blocks until arrival or failure |
-| `mine()` | 2 + action | Extract from resource node in range |
-| `deposit()` | 1 + action | Unload cargo to depot in range |
-| `closest(kind)` → `Result` | 3 | Generic nearest-of-kind query, sensor-range limited; `Result.Ok(entity)` / `Result.Err(msg)` |
-| `exists(kind)` → bool | 1 | Any entity of `kind` in sensor range? |
-| `.expect()` (method on `Result`) | 1 | Unwrap: `Ok` → the entity; `Err` → faults with the message |
-| `cargo_full()` → bool | 1 | |
-| `attack(entity)` | 2 + action | |
-| `scan_enemies()` → list | 4 | Requires Tier 5 |
-| `send(ch, val[, timeout])` | 3 + size, blocks | Requires Tier 7; one receiver, rendezvous; timeout faults |
-| `try_send(ch, val)` → bool | 3 + size | One receiver or lost |
-| `broadcast(ch, val[, timeout])` | 5 + size, blocks | All blocked receivers; waits for ≥1; timeout faults |
-| `try_broadcast(ch, val)` → bool | 5 + size | All blocked receivers or lost |
-| `receive(ch[, timeout])` | 2 + blocks | Timeout expiry faults |
-| `try_receive(ch)` → `Recv` enum | 2 | `Recv.Got(v)` / `Recv.Empty` |
-| `log(val)` | 1 | Append to local ring buffer |
-| `upload_log()` | 5 + size | Transmit buffer to the cloud (printers always accept) |
-| `upload_crash_dump()` | 25 | Full debug report (id, position, cargo, error, line); auto-forced on unhandled errors |
-| `become_disabled()` | 1 | Wreck this bot and start its self-destruct countdown; auto-forced at end of `on death:`. Player-callable = deliberate scuttle |
-| `salvage(entity)` | 2 + action | Recover partial Metal from a wreck (works on anyone's); destroys it → drops its Black Box. Salvager also gains **+N% permanent decryption of the bot's program color** (default 5%, [08-multiplayer.md](08-multiplayer.md)) |
-| `recover_black_box(entity)` | 2 + action | Pick up a Black Box and bank its contents to the cloud |
-| `last_error()` → string | 1 | Most recent fault; mainly for handlers |
-| `drop_cargo()` | 1 + action | Dump cargo on current tile (grabbable by others) |
-| `wait(n)` | 1 + n idle ticks | Deliberate idling; the Tier-0 traffic tool |
-| `rng(n)` → int | 1 | Uniform in [0, n) from the sim's seeded stream — `wait(rng(20))` desyncs identical programs |
-| `build()` | 2 + action | Work the nearest in-range blueprint (a `blueprint`-kind entity, [05-terrain.md](05-terrain.md)), 1 progress/tick; earns Building XP |
+| Function | Cost | Signal-safe | Effect |
+|---|---|---|---|
+| `move_to(entity\|pos)` | 2 + travel | **yes** | Pathfind and move; blocks until arrival or failure. Safe because retreat *is* the canonical handler |
+| `mine()` | 2 + action | no | Extract from resource node in range |
+| `deposit()` | 1 + action | no | Unload cargo to depot in range |
+| `closest(kind)` → `Result` | 3 | **yes** | Generic nearest-of-kind query, sensor-range limited; `Result.Ok(entity)` / `Result.Err(msg)` |
+| `exists(kind)` → bool | 1 | **yes** | Any entity of `kind` in sensor range? |
+| `.expect()` (method on `Result` / `Option`) | 1 | **yes** | Unwrap: `Ok`/`Some` → the value; `Err`/`None` → faults (with the carried message, for `Err`) |
+| `cargo_full()` → bool | 1 | **yes** | |
+| `attack(entity)` | 2 + action | no | Handlers are recovery, not combat — no fighting back mid-flinch |
+| `scan_enemies()` → list | 4 | **yes** | Requires Tier 5 |
+| `send(ch, val, timeout=None)` | 3 + size, blocks | no | Requires Tier 7; one receiver, rendezvous; `timeout=None` blocks forever, expiry faults. Blocking calls are never signal-safe |
+| `try_send(ch, val)` → bool | 3 + size | **yes** | One receiver or lost — the fire-and-forget distress call |
+| `broadcast(ch, val, timeout=None)` | 5 + size, blocks | no | All blocked receivers; waits for ≥1; timeout faults |
+| `try_broadcast(ch, val)` → bool | 5 + size | **yes** | All blocked receivers or lost |
+| `receive(ch, timeout=None)` | 2 + blocks | no | Timeout expiry faults |
+| `try_receive(ch)` → `Option` | 2 | **yes** | `Option.Some(v)` / `None` |
+| `log(val, level=info)` | 1 | **yes** | Append to the local ring buffer at a level — `trace / debug / info / warn / error` (pre-bound constants, like the kind constants) |
+| `upload_log()` | 5 + size | **yes** | Transmit buffer to the cloud (printers always accept), levels preserved |
+| `upload_crash_dump()` | 25 | **yes** | Full debug report (id, position, cargo, error, line), filed at `error` level; auto-forced on unhandled errors |
+| `become_disabled()` | 1 | **yes** | Wreck this bot and start its self-destruct countdown; auto-forced during abort. Player-callable = deliberate scuttle — giving up is always safe |
+| `salvage(entity)` | 2 + action | no | Recover partial Metal from a wreck (works on anyone's); destroys it → drops its Black Box. Salvager also gains **+N% permanent decryption of the bot's program color** (default 5%, [08-multiplayer.md](08-multiplayer.md)) |
+| `recover_black_box(entity)` | 2 + action | no | Pick up a Black Box and bank its contents to the cloud |
+| `last_error()` → string | 1 | **yes** | Most recent fault; mainly for handlers |
+| `drop_cargo()` | 1 + action | **yes** | Dump cargo on current tile (grabbable by others) — lightening the load is a recovery move |
+| `wait(n)` | 1 + n idle ticks | **yes** | Deliberate idling; the Tier-0 traffic tool (and the factory bump response) |
+| `setenv(key, val)` | 1 | **yes** | Set an env variable (engine-defined keys, bounded; see The Environment). Out-of-range faults |
+| `getenv(key)` → int | 1 | **yes** | Read an env variable; unset = the key's default, never a fault |
+| `rng(n)` → int | 1 | **yes** | Uniform in [0, n) from the sim's seeded stream — `wait(rng(20))` desyncs identical programs |
+| `build()` | 2 + action | no | Work the nearest in-range blueprint (a `blueprint`-kind entity, [05-terrain.md](05-terrain.md)), 1 progress/tick; earns Building XP |
 
 ## Editor & Player Experience
 
 - In-game code editor with **per-line cycle-cost annotations** in the gutter.
 - Live view: click any bot to watch its program counter step through lines in real time.
 - Locked constructs appear in the editor greyed out with their unlock requirement — the editor *is* the tech-tree advertisement.
+- Handler templates render as the full sandwich: forced prologue/epilogue lines shown locked (phantom lines, not in your source) around the editable window, with the window's remaining instruction budget and non-signal-safe functions greyed out inside it.
+- **The implicit forever-loop is drawn, in color**: every program renders inside phantom `while True:` / loop-end lines **tinted the program's color** — a Green program visibly sits inside a green loop, a Red one in red. Same idiom as the handler sandwich: engine truth shown as locked lines you can't type on. It teaches the loop, brands the file with its printer, and marks exactly where a redeploy will land (the loop boundary).
+- **Multi-window editing**: programs, modules, and individual handler windows each open as independent, movable, dockable editor windows. A hurt window and the module function it calls can sit side by side; the live view can dock next to the code it's stepping through.
+- **The colony file viewer**: a tree of all the colony's code — one node per color (shown with its printer swatch, deployed-version status, and in PvP its enemy-decryption %), the module library, and each program's handler windows nested under it. Double-click opens a window. Handler windows are files like any other here — reachable, diffable, editable from the tree, with their caps and safe-sets enforced at deploy as always.
 - Programs are validated at deploy time; using a locked construct is a parse error with a friendly "requires <unlock>" message.
 
 ## Decided
 
 - **Cost table is moddable** — base `costs.ron` + per-map/biome overlays, so maps can stress specific program designs (see Cycle Costs above).
 - **Recursion allowed, small stack cap** — base 4 frames, overflow is a standard fault (see Tier 4).
-- **Error/signal model** (see Errors & Signals): unhandled error → engine force-calls `upload_crash_dump()` (guaranteed debuggability, full price); handled error → trap cost + 10-tick grace window, then ops ×2 (overtime tax); `on hurt:` → unlimited budget; `on death:` → 10-cycle black box; `on bump:` / `on bumped:` → collision signals (rammer / victim) whose *unhandled* default is the engine's asymmetric stun — a handler replaces the stun with your own response, and engine-driven walks (recall) never raise `bump` on the mover. All constants live in the cost table.
-- **Double-handle rule** — any event that would start a handler while another handler runs (any combination, including faults inside `on death:`) destroys the bot instantly: no wreck, no rescue. The counterweight to hurt's unlimited budget.
-- **Every death exits through a forced `become_disabled()`**, which starts the wreck's self-destruct countdown: field-repair in time rescues it (XP intact); otherwise it explodes. Wrecks can also be `salvage()`d (by anyone) for partial Metal.
+- **Reserved handler templates** (redesign 2026-07-13, supersedes the 2026-07-12 unified handler): every signal — `error`, `hurt`, `bump`, `bumped`, `boot`, with `abort` and `recall` **fully engine-reserved** (zero-size windows) — owns a template of **forced prologue → editable window → forced epilogue**. Prologues carry the unskippable `handler_init()` flinch (~15 ticks; boot's is the forced `upload_log()`); epilogues carry the hard-coded exits (abort is *all* epilogue: `upload_log()` + `become_disabled()`); windows are per-signal `on <signal>:` blocks with **instruction caps**, restricted to **`signal_safe`-flagged functions**, both enforced at parse/deploy time. Windows ship with **factory contents** — the engine default as real, replaceable, inspectable Pyrite (error's is `upload_crash_dump()`, the guaranteed-debuggability floor). Constants live in the cost table; caps replace the old grace-window/overtime tax.
+- **Every handler state is broadcast visually** — each signal has a globally fixed color and icon shown in the bot's thought cloud on entry (distinct from program colors); handler states are readable at a glance by anyone with vision, friend or foe (pillar 2).
+- **Collision signals**: rammer gets `bump`, victim gets `bumped`; the factory windows implement the asymmetric stun (rammer's `wait(35)` + init = 50 ticks; victim's flinch-only = 15) — your window replaces the stun, never the chassis damage. Engine-driven walks (recall) never raise `bump` on the mover.
+- **Double-handle = abort** (2026-07-13, softening the original explosion rule): any event that would start a handler while another template runs — any combination, anywhere in the sandwich including forced epilogues, factory contents included — forces the bot into `abort`. Abort itself is un-interruptible: no player code to fault, and signals during it are absorbed. Instant explosions are gone; the counterweight to hurt's unbounded handler time is losing the bot to the wreck race early. (Answers Q50 — no humble carve-out needed.)
+- **Abort is fully engine-reserved** (like recall): no `on abort:` window exists. Every death runs the forced `upload_log()` then `become_disabled()` — the logs always reach the cloud, and the wreck's self-destruct countdown starts: field-repair in time rescues it (XP intact); expiry is the **only** way a bot explodes. There are no last words — the black box is whatever the bot logged while alive. Wrecks can also be `salvage()`d (by anyone) for partial Metal.
 - **Every destruction drops a Black Box** (local logs + cause); information always survives — XP is the only thing gambled. Rescued/printed bots run a **Boot Sequence**: forced `upload_log()` if the buffer is non-empty, then execute from line 1. Forced engine behaviors are ordinary player-callable builtins (`upload_crash_dump`, `become_disabled`, `upload_log`) — one code path.
-- **Boot participates in double-handle** — any signal mid-boot explodes the bot, so rescues must be timed to safety.
+- **Boot participates in double-handle** — any signal mid-boot aborts the bot back into a wreck, so rescues must be timed to safety.
 - **Colored program slots** — every bot carries one of the colony's colored programs, visibly tinted. One color = one Printer; printer count is gated by **controlled nests, quadratically** (3rd color: 1 nest; then 3, 6, 10 …) — named palette through 9 colors, **uncapped** beyond. Secrecy is per-color attrition: each enemy salvage grants +N% (default 5%) **permanent** decryption of that color, surviving redeploys ([08-multiplayer.md](08-multiplayer.md)). A *new* slot starts at 0%.
 - **Recall** — the engine-owned signal, engine-fixed and un-writable: printers over their desired max recall the lowest-XP bot of their color for re-coloring (XP kept); an over-capacity colony recalls its lowest-XP bot for scrap. Recall is an interrupt context — double-handle applies all the way home.
 - **Logging is ordinary functions** — `log`, `upload_log`, `upload_crash_dump` are costed builtins, so telemetry and black boxes are player-built, not engine magic (with the forced crash dump as the guaranteed floor).
 - **Loops** — `while` + `break`/`continue` at Tier 3; Python-style `for x in container` with containers at Tier 5. Implicit program loop stays; `while True:` legal but redundant.
 - **Generic fallible queries** — `exists(kind)` / `closest(kind)` with bare kind constants (`ore`, `depot`, `enemy`, `blueprint`, …) replace the old `nearest_*` / `*_exists` builtin family. `closest` returns the builtin `Result` enum (`Result.Ok(entity)` / `Result.Err(msg)`); unwrap with the `.expect()` method (faults with the message on `Err` — same behavior the old builtins had on a miss) or handle fault-free with `match`. Kind constants are host-bound names, shadowable, and survive post-fault restarts.
 
-- **Messaging is blocking channels, not signals** — a 2×2 API: `send`/`try_send` (one receiver) and `broadcast`/`try_broadcast` (all receivers), each blocking-with-timeout or fire-and-forget (unheard messages are lost); `receive(timeout)`/`try_receive` on the other end. No queues. Timeouts fault. **Blocking burns cycles** — waiting is what the CPU is doing, so listening posts and rendezvous have real compute cost. Any value travels; enums + `match` (Tier 6) make channel traffic into typed protocols.
+- **Messaging is blocking channels, not signals** — a 2×2 API: `send`/`try_send` (one receiver) and `broadcast`/`try_broadcast` (all receivers), each blocking-with-timeout or fire-and-forget (unheard messages are lost); `receive(ch, timeout=n)`/`try_receive` on the other end. No queues. Timeouts fault. **Blocking burns cycles** — waiting is what the CPU is doing, so listening posts and rendezvous have real compute cost. Any value travels; enums + `match` (Tier 6) make channel traffic into typed protocols.
 - **Enums & `match`** — Rust-style sum types with associated data, Tier 6 construct.
-- **`on hurt(threshold):` is an unlock** — the default Damaged-threshold hurt is part of the handler unlock; custom thresholds are a separate research.
+- **Bots have an environment** — a bot-local `key → int` store of engine-defined *policy* parameters (`hurt_line`, `log_min_level`, …) read/written via the signal-safe `setenv`/`getenv` builtins. Env lives on the bot like XP (survives restarts, redeploys, recalls; dies at destruction); keys are pre-bound constants with defaults and bounds, so reads never fault. The `on boot:` window is the idiomatic config point — the bot's dotfile. **Policy, never stats**: no key makes a bot more capable. Custom hurt thresholds live here (`hurt_line` — re-answers Q41, replacing the short-lived `on hurt(n):` research); the Damaged state penalty stays fixed at 50%, decoupled from the signal.
+- **Signal-safety is a single per-function property** (answers Q49): every function block's registry entry carries a `signal_safe` flag — one set for all windows, not a per-signal matrix. Assignments live in the function table (rough rule: sensing, logging, retreating, and giving up are safe; work, combat, and blocking calls are not). Flags are data, tunable like costs.
+- **User `def`s derive signal-safety; boundedness is checked at deploy** (answers Q51): a def is safe iff all its calls are safe and its body has no loops and no recursion; the compiler assigns each def a worst-case instruction count (longest branch, calls expanded), and window calls charge that worst case against the window cap. Window-reachable code is straight-line + `if`, all the way down — handlers decide and delegate; loops live in the main program.
+- **Logs have levels** — `log(value, level=info)` with five pre-bound level constants (`trace / debug / info / warn / error`). Levels ride the ring buffer, uploads, and Black Boxes; the cloud viewer color-codes and filters by them. Forced crash dumps file at `error`.
+- **Banked cycles are capped** — budget clamps to the `bank_cap` cost-table entry (default = the most expensive base op, 25) after every grant; debt from forced charges is unaffected (charged, not banked). Overlays are load-validated to keep every effective op cost ≤ `bank_cap` — an unaffordable-forever op would be a silent soft-lock, and mods must fail loudly instead.
+- **Optional parameters are trailing keyword defaults, Python-style** — `log(msg, level=warn)`, `send(ch, val, timeout=100)`; `timeout=None` (the default) means block forever. Applies to builtins and `def`s alike; call sites may pass optionals positionally or by keyword.
+- **`None` is an enum, not a null** — the builtin `Option.Some(v)` / `Option.None`, Rust-style, with `None` = `Option.None` (bare `case None:` works in `match`). Optional-typed parameters take the value or `None`; `.expect()` and `match` work on `Option` exactly as on `Result`. The type system stays null-free — absence is always explicit. The former `Recv` enum is retired: `try_receive` returns `Option` — two builtin enums (`Result`, `Option`), no one-off shapes.
+- **`None`, `True`, `False` are reserved words** — assigning to them is a parse error; they can never be shadowed. Kind and level constants stay ordinary shadowable names (colliding with `ore` is survivable; a program where `None` is 5 is not worth debugging).
 - **Log buffer is hardware** — base 8 entries, +Memory bank.
 
 - **Channel espionage is real, and gated by comm keys**: to touch a foreign channel you need its faction's **comm key** (salvage a player bot / analyze a Feral wreck) *plus* the channel name (found in decrypted portions of their code — player and Feral code decrypt by the same salvage-attrition rule, [08-multiplayer.md](08-multiplayer.md)). With both: `receive` to eavesdrop — or in one-receiver mode outright **steal** the message — and `send` to **spoof**. Defensive protocol craft — rotating names, enum-tag authentication, decoy channels — is the endgame of colony design.
+- **Decryption surface = the deployed artifact (answers Q62)** — a color leaks exactly what it deploys: program, handler windows, and transitively-called module functions, tree-shaken at function granularity at deploy time. Unused library code never ships, never leaks, and a function nobody deploys is a secret forever. Shared module text appears under each deploying color's reveal mask; cross-closure composition (the same mechanic as cross-version reading, [08-multiplayer.md](08-multiplayer.md)) makes shared libraries leak fastest — private forks are opsec.

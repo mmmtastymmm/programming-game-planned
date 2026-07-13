@@ -36,10 +36,10 @@ flowchart TD
         VAR["Variables — 10"]
         IF["if / elif / else — 20"]
         WHILE["while / break — 35"]
-        SIG1["on error: handler — 40"]
-        SIG2["on hurt: / on death: — 55"]
-        HURT_T["custom hurt threshold on hurt(n): — 25"]
-        BUMP_H["on bump: / on bumped: — 30"]
+        SIG1["on error: window — 40"]
+        SIG2["on hurt: window — 55"]
+        BUMP_H["on bump: / on bumped: windows — 30"]
+        BOOT_W["on boot: window — 45"]
         DEF["def / return — 50"]
         LIST["lists + for-in — 60"]
         ENUM["enum + match — 70"]
@@ -57,6 +57,7 @@ flowchart TD
         F_GUARD["guard, escort — 45"]
         F_HIJACK["hijack — 70"]
         F_TERRA["terraform: clear, bridge,<br/>barricade, demolish, cleanse — 35"]
+        F_ENV["setenv / getenv (env variables:<br/>hurt_line, log_min_level) — 25"]
     end
 
     START --> VAR
@@ -72,8 +73,9 @@ flowchart TD
     F_ATK --> F_GUARD
     IF --> F_BUILD
     WHILE --> DEF
-    SIG2 --> HURT_T
+    F_LOG --> F_ENV
     SIG1 --> BUMP_H
+    SIG1 --> BOOT_W
     F_BUILD --> F_AN
     F_BUILD --> F_TERRA
     F_AN --> F_HIJACK
@@ -86,6 +88,8 @@ flowchart TD
 ```
 
 **Program color slots are deliberately NOT in this tree** — they aren't researched with Data. Colors are gated by **controlled Feral nests** on a quadratic curve ([01-language.md](01-language.md), [04-enemies.md](04-enemies.md)): a third progression axis (territory) alongside research (Data) and hardware (Chips).
+
+Handler-window unlocks buy the right to **edit** that signal's window ([01-language.md](01-language.md)) — pre-unlock, the reserved template still runs with its factory contents, so nothing is unhandled, just uncustomized.
 
 Reading the tree: **constructs gate expressiveness, functions gate verbs**, and they interleave — e.g. `scan_enemies()` returns a list, so it requires lists; `if` is pointless without something to branch on, so sensor functions come first.
 
@@ -117,7 +121,7 @@ This table describes the *learning arc* — the one-time journey through the per
 | 0–5 min | Reads the pre-deployed Tier-0 miner program; edits a line; feels ownership. First Cache spotted nearby |
 | 5–15 min | Studies the sensor Cache, researches Variables; first `if cargo_full()` — the "my bot is smart now" beat |
 | 15–30 min | Loops + combat functions; first Feral raid survived by *code they wrote* |
-| 30–45 min | `def` and `on error:`; colony library of shared functions emerges; first uploaded crash log explains a mystery |
+| 30–45 min | `def` and the `on error:` window; colony library of shared functions emerges; first uploaded crash log explains a mystery |
 | 45–60 min | Lists/scan or messaging; coordinated multi-bot behavior; session climax vs. Warden raid or first Nest kill |
 
 ## Decided
