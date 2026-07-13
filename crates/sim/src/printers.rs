@@ -1,7 +1,7 @@
 //! Printer lifecycle: printing, boot sequences, recalls, re-coloring,
 //! and scrapping.
 
-use crate::map::{astar, TilePos};
+use crate::map::{astar_avoiding, TilePos};
 use crate::sim::Sim;
 use crate::world::{
     ArchiveEntry, ArchiveKind, BotId, Color, EntityId, PrinterState, Recall, RecallPurpose,
@@ -35,20 +35,24 @@ impl Sim {
 
     /// Recall arrival: "transported to the new printer for a new color,
     /// keeping XP" (docs/01). Fresh VM on the destination color's program,
-    /// then the Boot Sequence.
-    pub(crate) fn recolor_bot(&mut self, id: BotId, dest: EntityId) {
+    /// then the Boot Sequence. Returns false when no tile near the
+    /// destination is free yet — the caller keeps the recall alive and
+    /// retries next tick (bots are solid; finished prints wait the same way).
+    pub(crate) fn recolor_bot(&mut self, id: BotId, dest: EntityId) -> bool {
         let Some(printer) = self.world.printers.get(&dest) else {
             // Destination vanished: end the recall, resume the old program.
             self.finish_boot(id);
-            return;
+            return true;
         };
         let (printer_pos, color, faction) = (printer.pos, printer.color, printer.faction);
         let Some(cp) = self.world.color_programs.get(&(faction, color.0)) else {
             self.finish_boot(id);
-            return;
+            return true;
         };
         let program = Rc::clone(&cp.program);
-        let landing = self.world.free_spawn_tile(printer_pos).unwrap_or(printer_pos);
+        let Some(landing) = self.world.free_spawn_tile(printer_pos) else {
+            return false;
+        };
         let bot = self.world.bots.get_mut(&id).expect("bot exists");
         bot.data.pos = landing;
         bot.data.color = color;
@@ -57,6 +61,7 @@ impl Sim {
         let mut vm = Vm::new(program, self.vm_config.clone());
         vm.set_engine_interrupt(true);
         bot.vm = Some(vm);
+        true
     }
 
     /// Over-capacity decommission: logs upload to the cloud (the bot is at
@@ -246,18 +251,21 @@ impl Sim {
         let Some(home_pos) = self.world.printers.get(&home).map(|p| p.pos) else { return };
         let Some(bot) = self.world.bots.get_mut(&id) else { return };
         let start = bot.data.pos;
+        // Goals: the passable, non-structure tiles ORTHOGONALLY beside home
+        // (the printer tile itself is solid; diagonal corner-touch reads as
+        // arriving a square away, so it doesn't count as arrived).
+        let structures = self.world.structure_tiles();
         let mut goals = BTreeSet::new();
-        goals.insert(home_pos);
-        for dy in -1..=1 {
-            for dx in -1..=1 {
-                let g = TilePos::new(home_pos.x + dx, home_pos.y + dy);
-                if self.world.grid.get(g).is_some_and(|t| t.move_ticks().is_some()) {
-                    goals.insert(g);
-                }
+        for (dx, dy) in [(0, -1), (1, 0), (0, 1), (-1, 0)] {
+            let g = TilePos::new(home_pos.x + dx, home_pos.y + dy);
+            if self.world.grid.get(g).is_some_and(|t| t.move_ticks().is_some())
+                && !structures.contains(&g)
+            {
+                goals.insert(g);
             }
         }
-        let path =
-            astar(&self.world.grid, &self.world.overlays, start, &goals).unwrap_or_default();
+        let path = astar_avoiding(&self.world.grid, &self.world.overlays, start, &goals, &structures)
+            .unwrap_or_default();
         let ticks_left = path
             .first()
             .map(|p| self.world.grid.get(*p).and_then(|t| t.move_ticks()).unwrap_or(1))

@@ -2,7 +2,7 @@
 //! world actions bots issue (move, mine, build, ...).
 
 use crate::host::BotHost;
-use crate::map::{astar, TileKind, TilePos};
+use crate::map::{astar_avoiding, TileKind, TilePos};
 use crate::sim::{Sim, ATTACK_DAMAGE};
 use crate::world::{
     Action, ActionRequest, BlueprintKind, BotId, RecallPurpose,
@@ -39,17 +39,28 @@ impl Sim {
                         self.finish_action(id, Ok(Value::Unit));
                         return;
                     }
-                    // Goal set: passable tiles adjacent to the target.
+                    // Goal set: passable, non-structure tiles adjacent to
+                    // the target (structures are solid, so "at" a printer
+                    // or depot means standing beside it).
+                    let structures = self.world.structure_tiles();
                     let mut goals = BTreeSet::new();
                     for dy in -1..=1 {
                         for dx in -1..=1 {
                             let goal = TilePos::new(target_pos.x + dx, target_pos.y + dy);
-                            if self.world.grid.get(goal).is_some_and(|t| t.move_ticks().is_some()) {
+                            if self.world.grid.get(goal).is_some_and(|t| t.move_ticks().is_some())
+                                && !structures.contains(&goal)
+                            {
                                 goals.insert(goal);
                             }
                         }
                     }
-                    match astar(&self.world.grid, &self.world.overlays, pos, &goals) {
+                    match astar_avoiding(
+                        &self.world.grid,
+                        &self.world.overlays,
+                        pos,
+                        &goals,
+                        &structures,
+                    ) {
                         Some(path) if path.is_empty() => {
                             self.finish_action(id, Ok(Value::Unit));
                         }
@@ -371,13 +382,23 @@ impl Sim {
                     .get(*next)
                     .and_then(|t| t.move_ticks())
                     .expect("recall path tiles are passable");
-                bot.data.recall = Some(recall);
-                return;
             }
+            // Stand on the arrival tile for one tick even when the path is
+            // done — the walk's last step must be observable (the printer
+            // starts its work next tick, not mid-stride).
+            bot.data.recall = Some(recall);
+            return;
         }
         // Arrived at the home printer.
         match recall.purpose {
-            RecallPurpose::Recolor { dest } => self.recolor_bot(id, dest),
+            RecallPurpose::Recolor { dest } => {
+                if !self.recolor_bot(id, dest) {
+                    // No free tile beside the destination yet: hold here,
+                    // recall intact, and retry next tick.
+                    let bot = self.world.bots.get_mut(&id).expect("bot exists");
+                    bot.data.recall = Some(recall);
+                }
+            }
             RecallPurpose::Scrap => self.scrap_bot(id),
         }
     }

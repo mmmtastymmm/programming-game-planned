@@ -260,6 +260,62 @@ fn over_capacity_scraps_lowest_xp_for_refund() {
 }
 
 #[test]
+fn scrap_walk_ends_beside_the_printer_for_a_visible_tick() {
+    // The walk's last step must be observable from outside the sim: the
+    // viewer plays the disassembly wherever it last saw the bot, so being
+    // consumed in the same tick as the final step reads as a bot scrapped
+    // mid-stride, tiles away from the printer.
+    let mut sim = Sim::new(&colony_map());
+    sim.tuning.capacity = 1;
+    sim.apply(&Command::DeployProgram { faction: 0, color: Color::GREEN, source: IDLER.into() })
+        .unwrap();
+    let veteran = sim
+        .apply(&Command::SpawnBot {
+            pos: TilePos::new(2, 3),
+            source: IDLER.into(),
+            cpu: 2,
+            cargo_cap: 1,
+            faction: 0,
+            hp: 100,
+            color: Color::GREEN,
+        })
+        .unwrap()
+        .unwrap();
+    // The victim starts across the map, so the recall is a real walk.
+    let victim = sim
+        .apply(&Command::SpawnBot {
+            pos: TilePos::new(10, 6),
+            source: IDLER.into(),
+            cpu: 2,
+            cargo_cap: 1,
+            faction: 0,
+            hp: 100,
+            color: Color::GREEN,
+        })
+        .unwrap()
+        .unwrap();
+    sim.world.bots.get_mut(&veteran).unwrap().data.xp_combat = 900;
+
+    let printer_pos = TilePos::new(2, 2);
+    let mut last_seen = TilePos::new(10, 6);
+    for _ in 0..200 {
+        sim.step();
+        match sim.world.bots.get(&victim) {
+            Some(bot) => last_seen = bot.data.pos,
+            None => break,
+        }
+    }
+    assert!(!sim.world.bots.contains_key(&victim), "victim never scrapped");
+    assert_eq!(
+        last_seen.manhattan(printer_pos),
+        1,
+        "the victim's last observable position must be directly (orthogonally) \
+         beside the printer — no diagonal corner-touch, no mid-stride vanish \
+         (last seen {last_seen:?})"
+    );
+}
+
+#[test]
 fn printer_colony_is_deterministic() {
     let build = || {
         let mut sim = Sim::new(&colony_map());

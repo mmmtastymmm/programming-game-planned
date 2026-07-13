@@ -1,7 +1,7 @@
 //! Collision handling and path replanning: bumps, sidesteps, and the
 //! post-bump replan.
 
-use crate::map::{astar, astar_avoiding, edge_allowed, TilePos};
+use crate::map::{astar_avoiding, edge_allowed, TilePos};
 use crate::sim::Sim;
 use crate::world::{
     Action, BotId,
@@ -74,6 +74,7 @@ impl Sim {
             .filter(|&p| {
                 p != avoid
                     && edge_allowed(&self.world.grid, &self.world.overlays, from, p)
+                    && !self.world.structure_at(p)
                     && !self.world.tile_occupied(p, id)
                     && dist(p) <= here
             })
@@ -85,15 +86,19 @@ impl Sim {
     pub(crate) fn replan_move(&mut self, id: BotId, goals: BTreeSet<TilePos>) {
         let Some(bot) = self.world.bots.get(&id) else { return };
         let start = bot.data.pos;
-        let occupied: BTreeSet<TilePos> = self
+        let structures = self.world.structure_tiles();
+        let mut occupied: BTreeSet<TilePos> = self
             .world
             .bots
             .values()
             .filter(|b| b.data.id != id && !b.data.dying)
             .map(|b| b.data.pos)
             .collect();
+        occupied.extend(structures.iter().copied());
         let path = astar_avoiding(&self.world.grid, &self.world.overlays, start, &goals, &occupied)
-            .or_else(|| astar(&self.world.grid, &self.world.overlays, start, &goals));
+            .or_else(|| {
+                astar_avoiding(&self.world.grid, &self.world.overlays, start, &goals, &structures)
+            });
         match path {
             Some(path) if path.is_empty() => self.finish_action(id, Ok(Value::Unit)),
             Some(path) => {
@@ -116,13 +121,14 @@ impl Sim {
     pub(crate) fn replan_after_bump(&mut self, id: BotId) {
         let Some(bot) = self.world.bots.get(&id) else { return };
         let start = bot.data.pos;
-        let occupied: BTreeSet<TilePos> = self
+        let mut occupied: BTreeSet<TilePos> = self
             .world
             .bots
             .values()
             .filter(|b| b.data.id != id && !b.data.dying)
             .map(|b| b.data.pos)
             .collect();
+        occupied.extend(self.world.structure_tiles());
 
         // Program move.
         if let Some(Action::Move { goals, .. }) = &bot.data.action {
@@ -153,14 +159,15 @@ impl Sim {
         if let Some(recall) = &bot.data.recall {
             let home = recall.home;
             let Some(home_pos) = self.world.printers.get(&home).map(|p| p.pos) else { return };
+            // Goals: the passable, non-structure tiles ORTHOGONALLY beside
+            // home — same arrival rule as begin_recall_walk.
             let mut goals = BTreeSet::new();
-            goals.insert(home_pos);
-            for dy in -1..=1 {
-                for dx in -1..=1 {
-                    let g = TilePos::new(home_pos.x + dx, home_pos.y + dy);
-                    if self.world.grid.get(g).is_some_and(|t| t.move_ticks().is_some()) {
-                        goals.insert(g);
-                    }
+            for (dx, dy) in [(0, -1), (1, 0), (0, 1), (-1, 0)] {
+                let g = TilePos::new(home_pos.x + dx, home_pos.y + dy);
+                if self.world.grid.get(g).is_some_and(|t| t.move_ticks().is_some())
+                    && !self.world.structure_at(g)
+                {
+                    goals.insert(g);
                 }
             }
             if let Some(path) =

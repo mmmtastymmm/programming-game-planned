@@ -431,6 +431,22 @@ impl World {
             .any(|b| b.data.id != exclude && !b.data.dying && b.data.pos == pos)
     }
 
+    /// Structures are solid: bots can neither stand on nor path through
+    /// printer or depot tiles.
+    pub fn structure_at(&self, pos: TilePos) -> bool {
+        self.printers.values().any(|p| p.pos == pos)
+            || self.depots.values().any(|d| d.pos == pos)
+    }
+
+    /// All structure tiles, for feeding A*'s blocked set.
+    pub fn structure_tiles(&self) -> BTreeSet<TilePos> {
+        self.printers
+            .values()
+            .map(|p| p.pos)
+            .chain(self.depots.values().map(|d| d.pos))
+            .collect()
+    }
+
     /// First free, passable tile at/around `center`, in a fixed
     /// deterministic order. Used for print/re-color placement.
     pub fn free_spawn_tile(&self, center: TilePos) -> Option<TilePos> {
@@ -438,6 +454,7 @@ impl World {
             [(0, 0), (0, -1), (1, 0), (0, 1), (-1, 0), (1, -1), (1, 1), (-1, 1), (-1, -1)];
         ORDER.iter().map(|(dx, dy)| TilePos::new(center.x + dx, center.y + dy)).find(|&p| {
             self.grid.get(p).is_some_and(|t| t.move_ticks().is_some())
+                && !self.structure_at(p)
                 && !self.tile_occupied(p, BotId(u32::MAX))
         })
     }
