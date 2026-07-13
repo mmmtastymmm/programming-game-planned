@@ -166,19 +166,11 @@ impl Bot {
         self.vm.as_ref().is_some_and(|vm| vm.phase() != pyrite::Phase::Main)
     }
 
-    /// Name of the signal currently being handled, if any.
+    /// Name of the signal currently being handled ("error" / "hurt" /
+    /// "bump" / "bumped" / "death"), if any — the VM tracks which signal
+    /// the unified handler is serving.
     pub fn handler_name(&self) -> Option<&'static str> {
-        use pyrite::ast::SignalKind;
-        match self.vm.as_ref()?.phase() {
-            pyrite::Phase::Main => None,
-            pyrite::Phase::Handler(kind) => Some(match kind {
-                SignalKind::Error => "error",
-                SignalKind::Hurt => "hurt",
-                SignalKind::Death => "death",
-                SignalKind::Bump => "bump",
-                SignalKind::Bumped => "bumped",
-            }),
-        }
+        self.vm.as_ref()?.active_signal()
     }
 
     /// Is the running handler an engine default?
@@ -186,32 +178,24 @@ impl Bot {
         self.vm.as_ref().is_some_and(|vm| vm.handler_is_default())
     }
 
-    /// Engine-default handler source for a signal name, if installed.
-    pub fn default_handler_source(&self, signal: &str) -> Option<&str> {
+    /// Engine-default handler source for a handler kind ("signal" or
+    /// "death"), if installed.
+    pub fn default_handler_source(&self, which: &str) -> Option<&str> {
         use pyrite::ast::SignalKind;
-        let kind = match signal {
-            "error" => SignalKind::Error,
-            "hurt" => SignalKind::Hurt,
+        let kind = match which {
+            "signal" => SignalKind::Signal,
             "death" => SignalKind::Death,
-            "bump" => SignalKind::Bump,
-            "bumped" => SignalKind::Bumped,
             _ => return None,
         };
         self.vm.as_ref().and_then(|vm| vm.default_handler(kind)).map(|d| d.source.as_str())
     }
 
-    /// (signal name, handler's source line if the program installed one) —
-    /// for every player-facing signal, inspector-ready.
-    pub fn handler_summary(&self) -> [(&'static str, Option<u32>); 5] {
+    /// (handler name, source line if the program installed one) — the two
+    /// handler kinds, inspector-ready.
+    pub fn handler_summary(&self) -> [(&'static str, Option<u32>); 2] {
         use pyrite::ast::SignalKind;
         let line = |kind| self.vm.as_ref().and_then(|vm| vm.handler_line(kind));
-        [
-            ("error", line(SignalKind::Error)),
-            ("hurt", line(SignalKind::Hurt)),
-            ("death", line(SignalKind::Death)),
-            ("bump", line(SignalKind::Bump)),
-            ("bumped", line(SignalKind::Bumped)),
-        ]
+        [("signal", line(SignalKind::Signal)), ("death", line(SignalKind::Death))]
     }
 }
 

@@ -195,6 +195,9 @@ pub struct Vm {
     /// Is the running handler an engine default? Defaults are HUMBLE:
     /// a new signal interrupts them instead of double-handling.
     handler_is_default: bool,
+    /// Which signal the running handler is serving ("error" / "hurt" /
+    /// "bump" / "bumped" / "death") — for inspectors and mood clouds.
+    handler_signal: Option<&'static str>,
     /// Ticks spent in the current `on error:` handler (for the grace window).
     handler_ticks: u32,
     /// Remaining black-box budget while in the death handler.
@@ -230,6 +233,7 @@ impl Vm {
             budget: 0,
             phase: Phase::Main,
             handler_is_default: false,
+            handler_signal: None,
             handler_ticks: 0,
             death_budget: 0,
             engine_interrupt: false,
@@ -297,6 +301,15 @@ impl Vm {
         self.phase != Phase::Main && self.handler_is_default
     }
 
+    /// Name of the signal the running handler is serving, if any.
+    pub fn active_signal(&self) -> Option<&'static str> {
+        if self.phase == Phase::Main {
+            None
+        } else {
+            self.handler_signal
+        }
+    }
+
     /// The engine default handler for `kind` (source + program), if the
     /// host installed one.
     pub fn default_handler(&self, kind: SignalKind) -> Option<&DefaultHandler> {
@@ -308,18 +321,14 @@ impl Vm {
         self.program.handlers.get(&kind).map(|h| h.line)
     }
 
-    /// The hurt threshold this program wants (`on hurt(n):`), if any.
-    /// The sim reads this to decide when to raise `Signal::Hurt`.
-    pub fn hurt_threshold(&self) -> Option<i64> {
-        self.program.handlers.get(&SignalKind::Hurt).and_then(|h| h.hurt_threshold)
-    }
+
 
     // --- sim-facing control ---
 
     /// Grant this tick's cycles. Also advances the error-handler grace clock.
     pub fn grant(&mut self, cycles: u64) {
         self.budget = self.budget.saturating_add(cycles as i64);
-        if self.phase == Phase::Handler(SignalKind::Error) {
+        if self.phase == Phase::Handler(SignalKind::Signal) {
             self.handler_ticks = self.handler_ticks.saturating_add(1);
         }
     }
@@ -331,17 +340,59 @@ impl Vm {
     }
 
     /// Enter a handler: player handlers index the main program's arena;
-    /// default handlers swap the active program to the default's.
-    fn enter_handler(&mut self, kind: SignalKind, body: Vec<StmtId>, default: bool) {
+    /// default handlers swap the active program to the default's. The
+    /// unified handler starts with a FORCED `handler_init()` call — the
+    /// engine's time punishment (the visible flinch) that no handler can
+    /// skip. Death is exempt: the black-box budget can't afford it.
+    fn enter_handler(
+        &mut self,
+        kind: SignalKind,
+        body: Vec<StmtId>,
+        default: bool,
+        signal_name: &'static str,
+        binding: Option<(String, Value)>,
+    ) {
         self.work = body.into_iter().rev().map(Work::Stmt).collect();
+        if kind == SignalKind::Signal {
+            self.work.push(Work::Discard);
+            self.work.push(Work::CallExec {
+                name: "handler_init".to_string(),
+                argc: 0,
+                line: 0,
+            });
+        }
         self.values.clear();
         self.frames.clear();
+        if let Some((name, value)) = binding {
+            self.globals.insert(name, value);
+        }
         self.phase = Phase::Handler(kind);
         self.handler_is_default = default;
+        self.handler_signal = Some(signal_name);
         self.handler_ticks = 0;
-        if kind == SignalKind::Death {
-            // Black-box budget applies to player and default death alike.
-        }
+    }
+
+    /// The Signal enum value delivered to unified handlers.
+    fn signal_value(name: &'static str, fault: Option<&str>) -> Value {
+        let (variant, fields) = match name {
+            "error" => ("Error", vec![Value::Str(fault.unwrap_or("").to_string())]),
+            "hurt" => ("Hurt", vec![]),
+            "bump" => ("Bump", vec![]),
+            "bumped" => ("Bumped", vec![]),
+            other => (other, vec![]),
+        };
+        // Capitalized variant for non-error names.
+        let variant = match variant {
+            "Error" => "Error".to_string(),
+            v => {
+                let mut c = v.chars();
+                match c.next() {
+                    Some(first) => first.to_uppercase().collect::<String>() + c.as_str(),
+                    None => String::new(),
+                }
+            }
+        };
+        Value::Enum(EnumValue { enum_name: "Signal".to_string(), variant, fields })
     }
 
     /// Full reset: line 1, variables cleared. Used by the sim at boot.
@@ -352,6 +403,7 @@ impl Vm {
         }
         self.active = Rc::clone(&self.program);
         self.handler_is_default = false;
+        self.handler_signal = None;
         self.work = Self::block_work(&self.program.body.clone());
         self.values.clear();
         self.frames.clear();
@@ -403,30 +455,36 @@ impl Vm {
             // Engine defaults are humble: the new signal interrupts the
             // default response and is processed fresh below.
         }
-        let kind = match signal {
-            Signal::Hurt => SignalKind::Hurt,
-            Signal::Death => SignalKind::Death,
-            Signal::Bump => SignalKind::Bump,
-            Signal::Bumped => SignalKind::Bumped,
+        let (kind, name) = match signal {
+            Signal::Hurt => (SignalKind::Signal, "hurt"),
+            Signal::Bump => (SignalKind::Signal, "bump"),
+            Signal::Bumped => (SignalKind::Signal, "bumped"),
+            Signal::Death => (SignalKind::Death, "death"),
         };
         if let Some(handler) = self.program.handlers.get(&kind) {
             // Player handler: abandon any pending action (the sim cancels
             // the world side); only now is un-blocking sound.
             self.state = State::Running;
             let body = handler.body.clone();
-            self.enter_handler(kind, body, false);
+            let binding = handler
+                .binding
+                .clone()
+                .map(|b| (b, Self::signal_value(name, None)));
+            self.enter_handler(kind, body, false, name, binding);
             if kind == SignalKind::Death {
                 self.death_budget = costs.blackbox_budget as i64;
             }
             return RaiseOutcome::Handled;
         }
         if let Some(default) = self.config.default_handlers.get(&kind) {
-            // Engine default: real Pyrite, watchable and costed.
+            // Engine default: real Pyrite, watchable and costed. Defaults
+            // always see the signal as `s`.
             self.state = State::Running;
             let program = Rc::clone(&default.program);
             let body = program.body.clone();
             self.active = program;
-            self.enter_handler(kind, body, true);
+            let binding = Some(("s".to_string(), Self::signal_value(name, None)));
+            self.enter_handler(kind, body, true, name, binding);
             if kind == SignalKind::Death {
                 self.death_budget = costs.blackbox_budget as i64;
             }
@@ -512,7 +570,7 @@ impl Vm {
     // --- internals ---
 
     fn adjusted(&self, cost: u64, costs: &CostTable) -> u64 {
-        if self.phase == Phase::Handler(SignalKind::Error)
+        if self.phase == Phase::Handler(SignalKind::Signal)
             && self.handler_ticks > costs.grace_window_ticks
         {
             cost * costs.overtime_mult
@@ -583,14 +641,18 @@ impl Vm {
             self.state = State::Exploded;
             return;
         }
-        if let Some(handler) = self.program.handlers.get(&SignalKind::Error) {
+        if let Some(handler) = self.program.handlers.get(&SignalKind::Signal) {
             // Trap: pay the (cheap) trap cost, run the handler as normal
             // code. Variables preserved; work/values cleared.
             let body = handler.body.clone();
+            let binding = handler
+                .binding
+                .clone()
+                .map(|b| (b, Self::signal_value("error", Some(&msg))));
             self.budget -= costs.trap_cost as i64;
             self.active = Rc::clone(&self.program);
-            self.enter_handler(SignalKind::Error, body, false);
-        } else if let Some(default) = self.config.default_handlers.get(&SignalKind::Error) {
+            self.enter_handler(SignalKind::Signal, body, false, "error", binding);
+        } else if let Some(default) = self.config.default_handlers.get(&SignalKind::Signal) {
             // Engine default as real code: the crash-dump program runs on
             // this VM, watchable line by line. Still counts as a crash
             // (fault damage keys off crash_count — handlers are armor,
@@ -599,7 +661,8 @@ impl Vm {
             let program = Rc::clone(&default.program);
             let body = program.body.clone();
             self.active = program;
-            self.enter_handler(SignalKind::Error, body, true);
+            let binding = Some(("s".to_string(), Self::signal_value("error", Some(&msg))));
+            self.enter_handler(SignalKind::Signal, body, true, "error", binding);
         } else {
             // No default configured (bare VM): the hard fallback.
             self.crash_count += 1;
@@ -902,7 +965,13 @@ impl Vm {
             },
             Work::MatchArm { stmt, value, case } => {
                 let Stmt::Match { cases, .. } = program.stmt(stmt) else { unreachable!() };
-                let Pattern::EnumVariant { enum_name, variant, binds } = &cases[case].pattern;
+                let Pattern::EnumVariant { enum_name, variant, binds } = &cases[case].pattern
+                else {
+                    // Wildcard: matches anything, binds nothing.
+                    let body = cases[case].body.clone();
+                    self.push_block(&body);
+                    return;
+                };
                 if *enum_name == value.enum_name && *variant == value.variant {
                     if binds.len() != value.fields.len() {
                         self.fault(

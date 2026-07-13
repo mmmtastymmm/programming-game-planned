@@ -20,14 +20,10 @@ pub enum Construct {
     Lists,
     /// Tier 6: `enum` declarations + `match`.
     Enums,
-    /// `on error:` handler.
-    OnError,
-    /// `on hurt:` / `on death:` handlers.
-    OnHurtDeath,
-    /// `on hurt(n):` custom threshold (separate research, docs/06).
-    HurtThreshold,
-    /// `on bump:` / `on bumped:` collision handlers.
-    OnBump,
+    /// `on signal(s):` — the unified problem handler.
+    OnSignal,
+    /// `on death:` — the black-box handler.
+    OnDeath,
 }
 
 impl Construct {
@@ -39,24 +35,20 @@ impl Construct {
             Construct::Functions => "def / return",
             Construct::Lists => "lists + for-in",
             Construct::Enums => "enum + match",
-            Construct::OnError => "on error: handler",
-            Construct::OnHurtDeath => "on hurt: / on death: handlers",
-            Construct::HurtThreshold => "custom hurt threshold",
-            Construct::OnBump => "on bump: / on bumped: handlers",
+            Construct::OnSignal => "on signal: handler",
+            Construct::OnDeath => "on death: handler",
         }
     }
 
-    pub const ALL: [Construct; 10] = [
+    pub const ALL: [Construct; 8] = [
         Construct::Variables,
         Construct::If,
         Construct::WhileLoop,
         Construct::Functions,
         Construct::Lists,
         Construct::Enums,
-        Construct::OnError,
-        Construct::OnHurtDeath,
-        Construct::HurtThreshold,
-        Construct::OnBump,
+        Construct::OnSignal,
+        Construct::OnDeath,
     ];
 }
 

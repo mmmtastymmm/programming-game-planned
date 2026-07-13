@@ -151,24 +151,17 @@ impl<'a> Parser<'a> {
 
     fn parse_handler(&mut self) -> Result<(), PyriteError> {
         let on_tok = self.expect(Tok::On, "on")?;
-        let which = self.expect_ident("signal name (error, hurt, death, bump, bumped)")?;
+        let which = self.expect_ident("handler name (signal or death)")?;
         let (kind, construct) = match which.as_str() {
-            "error" => (SignalKind::Error, Construct::OnError),
-            "hurt" => (SignalKind::Hurt, Construct::OnHurtDeath),
-            "death" => (SignalKind::Death, Construct::OnHurtDeath),
-            "bump" => (SignalKind::Bump, Construct::OnBump),
-            "bumped" => (SignalKind::Bumped, Construct::OnBump),
-            _ => return Err(self.unexpected("error, hurt, death, bump, or bumped")),
+            "signal" => (SignalKind::Signal, Construct::OnSignal),
+            "death" => (SignalKind::Death, Construct::OnDeath),
+            _ => return Err(self.unexpected("signal or death")),
         };
         self.require(construct)?;
-        let mut hurt_threshold = None;
-        if kind == SignalKind::Hurt && self.eat(&Tok::LParen) {
-            self.require(Construct::HurtThreshold)?;
-            let t = self.advance();
-            let Tok::Int(v) = t.tok else {
-                return Err(self.unexpected("threshold integer"));
-            };
-            hurt_threshold = Some(v);
+        // `on signal(s):` binds the incoming Signal value.
+        let mut binding = None;
+        if kind == SignalKind::Signal && self.eat(&Tok::LParen) {
+            binding = Some(self.expect_ident("binding name")?);
             self.expect(Tok::RParen, ")")?;
         }
         if self.program.handlers.contains_key(&kind) {
@@ -182,7 +175,7 @@ impl<'a> Parser<'a> {
         let body = self.parse_block(false)?;
         self.program
             .handlers
-            .insert(kind, Handler { kind, hurt_threshold, body, line: on_tok.line });
+            .insert(kind, Handler { kind, binding, body, line: on_tok.line });
         Ok(())
     }
 
@@ -395,6 +388,16 @@ impl<'a> Parser<'a> {
                 continue;
             }
             self.expect(Tok::Case, "case")?;
+            // Rust-style catch-all: `case _:`.
+            if let Tok::Ident(name) = &self.peek().tok
+                && name == "_"
+            {
+                self.advance();
+                self.expect(Tok::Colon, ":")?;
+                let body = self.parse_block(in_function)?;
+                cases.push(MatchCase { pattern: Pattern::Wildcard, body });
+                continue;
+            }
             let enum_name = self.expect_ident("enum name")?;
             self.expect(Tok::Dot, ".")?;
             let variant = self.expect_ident("variant name")?;

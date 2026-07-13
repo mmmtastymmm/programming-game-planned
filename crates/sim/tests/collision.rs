@@ -279,14 +279,22 @@ fn bump_handlers_replace_the_freeze() {
     // Rammer with `on bump:`: no stun — its handler logs, program restarts.
     // Victim with `on bumped:`: same, no stagger freeze.
     let rammer_src = "\
-on bump:
-    log(\"ow-my-front\")
+on signal(s):
+    match s:
+        case Signal.Bump:
+            log(\"ow-my-front\")
+        case _:
+            wait(0)
 
 move_to(closest(depot).expect())
 ";
     let victim_src = "\
-on bumped:
-    log(\"hey-watch-it\")
+on signal(s):
+    match s:
+        case Signal.Bumped:
+            log(\"hey-watch-it\")
+        case _:
+            wait(0)
 
 wait(3)
 ";
@@ -321,7 +329,7 @@ fn bumped_during_a_handler_is_a_double_handle() {
     // The victim is mid-`on bumped:` (blocking wait) when a second bump
     // lands: any signal during a handler explodes — no wreck, black box.
     let victim_src = "\
-on bumped:
+on signal(s):
     wait(40)
 
 wait(3)

@@ -48,7 +48,7 @@ fn attacker_kills_defenseless_bot_into_wreck() {
 #[test]
 fn hurt_handler_fires_below_default_threshold() {
     let victim_src = "\
-on hurt:
+on signal(s):
     log(\"ouch\")
     upload_log()
 
@@ -56,11 +56,13 @@ log(1)
 ";
     let mut sim = Sim::new(&MapSpec::empty(5, 5));
     spawn(&mut sim, TilePos::new(1, 1), BRAWLER, 1, 100);
-    let victim = spawn(&mut sim, TilePos::new(2, 1), victim_src, 0, 100);
+    // Generous hp: the forced handler_init ritual (15 ticks) must survive
+    // sustained fire before the handler body can upload.
+    let victim = spawn(&mut sim, TilePos::new(2, 1), victim_src, 0, 400);
 
     // Track the victim's hp at the moment "ouch" lands in the cloud.
     let mut hp_at_ouch = None;
-    for _ in 0..600 {
+    for _ in 0..900 {
         sim.step();
         if hp_at_ouch.is_none()
             && sim.world.archive.iter().any(|e| e.text.contains("ouch"))
@@ -70,37 +72,10 @@ log(1)
         }
     }
     let hp = hp_at_ouch.expect("hurt handler must fire and upload");
-    assert!(hp < 50, "default threshold is 50% — fired at hp {hp}");
+    assert!(hp * 2 < 400, "default threshold is 50% — fired at hp {hp}");
     assert!(hp > 0, "fired before death");
 }
 
-#[test]
-fn custom_hurt_threshold_fires_later() {
-    let victim_src = "\
-on hurt(20):
-    log(\"late\")
-    upload_log()
-
-log(1)
-";
-    let mut sim = Sim::new(&MapSpec::empty(5, 5));
-    spawn(&mut sim, TilePos::new(1, 1), BRAWLER, 1, 100);
-    // Generous hp: the gap between "hurt fires" (<20% = 40hp) and death
-    // must fit the whole handler regardless of attack cadence — this test
-    // is about the threshold, not the double-handle race.
-    let victim = spawn(&mut sim, TilePos::new(2, 1), victim_src, 0, 200);
-
-    let mut hp_at_fire = None;
-    for _ in 0..900 {
-        sim.step();
-        if hp_at_fire.is_none() && sim.world.archive.iter().any(|e| e.text.contains("late")) {
-            hp_at_fire = sim.world.bots.get(&victim).map(|b| b.data.hp);
-            break;
-        }
-    }
-    let hp = hp_at_fire.expect("custom-threshold hurt handler must fire");
-    assert!(hp * 100 < 20 * 200, "on hurt(20) fires below 20% — fired at hp {hp}");
-}
 
 #[test]
 fn death_handler_files_black_box_report_then_wrecks() {
@@ -130,20 +105,28 @@ log(1)
 
 #[test]
 fn fault_inside_hurt_handler_is_double_handle_no_wreck() {
-    // The hurt handler calls closest(depot).expect() on a map with no depot: the
-    // fault inside the handler is a double handle — instant destruction,
-    // no wreck, but a Black Box with the cause.
+    // The hurt handler calls closest(depot).expect() on a map with no
+    // depot: the fault inside the PLAYER handler is a double handle —
+    // instant destruction, no wreck, black box with the cause. (A single
+    // wound, not sustained fire: the handler must survive its own
+    // handler_init ritual to reach the faulting line.)
     let victim_src = "\
-on hurt:
+on signal(s):
     move_to(closest(depot).expect())
 
 log(1)
 ";
     let mut sim = Sim::new(&MapSpec::empty(5, 5));
-    spawn(&mut sim, TilePos::new(1, 1), BRAWLER, 1, 100);
     let victim = spawn(&mut sim, TilePos::new(2, 1), victim_src, 0, 30);
-    for _ in 0..300 {
+    for _ in 0..4 {
         sim.step();
+    }
+    sim.apply_damage_for_test(victim, 20); // 10/30: below the 50% threshold
+    for _ in 0..120 {
+        sim.step();
+        if !sim.world.bots.contains_key(&victim) {
+            break;
+        }
     }
     assert!(!sim.world.bots.contains_key(&victim), "victim destroyed");
     assert!(
@@ -164,7 +147,7 @@ fn lethal_damage_during_hurt_handler_explodes() {
     // Retreat program: the hurt handler blocks on a long move while the
     // brawler keeps swinging — death mid-handler is a double handle.
     let victim_src = "\
-on hurt:
+on signal(s):
     move_to(closest(depot).expect())
 
 log(1)
@@ -198,7 +181,7 @@ fn combat_is_deterministic_tick_by_tick() {
         spawn(
             &mut sim,
             TilePos::new(2, 1),
-            "on hurt:\n    log(\"h\")\n    upload_log()\n\nlog(1)\n",
+            "on signal(s):\n    log(\"h\")\n    upload_log()\n\nlog(1)\n",
             0,
             60,
         );
@@ -228,12 +211,13 @@ fn crash_loops_are_lethal() {
     }
     assert!(!sim.world.bots.contains_key(&bot), "crash loop must eventually kill");
     assert!(sim.world.wrecks.contains_key(&bot), "fault death is a clean death: wreck");
-    // One fewer dump than crashes: the fatal fault kills the bot INSIDE
-    // the default error handler, before its upload_crash_dump() finishes
-    // paying — the last report never makes it out.
+    // Fewer dumps than crashes: the fatal fault kills the bot inside the
+    // default handler before its dump pays off, and the hurt crossing can
+    // humbly interrupt another crash's report mid-upload. The survivors
+    // are in the cloud; the rest are only in the wreck's black box.
     assert!(
-        sim.world.archive.iter().filter(|e| e.kind == ArchiveKind::CrashDump).count() >= 3,
-        "the earlier crashes are all in the cloud"
+        sim.world.archive.iter().filter(|e| e.kind == ArchiveKind::CrashDump).count() >= 2,
+        "the earlier crashes are in the cloud"
     );
 }
 
@@ -241,7 +225,7 @@ fn crash_loops_are_lethal() {
 fn error_handlers_are_armor() {
     // Same faulting call, but handled: no crashes, no chassis damage.
     let src = "\
-on error:
+on signal(s):
     wait(1)
 
 move_to(closest(ore).expect())
@@ -258,7 +242,7 @@ move_to(closest(ore).expect())
 #[test]
 fn bots_regenerate_and_hurt_rearms() {
     let hurt_src = "\
-on hurt:
+on signal(s):
     log(\"ouch\")
 
 wait(2)

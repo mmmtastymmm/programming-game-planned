@@ -107,6 +107,8 @@ pub enum Pattern {
     /// builtin enums (e.g. `Recv` from `try_receive`) can be matched without
     /// a declaration.
     EnumVariant { enum_name: String, variant: String, binds: Vec<String> },
+    /// `case _:` — matches anything, binds nothing (the Rust catch-all).
+    Wildcard,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -127,20 +129,19 @@ pub struct EnumDecl {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum SignalKind {
-    Error,
-    Hurt,
+    /// The ONE unified handler: every problem (fault, bump, bumped, hurt)
+    /// arrives here as a `Signal` enum value the body can `match` on.
+    Signal,
+    /// Death keeps its own tiny handler: the black-box budget can't afford
+    /// the unified entry ritual — the explosion doesn't wait.
     Death,
-    /// This bot rammed something (it was the mover).
-    Bump,
-    /// Something rammed this bot (it was standing there).
-    Bumped,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Handler {
     pub kind: SignalKind,
-    /// `on hurt(30):` — custom threshold, requires the HurtThreshold unlock.
-    pub hurt_threshold: Option<i64>,
+    /// `on signal(s):` — the name the incoming Signal value is bound to.
+    pub binding: Option<String>,
     pub body: Block,
     pub line: u32,
 }

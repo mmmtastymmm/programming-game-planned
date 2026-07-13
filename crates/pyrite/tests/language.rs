@@ -96,14 +96,11 @@ impl WithoutWhile for UnlockSet {
 }
 
 #[test]
-fn hurt_threshold_requires_extra_unlock() {
-    let src = "on hurt(30):\n    drop_cargo()\n";
-    let mut set = UnlockSet::none();
-    set.unlock(Construct::OnHurtDeath);
-    let err = parse(src, &set).unwrap_err();
-    assert_eq!(err.kind, PyriteErrorKind::LockedConstruct(Construct::HurtThreshold));
-    set.unlock(Construct::HurtThreshold);
-    assert!(parse(src, &set).is_ok());
+fn signal_handler_requires_unlock() {
+    let src = "on signal(s):\n    drop_cargo()\n";
+    let err = parse(src, &UnlockSet::none()).unwrap_err();
+    assert_eq!(err.kind, PyriteErrorKind::LockedConstruct(Construct::OnSignal));
+    assert!(parse(src, &UnlockSet::none().with(Construct::OnSignal)).is_ok());
 }
 
 #[test]
@@ -399,7 +396,7 @@ fn crash_dump_cost_is_charged_as_debt() {
 #[test]
 fn error_handler_runs_instead_of_crash_dump() {
     let src = "\
-on error:
+on signal(s):
     handled()
 
 boom(1 // 0)
@@ -416,7 +413,7 @@ boom(1 // 0)
 #[test]
 fn variables_preserved_during_handler_cleared_after() {
     let src = "\
-on error:
+on signal(s):
     log(x)
 
 x = 42
@@ -433,7 +430,7 @@ boom(1 // 0)
 #[test]
 fn fault_inside_error_handler_is_double_handle() {
     let src = "\
-on error:
+on signal(s):
     boom(1 // 0)
 
 boom(2 // 0)
@@ -448,7 +445,7 @@ fn overtime_doubles_costs_after_grace_window() {
     // Handler body: infinite busy loop. Grace window is 10 ticks; after
     // that every op costs double, so per-grant progress halves.
     let src = "\
-on error:
+on signal(s):
     while True:
         spin()
 
@@ -483,7 +480,7 @@ boom(1 // 0)
 #[test]
 fn hurt_handler_runs_then_program_restarts() {
     let src = "\
-on hurt:
+on signal(s):
     drop_cargo()
 
 work()
@@ -497,7 +494,8 @@ work()
     vm.grant(20);
     vm.run(&mut host, &costs);
     let names = call_names(&host);
-    assert_eq!(names[0], "drop_cargo");
+    assert_eq!(names[0], "handler_init", "every unified handler starts with the entry ritual");
+    assert_eq!(names[1], "drop_cargo");
     assert!(names.contains(&"work"), "program restarts from line 1 after handler");
 }
 
@@ -561,7 +559,7 @@ work()
 #[test]
 fn signal_during_hurt_handler_explodes() {
     let src = "\
-on hurt:
+on signal(s):
     limp_home()
 
 work()
@@ -583,13 +581,6 @@ fn signal_during_engine_interrupt_explodes() {
     assert_eq!(vm.raise(Signal::Hurt, &mut host, &costs), RaiseOutcome::Exploded);
 }
 
-#[test]
-fn hurt_threshold_is_readable_by_the_sim() {
-    let src = "on hurt(30):\n    drop_cargo()\n\nwork()\n";
-    let program = parse(src, &UnlockSet::all()).unwrap();
-    let vm = Vm::new(Rc::new(program), VmConfig::default());
-    assert_eq!(vm.hurt_threshold(), Some(30));
-}
 
 // --- determinism ---
 
@@ -747,7 +738,7 @@ fn config_with_default(kind: pyrite::ast::SignalKind, source: &str) -> VmConfig 
 fn default_error_handler_runs_as_watchable_code() {
     use pyrite::ast::SignalKind;
     let program = parse("boom(1 // 0)\n", &UnlockSet::all()).unwrap();
-    let config = config_with_default(SignalKind::Error, "upload_crash_dump()\n");
+    let config = config_with_default(SignalKind::Signal, "upload_crash_dump()\n");
     let mut vm = Vm::new(Rc::new(program), config);
     let mut host = TestHost::default();
     let costs = CostTable::default();
@@ -767,16 +758,17 @@ fn default_error_handler_runs_as_watchable_code() {
 fn default_handlers_are_humble_not_double_handles() {
     use pyrite::ast::SignalKind;
     let program = parse("boom(1 // 0)\n", &UnlockSet::all()).unwrap();
-    let config = config_with_default(SignalKind::Error, "upload_crash_dump()\n");
+    let config = config_with_default(SignalKind::Signal, "upload_crash_dump()\n");
     let mut vm = Vm::new(Rc::new(program), config);
     let mut host = TestHost::default();
     let costs = CostTable::default();
     vm.grant(5);
     vm.run(&mut host, &costs);
     assert!(vm.handler_is_default());
-    // A signal arriving mid-DEFAULT does not explode; with no hurt handler
-    // it is simply ignored and the default continues.
-    assert_eq!(vm.raise(Signal::Hurt, &mut host, &costs), RaiseOutcome::Ignored);
+    // A signal arriving mid-DEFAULT does not explode: the humble default
+    // yields, and the UNIFIED default handles the hurt fresh.
+    assert_eq!(vm.raise(Signal::Hurt, &mut host, &costs), RaiseOutcome::Handled);
+    assert!(vm.handler_is_default());
     assert!(!vm.is_dead());
     // Death mid-default is processed normally (wreck, not explosion).
     assert_eq!(vm.raise(Signal::Death, &mut host, &costs), RaiseOutcome::Died);
@@ -787,7 +779,7 @@ fn default_handlers_are_humble_not_double_handles() {
 fn default_bump_handler_waits_in_code() {
     use pyrite::ast::SignalKind;
     let program = parse("work()\n", &UnlockSet::all()).unwrap();
-    let config = config_with_default(SignalKind::Bump, "wait(50)\n");
+    let config = config_with_default(SignalKind::Signal, "wait(50)\n");
     let mut vm = Vm::new(Rc::new(program), config);
     let mut host = TestHost::default();
     host.blocking.insert("wait".into());

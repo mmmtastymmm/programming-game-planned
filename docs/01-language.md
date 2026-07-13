@@ -70,9 +70,27 @@ stateDiagram-v2
 | **Bumped** | something rammed this bot | normal costs | Unhandled default: a short stagger + chassis damage. Handler replaces the stagger. Double-handle applies: being rammed mid-handler/boot/recall explodes you. |
 | **Recall** | printer rebalancing or colony over-capacity | n/a — handler is **engine-fixed, not player-writable** | Suspend program, walk home, re-color (XP kept) or scrap (see Program Colors below). The one signal you can't customize. |
 
+### One handler, one entry ritual (redesign 2026-07-12)
+
+Handlers consolidated: there is **one** unified problem handler, `on signal(s):`, receiving every non-death signal as a builtin **`Signal` enum** value — `Signal.Error(msg)`, `Signal.Bump`, `Signal.Bumped`, `Signal.Hurt` — which the body `match`es (with Rust's `case _:` catch-all for everything you don't handle yet). `on death:` stays separate: the black box can't afford ceremony.
+
+**Every unified-handler entry begins with a forced `handler_init()`** — an engine wait (~15 ticks, tuning) no program can skip. It's the universal time punishment for having a problem, the moment the bot visibly flinches, and a real vulnerability window: a bot wounded under sustained fire may die mid-ritual before its handler body ever runs. Bot states, cleanly: **normal · boot · handler · low-health · death**.
+
 ### Engine defaults are real code
 
-When a signal has no player handler, the engine doesn't run hidden machinery — it runs its own tiny **Pyrite program** on the same VM: `on error:` defaults to `upload_crash_dump()`, `on death:` to `become_disabled()`, `on bump:`/`on bumped:` to `wait(n)` (the collision stuns). Default handlers are inspectable and line-highlighted like any code — a crash-looping bot visibly *sits inside* its crash-dump call. They're costed normally, and the crash still chips the chassis (handlers are armor; defaults are not).
+When a signal has no player handler, the engine doesn't run hidden machinery — it runs its own **Pyrite program** on the same VM. The unified default is one big match (after the forced init):
+
+```python
+match s:
+    case Signal.Error(msg):
+        upload_crash_dump()
+    case Signal.Bump:
+        wait(35)        # + the 15-tick init = the rammer's 50
+    case _:
+        wait(0)         # bumped/hurt: the init stagger was the response
+```
+
+and `on death:` defaults to `become_disabled()`. Default handlers are inspectable and line-highlighted like any code — a crash-looping bot visibly *sits inside* its crash-dump call. They're costed normally, and the crash still chips the chassis (handlers are armor; defaults are not).
 
 One asymmetry: **defaults are humble.** A new signal *interrupts* a running default (processed fresh) instead of double-handling — the double-handle price is reserved for *your* handler code claiming the bot. Consequence: dying mid-crash-dump means the final report never uploads.
 

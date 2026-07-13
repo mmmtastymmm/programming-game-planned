@@ -66,6 +66,8 @@ struct Pose {
     prev: Vec3,
     curr: Vec3,
     grid: TilePos,
+    /// Was the bot in a handler last tick (hop on entry)?
+    was_in_handler: bool,
     /// Last fault_count seen; a rise triggers the fault hop.
     fault_seen: u64,
     /// Fixed ticks since the last fault.
@@ -1296,14 +1298,17 @@ fn update_poses(
         };
         // Ride the terrain: mountains lift the bot, water (bridges) don't.
         y += terrain_top(world, bot.data.pos);
-        // Bump recoil: a hop whenever the freeze counter RISES (covers the
-        // rammer's long freeze and the victim's short stagger alike).
-        if bot.data.bump_frozen > pose.freeze_seen {
+        // The problem hop: entering ANY handler (fault, bump, bumped,
+        // hurt) makes the bot jump — the handler_init ritual is when it
+        // happens. One rule, every problem.
+        let in_handler = bot.in_signal_handler();
+        if in_handler && !pose.was_in_handler {
             pose.freeze_age = 0;
         } else {
             pose.freeze_age = pose.freeze_age.saturating_add(1);
         }
-        pose.freeze_seen = bot.data.bump_frozen;
+        pose.was_in_handler = in_handler;
+        pose.freeze_seen = bot.data.bump_frozen; // legacy field, unused
         if pose.freeze_age < 5 {
             y += 0.3 * (std::f32::consts::PI * (pose.freeze_age as f32 + 1.0) / 6.0).sin();
         }
@@ -1570,6 +1575,7 @@ fn sync_view(
                     prev: start,
                     curr: start,
                     grid: bot.data.pos,
+                    was_in_handler: false,
                     fault_seen: bot.vm.as_ref().map(|v| v.fault_count()).unwrap_or(0),
                     fault_age: u32::MAX,
                     hp_seen: bot.data.hp,
@@ -2151,7 +2157,11 @@ fn inspector_ui(
             let default_running = bot.in_default_handler();
             if default_running
                 && let Some(signal) = bot.handler_name()
-                && let Some(src) = bot.default_handler_source(signal)
+                && let Some(src) = bot.default_handler_source(if signal == "death" {
+                    "death"
+                } else {
+                    "signal"
+                })
             {
                 ui.strong(format!("engine default: on {signal}:"));
                 let current = vm.current_line() as usize;

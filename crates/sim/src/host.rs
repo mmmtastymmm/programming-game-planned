@@ -148,6 +148,8 @@ pub fn builtin_doc(name: &str) -> Option<&'static BuiltinDoc> {
 pub struct BotHost<'a> {
     pub world: &'a mut World,
     pub bot: BotId,
+    /// Duration of the forced handler-entry wait (from Tuning).
+    pub tuning_handler_init_ticks: u32,
 }
 
 impl BotHost<'_> {
@@ -222,6 +224,16 @@ impl pyrite::Host for BotHost<'_> {
                 _ => HostCall::Fault("move_to takes 1 argument".into()),
             },
             "mine" => self.request(ActionRequest::Mine),
+            // The forced handler-entry ritual: an engine wait the VM
+            // injects at every unified-handler entry (the flinch).
+            "handler_init" => {
+                let ticks = self.tuning_handler_init_ticks;
+                if ticks == 0 {
+                    HostCall::Ready(Value::Unit)
+                } else {
+                    self.request(ActionRequest::Wait(ticks))
+                }
+            }
             "wait" => match args {
                 [Value::Int(0)] => HostCall::Ready(Value::Unit), // waiting 0 is free
                 [Value::Int(n)] if *n > 0 => self.request(ActionRequest::Wait(*n as u32)),

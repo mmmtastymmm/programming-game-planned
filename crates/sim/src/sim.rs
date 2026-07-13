@@ -48,6 +48,9 @@ pub struct Tuning {
     pub bump_freeze_ticks: u32,
     /// Victim's (shorter) freeze — a stagger, then it moves on.
     pub bump_victim_freeze_ticks: u32,
+    /// The forced handler-entry ritual: EVERY unified-handler entry waits
+    /// this long first (the visible flinch). Death is exempt.
+    pub handler_init_ticks: u32,
     /// Collisions are accidents: BOTH bots take this chassis damage.
     pub bump_damage: i64,
     pub bridge_cost_ore: u64,
@@ -78,6 +81,7 @@ impl Default for Tuning {
             capacity: 10_000,
             bump_freeze_ticks: 50,
             bump_victim_freeze_ticks: 15,
+            handler_init_ticks: 15,
             bump_damage: 2,
             bridge_cost_ore: 3,
             bridge_build_ticks: 20,
@@ -137,17 +141,16 @@ impl Sim {
         let tuning = Tuning::default();
         let mut vm_config = VmConfig::default();
         // Engine default handlers are REAL Pyrite (docs/01): watchable,
-        // line-highlighted, costed. The wait() defaults replace the old
-        // hard-coded bump freezes; error/death route the forced calls
-        // through code.
+        // line-highlighted, costed. There is ONE unified default — a match
+        // over everything that can go wrong (every entry already paid the
+        // forced handler_init() stagger) — plus the tiny death handler.
+        let unified = format!(
+            "match s:\n    case Signal.Error(msg):\n        upload_crash_dump()\n    case Signal.Bump:\n        wait({})\n    case _:\n        wait(0)\n",
+            tuning.bump_freeze_ticks.saturating_sub(tuning.handler_init_ticks),
+        );
         for (kind, source) in [
-            (pyrite::ast::SignalKind::Error, "upload_crash_dump()\n".to_string()),
+            (pyrite::ast::SignalKind::Signal, unified),
             (pyrite::ast::SignalKind::Death, "become_disabled()\n".to_string()),
-            (pyrite::ast::SignalKind::Bump, format!("wait({})\n", tuning.bump_freeze_ticks)),
-            (
-                pyrite::ast::SignalKind::Bumped,
-                format!("wait({})\n", tuning.bump_victim_freeze_ticks),
-            ),
         ] {
             let program = pyrite::parse(&source, &UnlockSet::all())
                 .expect("engine default handlers parse");
@@ -366,7 +369,7 @@ impl Sim {
             let cpu = bot.data.cpu;
             vm.grant(cpu);
             let outcome = {
-                let mut host = BotHost { world: &mut self.world, bot: id };
+                let mut host = BotHost { world: &mut self.world, bot: id, tuning_handler_init_ticks: self.tuning.handler_init_ticks };
                 vm.run(&mut host, &self.costs)
             };
             self.after_vm(id, vm, outcome);
@@ -409,15 +412,8 @@ impl Sim {
                     continue;
                 }
                 bot.data.hp = (bot.data.hp + amount).min(bot.data.max_hp);
-                if bot.data.hurt_fired {
-                    let threshold = bot
-                        .vm
-                        .as_ref()
-                        .and_then(|vm| vm.hurt_threshold())
-                        .unwrap_or(50);
-                    if bot.data.hp * 100 >= bot.data.max_hp * threshold {
-                        bot.data.hurt_fired = false;
-                    }
+                if bot.data.hurt_fired && bot.data.hp * 100 >= bot.data.max_hp * 50 {
+                    bot.data.hurt_fired = false; // fixed Damaged threshold
                 }
             }
         }
@@ -728,7 +724,7 @@ impl Sim {
         bot.data.action = None;
         let mut vm = bot.vm.take().expect("vm present between phases");
         {
-            let mut host = BotHost { world: &mut self.world, bot: id };
+            let mut host = BotHost { world: &mut self.world, bot: id, tuning_handler_init_ticks: self.tuning.handler_init_ticks };
             vm.resolve_action(result, &mut host, &self.costs);
         }
         if let Some(bot) = self.world.bots.get_mut(&id) {
@@ -1274,13 +1270,9 @@ impl Sim {
             self.raise_signal(id, Signal::Death);
             return;
         }
-        let threshold_pct = self
-            .world
-            .bots
-            .get(&id)
-            .and_then(|b| b.vm.as_ref())
-            .and_then(|vm| vm.hurt_threshold())
-            .unwrap_or(50);
+        // Fixed Damaged threshold (custom thresholds went with the old
+        // per-signal handler syntax; can return as an on signal(s, n) param).
+        let threshold_pct = 50;
         let bot = self.world.bots.get_mut(&id).expect("bot exists");
         if !bot.data.hurt_fired && hp * 100 < max_hp * threshold_pct {
             bot.data.hurt_fired = true;
@@ -1292,7 +1284,7 @@ impl Sim {
         let Some(bot) = self.world.bots.get_mut(&id) else { return RaiseOutcome::Ignored };
         let mut vm = bot.vm.take().expect("vm present between phases");
         let outcome = {
-            let mut host = BotHost { world: &mut self.world, bot: id };
+            let mut host = BotHost { world: &mut self.world, bot: id, tuning_handler_init_ticks: self.tuning.handler_init_ticks };
             vm.raise(signal, &mut host, &self.costs)
         };
         match outcome {
