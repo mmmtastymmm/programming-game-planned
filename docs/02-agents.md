@@ -23,7 +23,7 @@ The universal base statline (the floor — roughly the worst of every option fro
 | Sensors | 5 tiles |
 | Module slots | 1 |
 
-**Identity is earned, not printed.** A fresh print is slow, fragile, dim-eyed, and nearly empty-handed — the same sorry machine every time. What it becomes is written by what it does: XP tracks grow the body, modules extend it, quirks bend it. The old sensing/carrying/surviving triangle didn't disappear — it moved from a print-time class picker to a lifetime of behavior. (Which tracks grow which body stats, and whether slots ever grow: Q66.)
+**Identity is earned, not printed.** A fresh print is slow, fragile, dim-eyed, and nearly empty-handed — the same sorry machine every time. What it becomes is written by what it does — and by simply lasting: XP tracks grow the body (HP by Age, speed by Mileage), total XP builds out the frame (slots), modules extend it, quirks bend it. The old sensing/carrying/surviving triangle didn't disappear — it moved from a print-time class picker to a lifetime of behavior. Identical rookies are the point: divergence starts at the first tick, and the print-time identity choice relocated to the first module + the color.
 
 ## The Stat Sheet
 
@@ -38,17 +38,17 @@ Domains: **Compute** (how well it thinks), **Body** (survives and carries), **Se
 | Domain | Stat | Base | Grown by | What it buys you |
 |---|---|---|---|---|
 | Compute | **Cycles per tick** | 1 | **Upgrade Station** (walk there, pay Chips) | The speed of thought. Every Pyrite operation costs cycles, so this is the exchange rate between *smart* and *slow*: a 1-cycle bot can run your scan-and-coordinate masterpiece — it'll just stand there thinking between moves. The single most contested stat in the game. |
-| Compute | **Program memory** | 32 lines | Upgrade Station | The longest color program this bot can receive at deploy. A colony's code can only be as ambitious as the memory of the bots that must run it (Q52). |
+| Compute | **Program memory** | 32 lines | Upgrade Station | The longest color program this bot can receive at deploy. Each color's deployed artifact sets a **hardware bar** its printer enforces — under-spec bots simply aren't claimed ([01-language.md](01-language.md), Q52 answered). |
 | Compute | **Variable slots** | 8 names | Upgrade Station | How many distinct names the program may bind — checked at deploy, like program memory. |
 | Compute | **Stack depth** | 4 frames | Upgrade Station | How deep `def` calls nest; what makes recursion viable. Overflow is an ordinary fault — chip damage and restart. |
 | Compute | **Log ring buffer** | 8 entries | Upgrade Station | How much story survives: richer `upload_log()` telemetry, richer Black Boxes, richer forced boot uploads. The forensics stat. |
 | Compute | **Coprocessor** | absent | Upgrade Station | Think *while* an action resolves. Without it, a blocked bot is a paused bot; with it, travel time is compute time. |
-| Body | **Max HP** | 40 | — (Q66 — Combat is the obvious owner) | Abuse before the wreck. Doubly load-bearing: the Damaged line and the hurt signal are *percentages of this* — more HP also widens the healthy band. |
+| Body | **Max HP** | 40 | **Age track**: every tick survived — old bots are tough bots | Abuse before the wreck. Doubly load-bearing: the Damaged line and the hurt signal are *percentages of this* — more HP also widens the healthy band. |
 | Body | **Damage taken** | 100% of incoming | — (by design) | Deliberately **no armor stat** — HP is the whole defense, so combat math stays legible and a bigger gun is always a bigger gun. Only quirks scale incoming damage, and only from specific sources. |
 | Body | **Self-repair** | 1 HP / 1000 ticks | **Regen track**: every HP self-repaired | Old scars fade on their own — and fade faster on bots that have healed a lot. Never combat-relevant; Repair Bays and field-repair are the real medicine. |
-| Body | **Move rate** | 14 ticks per tile | Hauling L3: +10% while loaded (general speed: Q66) | Response time and hauling throughput. Terrain multiplies it ([05-terrain.md](05-terrain.md)), so the map decides how much earned speed is worth. |
+| Body | **Move rate** | 14 ticks per tile | **Mileage track**: every tile traveled; Hauling L3: +10% while loaded | Response time and hauling throughput. Terrain multiplies it ([05-terrain.md](05-terrain.md)), so the map decides how much earned speed is worth. |
 | Body | **Cargo capacity** | 4 | Hauling: +10%/level | Fewer round trips. Since travel is time and time is cycles not spent working, cargo is secretly a compute stat. |
-| Body | **Module slots** | 1 | — (Q66) | No longer a print-time choice — every bot starts with one slot, so *which* module fills it is the identity decision. Whether slots ever grow (XP milestone? rare unlock? never?) is Q66. |
+| Body | **Module slots** | 1 | **total-XP milestones**: +1 slot at thresholds (tuning), cap 3 | Every bot starts with one slot, so *which* module fills it is the identity decision. Veterancy literally builds out the frame: total XP across all tracks unlocks the 2nd and 3rd slots — the old chassis range, now earned. |
 | Senses | **Sensor range** | 5 tiles | Scouting: +1/level; Combat L3: +1 vs enemies | The query horizon: `closest()`, `exists()`, `scan_*()` and eyes-only fog reveal all cap here. A blind bot isn't dumb — it's uninformed, and no cycle budget fixes that. (Where base sight lives: Q53; reveal radius vs. query radius, and what per-kind bonuses actually extend: Q57.) |
 | Senses | **Signature** | 0 | **Hiding track**: every time an enemy bot perceives it — the more it's seen, the better it hides | *Proposed* (Q54): how far away enemies perceive this bot — they see it at `their sensor range + your signature`. The formal home for every "enemies sense this bot at ±N" effect. |
 | Tools | **Damage** | weapon module | Combat: +5%/level | Kill speed — which in the wreck economy is also *rescue-denial* speed. |
@@ -66,23 +66,23 @@ Domains: **Compute** (how well it thinks), **Body** (survives and carries), **Se
 | Survival | **Print time** | ~10 s | **Print track**: every time this bot is printed (where print XP lives across destruction: Q68) | Reprint turnaround. Fleet resilience is really countdown + print time: how long a hole in the line stays a hole. |
 | Survival | **Upkeep draw** | per-bot Energy + Steel (`upkeep.ron`) | *derived* — a sum over the bot's stats and upgrades | What the colony pays per tick to keep it. Veterans cost more to run — power is priced. Individually invisible, collectively the real population cap: sustained excess → brownout → scrap recalls. |
 
-Reading the column: **compute is bought, not practiced** — walked to an Upgrade Station and paid for in Chips, never occupying a module slot ([06-progression.md](06-progression.md), [03-resources.md](03-resources.md)). The passive Survival stats level **by happening** — flinching, booting, healing, being seen, being printed all train the machine they happen to. **Salvage profile and upkeep are derived sums** — they scale with everything else, so a veteran is simultaneously pricier to run and juicier to kill. The remaining — are engine facts (Damaged line), policy knobs (hurt line), design refusals (no armor), module territory (XP preserved), or the true growth gaps — **max HP, general move rate, module slots** — of Q66.
+Reading the column: **compute is bought, not practiced** — walked to an Upgrade Station and paid for in Chips, never occupying a module slot ([06-progression.md](06-progression.md), [03-resources.md](03-resources.md)). The passive Survival stats level **by happening** — flinching, booting, healing, being seen, being printed all train the machine they happen to. **Salvage profile and upkeep are derived sums** — they scale with everything else, so a veteran is simultaneously pricier to run and juicier to kill. The remaining — are engine facts (Damaged line), policy knobs (hurt line), design refusals (no armor), or module territory (XP preserved). Every body stat now has an earned path: **brains are bought, the body is earned** (Q66, answered).
 
 Interpreter *costs* aren't bot stats — they live in `costs.ron` — but they support **per-bot overlays**: a quirk that makes `send()` cheaper or `if` pricier is a bot-local overlay on the cost table, the exact mechanism biome overlays already use per-map ([01-language.md](01-language.md)). Resolution: base table → biome overlay → per-bot quirk overlay, floored at 0.
 
 ### The ledger — per-bot facts that aren't dials
 
-Riding alongside the stats: **color** (program slot), **program version**, **XP per track** (5 task + 6 body), **quirk list**, **local log contents**, **cargo held**. XP and quirks are the two ledger entries that reach back and modify the sheet above.
+Riding alongside the stats: **color** (program slot), **program version**, **XP per track** (5 task + 8 body), **quirk list**, **local log contents**, **cargo held**. XP and quirks are the two ledger entries that reach back and modify the sheet above.
 
 ### Modifier pipeline (deterministic)
 
 One fixed order, integer math:
 
-> **base (universal print / tool) → hardware → XP perks → quirks → state (Damaged, brownout, Corruption, loaded, terrain)** → clamp (cycles/tick and move rate never below 1).
+> **base (universal print / tool) → hardware → XP perks → quirks → state (Damaged, brownout, Corruption, loaded, terrain)** → clamp (cycles/tick and move rate never below 1 stored unit — see Granularity below).
 
 Percentages are integer percents of the running subtotal; within a layer, effects apply in stable list order (purchase order then slot order for hardware, acquisition order for quirks). Every stat's data entry declares its **improvement direction** — cargo up is better, move rate *down* is better; "Grown by" in the table above always means *improved* — and rounding is **pessimistic**: fractional results round toward worse-for-the-bot (gains floor, penalties ceil), so the tiebreak is uniform and replay-stable. The pipeline is sim state — same inputs, same sheet, every machine ([08-multiplayer.md](08-multiplayer.md)).
 
-**Granularity warning (Q56):** integer percents are dead on small bases. Brownout's −50% can't touch a stock 1-cycle bot (0.5 floors to 0, clamps back to 1) — as written, the colony's core over-extension penalty *only punishes upgraded CPUs*. Hauling's +10% of the base 4 cargo is +0; Building's +10% of 1 progress/tick is +0 — and the universal floor statline means *every* bot now starts on these small bases. Before these numbers are implemented, either stats store fine-grained units (a centicycle budget, deci-cargo — the millitile precedent) or small-base percent perks become flat values.
+**Granularity (Q56, answered):** stats that take percent modifiers store **fine-grained integer units**. The cycle budget is stored in **centicycles** (stock bot = 100/tick — brownout's −50% leaves 50, so the over-extension penalty finally reaches stock CPUs, accumulating to one op every two ticks); cargo, build/repair progress, and move rate store **deci-units** (the millitile precedent — Hauling's +10% on base-4 cargo is a real +0.4 that compounds across levels). Each stat's `stats.ron` entry declares its **`unit_scale`**; the pipeline runs entirely in stored units with the same pessimistic rounding, and the UI displays human units. Flat-only stats (HP, slots, sensor tiles) stay whole. No percent perk needs converting to flat — the bases just stopped being small. Implementation note: the VM's cycle accounting migrates to centicycles, a replay-hash change that lands before any stat modifiers ship.
 
 Design intent: **stats scale execution, never decisions.** XP, hardware, and quirks make the numbers bigger or smaller; only the program decides what the bot *does* — a stat sheet never rescues bad code (pillar 1).
 
@@ -146,6 +146,8 @@ These five are the **task tracks** — earned by what the program chooses to do.
 
 | Track | Earned by | Improves |
 |---|---|---|
+| Age | every tick survived | max HP — the machine that lasts, lasts |
+| Mileage | every tile traveled | move rate — worn-in bearings |
 | Regen | every HP self-repaired | self-repair rate |
 | Hiding | every time an enemy bot perceives this bot | signature — the more it's seen, the better it hides (Q54) |
 | Flinch | every flinch endured | flinch duration |
@@ -153,12 +155,14 @@ These five are the **task tracks** — earned by what the program chooses to do.
 | Learning | XP earned in any other track | XP gain multiplier |
 | Print | every time this bot is printed | print time (where this XP lives across destruction: Q68) |
 
-Same quadratic curve, same L5 cap, all tuning. The theme is scar tissue: **the machine gets good at whatever keeps happening to it** — a bot that has flinched a hundred times flinches fast, a bot that keeps getting spotted learns to be unseen. Two sharp edges live in Q68: use-based growth invites deliberate farming (parading before enemy sensors to level Hiding, crash-looping to level Flinch), and the Print track fights the XP-dies-with-the-bot rule — a reprint is a new bot, so if print XP dies too, the track can never level.
+Same quadratic curve, same L5 cap, all tuning. The theme is scar tissue: **the machine gets good at whatever keeps happening to it** — a bot that has flinched a hundred times flinches fast, a bot that keeps getting spotted learns to be unseen, and a bot that has simply *survived* is harder to kill. Age is the pillar-3 stat distilled: its XP is literally time, so what death costs you is unrecoverable by definition — you can reprint the program in seconds, but the replacement is *young*. Two sharp edges live in Q68: use-based growth invites deliberate farming (parading before enemy sensors to level Hiding, laps around the base to level Mileage), and the Print track fights the XP-dies-with-the-bot rule — a reprint is a new bot, so if print XP dies too, the track can never level.
+
+The dichotomy that organizes all growth: **brains are bought, the body is earned.** Compute comes from the Upgrade Station for Chips; every body stat comes from the bot's lived history — tracks for the stats, total-XP milestones for the frame itself (module slots).
 
 Design intent:
 
 - **XP follows behavior, not assignment.** There's no class picker; a bot whose program mines becomes a good miner. The program *is* the specialization mechanism — reinforcing pillar 1.
-- **The tracks are the body plan.** With chassis classes gone, leveling carries *all* physical differentiation: the perk table already grows cargo (Hauling), sensors (Scouting), loaded speed (Hauling L3) and work rates — but max HP, general move rate, and module slots currently have no track that grows them. Which tracks pick those up (Combat → HP is the obvious first) is Q66.
+- **The tracks are the body plan.** With chassis classes gone, leveling carries *all* physical differentiation: task tracks grow the working stats (cargo, sensors, work rates), body tracks grow the machine itself (HP by Age, speed by Mileage), and total XP builds out the frame (slots). Nothing physical is chosen at print time; everything physical is a biography.
 - **Perks are task-relevant** (requirement 7): a veteran miner mines faster/more, a veteran fighter hits harder. Cross-track XP is tracked independently; hybrid programs produce hybrid veterans, but slower.
 - **Total loss on destruction** (requirement 8) makes veterans strategic assets. The pressure valves: hurt-handler retreat programs, Repair Bays, escorts for L5 miners, field-repair rescue during the self-destruct countdown, and (late) the Backup Core module. Targeting enemy veterans — and double-handling or salvage-sniping them to deny rescue — becomes PvP strategy.
 
@@ -189,7 +193,10 @@ Levels are visible to **everyone** (pillar 2: transparency) — a veteran bot ha
 
 ## Decided
 
-- **One universal chassis — no classes** (2026-07-13, supersedes the Scamp/Drudge/Bulwark/Artisan table). Every print is identical, starting at the floor of the old class options (HP 40, move 14 ticks/tile, cargo 4, sensors 5, slots 1 — all tuning). Specialization is earned, never printed: XP tracks, modules, and quirks are the only differentiation. Anything that was class-gated re-gates on tool modules (field repair needs a build/repair tool, not "an Artisan"). Growth gaps and slot growth: Q66.
+- **One universal chassis — no classes** (2026-07-13, supersedes the Scamp/Drudge/Bulwark/Artisan table). Every print is identical, starting at the floor of the old class options (HP 40, move 14 ticks/tile, cargo 4, sensors 5, slots 1 — all tuning). Specialization is earned, never printed: XP tracks, modules, and quirks are the only differentiation. Anything that was class-gated re-gates on tool modules (field repair needs a build/repair tool, not "an Artisan").
+- **Percent-modified stats store fine-grained units** (2026-07-14, answers Q56). Cycle budget in centicycles, cargo/progress/move in deci-units; per-stat `unit_scale` in `stats.ron`; pipeline math in stored units, human units in the UI; flat-only stats stay whole. Brownout finally bites stock CPUs; small percent perks stop rounding to +0. VM cycle accounting migrates → replay-hash change, before stat modifiers ship.
+- **A color's code sets its printer's hardware bar** (2026-07-14, answers Q52). Deploy computes the artifact's program-memory/variable-slot requirements; the printer claims only bots whose bought hardware fits (a filter before the selection key). A deploy is a rule edit — immediate re-allocation, under-spec members drop to the remainder, the editor warns and proceeds. The remainder color is capped at stock hardware (32 lines, 8 names) so it can receive anyone. Quirks never enter deploy-time stats.
+- **The body grows by living** (2026-07-14, answers Q66). **Max HP grows with the Age body track** — its XP is ticks survived, so toughness is seniority and death's cost is unrecoverable time. **Move rate grows with the Mileage track** (tiles traveled). **Module slots unlock at total-XP milestones** (+1 at thresholds, cap 3 — the old chassis range, now earned). The organizing dichotomy: **brains are bought** (Upgrade Station, Chips), **the body is earned** (lived history). Identical rookies stay by design — divergence begins at tick one.
 - **Compute is bought at the Upgrade Station; passive stats level by happening** (2026-07-13). All six compute stats upgrade per-bot at a player-placed **Upgrade Station** the bot must physically walk to (Chips — [03-resources.md](03-resources.md), catalog in [06-progression.md](06-progression.md)); compute never occupies a module slot, so slots are pure tool territory. Six use-based **body tracks** (Regen, Hiding, Flinch, Boot, Learning, Print) level the passive stats by the event itself happening; **salvage profile and upkeep are derived sums** over the sheet — veterans cost more and are worth more dead. Edges (farming, print-XP residence, station mechanics): Q68.
 - **Perks apply to the bot only.** No colony-wide or program-attached XP effects — the veteran *is* the asset, which is what gives death its sting.
 - **Quadratic XP increments** — level *n* costs 100×*n* additional XP (see XP curve table).
