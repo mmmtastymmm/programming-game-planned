@@ -78,12 +78,30 @@ pub(super) fn highlight_pyrite(
             }
             (byte_at(i), HL_COMMENT)
         } else if c == '"' {
-            i += 1;
-            while i < n && chars[i].1 != '"' && chars[i].1 != '\n' {
-                i += if chars[i].1 == '\\' { 2 } else { 1 };
-            }
-            if i < n && chars[i].1 == '"' {
+            let triple = chars.get(i + 1).map(|&(_, c)| c) == Some('"')
+                && chars.get(i + 2).map(|&(_, c)| c) == Some('"');
+            if triple {
+                // `"""docstring"""` — may span lines; unterminated runs to
+                // the end of the buffer (still best-effort, never fails).
+                i += 3;
+                while i < n
+                    && !(chars[i].1 == '"'
+                        && chars.get(i + 1).map(|&(_, c)| c) == Some('"')
+                        && chars.get(i + 2).map(|&(_, c)| c) == Some('"'))
+                {
+                    i += 1;
+                }
+                if i < n {
+                    i += 3;
+                }
+            } else {
                 i += 1;
+                while i < n && chars[i].1 != '"' && chars[i].1 != '\n' {
+                    i += if chars[i].1 == '\\' { 2 } else { 1 };
+                }
+                if i < n && chars[i].1 == '"' {
+                    i += 1;
+                }
             }
             (byte_at(i), HL_STRING)
         } else if c.is_ascii_digit() {

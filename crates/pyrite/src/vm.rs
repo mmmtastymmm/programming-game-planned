@@ -21,7 +21,7 @@
 
 use crate::ast::{BinOp, Expr, ExprId, Pattern, Program, SignalKind, Stmt, StmtId, UnOp};
 use crate::costs::CostTable;
-use crate::value::{EnumValue, Value};
+use crate::value::{DictKey, EnumValue, Value};
 use std::collections::BTreeMap;
 use std::rc::Rc;
 
@@ -165,10 +165,16 @@ enum Work {
     /// Marker popped when the forced handler_init() completes — flips the
     /// VM out of "entry ritual" state (inspector visibility).
     InitDone,
-    MethodExec { name: String, argc: usize, line: u32 },
+    /// `base_name` is the variable the base expression read, when it was a
+    /// bare name — mutating methods (`xs.append(v)`) write back through it
+    /// (containers are values; mutation is name-rooted).
+    MethodExec { name: String, argc: usize, line: u32, base_name: Option<String> },
     EnumCtorExec { enum_name: String, variant: String, argc: usize },
     MakeList { count: usize },
+    MakeDict { count: usize },
     IndexGet,
+    /// `name[index] = value` — pops value then index, mutates the variable.
+    IndexSet { name: String },
     AttrGet { name: String },
     ReturnNow,
     FrameEnd,
@@ -599,6 +605,7 @@ impl Vm {
             Work::Stmt(id) => match self.active.stmt(*id) {
                 Stmt::Expr { .. } => costs.statement,
                 Stmt::Assign { .. } => 0, // StoreVar charges `assign`
+                Stmt::IndexAssign { .. } => 0, // IndexSet charges `list_op`
                 Stmt::If { .. } => 0,     // IfArm charges per arm
                 Stmt::While { .. } => 0,  // WhileIter charges per iteration
                 Stmt::For { .. } => 0,    // ForIter charges per iteration
@@ -638,7 +645,9 @@ impl Vm {
             Work::MethodExec { name, .. } => costs.builtin_cost(name),
             Work::EnumCtorExec { .. } => costs.enum_ctor,
             Work::MakeList { .. } => costs.list_op,
+            Work::MakeDict { .. } => costs.list_op,
             Work::IndexGet => costs.list_op,
+            Work::IndexSet { .. } => costs.list_op,
             Work::AttrGet { .. } => costs.attr,
             Work::ReturnNow => 0,
             Work::FrameEnd => 0,
@@ -715,6 +724,24 @@ impl Vm {
         }
     }
 
+    /// Write back a mutated container to where the variable LIVES —
+    /// current frame if it's a local, else the globals (matching Python:
+    /// `xs[0] = 1` in a def mutates the outer list; only `xs = ...` makes
+    /// a local). Builtin constants aren't assignable.
+    fn store_existing(&mut self, name: String, value: Value, host: &mut dyn Host, costs: &CostTable) {
+        if let Some(frame) = self.frames.last_mut()
+            && frame.locals.contains_key(&name)
+        {
+            frame.locals.insert(name, value);
+            return;
+        }
+        if self.globals.contains_key(&name) {
+            self.globals.insert(name, value);
+            return;
+        }
+        self.fault(format!("cannot mutate '{name}' — not a variable"), host, costs);
+    }
+
     fn pop_value(&mut self) -> Value {
         self.values.pop().expect("value stack underflow is a VM bug")
     }
@@ -743,6 +770,12 @@ impl Vm {
                     Stmt::Assign { name, value, .. } => {
                         self.work.push(Work::StoreVar(name));
                         self.work.push(Work::Eval(value));
+                    }
+                    Stmt::IndexAssign { name, index, value, .. } => {
+                        // Index evaluates before value (left-to-right).
+                        self.work.push(Work::IndexSet { name });
+                        self.work.push(Work::Eval(value));
+                        self.work.push(Work::Eval(index));
                     }
                     Stmt::If { .. } => {
                         self.work.push(Work::IfArm { stmt: id, arm: 0 });
@@ -797,6 +830,13 @@ impl Vm {
                             self.work.push(Work::Eval(item));
                         }
                     }
+                    Expr::Dict(entries) => {
+                        self.work.push(Work::MakeDict { count: entries.len() });
+                        for &(key, value) in entries.iter().rev() {
+                            self.work.push(Work::Eval(value));
+                            self.work.push(Work::Eval(key));
+                        }
+                    }
                     Expr::Index { base, index } => {
                         self.work.push(Work::IndexGet);
                         self.work.push(Work::Eval(index));
@@ -824,7 +864,18 @@ impl Vm {
                     }
                     Expr::MethodCall { base, name, args, line } => {
                         self.current_line = line;
-                        self.work.push(Work::MethodExec { name, argc: args.len(), line });
+                        // A bare-name base lets mutating methods (append)
+                        // write the container back to its variable.
+                        let base_name = match program.expr(base) {
+                            Expr::Name(n) => Some(n.clone()),
+                            _ => None,
+                        };
+                        self.work.push(Work::MethodExec {
+                            name,
+                            argc: args.len(),
+                            line,
+                            base_name,
+                        });
                         for &arg in args.iter().rev() {
                             self.work.push(Work::Eval(arg));
                         }
@@ -956,8 +1007,17 @@ impl Vm {
                 Value::List(items) => {
                     self.work.push(Work::ForIter { stmt, items, idx: 0 });
                 }
+                Value::Dict(entries) => {
+                    // Keys, in sorted order (deterministic by construction).
+                    let keys: Vec<Value> = entries.keys().map(|k| k.to_value()).collect();
+                    self.work.push(Work::ForIter { stmt, items: keys, idx: 0 });
+                }
                 other => {
-                    self.fault(format!("for-in requires a list, got {}", other.type_name()), host, costs);
+                    self.fault(
+                        format!("for-in requires a list or dict, got {}", other.type_name()),
+                        host,
+                        costs,
+                    );
                 }
             },
             Work::ForIter { stmt, items, idx } => {
@@ -1048,6 +1108,44 @@ impl Vm {
                     let body = func.body.clone();
                     self.work.push(Work::FrameEnd);
                     self.push_block(&body);
+                } else if name == "len" {
+                    // Pure container builtins live in the VM, not the host.
+                    match args.as_slice() {
+                        [Value::List(items)] => self.values.push(Value::Int(items.len() as i64)),
+                        [Value::Dict(entries)] => {
+                            self.values.push(Value::Int(entries.len() as i64));
+                        }
+                        [Value::Str(s)] => {
+                            self.values.push(Value::Int(s.chars().count() as i64));
+                        }
+                        [other] => {
+                            self.fault(
+                                format!("len() requires a container, got {}", other.type_name()),
+                                host,
+                                costs,
+                            );
+                        }
+                        _ => self.fault("len() takes one argument".into(), host, costs),
+                    }
+                } else if name == "range" {
+                    let bounds = match args.as_slice() {
+                        [Value::Int(n)] => Some((0, *n)),
+                        [Value::Int(a), Value::Int(b)] => Some((*a, *b)),
+                        _ => None,
+                    };
+                    let Some((lo, hi)) = bounds else {
+                        self.fault("range() takes one or two int arguments".into(), host, costs);
+                        return;
+                    };
+                    if hi - lo > costs.range_cap as i64 {
+                        self.fault(
+                            format!("range too large (cap {})", costs.range_cap),
+                            host,
+                            costs,
+                        );
+                        return;
+                    }
+                    self.values.push(Value::List((lo..hi).map(Value::Int).collect()));
                 } else {
                     let ctx = CallCtx { line: self.current_line, last_fault: self.last_fault.as_deref() };
                     match host.call(&name, &args, ctx) {
@@ -1058,30 +1156,116 @@ impl Vm {
                 }
             }
 
-            Work::MethodExec { name, argc, line } => {
+            Work::MethodExec { name, argc, line, base_name } => {
                 self.current_line = line;
                 let args: Vec<Value> = self.values.split_off(self.values.len() - argc);
                 let base = self.pop_value();
                 match (name.as_str(), base) {
-                    ("expect", Value::Enum(e)) if e.enum_name == Value::RESULT_ENUM => {
+                    // --- container methods ---
+                    ("append", Value::List(mut items)) => {
+                        let [item] = args.as_slice() else {
+                            self.fault("append() takes one argument".into(), host, costs);
+                            return;
+                        };
+                        let Some(base_name) = base_name else {
+                            // Containers are values: mutating a temporary
+                            // would silently vanish, so it's a fault.
+                            self.fault(
+                                "append() needs a list variable (containers are values)".into(),
+                                host,
+                                costs,
+                            );
+                            return;
+                        };
+                        items.push(item.clone());
+                        self.store_existing(base_name, Value::List(items), host, costs);
+                        self.values.push(Value::Unit);
+                    }
+                    ("append", other) => {
+                        self.fault(
+                            format!("append() requires a list, got {}", other.type_name()),
+                            host,
+                            costs,
+                        );
+                    }
+                    ("get", Value::Dict(entries)) => {
+                        let [key] = args.as_slice() else {
+                            self.fault("get() takes one argument (the key)".into(), host, costs);
+                            return;
+                        };
+                        match DictKey::from_value(key.clone()) {
+                            Ok(key) => self.values.push(match entries.get(&key) {
+                                Some(v) => Value::option_some(v.clone()),
+                                None => Value::option_none(),
+                            }),
+                            Err(msg) => self.fault(msg, host, costs),
+                        }
+                    }
+                    ("remove", Value::Dict(mut entries)) => {
+                        let [key] = args.as_slice() else {
+                            self.fault("remove() takes one argument (the key)".into(), host, costs);
+                            return;
+                        };
+                        let Some(base_name) = base_name else {
+                            self.fault(
+                                "remove() needs a dict variable (containers are values)".into(),
+                                host,
+                                costs,
+                            );
+                            return;
+                        };
+                        match DictKey::from_value(key.clone()) {
+                            Ok(key) => {
+                                let removed = entries.remove(&key);
+                                self.store_existing(base_name, Value::Dict(entries), host, costs);
+                                self.values.push(match removed {
+                                    Some(v) => Value::option_some(v),
+                                    None => Value::option_none(),
+                                });
+                            }
+                            Err(msg) => self.fault(msg, host, costs),
+                        }
+                    }
+                    ("keys", Value::Dict(entries)) => {
+                        let keys: Vec<Value> = entries.keys().map(|k| k.to_value()).collect();
+                        self.values.push(Value::List(keys));
+                    }
+                    ("values", Value::Dict(entries)) => {
+                        let values: Vec<Value> = entries.values().cloned().collect();
+                        self.values.push(Value::List(values));
+                    }
+                    (m @ ("get" | "remove" | "keys" | "values"), other) => {
+                        self.fault(
+                            format!("{m}() requires a dict, got {}", other.type_name()),
+                            host,
+                            costs,
+                        );
+                    }
+                    ("expect", Value::Enum(e))
+                        if e.enum_name == Value::RESULT_ENUM
+                            || e.enum_name == Value::OPTION_ENUM =>
+                    {
                         if !args.is_empty() {
                             self.fault("expect() takes no arguments".into(), host, costs);
-                        } else if e.variant == "Ok" {
+                        } else if e.variant == "Ok" || e.variant == "Some" {
                             let v = e.fields.into_iter().next().unwrap_or(Value::Unit);
                             self.values.push(v);
                         } else {
-                            // Err: fault with the carried message.
+                            // Err / None: fault with the carried message.
                             let msg = match e.fields.first() {
                                 Some(Value::Str(s)) => s.clone(),
                                 Some(other) => other.to_string(),
-                                None => "expect() on Result.Err".to_string(),
+                                None => format!("expect() on {}.{}", e.enum_name, e.variant),
                             };
                             self.fault(msg, host, costs);
                         }
                     }
                     ("expect", other) => {
                         self.fault(
-                            format!("expect() requires a Result, got {}", other.type_name()),
+                            format!(
+                                "expect() requires a Result or Option, got {}",
+                                other.type_name()
+                            ),
                             host,
                             costs,
                         );
@@ -1102,6 +1286,25 @@ impl Vm {
                 self.values.push(Value::List(items));
             }
 
+            Work::MakeDict { count } => {
+                let flat: Vec<Value> = self.values.split_off(self.values.len() - count * 2);
+                let mut entries = std::collections::BTreeMap::new();
+                let mut it = flat.into_iter();
+                while let (Some(k), Some(v)) = (it.next(), it.next()) {
+                    match DictKey::from_value(k) {
+                        // Duplicate keys: last one wins, Python-style.
+                        Ok(key) => {
+                            entries.insert(key, v);
+                        }
+                        Err(msg) => {
+                            self.fault(msg, host, costs);
+                            return;
+                        }
+                    }
+                }
+                self.values.push(Value::Dict(entries));
+            }
+
             Work::IndexGet => {
                 let index = self.pop_value();
                 let base = self.pop_value();
@@ -1115,9 +1318,59 @@ impl Vm {
                             self.values.push(items[effective as usize].clone());
                         }
                     }
+                    (Value::Dict(entries), key) => match DictKey::from_value(key) {
+                        Ok(key) => match entries.get(&key) {
+                            Some(v) => self.values.push(v.clone()),
+                            // Missing key faults, like Python's KeyError —
+                            // `d.get(k)` is the fault-free Option form.
+                            None => {
+                                self.fault(format!("key {key} not found"), host, costs);
+                            }
+                        },
+                        Err(msg) => self.fault(msg, host, costs),
+                    },
                     (base, index) => {
                         self.fault(
                             format!("cannot index {} with {}", base.type_name(), index.type_name()),
+                            host,
+                            costs,
+                        );
+                    }
+                }
+            }
+
+            Work::IndexSet { name } => {
+                let value = self.pop_value();
+                let index = self.pop_value();
+                let Some(container) = self.lookup(&name) else {
+                    self.fault(format!("read of unset variable '{name}'"), host, costs);
+                    return;
+                };
+                match (container, index) {
+                    (Value::List(mut items), Value::Int(i)) => {
+                        let len = items.len() as i64;
+                        let effective = if i < 0 { i + len } else { i };
+                        if effective < 0 || effective >= len {
+                            self.fault(format!("index {i} out of range (len {len})"), host, costs);
+                        } else {
+                            items[effective as usize] = value;
+                            self.store_existing(name, Value::List(items), host, costs);
+                        }
+                    }
+                    (Value::Dict(mut entries), key) => match DictKey::from_value(key) {
+                        Ok(key) => {
+                            entries.insert(key, value);
+                            self.store_existing(name, Value::Dict(entries), host, costs);
+                        }
+                        Err(msg) => self.fault(msg, host, costs),
+                    },
+                    (container, index) => {
+                        self.fault(
+                            format!(
+                                "cannot index {} with {}",
+                                container.type_name(),
+                                index.type_name()
+                            ),
                             host,
                             costs,
                         );
@@ -1218,6 +1471,22 @@ fn binary_op(op: BinOp, lhs: Value, rhs: Value) -> Result<Value, String> {
     match op {
         Eq => Ok(Value::Bool(lhs == rhs)),
         NotEq => Ok(Value::Bool(lhs != rhs)),
+        // Membership: list item, dict key, or substring.
+        In => match (&lhs, &rhs) {
+            (item, Value::List(items)) => Ok(Value::Bool(items.contains(item))),
+            (key, Value::Dict(entries)) => {
+                let key = DictKey::from_value(key.clone())?;
+                Ok(Value::Bool(entries.contains_key(&key)))
+            }
+            (Value::Str(needle), Value::Str(haystack)) => {
+                Ok(Value::Bool(haystack.contains(needle.as_str())))
+            }
+            (l, r) => Err(format!(
+                "'in' requires a container on the right, got {} in {}",
+                l.type_name(),
+                r.type_name()
+            )),
+        },
         Add | Sub | Mul | FloorDiv | Mod | Lt | Gt | Le | Ge => {
             let (Value::Int(a), Value::Int(b)) = (&lhs, &rhs) else {
                 return Err(format!(

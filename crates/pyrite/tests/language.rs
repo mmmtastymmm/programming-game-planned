@@ -684,7 +684,7 @@ fn expect_on_non_result_faults() {
     vm.grant(100);
     vm.run(&mut host, &costs);
     let dump = host.calls.iter().find(|(n, _)| n == "upload_crash_dump").expect("must fault");
-    assert_eq!(dump.1, vec![Value::Str("expect() requires a Result, got int".into())]);
+    assert_eq!(dump.1, vec![Value::Str("expect() requires a Result or Option, got int".into())]);
 }
 
 #[test]
@@ -821,4 +821,438 @@ fn handler_init_window_is_observable() {
     assert!(!vm.in_handler_init(), "ritual complete — now in the handler body");
     assert!(vm.active_signal().is_some(), "still handling the signal");
     assert!(call_names(&host).contains(&"wait"), "the body's wait(35) issued");
+}
+
+// --- modules & imports (docs/01 "Modules & the Program Library") ---
+
+/// A deploy artifact: the editor inlines the library as `module` blocks;
+/// `from m import f` binds the function bare.
+#[test]
+fn from_import_binds_module_functions_bare() {
+    let src = "\
+module hauling:
+    def haul_home():
+        deposit()
+
+from hauling import haul_home
+
+haul_home()
+halt()
+";
+    let (mut vm, mut host, costs) = vm_for(src);
+    vm.grant(100);
+    vm.run(&mut host, &costs);
+    assert!(call_names(&host).contains(&"deposit"));
+}
+
+/// `import m` enables qualified `m.f()` calls.
+#[test]
+fn plain_import_enables_qualified_calls() {
+    let src = "\
+module hauling:
+    def haul_home():
+        deposit()
+
+import hauling
+
+hauling.haul_home()
+halt()
+";
+    let (mut vm, mut host, costs) = vm_for(src);
+    vm.grant(100);
+    vm.run(&mut host, &costs);
+    assert!(call_names(&host).contains(&"deposit"));
+}
+
+/// Module functions call their siblings bare, including forward references.
+#[test]
+fn module_functions_resolve_sibling_calls() {
+    let src = "\
+module hauling:
+    def haul_home():
+        go_home()
+        deposit()
+    def go_home():
+        beep()
+
+from hauling import haul_home
+
+haul_home()
+halt()
+";
+    let (mut vm, mut host, costs) = vm_for(src);
+    vm.grant(1000);
+    vm.run(&mut host, &costs);
+    let names = call_names(&host);
+    assert!(names.contains(&"beep") && names.contains(&"deposit"));
+}
+
+/// Importing a module the source doesn't carry is a deploy error — the
+/// library has no module by that name.
+#[test]
+fn importing_an_unknown_module_is_an_error() {
+    let err = parse("import nosuch\n", &UnlockSet::all()).unwrap_err();
+    assert_eq!(err.kind, PyriteErrorKind::UnknownModule("nosuch".into()));
+    let err = parse("from nosuch import f\n", &UnlockSet::all()).unwrap_err();
+    assert_eq!(err.kind, PyriteErrorKind::UnknownModule("nosuch".into()));
+}
+
+/// `from m import f` must name a function the module actually defines.
+#[test]
+fn from_import_of_a_missing_function_is_an_error() {
+    let src = "\
+module hauling:
+    def haul_home():
+        deposit()
+
+from hauling import nosuch
+";
+    let err = parse(src, &UnlockSet::all()).unwrap_err();
+    assert_eq!(
+        err.kind,
+        PyriteErrorKind::UnknownModuleMember { module: "hauling".into(), name: "nosuch".into() }
+    );
+}
+
+/// Qualified calls require the plain import — carrying the module block
+/// alone is not enough.
+#[test]
+fn qualified_call_without_import_is_an_error() {
+    let src = "\
+module hauling:
+    def haul_home():
+        deposit()
+
+hauling.haul_home()
+";
+    let err = parse(src, &UnlockSet::all()).unwrap_err();
+    assert_eq!(err.kind, PyriteErrorKind::ModuleNotImported("hauling".into()));
+}
+
+/// Modules are pure libraries: a module that did things on import would be
+/// a program.
+#[test]
+fn statements_in_a_module_block_are_an_error() {
+    let src = "\
+module hauling:
+    mine()
+";
+    let err = parse(src, &UnlockSet::all()).unwrap_err();
+    assert_eq!(err.kind, PyriteErrorKind::StatementInModule);
+}
+
+/// A from-import can't shadow a local def (and vice versa).
+#[test]
+fn from_import_colliding_with_a_local_def_is_an_error() {
+    let src = "\
+module hauling:
+    def haul_home():
+        deposit()
+
+def haul_home():
+    deposit()
+
+from hauling import haul_home
+";
+    let err = parse(src, &UnlockSet::all()).unwrap_err();
+    assert_eq!(err.kind, PyriteErrorKind::DuplicateDefinition("haul_home".into()));
+}
+
+/// Imports are top-level declarations, like defs and handlers.
+#[test]
+fn imports_inside_blocks_are_an_error() {
+    let src = "\
+module hauling:
+    def haul_home():
+        deposit()
+
+if True:
+    import hauling
+";
+    let err = parse(src, &UnlockSet::all()).unwrap_err();
+    assert_eq!(err.kind, PyriteErrorKind::HandlerNotAtTopLevel);
+}
+
+/// Import lines carry nothing else — trailing tokens are errors, not
+/// silently-parsed statements.
+#[test]
+fn trailing_tokens_after_an_import_are_an_error() {
+    let src = "\
+module hauling:
+    def haul_home():
+        deposit()
+
+import hauling extra
+";
+    assert!(parse(src, &UnlockSet::all()).is_err());
+}
+
+// --- docstrings ---
+
+/// A leading bare string in a def body is its docstring: captured on the
+/// Function, stripped from the runtime block (free — it doesn't exist at
+/// runtime), and the rest of the body runs normally.
+#[test]
+fn docstrings_are_captured_and_stripped() {
+    let src = "\
+def haul():
+    \"\"\"Take cargo home.\"\"\"
+    deposit()
+
+haul()
+halt()
+";
+    let program = parse(src, &UnlockSet::all()).expect("docstring def parses");
+    let f = &program.functions["haul"];
+    assert_eq!(f.doc.as_deref(), Some("Take cargo home."));
+    assert_eq!(f.body.len(), 1, "docstring must not remain in the runtime body");
+
+    let (mut vm, mut host, costs) = vm_for(src);
+    vm.grant(100);
+    vm.run(&mut host, &costs);
+    assert!(call_names(&host).contains(&"deposit"));
+}
+
+/// Triple-quoted strings span lines; the content is raw with literal
+/// newlines.
+#[test]
+fn multi_line_docstrings_lex() {
+    let src = "\
+def haul():
+    \"\"\"Take cargo home.
+    Walks to the nearest depot.\"\"\"
+    deposit()
+";
+    let program = parse(src, &UnlockSet::all()).expect("multi-line docstring parses");
+    let doc = program.functions["haul"].doc.clone().unwrap();
+    assert!(doc.contains("Take cargo home.\n"));
+    assert!(doc.contains("Walks to the nearest depot."));
+}
+
+/// Python allows a docstring-only body; so do we (a documented no-op).
+#[test]
+fn docstring_only_def_is_legal() {
+    let src = "\
+def todo():
+    \"\"\"Not written yet.\"\"\"
+
+todo()
+halt()
+";
+    let (mut vm, mut host, costs) = vm_for(src);
+    vm.grant(100);
+    vm.run(&mut host, &costs);
+    assert!(call_names(&host).contains(&"halt"), "empty documented def returns cleanly");
+}
+
+/// Outside the docstring position a triple-quoted string is an ordinary
+/// string value.
+#[test]
+fn triple_quoted_strings_are_ordinary_values() {
+    let src = "\
+x = \"\"\"big \"quote\" here\"\"\"
+log(x)
+halt()
+";
+    let (mut vm, mut host, costs) = vm_for(src);
+    vm.grant(100);
+    vm.run(&mut host, &costs);
+    let logged = host.calls.iter().find(|(n, _)| n == "log").unwrap();
+    assert_eq!(logged.1[0], Value::Str("big \"quote\" here".into()));
+}
+
+/// An unclosed triple quote reports at the opener, not the end of file.
+#[test]
+fn unterminated_triple_quote_is_an_error() {
+    let err = parse("x = \"\"\"never closed\nmine()\n", &UnlockSet::all()).unwrap_err();
+    assert_eq!(err.kind, PyriteErrorKind::UnterminatedString);
+    assert_eq!(err.line, 1);
+}
+
+// --- containers (docs/01 Tier 5: lists & dicts, value semantics) ---
+
+/// Lists: append writes back through the variable, len() counts, index
+/// assignment mutates in place.
+#[test]
+fn list_append_len_and_index_assignment() {
+    let src = "\
+xs = [1, 2]
+xs.append(3)
+xs[0] = 9
+log(len(xs))
+log(xs[0])
+log(xs[2])
+halt()
+";
+    let (mut vm, mut host, costs) = vm_for(src);
+    vm.grant(1000);
+    vm.run(&mut host, &costs);
+    let logged: Vec<&Value> =
+        host.calls.iter().filter(|(n, _)| n == "log").map(|(_, a)| &a[0]).collect();
+    assert_eq!(logged, [&Value::Int(3), &Value::Int(9), &Value::Int(3)]);
+}
+
+/// Dicts: literals, key writes, reads, membership, len.
+#[test]
+fn dict_literal_write_read_membership() {
+    let src = "\
+d = {\"ore\": 3, \"scrap\": 1}
+d[\"ore\"] = 4
+d[7] = \"seven\"
+log(d[\"ore\"])
+log(len(d))
+log(\"scrap\" in d)
+log(\"gold\" in d)
+halt()
+";
+    let (mut vm, mut host, costs) = vm_for(src);
+    vm.grant(1000);
+    vm.run(&mut host, &costs);
+    let logged: Vec<&Value> =
+        host.calls.iter().filter(|(n, _)| n == "log").map(|(_, a)| &a[0]).collect();
+    assert_eq!(
+        logged,
+        [&Value::Int(4), &Value::Int(3), &Value::Bool(true), &Value::Bool(false)]
+    );
+}
+
+/// Missing keys fault on `d[k]`; `d.get(k)` is the fault-free Option form
+/// (and `.expect()` unwraps Options like Results).
+#[test]
+fn dict_missing_key_faults_and_get_returns_option() {
+    let (mut vm, mut host, costs) = vm_for("d = {1: 2}\nlog(d[9])\n");
+    vm.grant(100);
+    vm.run(&mut host, &costs);
+    let dump = host.calls.iter().find(|(n, _)| n == "upload_crash_dump").expect("must fault");
+    assert!(matches!(&dump.1[0], Value::Str(s) if s.contains("key 9 not found")));
+
+    let src = "\
+d = {1: 2}
+log(d.get(1).expect())
+match d.get(9):
+    case Option.Some(v):
+        log(v)
+    case Option.None:
+        log(\"absent\")
+halt()
+";
+    let (mut vm, mut host, costs) = vm_for(src);
+    vm.grant(1000);
+    vm.run(&mut host, &costs);
+    let logged: Vec<&Value> =
+        host.calls.iter().filter(|(n, _)| n == "log").map(|(_, a)| &a[0]).collect();
+    assert_eq!(logged, [&Value::Int(2), &Value::Str("absent".into())]);
+}
+
+/// Dict iteration is sorted key order — deterministic by construction,
+/// never insertion order.
+#[test]
+fn dict_iteration_is_sorted_key_order() {
+    let src = "\
+d = {\"zebra\": 1, \"ant\": 2, \"moth\": 3}
+for k in d:
+    log(k)
+for v in d.values():
+    log(v)
+halt()
+";
+    let (mut vm, mut host, costs) = vm_for(src);
+    vm.grant(1000);
+    vm.run(&mut host, &costs);
+    let logged: Vec<&Value> =
+        host.calls.iter().filter(|(n, _)| n == "log").map(|(_, a)| &a[0]).collect();
+    assert_eq!(
+        logged,
+        [
+            &Value::Str("ant".into()),
+            &Value::Str("moth".into()),
+            &Value::Str("zebra".into()),
+            &Value::Int(2),
+            &Value::Int(3),
+            &Value::Int(1),
+        ]
+    );
+}
+
+/// Containers are values: passing to a def copies; index assignment inside
+/// a def mutates the outer variable (Python-consistent: only `xs = ...`
+/// makes a local).
+#[test]
+fn containers_are_values_with_python_write_back() {
+    let src = "\
+def eat(copy):
+    copy.append(99)
+    return len(copy)
+
+def poke():
+    xs[0] = 42
+
+xs = [1]
+log(eat(xs))
+log(len(xs))
+poke()
+log(xs[0])
+halt()
+";
+    let (mut vm, mut host, costs) = vm_for(src);
+    vm.grant(1000);
+    vm.run(&mut host, &costs);
+    let logged: Vec<&Value> =
+        host.calls.iter().filter(|(n, _)| n == "log").map(|(_, a)| &a[0]).collect();
+    assert_eq!(logged, [&Value::Int(2), &Value::Int(1), &Value::Int(42)]);
+}
+
+/// range() builds int lists (one or two bounds) and enforces its cap.
+#[test]
+fn range_builds_lists_under_a_cap() {
+    let src = "\
+total = 0
+for i in range(4):
+    total = total + i
+for i in range(10, 13):
+    total = total + i
+log(total)
+halt()
+";
+    let (mut vm, mut host, costs) = vm_for(src);
+    vm.grant(10000);
+    vm.run(&mut host, &costs);
+    let logged: Vec<&Value> =
+        host.calls.iter().filter(|(n, _)| n == "log").map(|(_, a)| &a[0]).collect();
+    assert_eq!(logged, [&Value::Int(6 + 33)]);
+
+    let (mut vm, mut host, costs) = vm_for("range(100000)\n");
+    vm.grant(1000);
+    vm.run(&mut host, &costs);
+    let dump = host.calls.iter().find(|(n, _)| n == "upload_crash_dump").expect("must fault");
+    assert!(matches!(&dump.1[0], Value::Str(s) if s.contains("range too large")));
+}
+
+/// Mutating a temporary is a fault, not a silent no-op — containers are
+/// values, so the mutation would vanish.
+#[test]
+fn appending_to_a_temporary_faults() {
+    let (mut vm, mut host, costs) = vm_for("[1, 2].append(3)\n");
+    vm.grant(100);
+    vm.run(&mut host, &costs);
+    let dump = host.calls.iter().find(|(n, _)| n == "upload_crash_dump").expect("must fault");
+    assert!(matches!(&dump.1[0], Value::Str(s) if s.contains("needs a list variable")));
+}
+
+/// dict.remove(k) deletes through the variable and returns the Option.
+#[test]
+fn dict_remove_writes_back() {
+    let src = "\
+d = {1: \"a\", 2: \"b\"}
+log(d.remove(1).expect())
+log(len(d))
+log(1 in d)
+halt()
+";
+    let (mut vm, mut host, costs) = vm_for(src);
+    vm.grant(1000);
+    vm.run(&mut host, &costs);
+    let logged: Vec<&Value> =
+        host.calls.iter().filter(|(n, _)| n == "log").map(|(_, a)| &a[0]).collect();
+    assert_eq!(logged, [&Value::Str("a".into()), &Value::Int(1), &Value::Bool(false)]);
 }

@@ -63,12 +63,21 @@ pub(crate) fn build_colony() -> Sim {
     // walk) and the chain stops there.
     game.tuning.boot_ticks = 40;
     game.tuning.capacity = 9;
+    // Both starter programs deploy at boot: green's `from hauling import
+    // haul_home` and red's `import hauling` show the two import forms (the
+    // red printer idles at dial 0 — turn it up to see red bots run it).
     game.apply(&Command::DeployProgram {
         faction: 0,
         color: BotColor::GREEN,
-        source: crate::editor::DEFAULT_PROGRAM.into(),
+        source: crate::editor::starter_deploy_source(BotColor::GREEN.0),
     })
     .expect("miner program parses");
+    game.apply(&Command::DeployProgram {
+        faction: 0,
+        color: BotColor::RED,
+        source: crate::editor::starter_deploy_source(BotColor::RED.0),
+    })
+    .expect("red starter program parses");
     // Bridge blueprints across the wall: the default program services
     // blueprints first, so the opening minutes are the colony building its
     // own crossings — progress bars and all — before mining east. (No

@@ -29,6 +29,15 @@ pub enum PyriteErrorKind {
     EmptyBlock,
     UnknownEnum(String),
     UnknownEnumVariant { enum_name: String, variant: String },
+    /// `import m` / `from m import f` names a module the source doesn't
+    /// carry — at deploy this means "no module by that name in the library".
+    UnknownModule(String),
+    UnknownModuleMember { module: String, name: String },
+    /// `m.f()` on a module that was never `import`ed.
+    ModuleNotImported(String),
+    /// Module blocks hold `def`s only — a module that *did* things on
+    /// import would be a program (docs/01 "Modules & the Program Library").
+    StatementInModule,
 }
 
 impl fmt::Display for PyriteError {
@@ -55,6 +64,22 @@ impl fmt::Display for PyriteError {
             PyriteErrorKind::UnknownEnum(name) => write!(f, "unknown enum {name}"),
             PyriteErrorKind::UnknownEnumVariant { enum_name, variant } => {
                 write!(f, "enum {enum_name} has no variant {variant}")
+            }
+            PyriteErrorKind::UnknownModule(name) => {
+                write!(f, "unknown module '{name}' — the library has no module by that name")
+            }
+            PyriteErrorKind::UnknownModuleMember { module, name } => {
+                write!(f, "module '{module}' has no function '{name}'")
+            }
+            PyriteErrorKind::ModuleNotImported(name) => {
+                write!(
+                    f,
+                    "module '{name}' is not imported — add 'import {name}' \
+                     or 'from {name} import ...'"
+                )
+            }
+            PyriteErrorKind::StatementInModule => {
+                write!(f, "modules hold only 'def' functions — no statements, handlers, or enums")
             }
         }
     }

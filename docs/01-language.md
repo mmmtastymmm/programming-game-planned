@@ -246,15 +246,24 @@ def haul_home():
     deposit()
 ```
 
-### Tier 5 — Collections & iteration (lists, `for x in xs`)
+### Tier 5 — Collections & iteration (lists, dicts, `for x in xs`)
 
-Python-style iteration over a container (no C-style index loops; `range(n)` is a container builtin here). `break`/`continue` work in `for` exactly as in `while`.
+Python-style containers and iteration (no C-style index loops; `range(n)` / `range(a, b)` is a container builtin here, capped by the `range_cap` cost entry). `break`/`continue` work in `for` exactly as in `while`.
+
+- **Lists**: `[a, b]` literals, `xs[i]` (negative indices count from the end; out of range faults), `xs[i] = v`, `xs.append(v)`, `x in xs`, `len(xs)`.
+- **Dicts**: `{k: v}` literals; keys are int, string, or entity — **entity keys are the headline**: per-target state like `seen[enemy] = tick`. `d[k]` faults on a missing key (Python's KeyError); `d.get(k)` is the fault-free form, giving `Option.Some(v)` / `Option.None`. `d[k] = v` inserts or overwrites, `d.remove(k)` deletes (returning the Option), `k in d` tests membership, `d.keys()` / `d.values()` give lists.
+- **Dict iteration order is sorted key order, always** — never insertion order (deterministic by construction, CLAUDE.md rule 3). `for k in d:` walks keys sorted; so do `.keys()` / `.values()`.
+- `in` also works on strings (substring test). Containers are **values**, not references — see Types.
 
 ```python
 threats = scan_enemies()
+seen = {}
 for t in threats:
+    seen[t] = t.distance          # entity-keyed dict
     if t.distance < 10:
         alert(t)
+if len(seen) > 3:
+    retreat()
 ```
 
 ### Tier 6 — Enums & `match`
@@ -369,7 +378,9 @@ Tier 4 promises a colony **program library**; modules are its formalization — 
 
 ## Types
 
-Deliberately small: `int` (i64), `bool`, `string` (labels/channels only, no manipulation initially), `entity` (opaque handle to a world object), `list`, and `enum` values (user-declared sum types with associated data, Tier 6). **No floats** — all world math is fixed-point internally and exposed to Pyrite as scaled integers (e.g. positions in millitiles).
+Deliberately small: `int` (i64), `bool`, `string` (labels/channels only, no manipulation initially), `entity` (opaque handle to a world object), `list`, `dict` (keys: int / string / entity), and `enum` values (user-declared sum types with associated data, Tier 6). **No floats** — all world math is fixed-point internally and exposed to Pyrite as scaled integers (e.g. positions in millitiles).
+
+**Containers are values, not references (DECIDED).** Assignment and argument passing copy; there is no aliasing. Mutation is always rooted at a variable — `xs.append(v)`, `d[k] = v` — and inside a `def` those writes hit the variable where it lives, Python-consistent (`xs[0] = 1` in a function mutates the outer list; only `xs = ...` makes a local). Mutating a temporary (`[1,2].append(3)`) is a fault, not a silent no-op. Simpler to reason about, deterministic by construction, and it keeps snapshots/state comparison trivial.
 
 Three builtin conventions ride on these types:
 

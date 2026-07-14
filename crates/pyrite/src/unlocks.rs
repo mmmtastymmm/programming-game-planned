@@ -33,7 +33,7 @@ impl Construct {
             Construct::If => "if / elif / else",
             Construct::WhileLoop => "while / break / continue",
             Construct::Functions => "def / return",
-            Construct::Lists => "lists + for-in",
+            Construct::Lists => "containers (lists, dicts) + for-in",
             Construct::Enums => "enum + match",
             Construct::OnSignal => "on signal: handler",
             Construct::OnDeath => "on death: handler",

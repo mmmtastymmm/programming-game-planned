@@ -24,6 +24,8 @@ pub enum BinOp {
     Ge,
     And,
     Or,
+    /// `k in d` / `x in xs` / `sub in s` — membership, Python-style.
+    In,
 }
 
 impl BinOp {
@@ -45,7 +47,9 @@ pub enum Expr {
     Bool(bool),
     Name(String),
     List(Vec<ExprId>),
-    /// `xs[i]`
+    /// `{k: v, ...}` — dict literal; keys evaluate to int/string/entity.
+    Dict(Vec<(ExprId, ExprId)>),
+    /// `xs[i]` / `d[k]`
     Index { base: ExprId, index: ExprId },
     /// `e.field` — runtime attribute lookup (entity properties via the Host).
     Attr { base: ExprId, name: String },
@@ -69,6 +73,10 @@ pub enum Stmt {
     /// editor gutter annotations and crash dumps.
     Expr { expr: ExprId, line: u32 },
     Assign { name: String, value: ExprId, line: u32 },
+    /// `name[index] = value` — in-place container write. The target is a
+    /// bare variable on purpose: containers are values, so mutation is
+    /// always rooted at a name (no nested `a[0][1] = v` yet).
+    IndexAssign { name: String, index: ExprId, value: ExprId, line: u32 },
     If { arms: Vec<(ExprId, Block)>, else_body: Option<Block>, line: u32 },
     While { cond: ExprId, body: Block, line: u32 },
     For { var: String, iter: ExprId, body: Block, line: u32 },
@@ -83,6 +91,7 @@ impl Stmt {
         match self {
             Stmt::Expr { line, .. }
             | Stmt::Assign { line, .. }
+            | Stmt::IndexAssign { line, .. }
             | Stmt::If { line, .. }
             | Stmt::While { line, .. }
             | Stmt::For { line, .. }
@@ -117,6 +126,10 @@ pub struct Function {
     pub params: Vec<String>,
     pub body: Block,
     pub line: u32,
+    /// `"""docstring"""` — a leading bare string literal in the body,
+    /// captured at parse and stripped from the runtime block (free at
+    /// runtime, like import lines). Editor surfaces show it.
+    pub doc: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -153,9 +166,20 @@ pub struct Program {
     pub stmts: Vec<Stmt>,
     /// Top-level statement sequence — the implicit forever-loop body.
     pub body: Block,
+    /// Keyed by qualified name for module functions (`"hauling.haul_home"`),
+    /// bare name for program-level defs.
     pub functions: BTreeMap<String, Function>,
     pub enums: BTreeMap<String, EnumDecl>,
     pub handlers: BTreeMap<SignalKind, Handler>,
+    /// `module <name>:` blocks carried by this source (deploy artifacts —
+    /// the editor inlines the library; imports resolve against these).
+    pub modules: std::collections::BTreeSet<String>,
+    /// Modules named by a plain `import m` — gates qualified `m.f()` calls.
+    pub imported: std::collections::BTreeSet<String>,
+    /// `from m import f` bindings, bare name → qualified. Calls are
+    /// rewritten to the qualified name at the end of the parse, so the VM
+    /// resolves everything through `functions` and never sees an alias.
+    pub aliases: BTreeMap<String, String>,
 }
 
 impl Program {

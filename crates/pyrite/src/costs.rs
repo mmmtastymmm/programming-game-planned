@@ -47,6 +47,10 @@ pub struct CostTable {
     /// Hard cycle cap for `on death:` — the black-box budget.
     pub blackbox_budget: u64,
 
+    /// Longest list `range()` may build in one call — a fault beyond it.
+    /// Bounds the single-op allocation (one op can't conjure a megalist).
+    pub range_cap: u64,
+
     /// Extra per-builtin costs (on top of `call_base`). Unlisted builtins
     /// cost `default_builtin`.
     pub builtins: BTreeMap<String, u64>,
@@ -68,6 +72,14 @@ impl Default for CostTable {
             ("exists", 1),
             // `.expect()` method: total = call_base alone.
             ("expect", 0),
+            // Container builtins & methods (VM-level, not host calls).
+            ("len", 0),
+            ("range", 2),
+            ("append", 0),
+            ("get", 0),
+            ("remove", 0),
+            ("keys", 1),
+            ("values", 1),
             // Priced here too now that the default error handler calls it
             // as ordinary code (the crash_dump field covers the bare-VM
             // forced-call fallback).
@@ -112,6 +124,7 @@ impl Default for CostTable {
             grace_window_ticks: 10,
             overtime_mult: 2,
             blackbox_budget: 10,
+            range_cap: 256,
             builtins,
             default_builtin: 1,
         }

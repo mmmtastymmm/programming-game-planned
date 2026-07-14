@@ -4,6 +4,9 @@
 //! - Indentation is spaces only; a tab in leading whitespace is a lex error.
 //! - Blank lines and comment-only lines (`# ...`) emit nothing.
 //! - Every non-blank logical line ends with `Newline`.
+//! - Triple-quoted strings (`"""..."""`, the docstring form) may span
+//!   lines; the content is raw — no escape processing, newlines literal.
+//!   Continuation lines belong to the string, not the layout.
 
 use crate::error::{PyriteError, PyriteErrorKind};
 use crate::token::{keyword, Tok, Token};
@@ -12,10 +15,12 @@ pub fn lex(source: &str) -> Result<Vec<Token>, PyriteError> {
     let mut tokens = Vec::new();
     // Indentation stack of column widths; always starts with 0.
     let mut indents: Vec<usize> = vec![0];
+    let lines: Vec<Vec<char>> = source.lines().map(|l| l.chars().collect()).collect();
 
-    for (line_idx, raw_line) in source.lines().enumerate() {
+    let mut line_idx = 0;
+    while line_idx < lines.len() {
         let line_no = (line_idx + 1) as u32;
-        let bytes: Vec<char> = raw_line.chars().collect();
+        let bytes = &lines[line_idx];
 
         // Measure leading whitespace.
         let mut i = 0;
@@ -34,6 +39,7 @@ pub fn lex(source: &str) -> Result<Vec<Token>, PyriteError> {
         }
         // Blank or comment-only line: contributes nothing to layout.
         if i >= bytes.len() || bytes[i] == '#' {
+            line_idx += 1;
             continue;
         }
 
@@ -56,12 +62,19 @@ pub fn lex(source: &str) -> Result<Vec<Token>, PyriteError> {
             }
         }
 
-        lex_line(&bytes, i, line_no, &mut tokens)?;
-        tokens.push(Token { tok: Tok::Newline, line: line_no, col: (bytes.len() + 1) as u32 });
+        // A triple-quoted string may consume continuation lines; the
+        // logical line (and its Newline token) ends where lexing ended.
+        let end_idx = lex_line(&lines, line_idx, i, &mut tokens)?;
+        tokens.push(Token {
+            tok: Tok::Newline,
+            line: (end_idx + 1) as u32,
+            col: (lines[end_idx].len() + 1) as u32,
+        });
+        line_idx = end_idx + 1;
     }
 
     // Close any open blocks at EOF.
-    let eof_line = (source.lines().count() + 1) as u32;
+    let eof_line = (lines.len() + 1) as u32;
     while indents.len() > 1 {
         indents.pop();
         tokens.push(Token { tok: Tok::Dedent, line: eof_line, col: 1 });
@@ -70,12 +83,18 @@ pub fn lex(source: &str) -> Result<Vec<Token>, PyriteError> {
     Ok(tokens)
 }
 
+/// Lex one logical line starting at `lines[start_line][start]`. Returns
+/// the index of the physical line where the logical line ended (greater
+/// than `start_line` only when a triple-quoted string spanned lines).
 fn lex_line(
-    chars: &[char],
+    lines: &[Vec<char>],
+    start_line: usize,
     start: usize,
-    line: u32,
     out: &mut Vec<Token>,
-) -> Result<(), PyriteError> {
+) -> Result<usize, PyriteError> {
+    let mut line_idx = start_line;
+    let mut chars = &lines[line_idx];
+    let mut line = (line_idx + 1) as u32;
     let mut i = start;
     while i < chars.len() {
         let c = chars[i];
@@ -102,6 +121,42 @@ fn lex_line(
                 out.push(Token { tok: Tok::Int(value), line, col });
             }
             '"' => {
+                let triple = chars.get(i + 1) == Some(&'"') && chars.get(i + 2) == Some(&'"');
+                if triple {
+                    // `"""..."""` — the docstring form. Raw content (no
+                    // escapes), may span lines; continuation lines are
+                    // string content, not layout.
+                    let (open_line, open_col) = (line, col);
+                    i += 3;
+                    let mut s = String::new();
+                    'scan: loop {
+                        while i < chars.len() {
+                            if chars[i] == '"'
+                                && chars.get(i + 1) == Some(&'"')
+                                && chars.get(i + 2) == Some(&'"')
+                            {
+                                i += 3;
+                                break 'scan;
+                            }
+                            s.push(chars[i]);
+                            i += 1;
+                        }
+                        if line_idx + 1 >= lines.len() {
+                            return Err(PyriteError {
+                                line: open_line,
+                                col: open_col,
+                                kind: PyriteErrorKind::UnterminatedString,
+                            });
+                        }
+                        s.push('\n');
+                        line_idx += 1;
+                        chars = &lines[line_idx];
+                        line = (line_idx + 1) as u32;
+                        i = 0;
+                    }
+                    out.push(Token { tok: Tok::Str(s), line: open_line, col: open_col });
+                    continue;
+                }
                 i += 1;
                 let mut s = String::new();
                 loop {
@@ -238,6 +293,14 @@ fn lex_line(
                 out.push(Token { tok: Tok::RBracket, line, col });
                 i += 1;
             }
+            '{' => {
+                out.push(Token { tok: Tok::LBrace, line, col });
+                i += 1;
+            }
+            '}' => {
+                out.push(Token { tok: Tok::RBrace, line, col });
+                i += 1;
+            }
             ',' => {
                 out.push(Token { tok: Tok::Comma, line, col });
                 i += 1;
@@ -259,5 +322,5 @@ fn lex_line(
             }
         }
     }
-    Ok(())
+    Ok(line_idx)
 }

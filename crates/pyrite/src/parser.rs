@@ -106,9 +106,12 @@ impl<'a> Parser<'a> {
                 Tok::Newline => {
                     self.advance();
                 }
-                Tok::Def => self.parse_def()?,
+                Tok::Def => self.parse_def(None)?,
                 Tok::On => self.parse_handler()?,
                 Tok::Enum => self.parse_enum()?,
+                Tok::Module => self.parse_module()?,
+                Tok::Import => self.parse_import()?,
+                Tok::From => self.parse_from_import()?,
                 _ => {
                     let stmt = self.parse_statement(false)?;
                     body.push(stmt);
@@ -116,18 +119,34 @@ impl<'a> Parser<'a> {
             }
         }
         self.program.body = body;
+        // `from m import f` binds f bare: rewrite every bare call through
+        // the alias table so the VM only ever resolves qualified names.
+        // (Aliases can't collide with local defs — both directions are
+        // duplicate-definition errors — so the rewrite is unambiguous.)
+        for i in 0..self.program.exprs.len() {
+            let Expr::Call { name, .. } = &self.program.exprs[i] else { continue };
+            let Some(qualified) = self.program.aliases.get(name).cloned() else { continue };
+            let Expr::Call { name, .. } = &mut self.program.exprs[i] else { unreachable!() };
+            *name = qualified;
+        }
         Ok(self.program)
     }
 
-    fn parse_def(&mut self) -> Result<(), PyriteError> {
+    /// A `def`, either at top level (bare name) or inside a `module` block
+    /// (registered under `module.name`).
+    fn parse_def(&mut self, module: Option<&str>) -> Result<(), PyriteError> {
         self.require(Construct::Functions)?;
         let def_tok = self.expect(Tok::Def, "def")?;
         let name = self.expect_ident("function name")?;
-        if self.program.functions.contains_key(&name) {
+        let key = match module {
+            Some(m) => format!("{m}.{name}"),
+            None => name.clone(),
+        };
+        if self.program.functions.contains_key(&key) || self.program.aliases.contains_key(&key) {
             return Err(PyriteError {
                 line: def_tok.line,
                 col: def_tok.col,
-                kind: PyriteErrorKind::DuplicateDefinition(name),
+                kind: PyriteErrorKind::DuplicateDefinition(key),
             });
         }
         self.expect(Tok::LParen, "(")?;
@@ -142,11 +161,184 @@ impl<'a> Parser<'a> {
         }
         self.expect(Tok::RParen, ")")?;
         self.expect(Tok::Colon, ":")?;
-        let body = self.parse_block(true)?;
+        let (body, doc) = self.parse_def_body()?;
         self.program
             .functions
-            .insert(name.clone(), Function { name, params, body, line: def_tok.line });
+            .insert(key.clone(), Function { name: key, params, body, line: def_tok.line, doc });
         Ok(())
+    }
+
+    /// A def body: `parse_block`, plus Python's docstring rule — a leading
+    /// bare string literal is documentation, captured here and stripped
+    /// from the runtime block (it costs nothing because it doesn't exist
+    /// at runtime). A docstring alone is a legal (do-nothing) body.
+    fn parse_def_body(&mut self) -> Result<(Block, Option<String>), PyriteError> {
+        self.expect(Tok::Newline, "newline")?;
+        self.expect(Tok::Indent, "indented block")?;
+        let mut doc = None;
+        if let Tok::Str(s) = &self.peek().tok {
+            if matches!(self.peek2(), Some(t) if t.tok == Tok::Newline) {
+                doc = Some(s.clone());
+                self.advance();
+                self.advance();
+            }
+        }
+        let mut block = Block::new();
+        while !self.check(&Tok::Dedent) {
+            if self.eat(&Tok::Newline) {
+                continue;
+            }
+            match &self.peek().tok {
+                Tok::Def | Tok::On | Tok::Enum | Tok::Module | Tok::Import | Tok::From => {
+                    let t = self.peek();
+                    return Err(PyriteError {
+                        line: t.line,
+                        col: t.col,
+                        kind: PyriteErrorKind::HandlerNotAtTopLevel,
+                    });
+                }
+                _ => block.push(self.parse_statement(true)?),
+            }
+        }
+        self.expect(Tok::Dedent, "dedent")?;
+        if block.is_empty() && doc.is_none() {
+            return Err(PyriteError {
+                line: self.peek().line,
+                col: self.peek().col,
+                kind: PyriteErrorKind::EmptyBlock,
+            });
+        }
+        Ok((block, doc))
+    }
+
+    /// A `module <name>:` block — the inlined library section of a deploy
+    /// artifact (the editor generates these; docs/01 "imports resolve at
+    /// deploy"). Holds `def`s only.
+    fn parse_module(&mut self) -> Result<(), PyriteError> {
+        self.require(Construct::Functions)?;
+        let module_tok = self.expect(Tok::Module, "module")?;
+        let name = self.expect_ident("module name")?;
+        if self.program.modules.contains(&name) {
+            return Err(PyriteError {
+                line: module_tok.line,
+                col: module_tok.col,
+                kind: PyriteErrorKind::DuplicateDefinition(name),
+            });
+        }
+        self.expect(Tok::Colon, ":")?;
+        self.expect(Tok::Newline, "newline")?;
+        self.expect(Tok::Indent, "indented module body")?;
+        let expr_start = self.program.exprs.len();
+        let mut saw_def = false;
+        while !self.check(&Tok::Dedent) {
+            if self.eat(&Tok::Newline) {
+                continue;
+            }
+            if !self.check(&Tok::Def) {
+                let t = self.peek();
+                return Err(PyriteError {
+                    line: t.line,
+                    col: t.col,
+                    kind: PyriteErrorKind::StatementInModule,
+                });
+            }
+            self.parse_def(Some(&name))?;
+            saw_def = true;
+        }
+        self.expect(Tok::Dedent, "dedent")?;
+        if !saw_def {
+            return Err(PyriteError {
+                line: module_tok.line,
+                col: module_tok.col,
+                kind: PyriteErrorKind::EmptyBlock,
+            });
+        }
+        // Sibling calls resolve within the module: a bare call parsed in
+        // this block that names a sibling def becomes qualified. Done after
+        // the whole block so forward references work.
+        for i in expr_start..self.program.exprs.len() {
+            let Expr::Call { name: callee, .. } = &self.program.exprs[i] else { continue };
+            if callee.contains('.') {
+                continue;
+            }
+            let qualified = format!("{name}.{callee}");
+            if !self.program.functions.contains_key(&qualified) {
+                continue;
+            }
+            let Expr::Call { name: callee, .. } = &mut self.program.exprs[i] else { unreachable!() };
+            *callee = qualified;
+        }
+        self.program.modules.insert(name);
+        Ok(())
+    }
+
+    /// `import m` — makes qualified `m.f()` calls resolvable.
+    fn parse_import(&mut self) -> Result<(), PyriteError> {
+        self.require(Construct::Functions)?;
+        let import_tok = self.expect(Tok::Import, "import")?;
+        let name = self.expect_ident("module name")?;
+        if !self.program.modules.contains(&name) {
+            return Err(PyriteError {
+                line: import_tok.line,
+                col: import_tok.col,
+                kind: PyriteErrorKind::UnknownModule(name),
+            });
+        }
+        self.end_of_line()?;
+        self.program.imported.insert(name);
+        Ok(())
+    }
+
+    /// `from m import f, g` — binds the named functions bare.
+    fn parse_from_import(&mut self) -> Result<(), PyriteError> {
+        self.require(Construct::Functions)?;
+        let from_tok = self.expect(Tok::From, "from")?;
+        let module = self.expect_ident("module name")?;
+        if !self.program.modules.contains(&module) {
+            return Err(PyriteError {
+                line: from_tok.line,
+                col: from_tok.col,
+                kind: PyriteErrorKind::UnknownModule(module),
+            });
+        }
+        self.expect(Tok::Import, "import")?;
+        loop {
+            let t = self.peek().clone();
+            let name = self.expect_ident("function name")?;
+            let qualified = format!("{module}.{name}");
+            if !self.program.functions.contains_key(&qualified) {
+                return Err(PyriteError {
+                    line: t.line,
+                    col: t.col,
+                    kind: PyriteErrorKind::UnknownModuleMember { module, name },
+                });
+            }
+            if self.program.functions.contains_key(&name)
+                || self.program.aliases.contains_key(&name)
+            {
+                return Err(PyriteError {
+                    line: t.line,
+                    col: t.col,
+                    kind: PyriteErrorKind::DuplicateDefinition(name),
+                });
+            }
+            self.program.aliases.insert(name, qualified);
+            if !self.eat(&Tok::Comma) {
+                break;
+            }
+        }
+        self.end_of_line()?;
+        Ok(())
+    }
+
+    /// Imports are one-per-line declarations: anything trailing is an error
+    /// (a bare `import m x` would otherwise parse `x` as its own statement).
+    fn end_of_line(&mut self) -> Result<(), PyriteError> {
+        if self.check(&Tok::Newline) || self.check(&Tok::Eof) {
+            Ok(())
+        } else {
+            Err(self.unexpected("end of line"))
+        }
     }
 
     fn parse_handler(&mut self) -> Result<(), PyriteError> {
@@ -243,7 +435,7 @@ impl<'a> Parser<'a> {
                 continue;
             }
             match &self.peek().tok {
-                Tok::Def | Tok::On | Tok::Enum => {
+                Tok::Def | Tok::On | Tok::Enum | Tok::Module | Tok::Import | Tok::From => {
                     let t = self.peek();
                     return Err(PyriteError {
                         line: t.line,
@@ -311,6 +503,27 @@ impl<'a> Parser<'a> {
                     Ok(self.add_stmt(Stmt::Assign { name, value, line }))
                 } else {
                     let expr = self.parse_expr()?;
+                    if self.check(&Tok::Assign) {
+                        // `name[index] = value` — the only other lvalue.
+                        // Containers are values, so writes are rooted at a
+                        // variable; nested targets (`a[0][1] = v`) aren't.
+                        let Expr::Index { base, index } =
+                            self.program.exprs[expr as usize].clone()
+                        else {
+                            return Err(self
+                                .unexpected("newline (only `x = ...` or `x[key] = ...` assign)"));
+                        };
+                        let Expr::Name(name) = self.program.exprs[base as usize].clone() else {
+                            return Err(self.unexpected(
+                                "a variable before `[` (nested container writes aren't supported)",
+                            ));
+                        };
+                        self.require(Construct::Variables)?;
+                        self.advance();
+                        let value = self.parse_expr()?;
+                        self.expect(Tok::Newline, "newline")?;
+                        return Ok(self.add_stmt(Stmt::IndexAssign { name, index, value, line }));
+                    }
                     self.expect(Tok::Newline, "newline")?;
                     Ok(self.add_stmt(Stmt::Expr { expr, line }))
                 }
@@ -473,9 +686,15 @@ impl<'a> Parser<'a> {
             Tok::Gt => Some(BinOp::Gt),
             Tok::Le => Some(BinOp::Le),
             Tok::Ge => Some(BinOp::Ge),
+            // Membership: `key in dict`, `item in list`, `sub in string`.
+            // (`for x in xs` never reaches here — parse_for eats its `in`.)
+            Tok::In => Some(BinOp::In),
             _ => None,
         };
         if let Some(op) = op {
+            if op == BinOp::In {
+                self.require(Construct::Lists)?;
+            }
             self.advance();
             let rhs = self.parse_additive()?;
             Ok(self.add_expr(Expr::Binary { op, lhs, rhs }))
@@ -534,11 +753,42 @@ impl<'a> Parser<'a> {
                 let name = self.expect_ident("attribute name")?;
                 // `EnumName.Variant` / `EnumName.Variant(args)` resolve at
                 // parse time when the enum is declared in this program.
-                let base_enum = match self.program.exprs[expr as usize].clone() {
-                    Expr::Name(n) if self.program.enums.contains_key(&n) => Some(n),
-                    _ => None,
+                let (base_enum, base_module) = match self.program.exprs[expr as usize].clone() {
+                    Expr::Name(n) if self.program.enums.contains_key(&n) => (Some(n), None),
+                    Expr::Name(n) if self.program.modules.contains(&n) => (None, Some(n)),
+                    _ => (None, None),
                 };
-                if let Some(enum_name) = base_enum {
+                if let Some(module) = base_module {
+                    // `hauling.haul_home(...)` — a qualified module call,
+                    // legal only under a plain `import hauling`.
+                    if !self.program.imported.contains(&module) {
+                        return Err(PyriteError {
+                            line: dot_line,
+                            col: self.peek().col,
+                            kind: PyriteErrorKind::ModuleNotImported(module),
+                        });
+                    }
+                    let qualified = format!("{module}.{name}");
+                    if !self.program.functions.contains_key(&qualified) {
+                        return Err(PyriteError {
+                            line: dot_line,
+                            col: self.peek().col,
+                            kind: PyriteErrorKind::UnknownModuleMember { module, name },
+                        });
+                    }
+                    self.expect(Tok::LParen, "( — modules export functions, call them")?;
+                    let mut args = Vec::new();
+                    if !self.check(&Tok::RParen) {
+                        loop {
+                            args.push(self.parse_expr()?);
+                            if !self.eat(&Tok::Comma) {
+                                break;
+                            }
+                        }
+                    }
+                    self.expect(Tok::RParen, ")")?;
+                    expr = self.add_expr(Expr::Call { name: qualified, args, line: dot_line });
+                } else if let Some(enum_name) = base_enum {
                     let decl = &self.program.enums[&enum_name];
                     let Some(fields) = decl.variants.get(&name) else {
                         let t = self.peek();
@@ -653,6 +903,25 @@ impl<'a> Parser<'a> {
                 }
                 self.expect(Tok::RBracket, "]")?;
                 Ok(self.add_expr(Expr::List(items)))
+            }
+            Tok::LBrace => {
+                self.pos -= 1; // restore for require()'s error position
+                self.require(Construct::Lists)?;
+                self.pos += 1;
+                let mut entries = Vec::new();
+                if !self.check(&Tok::RBrace) {
+                    loop {
+                        let key = self.parse_expr()?;
+                        self.expect(Tok::Colon, ":")?;
+                        let value = self.parse_expr()?;
+                        entries.push((key, value));
+                        if !self.eat(&Tok::Comma) {
+                            break;
+                        }
+                    }
+                }
+                self.expect(Tok::RBrace, "}")?;
+                Ok(self.add_expr(Expr::Dict(entries)))
             }
             other => Err(PyriteError {
                 line: t.line,

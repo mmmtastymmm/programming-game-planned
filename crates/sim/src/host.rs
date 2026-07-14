@@ -42,8 +42,56 @@ pub const BUILTIN_DOCS: &[BuiltinDoc] = &[
     BuiltinDoc {
         name: "expect",
         signature: "result.expect() -> entity",
-        summary: "Unwrap a Result: Ok gives the value; Err faults with the \
-                  carried message (crash dump unless an error handler is installed).",
+        summary: "Unwrap a Result or Option: Ok/Some gives the value; Err/None \
+                  faults with the carried message (crash dump unless an error \
+                  handler is installed).",
+        cost_note: "",
+    },
+    BuiltinDoc {
+        name: "len",
+        signature: "len(container) -> int",
+        summary: "Element count of a list, dict, or string.",
+        cost_note: "",
+    },
+    BuiltinDoc {
+        name: "range",
+        signature: "range(n) / range(a, b) -> list",
+        summary: "List of ints 0..n (or a..b), for counted for-loops. \
+                  Capped by the range_cap cost entry — too large faults.",
+        cost_note: "",
+    },
+    BuiltinDoc {
+        name: "append",
+        signature: "xs.append(v)",
+        summary: "Push onto a list variable. Containers are values: append \
+                  works through the variable, so a bare [1,2].append(3) faults.",
+        cost_note: "",
+    },
+    BuiltinDoc {
+        name: "get",
+        signature: "d.get(key) -> Option",
+        summary: "Fault-free dict lookup: Option.Some(value) or Option.None. \
+                  d[key] on a missing key faults instead.",
+        cost_note: "",
+    },
+    BuiltinDoc {
+        name: "remove",
+        signature: "d.remove(key) -> Option",
+        summary: "Delete a key from a dict variable; gives back the removed \
+                  value as an Option.",
+        cost_note: "",
+    },
+    BuiltinDoc {
+        name: "keys",
+        signature: "d.keys() -> list",
+        summary: "A dict's keys in sorted order (iteration order is always \
+                  sorted, never insertion — determinism).",
+        cost_note: "",
+    },
+    BuiltinDoc {
+        name: "values",
+        signature: "d.values() -> list",
+        summary: "A dict's values, in sorted-key order.",
         cost_note: "",
     },
     BuiltinDoc {
