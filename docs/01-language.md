@@ -448,6 +448,7 @@ The full catalog and unlock order live in [06-progression.md](06-progression.md)
 | `getenv(key)` → int | 1 | **yes** | Read an env variable; unset = the key's default, never a fault |
 | `rng(n)` → int | 1 | **yes** | Uniform in [0, n) from the sim's seeded stream — `wait(rng(20))` desyncs identical programs |
 | `build()` | 2 + action | no | Work the nearest in-range blueprint (a `blueprint`-kind entity, [05-terrain.md](05-terrain.md)), 1 progress/tick; earns Building XP |
+| `search()` | 2 + action | no | Prospect: the bot roots in place and surveys outward one ring per N ticks (tuning) up to sensor range, discovering buried resource nodes ([03-resources.md](03-resources.md)); each new node earns Scouting XP. Moving or any signal ends the survey |
 
 ## Editor & Player Experience
 
@@ -476,6 +477,7 @@ The full catalog and unlock order live in [06-progression.md](06-progression.md)
 - **Logging is ordinary functions** — `log`, `upload_log`, `upload_crash_dump` are costed builtins, so telemetry and black boxes are player-built, not engine magic (with the forced crash dump as the guaranteed floor).
 - **Loops** — `while` + `break`/`continue` at Tier 3; Python-style `for x in container` with containers at Tier 5. Implicit program loop stays; `while True:` legal but redundant.
 - **Generic fallible queries** — `exists(kind)` / `closest(kind)` with bare kind constants (`ore`, `depot`, `enemy`, `blueprint`, …) replace the old `nearest_*` / `*_exists` builtin family. `closest` returns the builtin `Result` enum (`Result.Ok(entity)` / `Result.Err(msg)`); unwrap with the `.expect()` method (faults with the message on `Err` — same behavior the old builtins had on a miss) or handle fault-free with `match`. Kind constants are host-bound names, shadowable, and survive post-fault restarts.
+- **Query radius = fog-reveal radius; undiscovered veins don't answer** (2026-07-14, answers Q57 — [05-terrain.md](05-terrain.md)): queries range over the bot's sensor radius, the same number that reveals fog; per-kind bonuses (Combat L3, Ore-acle) extend the *query* for that kind only, and such a query may return an entity on a still-fogged tile. For resource kinds, `closest`/`exists` see tier-0 surface nodes on sight but buried (tier-1+) nodes **only after the colony has prospected them** with `search()` — an unsurveyed vein is a miss, not a secret hit.
 
 - **Messaging is blocking channels, not signals** — a 2×2 API: `send`/`try_send` (one receiver) and `broadcast`/`try_broadcast` (all receivers), each blocking-with-timeout or fire-and-forget (unheard messages are lost); `receive(ch, timeout=n)`/`try_receive` on the other end. No queues. Timeouts fault. **Blocking burns cycles** — waiting is what the CPU is doing, so listening posts and rendezvous have real compute cost. Any value travels; enums + `match` (Tier 6) make channel traffic into typed protocols.
 - **Enums & `match`** — Rust-style sum types with associated data, Tier 6 construct.

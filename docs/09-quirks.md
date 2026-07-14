@@ -100,7 +100,7 @@ Every future env key is free quirk surface — the registry is the natural home 
 
   | Track (L5) | Merit | Effect |
   |---|---|---|
-  | Mining | **Ore-acle** | resource nodes visible at +2 range |
+  | Mining | **Ore-acle** | +2 range on resource-node queries and on `search()` prospecting ([05-terrain.md](05-terrain.md)) |
   | Hauling | **CDN** | +10% move speed while loaded — content, delivered |
   | Combat | **Aimbot** | +5% damage dealt |
   | Building | **Infrastructure as Code** | repairs restore +25% more |

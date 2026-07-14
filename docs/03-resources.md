@@ -69,7 +69,7 @@ Raw:
 | **Water** | Pumped at shorelines (Pump structure) | Coolant — the Upgrade Station consumes it per compute upgrade | *Do you hold shoreline?* Compute is water-cooled: colonies near rivers think better. |
 | **Stone** | Outcrops — plentiful, everywhere | Barricades, bridges, civil structures (Depot, Sentry Post, Request Box) | *Can you dig in?* Fortification is cheap in value but heavy in logistics — walls are hauled, not conjured. |
 | **Sand** | Shoreline flats and dune fringes (interacts with Q35's dune terrain) | Glass | *The other coastal claim* — water cools compute, sand feeds optics; shorelines are double-valuable. |
-| **Wood** | Groves — the flagship **regenerating** node type | Generator fuel (weak) | *Renewable but thin* — enough to idle on, never enough to grow on. |
+| **Wood** | Groves — the flagship **regenerating** node type | Generator fuel (weak); Lanterns | *Renewable but thin* — enough to idle on, never enough to grow on. |
 | **Coal** | Seams | Generator fuel (strong) + Steel | *Energy logistics* — the fuel line is a supply line. |
 | **Iron** | Veins, common | Steel | *Can your mining programs scale and reach?* |
 | **Copper** | Veins | Wire + Bronze | *Electrification* — one ore, two competing futures. |
@@ -101,7 +101,8 @@ Rates & currency:
 1. **Data is not minable.** It comes from *activity* — first kill, tiles explored, Feral wrecks analyzed, milestones ("deliver 500 ore"). This ties progression to playing broadly, and it means a turtling player unlocks slower than an active one.
 2. **Energy is upkeep, not stockpile.** It's a rate (generation vs. drain), not a pile. Exceeding generation causes **brownout**: all bot cycle budgets are halved. A colony that overbuilds *gets visibly dumber* — a thematic and legible failure state.
 3. **Raw resources are spatial.** Nodes are placed by terrain generation and **mostly finite**, forcing expansion — which forces longer supply lines — which rewards better hauling/escort programs. The resource system exists to create *routing problems for player code*. **Regeneration is a per-node-type data flag**: the engine supports it, most node types ship with it off — **Wood groves are the flagship exception** (renewable, low-yield) — and maps can place other regenerating variants (e.g. a slow *seeping vein*) as design accents or for long-running servers.
-4. **Refinement is a logistics step, not a click.** Smelters/Foundries have input/output buffers that bots must physically feed and empty. Factory-game DNA: throughput is a program-quality problem.
+4. **Buried veins are hidden until prospected** (2026-07-14, with Q57). Tier-1+ nodes (Iron and up) don't exist to a colony — not to eyes, not to `closest()`/`exists()` — until a bot discovers them with `search()` (immobile, ring-by-ring — builtin in [01-language.md](01-language.md)). Tier-0 surface resources (Wood groves, Stone outcrops, Sand flats) are visible on sight, so the starter program works untouched. Discoveries are **permanent map knowledge**; remaining amounts are live-only ([05-terrain.md](05-terrain.md)). The guaranteed start-zone nodes (Iron, Coal, Wood, Stone) ship **pre-discovered** so the pre-deployed starter program works from tick one. Expansion has a survey step: beyond the start zone, the map doesn't hand you the tier ladder — you go find it.
+5. **Refinement is a logistics step, not a click.** Smelters/Foundries have input/output buffers that bots must physically feed and empty. Factory-game DNA: throughput is a program-quality problem.
 
 ## Harvest Tool Tiers
 
@@ -141,6 +142,7 @@ No free-form resource gifting. A colony builds a **Request Box** and posts a req
 | **Repair Bay** | 8 Steel | Repairs bots in range (energy drain while active). The target of hurt-handler retreat programs ([01-language.md](01-language.md)). |
 | **Upgrade Station** | 10 Steel, 5 Chips, 3 Wire | Bots walk here to buy **per-bot compute upgrades** (cycles, memory, stack, log buffer, Coprocessor — catalog in [06-progression.md](06-progression.md)) for Chips, **consuming Water as coolant per upgrade** (rate: Q69). Player-placed like any structure; the upgrade happens at the pad, so the queue is physical and upgrading bots are exposed while they wait ([02-agents.md](02-agents.md), Q68). |
 | **Sentry Post** | 4 Stone, 1 Glass | Wide sensor radius, nothing else. Fog of war is eyes-only ([05-terrain.md](05-terrain.md)) — fixed sightlines are cheap infrastructure, but even a watchtower needs a window. |
+| **Lantern** | 2 Wood | Tiny fixed sensor radius (~2 tiles, tuning) — a light, not a watchtower. The cheapest ward against eyes-only fog: string them along perimeters and haul roads. Reveals only; never prospects. |
 | **Request Box** | 3 Stone | Posts a resource request allies may voluntarily fulfill by hauling and depositing (see Ally Aid). |
 
 ## Starting State (per player)
@@ -153,6 +155,7 @@ No free-form resource gifting. A colony builds a **Request Box** and posts a req
 
 - **Raw/refined split** (2026-07-13, supersedes the five-resource model). Eleven raws — Water, Stone, Sand, Wood, Coal, Iron, Copper, Tin, Silver, Gold, Crystal — feed six refined products: **Steel** (Iron+Coal), **Bronze** (Copper+Tin — bronze is an alloy, so Tin replaced it on the raw list), **Wire** (Copper), **Chips** (Silver+Crystal+Wire), **Glass** (Sand), **Lens** (Glass). Steel replaces the old generic "Metal" for machines and printing; **Stone** (added 2026-07-14) owns fortification and civil works — barricades, bridges, Depot/Sentry/Request Box; **Sand → Glass → Lens** (added 2026-07-14) is the seeing chain — glazing for sensor structures, lenses for Optics-grade sensor hardware (Q53); Gold is direct-use premium hardware + the Exchange's densest good; Water is pumped, not mined, and cools the Upgrade Station. Every raw gates a distinct verb (see Resource Roles). Tier ladder: Wood/Stone/Sand 0 → Iron/Coal 1 → Copper/Tin 2 → Silver/Gold 3 → Crystal 4. Open edges (recipes, kind constants, sim migration): Q69.
 - **Regen is a per-node-type data flag** — most node types are finite (**Wood groves are the flagship regenerating exception**); other regenerating variants exist for map design and long servers (see Design Rules).
+- **Buried veins are hidden until prospected** (2026-07-14, with Q57) — tier-1+ nodes invisible to eyes and queries until `search()`ed; tier-0 surface resources visible on sight; discoveries permanent, amounts live-only (see Design Rules; fog rules in [05-terrain.md](05-terrain.md)). The **Lantern** (2 Wood) joins the structure set as the cheap vision ward below the Sentry Post.
 - **Harvest tools are tiered** — level-N tools work resources of tier ≤ N; Ore low, Crystal high (see Harvest Tool Tiers).
 - **Ally aid = Request Box** — posted requests, voluntarily fulfilled by physical hauling; no free-form gifting (see Ally Aid).
 

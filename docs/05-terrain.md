@@ -72,7 +72,11 @@ Design intent: corridor congestion is the first *systems* problem a colony hits 
 - Scouting is therefore **infrastructure, not an event**: standing watch is a job bots do (and earn Scouting XP for, [02-agents.md](02-agents.md)). A cheap Sentry Post structure exists for fixed sightlines ([03-resources.md](03-resources.md)).
 - **Tall things block vision.** Sensors are line-of-sight: Barricades and cliff faces cut sightlines. High Ground sees *over* Barricades — height beats walls, which is half of why perches matter. Corollary: walling your base in also blinds it; pair walls with Sentry Posts or high ground.
 - Terrain hooks apply: High Ground +2 sensor range, Water conducts sensor pings farther, Scouting-track veterans see farther.
-- **Ally vision sharing is a grant**, like channels ([01-language.md](01-language.md)) — allied colonies choose to pool eyes; it isn't automatic.
+- **One radius (Q57 answered)**: a bot's sensor range is simultaneously its fog-reveal radius and its query radius — one number on the stat sheet ([02-agents.md](02-agents.md)). Per-kind bonuses (Combat L3 "+1 vs enemies", the Ore-acle merit) extend **queries only**: a kind-bonused `closest(enemy)` may return an entity standing on a tile that stays fogged. Sensing isn't seeing — the query says *something is there*, not what the ground looks like.
+- **Buried resources need prospecting.** Seeing a tile shows its terrain, not its geology: tier-1+ resource nodes (Iron and up) are invisible — to the eye *and* to queries — until a bot discovers them with `search()` (roots in place, scans outward ring by ring — builtin in [01-language.md](01-language.md); each new node found earns Scouting XP). Tier-0 surface resources (Wood groves, Stone outcrops, Sand flats) are visible on sight, so the Tier-0 starter program still works. **Discovered nodes are permanent map knowledge** — the one deliberate exception besides the terrain snapshot to "no persistent intel" — but their *remaining amounts* are live-only, like everything else.
+- Rendering: fogged tiles draw the greyed snapshot with ambient animations **frozen at the last-seen frame** — the world visibly stops where you stop watching, and resumes on reveal. Pure view layer, no sim state, no replay exposure.
+- **Lanterns are the cheap ward** ([03-resources.md](03-resources.md)): a tiny fixed sensor radius for pocket change — string them along perimeters and roads. Sentry Posts stay the real watchtowers; Lanterns make *lit territory* a visible map feature.
+- **Ally vision sharing is a grant**, like channels ([01-language.md](01-language.md)) — allied colonies choose to pool eyes; it isn't automatic. (Whether the grant also shares prospected node knowledge: Q70.)
 
 ## Corruption is the thematic centerpiece
 
@@ -119,6 +123,9 @@ flowchart TD
 
 - **Terraforming is in scope** — build (bridges, barricades) and deconstruct (clear, demolish, cleanse), symmetric and adversarial (see Terraforming).
 - **Fog of war is eyes-only** — live union of friendly bot + structure sensors; greyed terrain memory, no persistent live intel (see Fog of War).
+- **Sensor range is one radius; per-kind bonuses extend queries only** (2026-07-14, answers Q57) — reveal radius = query radius; kind-bonused queries may return entities on fogged tiles (see Fog of War).
+- **Buried resources need prospecting** (2026-07-14, with Q57) — tier-1+ nodes are hidden from eyes and queries until `search()`ed; discoveries are permanent map knowledge, remaining amounts live-only (see Fog of War; builtin in [01-language.md](01-language.md), node rules in [03-resources.md](03-resources.md)).
+- **Fog renders as greyed tiles with frozen animations** (2026-07-14) — the snapshot holds the last-seen frame; motion resumes on reveal. View layer only.
 - **Tall things block vision** — sensors are line-of-sight; Barricades are true walls; High Ground sees over them.
 - **Corruption is dynamic** — radiates from sources, re-corrupts cleansed ground until the source is destroyed (see Corruption dynamics).
 
