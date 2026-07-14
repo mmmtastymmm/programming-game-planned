@@ -2,13 +2,13 @@
 
 A Bevy multiplayer RTS where players program their units in **Pyrite**, a custom Python-like DSL interpreted one operation at a time. Design lives in `docs/00`–`08`; unresolved design questions in `docs/QUESTIONS.md`.
 
-Planned crate layout: `crates/pyrite` (language), `crates/sim` (deterministic world), `crates/game` (Bevy app). See `docs/07-architecture.md`.
+Crate layout: `crates/pyrite` (language), `crates/sim` (deterministic world — **plain Rust, no Bevy**), `crates/game` (Bevy app). See `docs/07-architecture.md`.
 
 ## Determinism rules (CRITICAL — lockstep multiplayer)
 
 The entire `sim` layer (including the Pyrite VM) must be bit-for-bit deterministic across machines. Violations surface as multiplayer desyncs, which are miserable to debug. Non-negotiable rules for any code in `pyrite` or `sim`:
 
-1. **`bevy_ecs` query iteration order is NOT guaranteed.** Any system that mutates state based on query results must first collect and **sort by stable entity ID** (or use an explicitly ordered query). This is the #1 desync risk in this codebase — flag it in review every time.
+1. **The `sim` crate has no `bevy_ecs` — keep it that way.** World state is plain Rust structs + `BTreeMap`s, so iteration is deterministic by construction. Never introduce ECS queries or ECS-managed state into `sim`; `bevy_ecs` lives only in the `game` crate, which may influence the sim exclusively through ordered `Command`s. ECS-side code feeding sim state any other way is the #1 architecture violation to flag in review — every time.
 2. **No float types (`f32`/`f64`) in any state-affecting path.** Integer / fixed-point math only. Floats are fine in rendering/UI (the `game` crate) only.
 3. **No `HashMap`/`HashSet` iteration in sim logic** — hash order is nondeterministic. Use `BTreeMap`, sorted `Vec`s, or sort before iterating.
 4. **No wall clock, no frame time, no OS randomness.** All randomness comes from named, seeded RNG streams owned by the sim and advanced only by sim systems.

@@ -64,12 +64,12 @@ The loop players should feel: *observe → rewrite → redeploy → watch it pla
 | **Tick** | One fixed step of the deterministic simulation (all bots, physics, combat). |
 | **Function block** | An unlockable built-in function bots can call (e.g. `scan()`, `broadcast()`). |
 | **Construct** | An unlockable language feature (variables, `if`, loops, `def`, lists). |
-| **Fabricator / Printer** | Structure that prints (and reprints) bots. One per program color; buildable count gated by controlled nests. Carries the desired-max population dial. |
+| **Fabricator / Printer** | Structure that prints (and reprints) bots. One per program color; buildable count gated by controlled nests. Each adds a fixed amount to the colony's fleet cap; each printer after the first carries a target share + selection key choosing which bots wear its color (the first takes the remainder). |
 | **Template Cache** | Non-consumable ruin where any colony studies a function block. Basic ones ring start zones; advanced ones sit deeper. |
 | **Reprint** | Rebuilding a destroyed bot. Its program is preserved; its XP is not. |
 | **Black Box** | Object dropped by every destroyed bot: its local logs + cause of death. Readable/recoverable by anyone. |
 | **Color** | A colony program slot (start with Green; repair the ruined Red printer with Data; more by controlling nests, quadratic, uncapped). One color = one printer. Every bot runs one color and is tinted by it. Enemy salvages permanently decrypt a color a few % at a time. |
-| **Recall** | The engine-owned signal (un-writable): a printer over its desired max recalls its lowest-XP bot for re-coloring (XP kept); an over-capacity colony recalls its lowest-XP bot for scrap. An interrupt context — double-handle applies. |
+| **Recall** | The engine-owned signal (un-writable): the target-share allocation re-colors a claimed bot at its new printer (XP kept); an over-capacity colony recalls its lowest-XP bot for scrap. An interrupt context — double-handle applies. |
 | **Boot Sequence** | State a bot passes through on print or rescue: auto-upload of any local logs, an optional `on boot:` window, then execute from line 1. |
 | **Feral** | The PvE enemy faction: corrupted machines running real Pyrite programs, decryptable by salvage like everyone else's. |
 | **Allegiance** | A Nest's rank 0–21, named for the tarot Major Arcana. Number ≈ difficulty; arcanum ≈ personality, especially how the nest treats code (static, mutating, researching). |

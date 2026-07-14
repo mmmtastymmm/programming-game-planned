@@ -8,11 +8,14 @@ Rule: **every terrain type must change what a good program looks like.** If a ti
 |---|---|---|---|
 | **Plains** | 1× | none | baseline |
 | **Rubble** | 2× | — | Pathing tradeoffs: `move_to` auto-paths, but route *choice* (waypoints) is player code |
-| **Ore Vein** | 1× | minable Ore node | mining loops |
+| **Ore Vein** | 1× | minable mineral node — Iron, Coal, Copper, Tin, Silver, or Gold variant ([03-resources.md](03-resources.md)); deeper/rarer kinds sit farther from start zones | mining loops |
+| **Grove** | 1× | harvestable Wood; **regenerates** | renewable-but-thin logging loops |
+| **Outcrop** | 1× | harvestable Stone node — plentiful, near everywhere ([03-resources.md](03-resources.md)) | fortification supply lines: walls are hauled |
+| **Sand Flat** | 1× | harvestable Sand — shoreline flats and dune fringes ([03-resources.md](03-resources.md)); Q35's deep-dune terrain would make *interior* sand costly to work | glassworks supply; another reason coasts are contested |
 | **Crystal Field** | 1× | minable Crystal; usually spawns near Corruption | risk-managed harvesting (`if can_see_feral(): flee`) |
 | **Geothermal Vent** | 1× | only tile allowing Geothermal Tap | expansion targets worth fighting over |
 | **Mud** | 3×, and loaded bots 4× | — | haulers should route *around*; naive `move_to(depot)` straight-lines through it |
-| **Water** | impassable (ground) | blocks ground bots; conducts sensor pings farther | natural walls; chokepoint defense |
+| **Water** | impassable (ground) | blocks ground bots; conducts sensor pings farther; shoreline tiles accept a **Pump** (the Water resource, [03-resources.md](03-resources.md)) | natural walls; chokepoint defense — and now a resource worth holding |
 | **High Ground** | 1×, enter only via Ramp tiles | +2 sensor range, +25% ranged damage down | king-of-the-hill fights; scout perches |
 | **Corruption** | 1× | bots suffer **+1 cycle cost on every operation**; no channel traffic (`send`/`receive`) in/out; Ferals spawn here | *the signature tile*: your code literally runs worse here — simple short programs outperform clever long ones inside Corruption |
 
@@ -35,9 +38,9 @@ The map is editable — both directions. **Designation is the player's; labor is
 
 | Action | Effect | Cost |
 |---|---|---|
-| `clear(tile)` | Rubble → Plains | build time |
-| `bridge(tile)` | Water → Bridge (ground-passable) | Metal + build time |
-| `barricade(tile)` | Plains → Barricade (blocks movement **and vision** — it's tall; has HP, attackable) | Metal + build time |
+| `clear(tile)` | Rubble → Plains; yields a little **Stone** | build time |
+| `bridge(tile)` | Water → Bridge (ground-passable) | Stone + build time |
+| `barricade(tile)` | Plains → Barricade (blocks movement **and vision** — it's tall; has HP, attackable) | Stone + build time |
 | `demolish(tile)` | remove Bridge / Barricade | build time |
 | `cleanse(tile)` | Corruption → Plains (see Corruption dynamics — it grows back) | build time, slow |
 
@@ -91,14 +94,14 @@ Corruption attacks the player's core resource — computation:
 ```mermaid
 flowchart TD
     subgraph MapRing["Typical map, center-out"]
-        S[Start zones:<br/>Plains + small Ore + 1 Vent] --> M[Midfield:<br/>Rubble, Mud, larger Ore veins,<br/>contested Vents]
-        M --> C[Deep field:<br/>Crystal + Corruption + Feral Nests,<br/>High Ground overlooks]
+        S[Start zones:<br/>Plains + Iron/Coal/Wood/Stone + 1 Vent] --> M[Midfield:<br/>Rubble, Mud, Copper/Tin veins,<br/>contested Vents + shorelines<br/>with Pumps & Sand Flats]
+        M --> C[Deep field:<br/>Silver/Gold, Crystal + Corruption,<br/>Feral Nests, High Ground overlooks]
     end
 ```
 
 - **Start zones are safe and legible** — a Tier-0 program works there. Difficulty is geographic.
 - **Template Caches ring each start zone** ([06-progression.md](06-progression.md)): basic ones close, advanced ones toward the midfield. They're non-consumable study sites — everyone can learn from them, so the deep ones are worth *holding*, not racing. The opening toolkit sweep is the first thing eyes-only fog makes interesting.
-- **Every expansion is a tradeoff**: more Ore = longer haul routes; Crystal = Corruption exposure; Vents = contested.
+- **Every expansion is a tradeoff**: more veins = longer haul routes; the tier ladder (Copper/Tin → Silver/Gold → Crystal, [03-resources.md](03-resources.md)) is laid out center-out, so richer material is farther material; Crystal = Corruption exposure; Vents and shorelines = contested.
 - **Chokepoints from Water/High Ground** give defensive programs something to anchor on (`guard(ramp_tile)`).
 - PvP maps are **mirror-symmetric**; co-op maps are asymmetric with a shared frontier.
 

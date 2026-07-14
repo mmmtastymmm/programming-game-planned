@@ -2,7 +2,7 @@
 
 **Status: proposal — nothing here is Decided.** Open questions live in [QUESTIONS.md](QUESTIONS.md) (Q44–Q48).
 
-A **quirk** is a small per-bot deviation from its chassis spec — a positive or negative "personality" of the individual machine. Two bots printed from the same Fabricator, running the same color, are no longer perfectly identical. Quirk names are programming jokes on purpose: the audience writes code, and a joke name that *explains its own effect* (Memory Leak, Cold Start) is free documentation.
+A **quirk** is a small per-bot deviation from the universal chassis spec ([02-agents.md](02-agents.md)) — a positive or negative "personality" of the individual machine. With chassis classes gone, quirks and XP are the *only* things making two prints differ. Two bots printed from the same Fabricator, running the same color, are no longer perfectly identical. Quirk names are programming jokes on purpose: the audience writes code, and a joke name that *explains its own effect* (Memory Leak, Cold Start) is free documentation.
 
 ## Design rules (what keeps quirks on-pillar)
 

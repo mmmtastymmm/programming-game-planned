@@ -102,15 +102,24 @@ Reading the tree: **constructs gate expressiveness, functions gate verbs**, and 
 
 ## Hardware Upgrades (Chips, per-bot)
 
+Compute is **bought at the Upgrade Station** ([03-resources.md](03-resources.md)): the bot physically walks to the structure and the upgrade installs for Chips — **no module slot consumed**. Module slots hold tools (and the Backup Core).
+
+Upgrade Station catalog:
+
 | Upgrade | Cost | Effect |
 |---|---|---|
 | CPU Mk2 / Mk3 | 5 / 15 Chips | 2 / 4 cycles per tick |
 | Memory bank | 5 Chips | +32 program lines, +4 variables, +8 log ring-buffer entries |
-| Stack module | 8 Chips | +4 call depth (base cap is 4; recursion is legal but overflows fault — stack is what makes recursive style viable, [01-language.md](01-language.md)) |
+| Stack extension | 8 Chips | +4 call depth (base cap is 4; recursion is legal but overflows fault — stack is what makes recursive style viable, [01-language.md](01-language.md)) |
 | Coprocessor | 20 Chips | think *while* an action resolves (removes action-blocking — huge, late) |
+
+Slotted modules:
+
+| Module | Cost | Effect |
+|---|---|---|
 | Backup Core | 25 Chips | preserve 50% XP on destruction (see [02-agents.md](02-agents.md)) |
 
-Hardware is where the "compute vs. claws" economy bites: Chips also buy weapons/tools, so a maxed-CPU bot is an underarmed one.
+Hardware is where the "compute vs. claws" economy bites: Chips also buy weapons/tools, so a maxed-CPU bot starved the armory. The tension lives in the Chips budget — and in the walk: every compute upgrade is a round trip to the station, paid in time and exposure.
 
 ## Pacing Targets (a NEW player's first co-op session)
 
@@ -132,4 +141,4 @@ This table describes the *learning arc* — the one-time journey through the per
 - **All function blocks are learned at Template Caches** — non-consumable study sites; anyone can learn from any Cache; depth replaces Data pricing (see Template Caches).
 - **Any PvE play earns construct unlocks** — no dedicated academy required (one can be authored later as an accelerant).
 
-- **Data is a currency** — beyond one-time construct research, the Research Archive runs a **Data Exchange** (Data → Chips/Metal at tuned rates, [03-resources.md](03-resources.md)). Data never goes dead: veterans convert it, raze-vs-claim stays a real choice, and milestone Data keeps mattering in PvP.
+- **Data is a currency** — beyond one-time construct research, the Research Archive runs a **Data Exchange** (Data → other resources at tuned rates, Chips-favored, Gold densest — [03-resources.md](03-resources.md)). Data never goes dead: veterans convert it, raze-vs-claim stays a real choice, and milestone Data keeps mattering in PvP.

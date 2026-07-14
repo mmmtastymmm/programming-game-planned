@@ -78,7 +78,7 @@ Patrols and *calls for help* (other Ferals block on `receive("intruder")`). Coun
 
 Prints Ferals from harvested resources, exactly like a player Fabricator. Feral economy is real: starve the nest (kill Harvesters) and it prints less. Destroying a Nest yields a large Data bounty.
 
-**Controlling nests is the territory game**: a defeated Nest can be **claimed** (an Artisan converts the site) instead of razed. Controlled nests gate how many **printers** — and therefore program colors — a colony may build, on a quadratic curve ([01-language.md](01-language.md), [03-resources.md](03-resources.md)). Razing pays Data now; claiming grows your program portfolio forever. Higher-arcana nests are worth the same slot credit but are far harder to take — pick your conquests.
+**Controlling nests is the territory game**: a defeated Nest can be **claimed** (a bot with a build tool converts the site) instead of razed. Controlled nests gate how many **printers** — and therefore program colors — a colony may build, on a quadratic curve ([01-language.md](01-language.md), [03-resources.md](03-resources.md)). Razing pays Data now; claiming grows your program portfolio forever. Higher-arcana nests are worth the same slot credit but are far harder to take — pick your conquests.
 
 **Claims must be held: Ferals reclaim nests.** An undefended claim is a loan — nearby Feral activity can re-take the site, sending its printer dormant ([01-language.md](01-language.md)). Aggressiveness is arcanum-flavored: siege personalities (Tower, Justice) will assault defended claims; most others only reoccupy ones left empty.
 
@@ -98,7 +98,7 @@ All of this is first-pass flavor to tune; the mechanical skeleton (allegiance nu
 | 5 | The Hierophant | The teacher: deploys textbook-perfect demos of constructs you haven't unlocked — and **converts**: attempts to `hijack()` your disabled wrecks into its flock. | Static exemplars; hijack-capable |
 | 6 | The Lovers | Bonded pairs: units fight in twos; when one dies, its partner hot-swaps to an avenger program. | Static, signal-linked pairs |
 | 7 | The Chariot | Speed: fast raid swarms on straight-line assault vectors, terrain-ignorant pathing (exploitable at chokes). | Static rush scripts |
-| 8 | Strength | Few, heavy, patient: Bulwark-class hunters that **target your highest-XP bots** first. | Static; priority logic reads XP decals |
+| 8 | Strength | Few, heavy, patient: high-HP hunters that **target your highest-XP bots** first. | Static; priority logic reads XP decals |
 | 9 | The Hermit | Lone elites far from any nest; the nest itself is hidden and must be scouted to be ended. | Static, self-sufficient (long programs, big CPU) |
 | 10 | Wheel of Fortune | Chance: patrol routes, targets, even cycle budgets rolled from seeded RNG streams. Unreadable by pattern, only by code. | **Procedurally randomized parameters** per print |
 | 11 | Justice | The ledger: retaliates in proportion to each player's aggression — tit-for-tat tracked per player (multiplayer-aware). | Static but **stateful**: grudge counters in colony memory |
@@ -156,7 +156,7 @@ flowchart LR
 - **Nest Allegiance 0–21** (Major Arcana) is the enemy difficulty-and-personality axis; number ≈ difficulty, arcanum ≈ how it treats code.
 - **Controlled nests gate printers/colors** (quadratic) — see Nest section above.
 - **v1 arcana subset: 0 (Fool), 1 (Magician), 5 (Hierophant), 7 (Chariot), 13 (Death), 16 (Tower), 18 (Moon)** — spans the difficulty axis and covers the flag matrix: static, mutating, hijacking, salvage-denial, siege, and counter-intel.
-- **Losing a claimed nest makes its printer dormant, not dead** — desired max forced to 0, color frozen (no prints, no hotfixes); stragglers optionally absorbed by other printers or left as a ghost fleet. Retaking the nest reactivates it ([01-language.md](01-language.md)).
+- **Losing a claimed nest makes its printer dormant, not dead** — fleet-cap contribution withdrawn, target voided, color frozen (no prints, no hotfixes); stragglers are claimed by other printers' selection keys or fall to the first printer's remainder (whether a deliberate ghost fleet survives auto-absorb: Q65). Retaking the nest reactivates it ([01-language.md](01-language.md)).
 - **Max arcanum is a match option, on any server type** — higher-arcana nests always spawn farther from player starts; raising the cap deepens the frontier rather than hardening the neighborhood.
 - **Mutated programs stay functional** — procedural mutation must yield parse-valid, non-degenerate programs. Buggy Feral code (the Fool) is an authored choice, never a mutation accident.
 - **Ferals reclaim claimed nests** — claims must be defended; loss sends the printer dormant. Siege arcana (Tower, Justice) assault defended claims; others reoccupy empty ones.
