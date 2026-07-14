@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <!-- inner-corner crust nub, NW corner master: caps the dried rim where
+       firm ground touches this mud tile only diagonally -->
+  <path d="M0 8 Q3.5 7 5 5 Q7 3.5 8 0 L0 0 Z" fill="#6b5637"/>
+  <path d="M0 3.5 Q2 3 2.5 2.5 Q3 2 3.5 0 L0 0 Z" fill="#80693f"/>
+  <path d="M4 3 L6 6" stroke="#3f311d" stroke-width="1.1" stroke-linecap="round" fill="none"/>
+</svg>

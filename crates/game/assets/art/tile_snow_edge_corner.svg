@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <!-- inner-corner drift nub, NW corner master: caps the bank where bare
+       ground touches this snow tile only diagonally -->
+  <path d="M0 8 Q3.5 7 5 5 Q7 3.5 8 0 L0 0 Z" fill="#5f88bc"/>
+  <path d="M0 4 Q2.2 3.5 2.8 2.8 Q3.5 2.2 4 0 L0 0 Z" fill="#ffffff"/>
+  <ellipse cx="5" cy="7" rx="1.8" ry="1.2" fill="#f7fbff"/>
+  <circle cx="9" cy="4" r="0.7" fill="#6f98cc"/>
+</svg>

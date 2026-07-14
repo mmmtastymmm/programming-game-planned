@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <!-- snow: bright white drift hills on a cold blue field, snowflakes
+       mid-fall (frame 0 of the fall cycle — see tile_snow_fall_1/2);
+       edges stay base-colored so tiling is seamless -->
+  <rect width="64" height="64" fill="#86aede"/>
+  <!-- shadowed ice beneath the hills -->
+  <path d="M9 16 Q20 9 27 17 Q29 26 18 27 Q8 25 9 16 Z" fill="#6f98cc"/>
+  <path d="M37 38 Q50 32 55 41 Q54 50 43 50 Q35 44 37 38 Z" fill="#6f98cc"/>
+  <path d="M13 47 Q22 42 28 48 Q27 56 18 56 Q10 53 13 47 Z" fill="#7aa2d4"/>
+  <!-- white drift hills, sitting a touch high on their shadows -->
+  <path d="M8 14 Q19 7 26 15 Q28 23 17 24 Q7 22 8 14 Z" fill="#f7fbff"/>
+  <path d="M36 36 Q49 30 54 38 Q53 47 42 47 Q34 42 36 36 Z" fill="#f7fbff"/>
+  <path d="M12 45 Q21 40 27 46 Q26 53 17 53 Q9 51 12 45 Z" fill="#fdfeff"/>
+  <path d="M35 9 Q44 5 48 11 Q47 17 39 17 Q33 14 35 9 Z" fill="#fdfeff"/>
+  <!-- crest highlights -->
+  <g stroke="#ffffff" stroke-width="1.8" stroke-linecap="round" fill="none">
+    <path d="M12 15 Q18 11 23 15"/>
+    <path d="M40 37 Q46 33 51 37"/>
+  </g>
+  <!-- ground glitter (static across frames) -->
+  <g fill="#ffffff">
+    <circle cx="31" cy="28" r="1.0"/>
+    <circle cx="6" cy="34" r="0.8"/>
+    <circle cx="58" cy="55" r="0.8"/>
+  </g>
+  <!-- falling flakes: little asterisks, step 9px down per frame -->
+  <g stroke="#ffffff" stroke-width="1.1" stroke-linecap="round" fill="none">
+    <path d="M14 5 V9 M12.3 6 L15.7 8 M15.7 6 L12.3 8"/>
+    <path d="M44 19 V23 M42.3 20 L45.7 22 M45.7 20 L42.3 22"/>
+    <path d="M30 39 V43 M28.3 40 L31.7 42 M31.7 40 L28.3 42"/>
+    <path d="M56 31 V35 M54.3 32 L57.7 34 M57.7 32 L54.3 34"/>
+  </g>
+  <!-- last cycle's flake settling into the pack -->
+  <circle cx="31" cy="59" r="0.8" fill="#ffffff" opacity="0.5"/>
+  <!-- wind-scoured flecks -->
+  <g fill="#5f88bc">
+    <circle cx="56" cy="46" r="1.0"/>
+    <circle cx="24" cy="33" r="0.9"/>
+    <circle cx="10" cy="8" r="0.9"/>
+    <circle cx="47" cy="57" r="0.8"/>
+  </g>
+</svg>

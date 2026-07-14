@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <!-- iron vein: rusty seams in workable stone (docs/03: common, feeds
+       Steel); edges stay base-colored so tiling is seamless -->
+  <rect width="64" height="64" fill="#58524a"/>
+  <path d="M8 10 Q18 5 24 12 Q26 20 16 22 Q7 20 8 10 Z" fill="#4f4a42"/>
+  <path d="M40 40 Q52 36 56 44 Q54 52 44 52 Q38 46 40 40 Z" fill="#4f4a42"/>
+  <path d="M34 8 Q44 4 48 11 Q47 18 38 18 Q32 14 34 8 Z" fill="#615a50"/>
+  <g stroke="#3b362f" stroke-width="1.4" stroke-linecap="round" fill="none">
+    <path d="M14 30 L20 36 L18 42"/>
+    <path d="M50 16 L46 24"/>
+  </g>
+  <!-- rust seams -->
+  <g stroke="#b0623a" stroke-width="2.2" stroke-linecap="round" fill="none">
+    <path d="M10 46 L18 41 L26 45 L33 39"/>
+    <path d="M40 20 L47 25 L54 21"/>
+  </g>
+  <!-- ore lumps -->
+  <g fill="#c0714a">
+    <circle cx="18" cy="41" r="1.9"/>
+    <circle cx="47" cy="25" r="1.7"/>
+    <circle cx="33" cy="39" r="1.4"/>
+  </g>
+  <g fill="#8c4c2c">
+    <circle cx="26" cy="45" r="1.1"/>
+    <circle cx="54" cy="21" r="1.0"/>
+  </g>
+</svg>

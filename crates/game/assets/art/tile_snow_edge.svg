@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <!-- drift bank for a snow tile's NORTH edge (build.rs rotates it onto
+       whichever sides border bare ground): a deep-blue melt line under a
+       very white piled crest, white lumps trailing inward. Layers start
+       and end at the same height so the bank runs seamlessly -->
+  <path d="M0 0 H64 V6 Q54 9.5 44 6.5 Q34 3.5 24 7.5 Q14 11 0 6 Z" fill="#5f88bc"/>
+  <path d="M0 0 H64 V3 Q48 5.5 34 3.5 Q20 1.5 0 3 Z" fill="#ffffff"/>
+  <!-- white drift lumps at the bank -->
+  <g fill="#f7fbff">
+    <ellipse cx="12" cy="7.5" rx="2.6" ry="1.7"/>
+    <ellipse cx="33" cy="8.5" rx="2.2" ry="1.5"/>
+    <ellipse cx="52" cy="7.5" rx="2.4" ry="1.6"/>
+    <ellipse cx="22" cy="9" rx="1.6" ry="1.1"/>
+    <ellipse cx="43" cy="9.5" rx="1.5" ry="1.0"/>
+  </g>
+  <!-- cold shadow flecks under the lumps -->
+  <g fill="#6f98cc">
+    <circle cx="17" cy="10" r="0.9"/>
+    <circle cx="38" cy="11" r="0.8"/>
+    <circle cx="58" cy="9.5" r="0.9"/>
+  </g>
+</svg>

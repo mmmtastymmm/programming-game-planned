@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <!-- frost fringe for a crystal tile's NORTH edge (build.rs rotates it
+       onto whichever sides meet plain ground): a pale mineral band with
+       small shards sprouting at the frontier. Layers start and end at the
+       same height so the band runs seamlessly along a field -->
+  <path d="M0 0 H64 V5.5 Q54 9 44 6 Q34 3 24 7 Q14 10.5 0 5.5 Z" fill="#575270"/>
+  <path d="M0 0 H64 V2.5 Q48 5 34 3 Q20 1 0 2.5 Z" fill="#656080"/>
+  <!-- sprouting shards -->
+  <path d="M9 12 L11 4.5 L11 12 Z" fill="#b9ecf7"/>
+  <path d="M11 4.5 L11 12 L13.5 12 Z" fill="#7fb6cf"/>
+  <path d="M31 11 L33 5.5 L33 11 Z" fill="#b9ecf7"/>
+  <path d="M33 5.5 L33 11 L35 11 Z" fill="#7fb6cf"/>
+  <path d="M49 12.5 L51 4 L51 12.5 Z" fill="#b9ecf7"/>
+  <path d="M51 4 L51 12.5 L53.5 12.5 Z" fill="#7fb6cf"/>
+  <!-- specks -->
+  <g fill="#a8e2f0">
+    <circle cx="21" cy="9" r="0.8"/>
+    <circle cx="42" cy="8.5" r="0.8"/>
+    <circle cx="60" cy="9.5" r="0.7"/>
+  </g>
+</svg>

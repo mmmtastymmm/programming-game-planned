@@ -15,6 +15,23 @@ pub(crate) const ORE_GOLD: Color = Color::srgb(1.0, 0.85, 0.15);
 pub(crate) const PRINT_GLOW: Color = Color::srgb(0.25, 0.55, 0.95);
 pub(crate) const EXPLODE_ORANGE: Color = Color::srgb(1.0, 0.45, 0.1);
 
+/// Bot cube half-extent (tiles are 1.0 apart; two adjacent bots leave a
+/// `1.0 - 2*BOT_HALF` gap between faces).
+pub(crate) const BOT_HALF: f32 = 0.35;
+/// Camera-lens nose geometry, shared by the meshes (scene.rs) and the
+/// spawn transforms (view.rs) so the clip test below checks the real
+/// numbers. The barrel sits half-sunk: centered on the face plane.
+pub(crate) const LENS_Y: f32 = 0.044;
+pub(crate) const LENS_BARREL_RADIUS: f32 = 0.115;
+pub(crate) const LENS_BARREL_LEN: f32 = 0.24;
+pub(crate) const LENS_BARREL_Z: f32 = -BOT_HALF;
+pub(crate) const LENS_GLASS_RADIUS: f32 = 0.08;
+pub(crate) const LENS_GLASS_LEN: f32 = 0.02;
+/// Glass cap: seated on the barrel tip, overlapping it by a quarter of
+/// its own thickness so there's no gap.
+pub(crate) const LENS_GLASS_Z: f32 =
+    LENS_BARREL_Z - LENS_BARREL_LEN / 2.0 - LENS_GLASS_LEN / 4.0;
+
 #[derive(Resource)]
 pub(crate) struct Palette {
     pub(crate) unit_cube: Handle<Mesh>,
@@ -25,7 +42,13 @@ pub(crate) struct Palette {
     pub(crate) black_mat: Handle<StandardMaterial>,
     pub(crate) explode_mat: Handle<StandardMaterial>,
     pub(crate) print_glow_mat: Handle<StandardMaterial>,
-    pub(crate) nose_mat: Handle<StandardMaterial>,
+    /// Camera-lens nose: gunmetal barrel + team-accent glass front,
+    /// aligned with the lens flange drawn on the front-face atlas.
+    pub(crate) lens_barrel: Handle<Mesh>,
+    pub(crate) lens_glass: Handle<Mesh>,
+    pub(crate) lens_barrel_mat: Handle<StandardMaterial>,
+    /// Keyed like `bot_tex_mats` (color 0 = green, 1 = red, 2+ = blue).
+    pub(crate) lens_glass_mats: HashMap<u8, Handle<StandardMaterial>>,
     pub(crate) tile_slab: Handle<Mesh>,
     /// Bot body: cube whose faces sample cells of the team's 3x2 atlas.
     pub(crate) bot_cube: Handle<Mesh>,
@@ -57,11 +80,36 @@ pub(crate) struct Palette {
     pub(crate) grass_tex_mats: Vec<Handle<StandardMaterial>>,
     pub(crate) water_tex_mats: Vec<Handle<StandardMaterial>>,
     pub(crate) mountain_tex_mats: Vec<Handle<StandardMaterial>>,
+    /// Static autotiled terrains: mud grows a dried crust, corruption a
+    /// creep frontier, ore a broken-rock lip, crystal a frost band.
+    pub(crate) mud_tex_mats: Vec<Handle<StandardMaterial>>,
+    pub(crate) corruption_tex_mats: Vec<Handle<StandardMaterial>>,
+    pub(crate) ore_tex_mats: Vec<Handle<StandardMaterial>>,
+    pub(crate) crystal_tex_mats: Vec<Handle<StandardMaterial>>,
+    pub(crate) snow_tex_mats: Vec<Handle<StandardMaterial>>,
+    /// High-ground plateau: atlas pairs like the mountain (top + rock
+    /// face), rendered on the same block mesh.
+    pub(crate) highground_tex_mats: Vec<Handle<StandardMaterial>>,
+    /// Raw-resource terrains (docs/03), keyed by `TileKind::as_u8`:
+    /// autotile sets and corner-nub overlays. Ground art only until the
+    /// Q69 sim migration wires nodes and recipes.
+    pub(crate) resource_tex_mats: HashMap<u8, Vec<Handle<StandardMaterial>>>,
+    pub(crate) resource_corner_mats: HashMap<u8, Vec<Handle<StandardMaterial>>>,
+    /// Geothermal vent: a point feature, no autotiling; the crater glows.
+    pub(crate) vent_tex_mat: Handle<StandardMaterial>,
     /// Ambient animation frames, indexed `[frame][mask]`. Every tile of a
-    /// (terrain, mask) shares one material, so retargeting these 32
-    /// materials' textures animates the whole map (see animate_terrain).
+    /// (terrain, mask) shares one material, so retargeting one material
+    /// set's textures animates the whole map (see animate_terrain).
     pub(crate) grass_frames: Vec<Vec<Handle<Image>>>,
     pub(crate) water_frames: Vec<Vec<Handle<Image>>>,
+    pub(crate) mud_frames: Vec<Vec<Handle<Image>>>,
+    pub(crate) corruption_frames: Vec<Vec<Handle<Image>>>,
+    pub(crate) ore_frames: Vec<Vec<Handle<Image>>>,
+    pub(crate) crystal_frames: Vec<Vec<Handle<Image>>>,
+    pub(crate) snow_frames: Vec<Vec<Handle<Image>>>,
+    /// Vent pulse frames (one tile, no autotile). The animator retargets
+    /// base AND emissive so the crater actually glows brighter.
+    pub(crate) vent_frames: Vec<Handle<Image>>,
     /// Transparent scree overlays for grass at a mountain's base, indexed
     /// by the same NESW mask (bit unset = mountain on that side).
     pub(crate) scree_mats: Vec<Handle<StandardMaterial>>,
@@ -72,6 +120,12 @@ pub(crate) struct Palette {
     pub(crate) grass_corner_mats: Vec<Handle<StandardMaterial>>,
     pub(crate) scree_corner_mats: Vec<Handle<StandardMaterial>>,
     pub(crate) mountain_corner_mats: Vec<Handle<StandardMaterial>>,
+    pub(crate) mud_corner_mats: Vec<Handle<StandardMaterial>>,
+    pub(crate) corruption_corner_mats: Vec<Handle<StandardMaterial>>,
+    pub(crate) ore_corner_mats: Vec<Handle<StandardMaterial>>,
+    pub(crate) crystal_corner_mats: Vec<Handle<StandardMaterial>>,
+    pub(crate) snow_corner_mats: Vec<Handle<StandardMaterial>>,
+    pub(crate) highground_corner_mats: Vec<Handle<StandardMaterial>>,
     /// Full-height block for mountain (Rubble) tiles.
     pub(crate) mountain_block: Handle<Mesh>,
     pub(crate) preview_valid_mat: Handle<StandardMaterial>,
@@ -167,16 +221,17 @@ pub(crate) fn textured_slab_mesh(half: Vec3) -> Mesh {
     box_with_face_uvs(half, [EDGE, EDGE, EDGE, EDGE, [0.0, 0.0, 1.0, 1.0], EDGE])
 }
 
-/// Render height of a mountain (Rubble) block's top face; other terrain
-/// tops sit at 0.0 (water slightly below). Bots, overlays, and paint all
-/// ride the terrain they're on.
+/// Render height of a mountain (Rubble) or high-ground block's top face;
+/// other terrain tops sit at 0.0 (water and mud slightly below). Bots,
+/// overlays, and paint all ride the terrain they're on.
 pub(crate) const MOUNTAIN_TOP: f32 = 0.25;
 
 /// Top surface of the tile at `pos` in render space.
 pub(crate) fn terrain_top(world: &sim::World, pos: TilePos) -> f32 {
     match world.grid.get(pos) {
-        Some(TileKind::Rubble) => MOUNTAIN_TOP,
+        Some(TileKind::Rubble | TileKind::HighGround) => MOUNTAIN_TOP,
         Some(TileKind::Water) => -0.05,
+        Some(TileKind::Mud) => -0.02,
         _ => 0.0,
     }
 }
@@ -192,4 +247,36 @@ pub(crate) fn mountain_block_mesh() -> Mesh {
         Vec3::new(0.48, MOUNTAIN_TOP / 2.0 + 0.025, 0.48),
         [SIDE, SIDE, SIDE, SIDE, TOP, EDGE],
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Two bots on adjacent tiles staring at each other must not touch:
+    /// everything past the face plane has to fit in half the inter-face
+    /// gap, with a visible sliver of daylight to spare. This is pure
+    /// arithmetic on the same constants the meshes and spawn transforms
+    /// use, so any future lens resizing re-runs the collision math.
+    #[test]
+    fn facing_lenses_never_clip() {
+        const TILE_PITCH: f32 = 1.0; // tile_xyz: one world unit per tile
+        const DAYLIGHT: f32 = 0.02; // minimum visible gap between lens tips
+
+        let gap = TILE_PITCH - 2.0 * BOT_HALF;
+        let tip = LENS_GLASS_Z - LENS_GLASS_LEN / 2.0; // most negative point
+        let protrusion = -tip - BOT_HALF;
+
+        assert!(protrusion > 0.0, "the lens should protrude past the face at all");
+        assert!(
+            2.0 * protrusion + DAYLIGHT <= gap,
+            "facing bots clip (or touch): 2 x {protrusion} + {DAYLIGHT} > gap {gap}"
+        );
+        // The glass must cap the barrel, not float in front of it.
+        let barrel_tip = LENS_BARREL_Z - LENS_BARREL_LEN / 2.0;
+        assert!(
+            LENS_GLASS_Z + LENS_GLASS_LEN / 2.0 > barrel_tip,
+            "glass is detached from the barrel"
+        );
+    }
 }

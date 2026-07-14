@@ -306,12 +306,24 @@ pub(crate) fn animate_terrain(
     time: Res<Time>,
     palette: Res<Palette>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    mut shown: Local<(usize, usize)>,
+    mut shown: Local<[usize; 8]>,
 ) {
     let t = time.elapsed_secs();
-    let water = (t / 0.55) as usize % 3;
+    // Each terrain ticks on its own period so the map never pulses in
+    // lockstep. SWAY ping-pongs through the frames; GLITCH runs them out
+    // of order — corruption should stutter, not breathe.
     const SWAY: [usize; 4] = [0, 1, 0, 2];
+    const GLITCH: [usize; 4] = [0, 2, 0, 1];
+    let water = (t / 0.55) as usize % 3;
     let grass = SWAY[(t / 0.8) as usize % 4];
+    let mud = (t / 1.0) as usize % 3;
+    let corruption = GLITCH[(t / 0.35) as usize % 4];
+    let ore = (t / 0.7) as usize % 3;
+    let crystal = SWAY[(t / 1.0) as usize % 4];
+    // Snow runs forward-only: flakes fall, land, and respawn at the top —
+    // a ping-pong would send them back up.
+    let snow = (t / 0.5) as usize % 3;
+    let vent = SWAY[(t / 0.6) as usize % 4];
     let mut retarget = |mats: &[Handle<StandardMaterial>], frame: &[Handle<Image>]| {
         for (mat, img) in mats.iter().zip(frame) {
             if let Some(m) = materials.get_mut(mat) {
@@ -319,13 +331,28 @@ pub(crate) fn animate_terrain(
             }
         }
     };
-    if shown.0 != water {
-        shown.0 = water;
-        retarget(&palette.water_tex_mats, &palette.water_frames[water]);
+    let sets: [(usize, &[Handle<StandardMaterial>], &[Vec<Handle<Image>>]); 7] = [
+        (water, &palette.water_tex_mats, &palette.water_frames),
+        (grass, &palette.grass_tex_mats, &palette.grass_frames),
+        (mud, &palette.mud_tex_mats, &palette.mud_frames),
+        (corruption, &palette.corruption_tex_mats, &palette.corruption_frames),
+        (ore, &palette.ore_tex_mats, &palette.ore_frames),
+        (crystal, &palette.crystal_tex_mats, &palette.crystal_frames),
+        (snow, &palette.snow_tex_mats, &palette.snow_frames),
+    ];
+    for (slot, (frame, mats, frames)) in sets.into_iter().enumerate() {
+        if shown[slot] != frame {
+            shown[slot] = frame;
+            retarget(mats, &frames[frame]);
+        }
     }
-    if shown.1 != grass {
-        shown.1 = grass;
-        retarget(&palette.grass_tex_mats, &palette.grass_frames[grass]);
+    // The vent pulses base + emissive together, so the glow itself beats.
+    if shown[7] != vent {
+        shown[7] = vent;
+        if let Some(m) = materials.get_mut(&palette.vent_tex_mat) {
+            m.base_color_texture = Some(palette.vent_frames[vent].clone());
+            m.emissive_texture = Some(palette.vent_frames[vent].clone());
+        }
     }
 }
 
@@ -504,10 +531,22 @@ pub(crate) fn sync_view(
                 },
             ))
             .with_children(|parent| {
+                // Camera-lens nose on the -Z face: barrel half-sunk into
+                // the face (its drawn flange rings it), team-accent glass
+                // at the tip. Cylinders are Y-up; tip them to point along
+                // Z. Geometry constants live in palette.rs, where the
+                // facing_lenses_never_clip test guards the protrusion
+                // budget (facing bots on adjacent tiles must not touch).
+                let tip = Quat::from_rotation_x(std::f32::consts::FRAC_PI_2);
                 parent.spawn((
-                    Mesh3d(palette.nose_cube.clone()),
-                    MeshMaterial3d(palette.nose_mat.clone()),
-                    Transform::from_xyz(0.0, 0.05, -0.45),
+                    Mesh3d(palette.lens_barrel.clone()),
+                    MeshMaterial3d(palette.lens_barrel_mat.clone()),
+                    Transform::from_xyz(0.0, LENS_Y, LENS_BARREL_Z).with_rotation(tip),
+                ));
+                parent.spawn((
+                    Mesh3d(palette.lens_glass.clone()),
+                    MeshMaterial3d(palette.lens_glass_mats[&bot.data.color.0.min(2)].clone()),
+                    Transform::from_xyz(0.0, LENS_Y, LENS_GLASS_Z).with_rotation(tip),
                 ));
                 // Health bar: shown for a few seconds after any hp change.
                 bar_root = parent

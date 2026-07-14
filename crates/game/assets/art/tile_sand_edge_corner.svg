@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <!-- inner-corner dune nub, NW corner master: caps the slip face where
+       firm ground touches this sand tile only diagonally -->
+  <path d="M0 8 Q3.5 7 5 5 Q7 3.5 8 0 L0 0 Z" fill="#c9b177"/>
+  <path d="M0 3.5 Q2 3 2.5 2.5 Q3 2 3.5 0 L0 0 Z" fill="#e6d6a6"/>
+  <circle cx="6" cy="7" r="0.9" fill="#b59a5f"/>
+</svg>

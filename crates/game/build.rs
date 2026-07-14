@@ -24,6 +24,22 @@ const TILES: &[&str] = &[
     "tile_mountain",
     "tile_terraform",
     "tile_wreck",
+    "tile_mud",
+    "tile_corruption",
+    "tile_ore",
+    "tile_crystal",
+    "tile_highground",
+    "tile_vent",
+    "tile_snow",
+    "tile_sand",
+    "tile_stone",
+    "tile_wood",
+    "tile_coal",
+    "tile_iron",
+    "tile_copper",
+    "tile_tin",
+    "tile_silver",
+    "tile_gold",
     "crate",
     "paper",
     "scribble_0",
@@ -149,9 +165,8 @@ fn main() {
             })
             .collect()
     };
-    // Water and grass are animated: 3 base frames each (surface drift /
-    // tuft sway), sharing one static edge master. Baked as
-    // {prefix}_{mask}_f{frame}.png.
+    // Animated terrains: 3 base frames each (frame 0 is the master),
+    // sharing one static edge master. Baked as {prefix}_{mask}_f{frame}.png.
     for (frames, edge, prefix) in [
         (
             ["tile_water", "tile_water_flow_1", "tile_water_flow_2"],
@@ -162,6 +177,31 @@ fn main() {
             ["tile_grass", "tile_grass_sway_1", "tile_grass_sway_2"],
             "tile_grass_edge",
             "tile_grass",
+        ),
+        (
+            ["tile_mud", "tile_mud_bubble_1", "tile_mud_bubble_2"],
+            "tile_mud_edge",
+            "tile_mud",
+        ),
+        (
+            ["tile_corruption", "tile_corruption_glitch_1", "tile_corruption_glitch_2"],
+            "tile_corruption_edge",
+            "tile_corruption",
+        ),
+        (
+            ["tile_ore", "tile_ore_glint_1", "tile_ore_glint_2"],
+            "tile_ore_edge",
+            "tile_ore",
+        ),
+        (
+            ["tile_crystal", "tile_crystal_shimmer_1", "tile_crystal_shimmer_2"],
+            "tile_crystal_edge",
+            "tile_crystal",
+        ),
+        (
+            ["tile_snow", "tile_snow_fall_1", "tile_snow_fall_2"],
+            "tile_snow_edge",
+            "tile_snow",
         ),
     ] {
         for (f, base) in frames.into_iter().enumerate() {
@@ -177,6 +217,35 @@ fn main() {
     for (mask, px) in autotile("tile_empty", "tile_scree_edge").iter().enumerate() {
         px.save_png(out.join(format!("tile_scree_{mask}.png"))).expect("save scree png");
     }
+    // Raw-resource terrains (docs/03): static autotiles, baked and ready
+    // for when the Q69 sim migration gives them tile kinds. Same
+    // base+edge bake as the animated sets, single frame —
+    // {prefix}_{mask}.png.
+    for (base, edge) in [
+        ("tile_sand", "tile_sand_edge"),
+        ("tile_stone", "tile_stone_edge"),
+        ("tile_wood", "tile_wood_edge"),
+        ("tile_coal", "tile_coal_edge"),
+        ("tile_iron", "tile_iron_edge"),
+        ("tile_copper", "tile_copper_edge"),
+        ("tile_tin", "tile_tin_edge"),
+        ("tile_silver", "tile_silver_edge"),
+        ("tile_gold", "tile_gold_edge"),
+    ] {
+        for (mask, px) in autotile(base, edge).iter().enumerate() {
+            px.save_png(out.join(format!("{base}_{mask}.png")))
+                .expect("save resource autotile png");
+        }
+    }
+
+    // Vent pulse: a single tile (no autotiling), three plain frames.
+    for (f, name) in ["tile_vent", "tile_vent_pulse_1", "tile_vent_pulse_2"].into_iter().enumerate()
+    {
+        let svg = fs::read_to_string(art.join(format!("{name}.svg"))).expect("vent frame svg");
+        render(&svg, SIZE)
+            .save_png(out.join(format!("tile_vent_f{f}.png")))
+            .expect("save vent frame png");
+    }
 
     // Inner-corner overlays: a nub where both flanking neighbors match but
     // the diagonal doesn't. Transparent except the masked corners; the
@@ -187,30 +256,51 @@ fn main() {
         ("tile_grass_edge_corner", "tile_grass_corner"),
         ("tile_scree_edge_corner", "tile_scree_corner"),
         ("tile_mountain_rim_corner", "tile_mountain_corner"),
+        ("tile_mud_edge_corner", "tile_mud_corner"),
+        ("tile_corruption_edge_corner", "tile_corruption_corner"),
+        ("tile_ore_edge_corner", "tile_ore_corner"),
+        ("tile_crystal_edge_corner", "tile_crystal_corner"),
+        ("tile_highground_rim_corner", "tile_highground_corner"),
+        ("tile_snow_edge_corner", "tile_snow_corner"),
+        ("tile_sand_edge_corner", "tile_sand_corner"),
+        ("tile_stone_edge_corner", "tile_stone_corner"),
+        ("tile_wood_edge_corner", "tile_wood_corner"),
+        ("tile_coal_edge_corner", "tile_coal_corner"),
+        ("tile_iron_edge_corner", "tile_iron_corner"),
+        ("tile_copper_edge_corner", "tile_copper_corner"),
+        ("tile_tin_edge_corner", "tile_tin_corner"),
+        ("tile_silver_edge_corner", "tile_silver_corner"),
+        ("tile_gold_edge_corner", "tile_gold_corner"),
     ] {
         for (mask, px) in autotile("tile_empty", corner).iter().enumerate() {
             px.save_png(out.join(format!("{prefix}_{mask}.png"))).expect("save corner png");
         }
     }
 
-    // Mountain summits autotile the same way, but each variant ships as an
-    // atlas pair with the rock face (the layout mountain_block_mesh maps).
+    // Raised blocks (mountain summits, high-ground plateaus) autotile the
+    // same way, but each variant ships as an atlas pair with the rock face
+    // (the layout mountain_block_mesh maps).
     let rock_svg = fs::read_to_string(art.join("rock_face.svg")).expect("rock svg");
     let rock = render(&rock_svg, SIZE);
-    for (mask, top) in autotile("tile_mountain", "tile_mountain_rim").iter().enumerate() {
-        let mut pair = tiny_skia::Pixmap::new(SIZE * 2, SIZE).expect("pair alloc");
-        for (i, px) in [top, &rock].into_iter().enumerate() {
-            pair.draw_pixmap(
-                (i as u32 * SIZE) as i32,
-                0,
-                px.as_ref(),
-                &tiny_skia::PixmapPaint::default(),
-                tiny_skia::Transform::identity(),
-                None,
-            );
+    for (top_base, rim, out_prefix) in [
+        ("tile_mountain", "tile_mountain_rim", "mountain_atlas"),
+        ("tile_highground", "tile_highground_rim", "highground_atlas"),
+    ] {
+        for (mask, top) in autotile(top_base, rim).iter().enumerate() {
+            let mut pair = tiny_skia::Pixmap::new(SIZE * 2, SIZE).expect("pair alloc");
+            for (i, px) in [top, &rock].into_iter().enumerate() {
+                pair.draw_pixmap(
+                    (i as u32 * SIZE) as i32,
+                    0,
+                    px.as_ref(),
+                    &tiny_skia::PixmapPaint::default(),
+                    tiny_skia::Transform::identity(),
+                    None,
+                );
+            }
+            pair.save_png(out.join(format!("{out_prefix}_{mask}.png")))
+                .expect("save block atlas variant");
         }
-        pair.save_png(out.join(format!("mountain_atlas_{mask}.png")))
-            .expect("save mountain atlas variant");
     }
 
     for (svg_prefix, out_prefix) in ATLASES {

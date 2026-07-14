@@ -14,13 +14,13 @@ use crate::view::*;
 use crate::tools::*;
 
 pub(crate) fn build_colony() -> Sim {
-    let mut spec = MapSpec::empty(24, 14);
+    let mut spec = MapSpec::empty(34, 20);
     for y in 2..9 {
         spec.rubble.push(TilePos::new(12, y));
     }
     // A water wall fully splits the map: the ONLY way east is bridges the
     // player builds — one-way pairs make deadlock-free crossings.
-    for y in 0..14 {
+    for y in 0..20 {
         spec.water.push(TilePos::new(16, y));
     }
     // Modest west-side ore keeps the colony alive pre-bridge.
@@ -28,6 +28,81 @@ pub(crate) fn build_colony() -> Sim {
 
     spec.ore_nodes.push((TilePos::new(20, 3), 60));
     spec.ore_nodes.push((TilePos::new(19, 11), 40));
+    // Ore nodes sit in vein outcrops (docs/05): the gem marks the node,
+    // the vein marks the ground it came out of. Same move cost as plains,
+    // so miner routes are unchanged.
+    for (x, y) in [(8, 3), (9, 3), (8, 4), (20, 3), (21, 3), (20, 2), (19, 3)] {
+        spec.ore_veins.push(TilePos::new(x, y));
+    }
+    for (x, y) in [(19, 11), (20, 11), (19, 12), (18, 11)] {
+        spec.ore_veins.push(TilePos::new(x, y));
+    }
+
+    // --- East-side terrain showcase (docs/05). Everything lives behind
+    // the water wall (or is cost-neutral, like the veins above), so the
+    // tuned west-side choreography below never feels it. ---
+    // High-ground mesa running off the NE corner: cliff rim + scree where
+    // it meets the meadow. Impassable until ramps exist.
+    for (x, depth) in [(29, 2), (30, 3), (31, 4), (32, 4), (33, 3)] {
+        for y in 0..depth {
+            spec.high_ground.push(TilePos::new(x, y));
+        }
+    }
+    // A snowfield drapes the mesa's west flank (altitude reads cold);
+    // plains-cost for now, so no route changes (docs/QUESTIONS Q67).
+    for (x, depth) in [(25, 2), (26, 3), (27, 4), (28, 3)] {
+        for y in 0..depth {
+            spec.snow.push(TilePos::new(x, y));
+        }
+    }
+    // Mud bog with a standing pool at its heart — haulers would route
+    // around it (3x entry), which is the tile's whole lesson.
+    for (x, y0, y1) in [(21, 6, 9), (22, 5, 10), (23, 5, 10), (24, 6, 10), (25, 7, 9)] {
+        for y in y0..y1 {
+            // The pool tile stays water (mud is painted after water in
+            // from_spec, so it must be left out here, not just overdrawn).
+            if (x, y) != (23, 7) {
+                spec.mud.push(TilePos::new(x, y));
+            }
+        }
+    }
+    spec.water.push(TilePos::new(23, 7));
+    // Geothermal vent: a lone glowing crater on the east plain.
+    spec.vents.push(TilePos::new(24, 2));
+    // Corruption creeps in from the SE corner; the crystal field sits on
+    // its doorstep (docs/05: Crystal spawns near Corruption).
+    for (x, y0) in [(26, 16), (27, 16), (28, 15), (29, 15), (30, 14), (31, 14), (32, 14), (33, 13)] {
+        for y in y0..20 {
+            spec.corruption.push(TilePos::new(x, y));
+        }
+    }
+    for (x, y) in
+        [(26, 14), (26, 15), (27, 14), (27, 15), (28, 13), (28, 14), (29, 13), (29, 14), (30, 13)]
+    {
+        spec.crystal.push(TilePos::new(x, y));
+    }
+    // --- Raw-resource sampler (docs/03): a 2x2 swatch of each of the
+    // nine resource grounds in the open south field, spaced so every
+    // fringe and corner nub shows against the meadow. Ground kinds only,
+    // plains-cost — nodes and recipes are Q69, so no bot behavior
+    // changes. Kept south of y=14: clear of the sealed signal strip and
+    // the scrap-recall walk along y=13.
+    let swatches: [(i32, i32, TileKind); 9] = [
+        (2, 15, TileKind::Sand),
+        (5, 15, TileKind::StoneOutcrop),
+        (8, 15, TileKind::Grove),
+        (11, 15, TileKind::CoalSeam),
+        (14, 15, TileKind::IronVein),
+        (2, 18, TileKind::CopperVein),
+        (5, 18, TileKind::TinVein),
+        (8, 18, TileKind::SilverVein),
+        (11, 18, TileKind::GoldVein),
+    ];
+    for (x, y, kind) in swatches {
+        for (dx, dy) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
+            spec.resource_tiles.push((TilePos::new(x + dx, y + dy), kind));
+        }
+    }
     spec.depots.push(TilePos::new(3, 7));
     spec.printers.push(PrinterSpec {
         pos: TilePos::new(2, 5),
@@ -194,12 +269,28 @@ pub(crate) fn setup_scene(
     };
     let mut bot_tex_mats = HashMap::new();
     let mut printer_tex_mats = HashMap::new();
-    for (c, team) in [(0u8, "green"), (1, "red"), (2, "blue")] {
+    let mut lens_glass_mats = HashMap::new();
+    for (c, team, accent) in [
+        (0u8, "green", Color::srgb(0.22, 0.85, 0.54)),
+        (1, "red", Color::srgb(0.95, 0.30, 0.25)),
+        (2, "blue", Color::srgb(0.31, 0.64, 0.95)),
+    ] {
         let bot: Handle<Image> = asset_server.load(format!("textures/bot_atlas_{team}.png"));
         bot_tex_mats.insert(c, atlas_mat(&mut materials, bot));
         let printer: Handle<Image> =
             asset_server.load(format!("textures/printer_atlas_{team}.png"));
         printer_tex_mats.insert(c, atlas_mat(&mut materials, printer));
+        // The lens glass is the team's accent — a glossy, faintly lit eye.
+        lens_glass_mats.insert(
+            c,
+            materials.add(StandardMaterial {
+                base_color: accent,
+                metallic: 0.6,
+                perceptual_roughness: 0.2,
+                emissive: LinearRgba::from(accent) * 0.25,
+                ..default()
+            }),
+        );
     }
     // Ruined printers: the gray palette swap, no glow — the machine is dead.
     let printer_ruined_mat = materials.add(StandardMaterial {
@@ -232,20 +323,51 @@ pub(crate) fn setup_scene(
     };
     let grass_frames = load_frames("tile_grass");
     let water_frames = load_frames("tile_water");
+    let mud_frames = load_frames("tile_mud");
+    let corruption_frames = load_frames("tile_corruption");
+    let ore_frames = load_frames("tile_ore");
+    let crystal_frames = load_frames("tile_crystal");
+    let snow_frames = load_frames("tile_snow");
     let mut mats_from = |frame0: &[Handle<Image>], roughness: f32| -> Vec<_> {
         frame0.iter().map(|img| tile_tex_mat(&mut materials, img.clone(), roughness)).collect()
     };
     let grass_tex_mats = mats_from(&grass_frames[0], 0.95);
     let water_tex_mats = mats_from(&water_frames[0], 0.35);
-    let mountain_tex_mats = (0..16)
-        .map(|mask| {
-            tile_tex_mat(
-                &mut materials,
-                asset_server.load(format!("textures/mountain_atlas_{mask}.png")),
-                0.95,
-            )
-        })
-        .collect();
+    let mud_tex_mats = mats_from(&mud_frames[0], 0.75); // wet = a little glossy
+    let corruption_tex_mats = mats_from(&corruption_frames[0], 0.9);
+    let ore_tex_mats = mats_from(&ore_frames[0], 0.95);
+    let crystal_tex_mats = mats_from(&crystal_frames[0], 0.7); // glassy shards
+    let snow_tex_mats = mats_from(&snow_frames[0], 0.85);
+    let mut autotile_mats = |prefix: &str, roughness: f32| -> Vec<_> {
+        (0..16)
+            .map(|mask| {
+                tile_tex_mat(
+                    &mut materials,
+                    asset_server.load(format!("textures/{prefix}_{mask}.png")),
+                    roughness,
+                )
+            })
+            .collect()
+    };
+    let mountain_tex_mats = autotile_mats("mountain_atlas", 0.95);
+    let highground_tex_mats = autotile_mats("highground_atlas", 0.95);
+    // The nine raw-resource grounds (docs/03), keyed by kind. Metals get
+    // a touch of gloss; sand, stone, and the grove stay matte.
+    const RESOURCE_KINDS: [(TileKind, &str, f32); 9] = [
+        (TileKind::Sand, "tile_sand", 0.95),
+        (TileKind::StoneOutcrop, "tile_stone", 0.95),
+        (TileKind::Grove, "tile_wood", 0.95),
+        (TileKind::CoalSeam, "tile_coal", 0.9),
+        (TileKind::IronVein, "tile_iron", 0.95),
+        (TileKind::CopperVein, "tile_copper", 0.85),
+        (TileKind::TinVein, "tile_tin", 0.9),
+        (TileKind::SilverVein, "tile_silver", 0.8),
+        (TileKind::GoldVein, "tile_gold", 0.8),
+    ];
+    let mut resource_tex_mats = HashMap::new();
+    for (kind, prefix, rough) in RESOURCE_KINDS {
+        resource_tex_mats.insert(kind.as_u8(), autotile_mats(prefix, rough));
+    }
     let mut overlay_mats = |prefix: &str| -> Vec<_> {
         (0..16)
             .map(|mask| {
@@ -265,6 +387,28 @@ pub(crate) fn setup_scene(
     let grass_corner_mats = overlay_mats("tile_grass_corner");
     let scree_corner_mats = overlay_mats("tile_scree_corner");
     let mountain_corner_mats = overlay_mats("tile_mountain_corner");
+    let mud_corner_mats = overlay_mats("tile_mud_corner");
+    let corruption_corner_mats = overlay_mats("tile_corruption_corner");
+    let ore_corner_mats = overlay_mats("tile_ore_corner");
+    let crystal_corner_mats = overlay_mats("tile_crystal_corner");
+    let snow_corner_mats = overlay_mats("tile_snow_corner");
+    let highground_corner_mats = overlay_mats("tile_highground_corner");
+    let mut resource_corner_mats = HashMap::new();
+    for (kind, prefix, _) in RESOURCE_KINDS {
+        resource_corner_mats.insert(kind.as_u8(), overlay_mats(&format!("{prefix}_corner")));
+    }
+    // Vent crater stays lit in shadow: its texture doubles as the emissive
+    // map, so only the glow pixels glow (same trick as paper). Three pulse
+    // frames; animate_terrain retargets base + emissive together.
+    let vent_frames: Vec<Handle<Image>> =
+        (0..3).map(|f| asset_server.load(format!("textures/tile_vent_f{f}.png"))).collect();
+    let vent_tex_mat = materials.add(StandardMaterial {
+        base_color_texture: Some(vent_frames[0].clone()),
+        emissive: LinearRgba::new(0.7, 0.35, 0.12, 1.0),
+        emissive_texture: Some(vent_frames[0].clone()),
+        perceptual_roughness: 0.9,
+        ..default()
+    });
     let wreck_tex_mat =
         tile_tex_mat(&mut materials, asset_server.load("textures/tile_wreck.png"), 0.95);
     let crate_mat =
@@ -308,13 +452,17 @@ pub(crate) fn setup_scene(
             alpha_mode: AlphaMode::Blend,
             ..default()
         }),
-        nose_mat: materials.add(StandardMaterial {
-            base_color: Color::srgb(0.15, 0.10, 0.05),
-            perceptual_roughness: 0.6,
+        lens_barrel: meshes.add(Cylinder::new(LENS_BARREL_RADIUS, LENS_BARREL_LEN)),
+        lens_glass: meshes.add(Cylinder::new(LENS_GLASS_RADIUS, LENS_GLASS_LEN)),
+        lens_barrel_mat: materials.add(StandardMaterial {
+            base_color: Color::srgb(0.11, 0.14, 0.18),
+            metallic: 0.7,
+            perceptual_roughness: 0.35,
             ..default()
         }),
+        lens_glass_mats,
         tile_slab: meshes.add(Cuboid::new(0.96, 0.12, 0.96)),
-        bot_cube: meshes.add(atlas_box_mesh(Vec3::splat(0.35))),
+        bot_cube: meshes.add(atlas_box_mesh(Vec3::splat(BOT_HALF))),
         bot_tex_mats,
         printer_box: meshes.add(atlas_box_mesh(Vec3::new(0.45, 0.25, 0.45))),
         printer_tex_mats,
@@ -333,13 +481,34 @@ pub(crate) fn setup_scene(
         grass_tex_mats,
         water_tex_mats,
         mountain_tex_mats,
+        mud_tex_mats,
+        corruption_tex_mats,
+        ore_tex_mats,
+        crystal_tex_mats,
+        snow_tex_mats,
+        highground_tex_mats,
+        resource_tex_mats,
+        resource_corner_mats,
+        vent_tex_mat,
         grass_frames,
         water_frames,
+        mud_frames,
+        corruption_frames,
+        ore_frames,
+        crystal_frames,
+        snow_frames,
+        vent_frames,
         scree_mats,
         water_corner_mats,
         grass_corner_mats,
         scree_corner_mats,
         mountain_corner_mats,
+        mud_corner_mats,
+        corruption_corner_mats,
+        ore_corner_mats,
+        crystal_corner_mats,
+        snow_corner_mats,
+        highground_corner_mats,
         preview_valid_mat: materials.add(StandardMaterial {
             base_color: Color::srgba(0.85, 0.95, 1.0, 0.45),
             alpha_mode: AlphaMode::Blend,
@@ -470,6 +639,21 @@ pub(crate) fn setup_scene(
                 }
                 mask
             };
+            // Raw-resource grounds all autotile against "not myself"; one
+            // fn-pointer table keeps the per-kind predicates non-capturing
+            // (mask_of takes `fn`, not a closure).
+            let same_resource: Option<fn(TileKind) -> bool> = match kind {
+                TileKind::Sand => Some(|t| matches!(t, TileKind::Sand)),
+                TileKind::StoneOutcrop => Some(|t| matches!(t, TileKind::StoneOutcrop)),
+                TileKind::Grove => Some(|t| matches!(t, TileKind::Grove)),
+                TileKind::CoalSeam => Some(|t| matches!(t, TileKind::CoalSeam)),
+                TileKind::IronVein => Some(|t| matches!(t, TileKind::IronVein)),
+                TileKind::CopperVein => Some(|t| matches!(t, TileKind::CopperVein)),
+                TileKind::TinVein => Some(|t| matches!(t, TileKind::TinVein)),
+                TileKind::SilverVein => Some(|t| matches!(t, TileKind::SilverVein)),
+                TileKind::GoldVein => Some(|t| matches!(t, TileKind::GoldVein)),
+                _ => None,
+            };
             let (mesh, mat, y_off) = match kind {
                 // Sand fringes where the meadow meets the river — Bridge
                 // counts as water (same beach before and after the planks
@@ -502,6 +686,59 @@ pub(crate) fn setup_scene(
                 // (sync_view overlays planks when they appear).
                 TileKind::Bridge => {
                     (palette.tex_slab.clone(), palette.ground_tex_mat.clone(), 0.0)
+                }
+                // Each remaining terrain owns its boundary art: a dried
+                // crust, a creep frontier, a broken-rock lip, a frost band
+                // — all against anything that isn't itself.
+                TileKind::Mud => {
+                    let mask = mask_of(|t| matches!(t, TileKind::Mud));
+                    (palette.tex_slab.clone(), palette.mud_tex_mats[mask].clone(), -0.02)
+                }
+                TileKind::Corruption => {
+                    let mask = mask_of(|t| matches!(t, TileKind::Corruption));
+                    (palette.tex_slab.clone(), palette.corruption_tex_mats[mask].clone(), 0.0)
+                }
+                TileKind::OreVein => {
+                    let mask = mask_of(|t| matches!(t, TileKind::OreVein));
+                    (palette.tex_slab.clone(), palette.ore_tex_mats[mask].clone(), 0.0)
+                }
+                TileKind::CrystalField => {
+                    let mask = mask_of(|t| matches!(t, TileKind::CrystalField));
+                    (palette.tex_slab.clone(), palette.crystal_tex_mats[mask].clone(), 0.0)
+                }
+                TileKind::Snow => {
+                    let mask = mask_of(|t| matches!(t, TileKind::Snow));
+                    (palette.tex_slab.clone(), palette.snow_tex_mats[mask].clone(), 0.0)
+                }
+                // High ground is a mesa: same block as the mountain, tan
+                // plateau top, cliff rim wherever the mesa ends.
+                TileKind::HighGround => {
+                    let mask = mask_of(|t| matches!(t, TileKind::HighGround));
+                    (
+                        palette.mountain_block.clone(),
+                        palette.highground_tex_mats[mask].clone(),
+                        MOUNTAIN_TOP - 0.10,
+                    )
+                }
+                // Vents are point features: one crater, no autotiling.
+                TileKind::Vent => {
+                    (palette.tex_slab.clone(), palette.vent_tex_mat.clone(), 0.0)
+                }
+                TileKind::Sand
+                | TileKind::StoneOutcrop
+                | TileKind::Grove
+                | TileKind::CoalSeam
+                | TileKind::IronVein
+                | TileKind::CopperVein
+                | TileKind::TinVein
+                | TileKind::SilverVein
+                | TileKind::GoldVein => {
+                    let mask = mask_of(same_resource.expect("resource kind has predicate"));
+                    (
+                        palette.tex_slab.clone(),
+                        palette.resource_tex_mats[&kind.as_u8()][mask].clone(),
+                        0.0,
+                    )
                 }
             };
             commands.spawn((
@@ -547,14 +784,17 @@ pub(crate) fn setup_scene(
             };
             match kind {
                 TileKind::Plains => {
-                    // Scree at a mountain's base: contact shadow + stones
-                    // on the looming sides, plus corner clusters.
-                    let not_mountain = |t: TileKind| !matches!(t, TileKind::Rubble);
-                    overlay(&mut commands, &palette.scree_mats, mask_of(not_mountain), 0.012);
+                    // Scree at a cliff's base (mountain or mesa): contact
+                    // shadow + stones on the looming sides, plus corner
+                    // clusters.
+                    let not_cliff = |t: TileKind| {
+                        !matches!(t, TileKind::Rubble | TileKind::HighGround)
+                    };
+                    overlay(&mut commands, &palette.scree_mats, mask_of(not_cliff), 0.012);
                     overlay(
                         &mut commands,
                         &palette.scree_corner_mats,
-                        corner_mask_of(not_mountain),
+                        corner_mask_of(not_cliff),
                         0.015,
                     );
                     overlay(
@@ -576,7 +816,57 @@ pub(crate) fn setup_scene(
                     corner_mask_of(|t| matches!(t, TileKind::Rubble)),
                     0.012,
                 ),
-                TileKind::Bridge => {}
+                TileKind::Mud => overlay(
+                    &mut commands,
+                    &palette.mud_corner_mats,
+                    corner_mask_of(|t| matches!(t, TileKind::Mud)),
+                    0.012,
+                ),
+                TileKind::Corruption => overlay(
+                    &mut commands,
+                    &palette.corruption_corner_mats,
+                    corner_mask_of(|t| matches!(t, TileKind::Corruption)),
+                    0.012,
+                ),
+                TileKind::OreVein => overlay(
+                    &mut commands,
+                    &palette.ore_corner_mats,
+                    corner_mask_of(|t| matches!(t, TileKind::OreVein)),
+                    0.012,
+                ),
+                TileKind::CrystalField => overlay(
+                    &mut commands,
+                    &palette.crystal_corner_mats,
+                    corner_mask_of(|t| matches!(t, TileKind::CrystalField)),
+                    0.012,
+                ),
+                TileKind::Snow => overlay(
+                    &mut commands,
+                    &palette.snow_corner_mats,
+                    corner_mask_of(|t| matches!(t, TileKind::Snow)),
+                    0.012,
+                ),
+                TileKind::HighGround => overlay(
+                    &mut commands,
+                    &palette.highground_corner_mats,
+                    corner_mask_of(|t| matches!(t, TileKind::HighGround)),
+                    0.012,
+                ),
+                TileKind::Sand
+                | TileKind::StoneOutcrop
+                | TileKind::Grove
+                | TileKind::CoalSeam
+                | TileKind::IronVein
+                | TileKind::CopperVein
+                | TileKind::TinVein
+                | TileKind::SilverVein
+                | TileKind::GoldVein => overlay(
+                    &mut commands,
+                    &palette.resource_corner_mats[&kind.as_u8()],
+                    corner_mask_of(same_resource.expect("resource kind has predicate")),
+                    0.012,
+                ),
+                TileKind::Bridge | TileKind::Vent => {}
             }
         }
     }
@@ -602,7 +892,7 @@ pub(crate) fn setup_scene(
     ));
 
     // Orbit camera.
-    let cam = OrbitCam { focus: Vec3::ZERO, distance: 22.0, yaw: 0.0, pitch: 0.85 };
+    let cam = OrbitCam { focus: Vec3::ZERO, distance: 28.0, yaw: 0.0, pitch: 0.85 };
     let transform = orbit_transform(&cam);
     commands.spawn((Camera3d::default(), transform, cam));
 

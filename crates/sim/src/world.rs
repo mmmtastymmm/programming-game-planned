@@ -294,6 +294,22 @@ impl World {
         for &pos in &spec.bridges {
             grid.set(pos, TileKind::Bridge);
         }
+        for (tiles, kind) in [
+            (&spec.mud, TileKind::Mud),
+            (&spec.corruption, TileKind::Corruption),
+            (&spec.ore_veins, TileKind::OreVein),
+            (&spec.crystal, TileKind::CrystalField),
+            (&spec.high_ground, TileKind::HighGround),
+            (&spec.vents, TileKind::Vent),
+            (&spec.snow, TileKind::Snow),
+        ] {
+            for &pos in tiles {
+                grid.set(pos, kind);
+            }
+        }
+        for &(pos, kind) in &spec.resource_tiles {
+            grid.set(pos, kind);
+        }
         let mut world = Self {
             tick: 0,
             grid,

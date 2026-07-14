@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <!-- inner-corner treeline nub, NW corner master: a bush caps the fringe
+       where open ground touches this grove tile only diagonally -->
+  <path d="M0 8 Q3.5 7 5 5 Q7 3.5 8 0 L0 0 Z" fill="#22381f"/>
+  <path d="M0 3.5 Q2 3 2.5 2.5 Q3 2 3.5 0 L0 0 Z" fill="#2e5231"/>
+  <ellipse cx="5" cy="7" rx="2.2" ry="1.5" fill="#3f7046"/>
+  <ellipse cx="4.4" cy="6.2" rx="1.0" ry="0.7" fill="#4c8052"/>
+</svg>

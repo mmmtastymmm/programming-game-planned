@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <!-- inner-corner coal nub, NW corner master -->
+  <path d="M0 8 Q3.5 7 5 5 Q7 3.5 8 0 L0 0 Z" fill="#625f58"/>
+  <path d="M0 3.5 Q2 3 2.5 2.5 Q3 2 3.5 0 L0 0 Z" fill="#747066"/>
+  <ellipse cx="5" cy="7" rx="1.8" ry="1.2" fill="#26242a"/>
+  <path d="M4.2 6.5 L5.8 6.9" stroke="#4a505e" stroke-width="0.8" stroke-linecap="round" fill="none"/>
+</svg>

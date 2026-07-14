@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <!-- cliff rim for a high-ground plateau's NORTH edge (build.rs rotates
+       it onto whichever sides drop off): a sunlit crest over a shadowed
+       shoulder, tan to match the plateau. Matched endpoints so the rim
+       runs seamlessly along a mesa -->
+  <path d="M0 0 H64 V5 Q54 9 44 6 Q34 3 24 7 Q14 11 0 5 Z" fill="#57513f"/>
+  <path d="M0 0 H64 V2.5 Q48 5 32 3 Q16 1 0 2.5 Z" fill="#948b74"/>
+</svg>

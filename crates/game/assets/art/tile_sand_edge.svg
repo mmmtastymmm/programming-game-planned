@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <!-- dune fringe for a sand tile's NORTH edge (build.rs rotates it onto
+       whichever sides meet firmer ground): a shadowed slip face under a
+       pale wind-piled crest, stray grains scattering. Layers start and
+       end at the same height so dunes run seamlessly -->
+  <path d="M0 0 H64 V6 Q54 9.5 44 6.5 Q34 3.5 24 7.5 Q14 11 0 6 Z" fill="#c9b177"/>
+  <path d="M0 0 H64 V2.5 Q48 5 34 3 Q20 1 0 2.5 Z" fill="#e6d6a6"/>
+  <!-- grains spilling past the fringe -->
+  <g fill="#b59a5f">
+    <circle cx="14" cy="9" r="1.0"/>
+    <circle cx="40" cy="9.5" r="0.9"/>
+    <circle cx="56" cy="8.5" r="1.0"/>
+    <circle cx="26" cy="10.5" r="0.8"/>
+  </g>
+  <circle cx="48" cy="6" r="0.8" fill="#f0e4bc"/>
+</svg>

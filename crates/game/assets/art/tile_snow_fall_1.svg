@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <!-- snow frame 1: every flake 9px lower with a little sideways drift.
+       Hills, glitter, and flecks match tile_snow.svg exactly -->
+  <rect width="64" height="64" fill="#86aede"/>
+  <path d="M9 16 Q20 9 27 17 Q29 26 18 27 Q8 25 9 16 Z" fill="#6f98cc"/>
+  <path d="M37 38 Q50 32 55 41 Q54 50 43 50 Q35 44 37 38 Z" fill="#6f98cc"/>
+  <path d="M13 47 Q22 42 28 48 Q27 56 18 56 Q10 53 13 47 Z" fill="#7aa2d4"/>
+  <path d="M8 14 Q19 7 26 15 Q28 23 17 24 Q7 22 8 14 Z" fill="#f7fbff"/>
+  <path d="M36 36 Q49 30 54 38 Q53 47 42 47 Q34 42 36 36 Z" fill="#f7fbff"/>
+  <path d="M12 45 Q21 40 27 46 Q26 53 17 53 Q9 51 12 45 Z" fill="#fdfeff"/>
+  <path d="M35 9 Q44 5 48 11 Q47 17 39 17 Q33 14 35 9 Z" fill="#fdfeff"/>
+  <g stroke="#ffffff" stroke-width="1.8" stroke-linecap="round" fill="none">
+    <path d="M12 15 Q18 11 23 15"/>
+    <path d="M40 37 Q46 33 51 37"/>
+  </g>
+  <g fill="#ffffff">
+    <circle cx="31" cy="28" r="1.0"/>
+    <circle cx="6" cy="34" r="0.8"/>
+    <circle cx="58" cy="55" r="0.8"/>
+  </g>
+  <!-- falling flakes, one step down -->
+  <g stroke="#ffffff" stroke-width="1.1" stroke-linecap="round" fill="none">
+    <path d="M13 14 V18 M11.3 15 L14.7 17 M14.7 15 L11.3 17"/>
+    <path d="M43 28 V32 M41.3 29 L44.7 31 M44.7 29 L41.3 31"/>
+    <path d="M29 48 V52 M27.3 49 L30.7 51 M30.7 49 L27.3 51"/>
+    <path d="M55 40 V44 M53.3 41 L56.7 43 M56.7 41 L53.3 43"/>
+  </g>
+  <!-- the settled flake fades -->
+  <circle cx="31" cy="59" r="0.6" fill="#ffffff" opacity="0.3"/>
+  <g fill="#5f88bc">
+    <circle cx="56" cy="46" r="1.0"/>
+    <circle cx="24" cy="33" r="0.9"/>
+    <circle cx="10" cy="8" r="0.9"/>
+    <circle cx="47" cy="57" r="0.8"/>
+  </g>
+</svg>

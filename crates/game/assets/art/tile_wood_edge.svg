@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <!-- undergrowth fringe for a wood tile's NORTH edge (build.rs rotates it
+       onto whichever sides leave the grove): a shaded treeline band with
+       bushes pushing out. Layers start and end at the same height so the
+       treeline runs seamlessly -->
+  <path d="M0 0 H64 V6 Q54 9.5 44 6.5 Q34 3.5 24 7.5 Q14 11 0 6 Z" fill="#22381f"/>
+  <path d="M0 0 H64 V2.5 Q48 5 34 3 Q20 1 0 2.5 Z" fill="#2e5231"/>
+  <!-- bushes at the treeline -->
+  <g fill="#3f7046">
+    <ellipse cx="12" cy="7.5" rx="3.0" ry="2.0"/>
+    <ellipse cx="33" cy="8.5" rx="2.6" ry="1.8"/>
+    <ellipse cx="52" cy="7.5" rx="2.8" ry="1.9"/>
+  </g>
+  <g fill="#4c8052">
+    <ellipse cx="11" cy="6.5" rx="1.4" ry="0.9"/>
+    <ellipse cx="32" cy="7.5" rx="1.2" ry="0.8"/>
+    <ellipse cx="51" cy="6.5" rx="1.3" ry="0.8"/>
+  </g>
+  <!-- sprigs -->
+  <g stroke="#457a4b" stroke-width="1.2" stroke-linecap="round" fill="none">
+    <path d="M22 9 L21 12"/>
+    <path d="M43 9.5 L44 12.5"/>
+    <path d="M60 8 L61 11"/>
+  </g>
+</svg>

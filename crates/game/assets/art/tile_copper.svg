@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <!-- copper vein: bright orange seams with verdigris freckles (docs/03:
+       one ore, two futures — Wire or Bronze); edges stay base-colored so
+       tiling is seamless -->
+  <rect width="64" height="64" fill="#58524a"/>
+  <path d="M8 10 Q18 5 24 12 Q26 20 16 22 Q7 20 8 10 Z" fill="#4f4a42"/>
+  <path d="M40 40 Q52 36 56 44 Q54 52 44 52 Q38 46 40 40 Z" fill="#4f4a42"/>
+  <path d="M34 8 Q44 4 48 11 Q47 18 38 18 Q32 14 34 8 Z" fill="#615a50"/>
+  <g stroke="#3b362f" stroke-width="1.4" stroke-linecap="round" fill="none">
+    <path d="M14 30 L20 36 L18 42"/>
+    <path d="M50 16 L46 24"/>
+  </g>
+  <!-- copper seams (different run than iron's) -->
+  <g stroke="#cd7f43" stroke-width="2.2" stroke-linecap="round" fill="none">
+    <path d="M12 22 L20 27 L28 23"/>
+    <path d="M36 48 L44 43 L52 47 L58 42"/>
+  </g>
+  <!-- nuggets -->
+  <g fill="#de9155">
+    <circle cx="20" cy="27" r="1.8"/>
+    <circle cx="44" cy="43" r="1.7"/>
+    <circle cx="52" cy="47" r="1.4"/>
+  </g>
+  <!-- verdigris freckles -->
+  <g fill="#4fa584">
+    <circle cx="27" cy="24" r="0.9"/>
+    <circle cx="38" cy="47" r="0.8"/>
+    <circle cx="57" cy="43" r="0.7"/>
+  </g>
+</svg>

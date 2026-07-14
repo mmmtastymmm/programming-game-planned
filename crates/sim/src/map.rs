@@ -78,6 +78,39 @@ pub enum TileKind {
     Water,
     /// Built over Water by terraforming (docs/05): ground-passable.
     Bridge,
+    /// Bog (docs/05): slow going. (The loaded-hauler 4x surcharge and
+    /// per-biome cost overlays are future work — flat 3x for now.)
+    Mud,
+    /// The compute-tax biome (docs/05). Walkable like plains; the cycle
+    /// tax and channel jamming are future work — terrain kind first so
+    /// maps can paint it and the renderer can show it.
+    Corruption,
+    /// Minable outcrop (docs/05): the vein an ore node sits in.
+    OreVein,
+    /// Minable Crystal ground (docs/05); mapgen puts it near Corruption.
+    CrystalField,
+    /// Plateau (docs/05): enter only via Ramp tiles. No ramps exist yet,
+    /// so it is impassable for now — a natural wall you can see over.
+    HighGround,
+    /// Geothermal vent (docs/05): the only tile allowing a Geothermal
+    /// Tap. Ordinary ground to walk on.
+    Vent,
+    /// Snowfield. Plains-cost for now; whether it slows, conceals, or
+    /// holds tracks is open (docs/QUESTIONS Q67).
+    Snow,
+    /// Raw-resource terrains (docs/03: the eleven-raw split — Water is
+    /// water tiles, Crystal is CrystalField, these are the other nine).
+    /// Ground kinds only for now: plains-cost, no node/recipe wiring —
+    /// the sim-side resource migration is open (docs/QUESTIONS Q69).
+    Sand,
+    StoneOutcrop,
+    Grove,
+    CoalSeam,
+    IronVein,
+    CopperVein,
+    TinVein,
+    SilverVein,
+    GoldVein,
 }
 
 /// A traffic rule painted onto any tile — independent of terrain.
@@ -104,6 +137,23 @@ impl TileKind {
             TileKind::Rubble => Some(2),
             TileKind::Water => None,
             TileKind::Bridge => Some(1),
+            TileKind::Mud => Some(3),
+            TileKind::Corruption => Some(1),
+            TileKind::OreVein => Some(1),
+            TileKind::CrystalField => Some(1),
+            TileKind::HighGround => None,
+            TileKind::Vent => Some(1),
+            TileKind::Snow => Some(1),
+            // Resource ground is cost-neutral until Q69 decides otherwise.
+            TileKind::Sand
+            | TileKind::StoneOutcrop
+            | TileKind::Grove
+            | TileKind::CoalSeam
+            | TileKind::IronVein
+            | TileKind::CopperVein
+            | TileKind::TinVein
+            | TileKind::SilverVein
+            | TileKind::GoldVein => Some(1),
         }
     }
 
@@ -113,6 +163,22 @@ impl TileKind {
             TileKind::Rubble => 1,
             TileKind::Water => 2,
             TileKind::Bridge => 3,
+            TileKind::Mud => 4,
+            TileKind::Corruption => 5,
+            TileKind::OreVein => 6,
+            TileKind::CrystalField => 7,
+            TileKind::HighGround => 8,
+            TileKind::Vent => 9,
+            TileKind::Snow => 10,
+            TileKind::Sand => 11,
+            TileKind::StoneOutcrop => 12,
+            TileKind::Grove => 13,
+            TileKind::CoalSeam => 14,
+            TileKind::IronVein => 15,
+            TileKind::CopperVein => 16,
+            TileKind::TinVein => 17,
+            TileKind::SilverVein => 18,
+            TileKind::GoldVein => 19,
         }
     }
 }
@@ -170,6 +236,17 @@ pub struct MapSpec {
     pub seed: u64,
     /// Pre-built bridge tiles (placed over water at world build).
     pub bridges: Vec<TilePos>,
+    pub mud: Vec<TilePos>,
+    pub corruption: Vec<TilePos>,
+    pub ore_veins: Vec<TilePos>,
+    pub crystal: Vec<TilePos>,
+    pub high_ground: Vec<TilePos>,
+    pub vents: Vec<TilePos>,
+    pub snow: Vec<TilePos>,
+    /// Raw-resource ground painted at build, as (pos, kind) pairs — one
+    /// list for all nine kinds rather than nine vecs. Nodes/recipes are
+    /// pending Q69.
+    pub resource_tiles: Vec<(TilePos, TileKind)>,
 }
 
 /// A printer placed by the map (docs/03: colonies start with a working
@@ -197,6 +274,14 @@ impl MapSpec {
             starting_ore: 0,
             seed: 0x5EED_0001,
             bridges: Vec::new(),
+            mud: Vec::new(),
+            corruption: Vec::new(),
+            ore_veins: Vec::new(),
+            crystal: Vec::new(),
+            high_ground: Vec::new(),
+            vents: Vec::new(),
+            snow: Vec::new(),
+            resource_tiles: Vec::new(),
         }
     }
 }

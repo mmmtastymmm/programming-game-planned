@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <!-- geothermal vent: a basalt cap split by a glowing crater — the only
+       tile a Geothermal Tap can anchor to. A point feature, so no
+       autotile edges: it sits whole inside whatever terrain hosts it -->
+  <defs>
+    <radialGradient id="ventGlow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#ffd984"/>
+      <stop offset="0.45" stop-color="#ff9a3d"/>
+      <stop offset="1" stop-color="#8c3b17"/>
+    </radialGradient>
+  </defs>
+  <rect width="64" height="64" fill="#33343a"/>
+  <!-- basalt mottling -->
+  <path d="M8 12 Q18 7 24 14 Q26 22 16 24 Q7 22 8 12 Z" fill="#2b2c31"/>
+  <path d="M40 44 Q52 40 56 48 Q54 56 44 56 Q38 50 40 44 Z" fill="#2b2c31"/>
+  <!-- crater mouth -->
+  <ellipse cx="32" cy="32" rx="13" ry="10" fill="#1f2024"/>
+  <ellipse cx="32" cy="32" rx="9.5" ry="7" fill="url(#ventGlow)"/>
+  <!-- cracks still carrying heat, fading to cold stone -->
+  <g stroke="#e06a28" stroke-width="1.6" stroke-linecap="round" fill="none">
+    <path d="M20 26 L12 20"/>
+    <path d="M44 27 L52 22"/>
+    <path d="M22 40 L15 46"/>
+    <path d="M43 38 L51 44"/>
+  </g>
+  <g stroke="#4a4b52" stroke-width="1.4" stroke-linecap="round" fill="none">
+    <path d="M12 20 L8 18"/>
+    <path d="M52 22 L56 20"/>
+    <path d="M15 46 L11 49"/>
+    <path d="M51 44 L55 48"/>
+  </g>
+  <!-- steam wisps -->
+  <g stroke="#cfd4da" stroke-width="2" stroke-linecap="round" fill="none" opacity="0.35">
+    <path d="M26 22 Q24 16 27 11"/>
+    <path d="M37 20 Q40 15 38 9"/>
+  </g>
+</svg>

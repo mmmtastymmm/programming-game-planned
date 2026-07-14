@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <!-- sand: warm dune flats (docs/03: shoreline flats and dune fringes,
+       feeds Glass) in the same palette as the grass tile's beach fringe;
+       edges stay base-colored so tiling is seamless -->
+  <rect width="64" height="64" fill="#d8c28a"/>
+  <!-- dune crests -->
+  <path d="M8 16 Q19 9 26 17 Q28 25 17 26 Q7 24 8 16 Z" fill="#e6d6a6"/>
+  <path d="M36 38 Q49 32 54 40 Q53 49 42 49 Q34 44 36 38 Z" fill="#e6d6a6"/>
+  <!-- hollows between dunes -->
+  <path d="M34 8 Q44 4 48 11 Q47 18 38 18 Q32 14 34 8 Z" fill="#ccb478"/>
+  <path d="M12 44 Q21 40 26 46 Q25 54 16 54 Q9 51 12 44 Z" fill="#ccb478"/>
+  <!-- wind ripples -->
+  <g stroke="#c2a86b" stroke-width="1.4" stroke-linecap="round" fill="none">
+    <path d="M12 32 Q18 29 24 32 Q30 35 36 32"/>
+    <path d="M34 54 Q40 51 46 54 Q52 57 58 54"/>
+    <path d="M42 24 Q47 21 52 24"/>
+  </g>
+  <!-- scattered grains -->
+  <g fill="#b59a5f">
+    <circle cx="10" cy="10" r="1.0"/>
+    <circle cx="55" cy="14" r="1.0"/>
+    <circle cx="28" cy="42" r="0.9"/>
+    <circle cx="58" cy="44" r="0.9"/>
+    <circle cx="20" cy="58" r="0.8"/>
+  </g>
+  <g fill="#f0e4bc">
+    <circle cx="16" cy="20" r="0.8"/>
+    <circle cx="44" cy="42" r="0.8"/>
+  </g>
+</svg>

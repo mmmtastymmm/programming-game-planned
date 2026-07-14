@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <!-- vent frame 1 (bright): the crater flares and swells, cracks heat
+       up, steam climbs. Basalt matches tile_vent.svg exactly -->
+  <defs>
+    <radialGradient id="ventGlow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#ffe9ac"/>
+      <stop offset="0.45" stop-color="#ffa64f"/>
+      <stop offset="1" stop-color="#96421c"/>
+    </radialGradient>
+  </defs>
+  <rect width="64" height="64" fill="#33343a"/>
+  <path d="M8 12 Q18 7 24 14 Q26 22 16 24 Q7 22 8 12 Z" fill="#2b2c31"/>
+  <path d="M40 44 Q52 40 56 48 Q54 56 44 56 Q38 50 40 44 Z" fill="#2b2c31"/>
+  <ellipse cx="32" cy="32" rx="13" ry="10" fill="#1f2024"/>
+  <ellipse cx="32" cy="32" rx="10.5" ry="7.8" fill="url(#ventGlow)"/>
+  <g stroke="#ff7a30" stroke-width="1.6" stroke-linecap="round" fill="none">
+    <path d="M20 26 L12 20"/>
+    <path d="M44 27 L52 22"/>
+    <path d="M22 40 L15 46"/>
+    <path d="M43 38 L51 44"/>
+  </g>
+  <g stroke="#4a4b52" stroke-width="1.4" stroke-linecap="round" fill="none">
+    <path d="M12 20 L8 18"/>
+    <path d="M52 22 L56 20"/>
+    <path d="M15 46 L11 49"/>
+    <path d="M51 44 L55 48"/>
+  </g>
+  <g stroke="#cfd4da" stroke-width="2" stroke-linecap="round" fill="none" opacity="0.3">
+    <path d="M26 19 Q24 13 27 8"/>
+    <path d="M37 17 Q40 12 38 6"/>
+  </g>
+  <path d="M31.5 21 Q30.5 18 32 15" stroke="#cfd4da" stroke-width="2" stroke-linecap="round" fill="none" opacity="0.3"/>
+</svg>
