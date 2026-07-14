@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <!-- shoreline overlay for a water tile's NORTH edge (build.rs rotates it
+       onto whichever sides border land): shallow band, then foam at the
+       waterline -->
+  <!-- both layers start and end at the same height so bank runs tile
+       seamlessly across neighbors -->
+  <path d="M0 0 H64 V8 Q57 12 49 9 Q41 6 33 10 Q25 14 17 10 Q9 6 0 8 Z" fill="#2f6ab5"/>
+  <path d="M0 0 H64 V4 Q53 7.5 42 4.5 Q31 1.5 20 5 Q10 8 0 4 Z" fill="#cfe3f5"/>
+  <g stroke="#e9f3fc" stroke-width="1.6" stroke-linecap="round" fill="none">
+    <path d="M8 6.5 Q12 8.5 16 7"/>
+    <path d="M38 7 Q43 9 48 7.5"/>
+  </g>
+</svg>

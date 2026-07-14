@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <!-- water flow frame 2: crests another step south, sparkles elsewhere -->
+  <rect width="64" height="64" fill="#1a478c"/>
+  <path d="M8 40 Q20 34 30 40 Q34 48 24 52 Q10 52 8 40 Z" fill="#153b78"/>
+  <path d="M38 10 Q50 6 54 14 Q54 22 44 22 Q36 18 38 10 Z" fill="#173f80"/>
+  <g stroke="#2f6ab5" stroke-width="2" stroke-linecap="round" fill="none">
+    <path d="M10 28 Q16 24 22 28 Q28 32 34 28"/>
+    <path d="M30 42 Q36 38 42 42 Q48 46 54 42"/>
+    <path d="M14 17 Q20 13 26 17"/>
+  </g>
+  <g stroke="#4d87cc" stroke-width="1.4" stroke-linecap="round">
+    <path d="M48 40 L52 40"/>
+    <path d="M16 22 L19 22"/>
+    <path d="M50 28 L53 28"/>
+  </g>
+</svg>

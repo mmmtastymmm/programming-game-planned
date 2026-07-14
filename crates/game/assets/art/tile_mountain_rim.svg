@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <!-- cliff rim for a mountain summit's NORTH edge (build.rs rotates it
+       onto whichever sides end the range): a sunlit crest over a mid-grey
+       shoulder. Matched endpoints so ridgelines run seamlessly -->
+  <path d="M0 0 H64 V5 Q54 9 44 6 Q34 3 24 7 Q14 11 0 5 Z" fill="#6e727c"/>
+  <path d="M0 0 H64 V2.5 Q48 5 32 3 Q16 1 0 2.5 Z" fill="#9aa0ab"/>
+</svg>

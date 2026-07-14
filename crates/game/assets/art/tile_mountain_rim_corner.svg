@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <!-- inner-corner cliff-rim nub, NW corner master: rounds the summit
+       edge where the range continues only diagonally -->
+  <path d="M0 7 Q3.5 6 5 4.5 Q6.5 3 7 0 L0 0 Z" fill="#6e727c"/>
+  <path d="M0 3.5 Q2.5 3 3 2.5 Q3.5 2 3.5 0 L0 0 Z" fill="#9aa0ab"/>
+</svg>

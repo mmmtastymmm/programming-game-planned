@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <!-- inner-corner bank nub, NW corner master (build.rs rotates it):
+       caps the bend where land touches this water tile only diagonally -->
+  <path d="M0 10 Q4 9 6 6 Q9 3 10 0 L0 0 Z" fill="#2f6ab5"/>
+  <path d="M0 5 Q3 4.5 3.5 3.5 Q4.5 2.5 5 0 L0 0 Z" fill="#cfe3f5"/>
+</svg>

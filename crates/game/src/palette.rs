@@ -50,9 +50,28 @@ pub(crate) struct Palette {
     pub(crate) ground_tex_mat: Handle<StandardMaterial>,
     pub(crate) bridge_tex_mat: Handle<StandardMaterial>,
     pub(crate) oneway_tex_mat: Handle<StandardMaterial>,
-    pub(crate) grass_tex_mat: Handle<StandardMaterial>,
-    pub(crate) water_tex_mat: Handle<StandardMaterial>,
-    pub(crate) mountain_tex_mat: Handle<StandardMaterial>,
+    /// Autotiled terrain, indexed by the NESW same-neighbor bitmask
+    /// (bit 0 = N … bit 3 = W; set = that neighbor is the same terrain):
+    /// grass grows a sandy fringe, water grows banks, mountain summits
+    /// grow a cliff rim on their "different" sides.
+    pub(crate) grass_tex_mats: Vec<Handle<StandardMaterial>>,
+    pub(crate) water_tex_mats: Vec<Handle<StandardMaterial>>,
+    pub(crate) mountain_tex_mats: Vec<Handle<StandardMaterial>>,
+    /// Ambient animation frames, indexed `[frame][mask]`. Every tile of a
+    /// (terrain, mask) shares one material, so retargeting these 32
+    /// materials' textures animates the whole map (see animate_terrain).
+    pub(crate) grass_frames: Vec<Vec<Handle<Image>>>,
+    pub(crate) water_frames: Vec<Vec<Handle<Image>>>,
+    /// Transparent scree overlays for grass at a mountain's base, indexed
+    /// by the same NESW mask (bit unset = mountain on that side).
+    pub(crate) scree_mats: Vec<Handle<StandardMaterial>>,
+    /// Inner-corner nub overlays, indexed by a NW/NE/SE/SW corner mask
+    /// (bit unset = both flanks match but the diagonal doesn't — nub
+    /// there). One set per transition kind.
+    pub(crate) water_corner_mats: Vec<Handle<StandardMaterial>>,
+    pub(crate) grass_corner_mats: Vec<Handle<StandardMaterial>>,
+    pub(crate) scree_corner_mats: Vec<Handle<StandardMaterial>>,
+    pub(crate) mountain_corner_mats: Vec<Handle<StandardMaterial>>,
     /// Full-height block for mountain (Rubble) tiles.
     pub(crate) mountain_block: Handle<Mesh>,
     pub(crate) preview_valid_mat: Handle<StandardMaterial>,

@@ -297,6 +297,38 @@ pub(crate) fn animate_disassembly(
     }
 }
 
+/// Ambient terrain animation: water's surface drifts on a forward 3-frame
+/// cycle, grass sways on a ping-pong. All tiles of a (terrain, mask) share
+/// one material, so retargeting 32 materials animates the whole map; the
+/// two clocks are deliberately different so the world doesn't tick in
+/// lockstep. Materials are only touched when a frame index changes.
+pub(crate) fn animate_terrain(
+    time: Res<Time>,
+    palette: Res<Palette>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut shown: Local<(usize, usize)>,
+) {
+    let t = time.elapsed_secs();
+    let water = (t / 0.55) as usize % 3;
+    const SWAY: [usize; 4] = [0, 1, 0, 2];
+    let grass = SWAY[(t / 0.8) as usize % 4];
+    let mut retarget = |mats: &[Handle<StandardMaterial>], frame: &[Handle<Image>]| {
+        for (mat, img) in mats.iter().zip(frame) {
+            if let Some(m) = materials.get_mut(mat) {
+                m.base_color_texture = Some(img.clone());
+            }
+        }
+    };
+    if shown.0 != water {
+        shown.0 = water;
+        retarget(&palette.water_tex_mats, &palette.water_frames[water]);
+    }
+    if shown.1 != grass {
+        shown.1 = grass;
+        retarget(&palette.grass_tex_mats, &palette.grass_frames[grass]);
+    }
+}
+
 /// Diff sim state into persistent view entities.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn sync_view(

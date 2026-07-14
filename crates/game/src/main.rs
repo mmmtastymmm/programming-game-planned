@@ -76,6 +76,7 @@ fn main() {
                 view::animate_job_cubes,
                 view::animate_explosions,
                 view::animate_disassembly,
+                view::animate_terrain,
             )
                 .chain(),
         )

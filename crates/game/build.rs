@@ -118,6 +118,101 @@ fn main() {
         px.save_png(out.join(format!("{tile}.png"))).expect("save tile png");
     }
 
+    // Terrain autotiling: 16 variants keyed by a NESW same-neighbor
+    // bitmask (bit set = that neighbor is the same terrain). Each
+    // "different" side gets the terrain's edge overlay, rotated from its
+    // north-edge master. Bit order matches the scene's mask computation:
+    // 0 = N, 1 = E, 2 = S, 3 = W (image-up = north).
+    let autotile = |base: &str, edge: &str| -> Vec<tiny_skia::Pixmap> {
+        let base_svg =
+            fs::read_to_string(art.join(format!("{base}.svg"))).expect("autotile base svg");
+        let edge_svg =
+            fs::read_to_string(art.join(format!("{edge}.svg"))).expect("autotile edge svg");
+        let edge_px = render(&edge_svg, SIZE);
+        (0..16u32)
+            .map(|mask| {
+                let mut px = render(&base_svg, SIZE);
+                for bit in 0..4 {
+                    if mask & (1 << bit) == 0 {
+                        let half = SIZE as f32 / 2.0;
+                        px.draw_pixmap(
+                            0,
+                            0,
+                            edge_px.as_ref(),
+                            &tiny_skia::PixmapPaint::default(),
+                            tiny_skia::Transform::from_rotate_at(90.0 * bit as f32, half, half),
+                            None,
+                        );
+                    }
+                }
+                px
+            })
+            .collect()
+    };
+    // Water and grass are animated: 3 base frames each (surface drift /
+    // tuft sway), sharing one static edge master. Baked as
+    // {prefix}_{mask}_f{frame}.png.
+    for (frames, edge, prefix) in [
+        (
+            ["tile_water", "tile_water_flow_1", "tile_water_flow_2"],
+            "tile_water_bank",
+            "tile_water",
+        ),
+        (
+            ["tile_grass", "tile_grass_sway_1", "tile_grass_sway_2"],
+            "tile_grass_edge",
+            "tile_grass",
+        ),
+    ] {
+        for (f, base) in frames.into_iter().enumerate() {
+            for (mask, px) in autotile(base, edge).iter().enumerate() {
+                px.save_png(out.join(format!("{prefix}_{mask}_f{f}.png")))
+                    .expect("save autotile png");
+            }
+        }
+    }
+    // Scree: a transparent overlay for grass tiles at a mountain's base —
+    // edge art on the sides where the range looms, nothing elsewhere. The
+    // scene spawns it as an alpha-blended quad above the grass.
+    for (mask, px) in autotile("tile_empty", "tile_scree_edge").iter().enumerate() {
+        px.save_png(out.join(format!("tile_scree_{mask}.png"))).expect("save scree png");
+    }
+
+    // Inner-corner overlays: a nub where both flanking neighbors match but
+    // the diagonal doesn't. Transparent except the masked corners; the
+    // corner master sits NW and the same rotation walk maps bit order
+    // 0 = NW, 1 = NE, 2 = SE, 3 = SW (bit unset = nub there).
+    for (corner, prefix) in [
+        ("tile_water_bank_corner", "tile_water_corner"),
+        ("tile_grass_edge_corner", "tile_grass_corner"),
+        ("tile_scree_edge_corner", "tile_scree_corner"),
+        ("tile_mountain_rim_corner", "tile_mountain_corner"),
+    ] {
+        for (mask, px) in autotile("tile_empty", corner).iter().enumerate() {
+            px.save_png(out.join(format!("{prefix}_{mask}.png"))).expect("save corner png");
+        }
+    }
+
+    // Mountain summits autotile the same way, but each variant ships as an
+    // atlas pair with the rock face (the layout mountain_block_mesh maps).
+    let rock_svg = fs::read_to_string(art.join("rock_face.svg")).expect("rock svg");
+    let rock = render(&rock_svg, SIZE);
+    for (mask, top) in autotile("tile_mountain", "tile_mountain_rim").iter().enumerate() {
+        let mut pair = tiny_skia::Pixmap::new(SIZE * 2, SIZE).expect("pair alloc");
+        for (i, px) in [top, &rock].into_iter().enumerate() {
+            pair.draw_pixmap(
+                (i as u32 * SIZE) as i32,
+                0,
+                px.as_ref(),
+                &tiny_skia::PixmapPaint::default(),
+                tiny_skia::Transform::identity(),
+                None,
+            );
+        }
+        pair.save_png(out.join(format!("mountain_atlas_{mask}.png")))
+            .expect("save mountain atlas variant");
+    }
+
     for (svg_prefix, out_prefix) in ATLASES {
         for (team, colors) in TEAMS {
             let mut atlas = tiny_skia::Pixmap::new(SIZE * 3, SIZE * 2).expect("atlas alloc");

@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <!-- sandy fringe for a grass tile's NORTH edge (build.rs rotates it onto
+       whichever sides border non-grass): dry sand, pale strand line, a few
+       scattered grains. Layers start and end at the same height so the
+       fringe tiles seamlessly across neighbors -->
+  <path d="M0 0 H64 V6 Q55 10 46 7 Q37 4 28 8 Q19 12 10 8 Q4 5 0 6 Z" fill="#d4bd83"/>
+  <path d="M0 0 H64 V2.5 Q50 5.5 36 3 Q22 0.5 10 4 Q4 5.5 0 2.5 Z" fill="#e3d3a3"/>
+  <g fill="#c2a86b">
+    <circle cx="14" cy="9.5" r="1.1"/>
+    <circle cx="40" cy="10" r="1.0"/>
+    <circle cx="56" cy="8.5" r="1.1"/>
+  </g>
+</svg>

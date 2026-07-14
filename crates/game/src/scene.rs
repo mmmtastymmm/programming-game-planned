@@ -87,7 +87,7 @@ pub(crate) fn build_colony() -> Sim {
     // and ties on the attackers' closest(enemy) break by id.
     const IDLE: &str = "wait(100000)\n";
     const PARK: &str = "on signal(s):\n    wait(100000)\n\nwait(100000)\n";
-    let mut spawn = |game: &mut Sim, pos, faction, color, hp, source: &str| {
+    let spawn = |game: &mut Sim, pos, faction, color, hp, source: &str| {
         game.apply(&Command::SpawnBot {
             pos,
             source: source.into(),
@@ -212,12 +212,50 @@ pub(crate) fn setup_scene(
         tile_tex_mat(&mut materials, asset_server.load("textures/tile_bridge.png"), 0.85);
     let oneway_tex_mat =
         tile_tex_mat(&mut materials, asset_server.load("textures/tile_oneway.png"), 0.85);
-    let grass_tex_mat =
-        tile_tex_mat(&mut materials, asset_server.load("textures/tile_grass.png"), 0.95);
-    let water_tex_mat =
-        tile_tex_mat(&mut materials, asset_server.load("textures/tile_water.png"), 0.35);
-    let mountain_tex_mat =
-        tile_tex_mat(&mut materials, asset_server.load("textures/mountain_atlas.png"), 0.95);
+    let load_frames = |prefix: &str| -> Vec<Vec<Handle<Image>>> {
+        (0..3)
+            .map(|f| {
+                (0..16)
+                    .map(|mask| asset_server.load(format!("textures/{prefix}_{mask}_f{f}.png")))
+                    .collect()
+            })
+            .collect()
+    };
+    let grass_frames = load_frames("tile_grass");
+    let water_frames = load_frames("tile_water");
+    let mut mats_from = |frame0: &[Handle<Image>], roughness: f32| -> Vec<_> {
+        frame0.iter().map(|img| tile_tex_mat(&mut materials, img.clone(), roughness)).collect()
+    };
+    let grass_tex_mats = mats_from(&grass_frames[0], 0.95);
+    let water_tex_mats = mats_from(&water_frames[0], 0.35);
+    let mountain_tex_mats = (0..16)
+        .map(|mask| {
+            tile_tex_mat(
+                &mut materials,
+                asset_server.load(format!("textures/mountain_atlas_{mask}.png")),
+                0.95,
+            )
+        })
+        .collect();
+    let mut overlay_mats = |prefix: &str| -> Vec<_> {
+        (0..16)
+            .map(|mask| {
+                materials.add(StandardMaterial {
+                    base_color_texture: Some(
+                        asset_server.load(format!("textures/{prefix}_{mask}.png")),
+                    ),
+                    alpha_mode: AlphaMode::Blend,
+                    perceptual_roughness: 0.95,
+                    ..default()
+                })
+            })
+            .collect()
+    };
+    let scree_mats = overlay_mats("tile_scree");
+    let water_corner_mats = overlay_mats("tile_water_corner");
+    let grass_corner_mats = overlay_mats("tile_grass_corner");
+    let scree_corner_mats = overlay_mats("tile_scree_corner");
+    let mountain_corner_mats = overlay_mats("tile_mountain_corner");
     let wreck_tex_mat =
         tile_tex_mat(&mut materials, asset_server.load("textures/tile_wreck.png"), 0.95);
     let crate_mat =
@@ -283,9 +321,16 @@ pub(crate) fn setup_scene(
         ground_tex_mat,
         bridge_tex_mat,
         oneway_tex_mat,
-        grass_tex_mat,
-        water_tex_mat,
-        mountain_tex_mat,
+        grass_tex_mats,
+        water_tex_mats,
+        mountain_tex_mats,
+        grass_frames,
+        water_frames,
+        scree_mats,
+        water_corner_mats,
+        grass_corner_mats,
+        scree_corner_mats,
+        mountain_corner_mats,
         preview_valid_mat: materials.add(StandardMaterial {
             base_color: Color::srgba(0.85, 0.95, 1.0, 0.45),
             alpha_mode: AlphaMode::Blend,
@@ -395,23 +440,54 @@ pub(crate) fn setup_scene(
     // Terrain slabs (0.96 with grout lines, prototype-style). The default
     // world is natural — grass, water, mountains; the circuit "tech" tile
     // is what terraforming turns ground into.
+    //
+    // Grass, water, and mountain autotile: a NESW same-neighbor bitmask
+    // (bit 0 = N … bit 3 = W) picks 1 of 16 baked variants with edge art
+    // on the "different" sides. Off-map counts as same, so terrain runs
+    // off the board clean. Every predicate is stable under the one runtime
+    // grid change (Water -> Bridge), so tiles never need re-syncing.
     for y in 0..world.grid.height {
         for x in 0..world.grid.width {
             let pos = TilePos::new(x, y);
             let kind = world.grid.get(pos).expect("in bounds");
+            let mask_of = |same: fn(TileKind) -> bool| -> usize {
+                let mut mask = 0usize;
+                for (bit, (dx, dy)) in
+                    [(0, -1), (1, 0), (0, 1), (-1, 0)].into_iter().enumerate()
+                {
+                    if world.grid.get(TilePos::new(x + dx, y + dy)).is_none_or(same) {
+                        mask |= 1 << bit;
+                    }
+                }
+                mask
+            };
             let (mesh, mat, y_off) = match kind {
+                // Sand fringes where the meadow meets the river — Bridge
+                // counts as water (same beach before and after the planks
+                // land, keeping the no-resync invariant). Mountains count
+                // as grass; the block would hide a fringe anyway.
                 TileKind::Plains => {
-                    (palette.tex_slab.clone(), palette.grass_tex_mat.clone(), 0.0)
+                    let mask =
+                        mask_of(|t| !matches!(t, TileKind::Water | TileKind::Bridge));
+                    (palette.tex_slab.clone(), palette.grass_tex_mats[mask].clone(), 0.0)
                 }
                 // Mountains rise a full block: crossing costs double, and
-                // the silhouette should say so.
-                TileKind::Rubble => (
-                    palette.mountain_block.clone(),
-                    palette.mountain_tex_mat.clone(),
-                    MOUNTAIN_TOP - 0.10,
-                ),
+                // the silhouette should say so. The summit grows a cliff
+                // rim wherever the range ends.
+                TileKind::Rubble => {
+                    let mask = mask_of(|t| matches!(t, TileKind::Rubble));
+                    (
+                        palette.mountain_block.clone(),
+                        palette.mountain_tex_mats[mask].clone(),
+                        MOUNTAIN_TOP - 0.10,
+                    )
+                }
+                // Banks on the sides that border land. Bridges count as
+                // water: the river visibly flows under the planks.
                 TileKind::Water => {
-                    (palette.tex_slab.clone(), palette.water_tex_mat.clone(), -0.05)
+                    let mask =
+                        mask_of(|t| matches!(t, TileKind::Water | TileKind::Bridge));
+                    (palette.tex_slab.clone(), palette.water_tex_mats[mask].clone(), -0.05)
                 }
                 // Bridges only exist after terraforming; at startup none do
                 // (sync_view overlays planks when they appear).
@@ -424,6 +500,75 @@ pub(crate) fn setup_scene(
                 MeshMaterial3d(mat),
                 Transform::from_translation(tile_xyz(world, pos, y_off - 0.05)),
             ));
+            // Inner corners: both flanking neighbors match but the
+            // diagonal doesn't — a nub caps that corner (bit unset = nub;
+            // 15 = no nubs). Same bit walk as the edge masks: NW/NE/SE/SW.
+            let corner_mask_of = |same: fn(TileKind) -> bool| -> usize {
+                const CORNERS: [((i32, i32), (i32, i32), (i32, i32)); 4] = [
+                    ((0, -1), (-1, 0), (-1, -1)), // NW: flanks N+W
+                    ((0, -1), (1, 0), (1, -1)),   // NE
+                    ((0, 1), (1, 0), (1, 1)),     // SE
+                    ((0, 1), (-1, 0), (-1, 1)),   // SW
+                ];
+                let is_same = |(dx, dy): (i32, i32)| {
+                    world.grid.get(TilePos::new(x + dx, y + dy)).is_none_or(same)
+                };
+                let mut mask = 15usize;
+                for (bit, (a, b, diag)) in CORNERS.into_iter().enumerate() {
+                    if is_same(a) && is_same(b) && !is_same(diag) {
+                        mask &= !(1 << bit);
+                    }
+                }
+                mask
+            };
+            // Overlay quads float just above the tile surface; stacked
+            // overlays on one tile get distinct epsilons to avoid z-fights.
+            let overlay = |commands: &mut Commands,
+                               mats: &Vec<Handle<StandardMaterial>>,
+                               mask: usize,
+                               eps: f32| {
+                if mask != 15 {
+                    let top = terrain_top(world, pos);
+                    commands.spawn((
+                        Mesh3d(palette.tex_slab.clone()),
+                        MeshMaterial3d(mats[mask].clone()),
+                        Transform::from_translation(tile_xyz(world, pos, top - 0.05 + eps)),
+                    ));
+                }
+            };
+            match kind {
+                TileKind::Plains => {
+                    // Scree at a mountain's base: contact shadow + stones
+                    // on the looming sides, plus corner clusters.
+                    let not_mountain = |t: TileKind| !matches!(t, TileKind::Rubble);
+                    overlay(&mut commands, &palette.scree_mats, mask_of(not_mountain), 0.012);
+                    overlay(
+                        &mut commands,
+                        &palette.scree_corner_mats,
+                        corner_mask_of(not_mountain),
+                        0.015,
+                    );
+                    overlay(
+                        &mut commands,
+                        &palette.grass_corner_mats,
+                        corner_mask_of(|t| !matches!(t, TileKind::Water | TileKind::Bridge)),
+                        0.0135,
+                    );
+                }
+                TileKind::Water => overlay(
+                    &mut commands,
+                    &palette.water_corner_mats,
+                    corner_mask_of(|t| matches!(t, TileKind::Water | TileKind::Bridge)),
+                    0.012,
+                ),
+                TileKind::Rubble => overlay(
+                    &mut commands,
+                    &palette.mountain_corner_mats,
+                    corner_mask_of(|t| matches!(t, TileKind::Rubble)),
+                    0.012,
+                ),
+                TileKind::Bridge => {}
+            }
         }
     }
 
