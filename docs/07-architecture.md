@@ -73,8 +73,14 @@ Structure:       StructureKind, Hp, Buffers, TilePos, Faction
 Tile map:        dense Grid<TileKind> resource + spatial index (bots per tile)
 Programs:        ProgramLibrary resource — source + AST, shared/refcounted
                  (100 bots on one program share one AST)
-Commands:        DeployProgram, QueuePrint, PlaceStructure, SetRallyPoint,
-                 Research(UnlockId) — the ONLY external inputs to sim
+Commands:        DeployProgram, QueuePrint(loadout), PlaceBlueprint
+                 (structures, terraform, repairs), EditPrinterRules
+                 (targets, keys, directions, priority, check interval),
+                 PlaceOverlay(arrow | paint), ExchangeData, PostRequest,
+                 Vote(sim-speed | decommission), SetRallyPoint,
+                 Research(UnlockId)
+                 — the ONLY external inputs to sim (Q77: list completed;
+                 it grows only when a decided system adds a player input)
 ```
 
 ## UI Notes (editor & inspector)

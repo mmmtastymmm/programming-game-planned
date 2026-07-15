@@ -74,6 +74,20 @@ The rules every system must obey (enforced by CI replay tests):
 - **What's decrypted is the color's deployed artifact** ([01-language.md](01-language.md), Modules — answers Q62): the program, its handler windows, and every module function its deploy pulled in (tree-shaken). What deploys is what leaks; never-deployed code is a secret forever. A module function shared by several colors appears under *each* color's mask — deliberate consequence, same mechanic as cross-version reading: shared code cross-reads across closures and effectively leaks at the sum of its exposures. Fork privately for opsec; no extra sim state needed (the per-(color, faction) levels remain the only decryption state).
 - Open questions: can opponents see a color's *version counter* tick ("they redeployed Blue 30s after our salvage" — juicy intel)? Lean yes, it rewards attention. Should structural whitespace (line breaks, indentation) be always-visible rather than maskable? Lean yes — silhouettes read as "shape of the program," which is good partial-intel texture.
 
+## Match Settings (the owning inventory — Q77)
+
+Every dial a match is configured with, in one place. Each is a lockstep-shared constant fixed at match start; the owning doc holds the mechanics.
+
+| Setting | Default | Owner |
+|---|---|---|
+| **Server harm setting** (non-PvP / PvP) | non-PvP | this doc (Modes) |
+| **Print cost** | FREE | [02-agents.md](02-agents.md) (build receipt is literal — refunds scale with what was actually spent) |
+| **Max nest arcanum** | per map | [04-enemies.md](04-enemies.md) |
+| **Quirk probability** (expected quirks per bot) | tuning | [09-quirks.md](09-quirks.md) |
+| **Salvage decryption %** | 5% | this doc (Color-decryption rules) |
+| **Sim-speed vote cooldown** | tuning | this doc |
+| *(floated)* cargo-scaled wreck blasts | off | [02-agents.md](02-agents.md) (Q55 note) |
+
 ## Decided
 
 - **Allied colonies, never shared** — every player owns a colony; cooperation happens through shared research, the shared program library, messaging, and leak intel (see Modes).

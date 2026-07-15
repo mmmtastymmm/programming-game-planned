@@ -41,13 +41,15 @@ flowchart TD
         BUMP_H["on bump: / on bumped: windows — 30"]
         BOOT_W["on boot: window — 45"]
         DEF["def / return — 50"]
-        LIST["lists + for-in — 60"]
+        IMPORT["import / from-import — 65"]
+        LIST["lists, dicts + for-in — 60"]
         ENUM["enum + match — 70"]
         MSG_C["channels: send / receive — 80"]
     end
 
     subgraph Functions["Function blocks (found at Caches — number ≈ cache depth)"]
         F_SENSE["cargo_full, health_low — 5"]
+        F_SEARCH["search (the scouting stance) — 12"]
         F_LOG["log, upload_log, last_error — 10"]
         F_ATK["attack, closest(enemy) — 15"]
         F_BUILD["build, repair — 20"]
@@ -73,6 +75,8 @@ flowchart TD
     F_ATK --> F_GUARD
     IF --> F_BUILD
     WHILE --> DEF
+    DEF --> IMPORT
+    START --> F_SEARCH
     F_LOG --> F_ENV
     SIG1 --> BUMP_H
     SIG1 --> BOOT_W
