@@ -326,10 +326,10 @@ fn file_viewer(ui: &mut egui::Ui, editor: &mut EditorState, game: &GameSim) {
                     }
                     match deployed {
                         Some(cp) if Some(&cp.source) != assembled.get(&color) => {
-                            ui.small(format!("v{} · modified", cp.version));
+                            ui.small(format!("v{:08x} · modified", cp.hash as u32));
                         }
                         Some(cp) => {
-                            ui.small(format!("v{}", cp.version));
+                            ui.small(format!("v{:08x}", cp.hash as u32));
                         }
                         None => {
                             ui.small("undeployed");
@@ -685,10 +685,10 @@ fn doc_window(
                     if let [(color, source)] = deploy.as_slice() {
                         match game.0.world.color_programs.get(&(0, *color)) {
                             Some(cp) if cp.source == *source => {
-                                ui.small(format!("deployed v{}", cp.version));
+                                ui.small(format!("deployed v{:08x}", cp.hash as u32));
                             }
                             Some(cp) => {
-                                ui.small(format!("v{} deployed · buffer modified", cp.version));
+                                ui.small(format!("v{:08x} deployed · buffer modified", cp.hash as u32));
                             }
                             None => {
                                 ui.small("never deployed");

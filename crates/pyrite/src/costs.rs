@@ -1,11 +1,13 @@
 //! The cycle-cost table (docs/01-language.md "Cycle Costs").
 //!
-//! Costs are data, not code: the sim loads a base table plus per-map/biome
-//! overlays. Every constant here is a tuning value.
+//! Costs are data, not code: the base table lives in `data/costs.ron`
+//! (baked in at compile time, parsed once at load); per-map/biome overlays
+//! layer on later (docs/07). Every constant is a tuning value.
 
 use std::collections::BTreeMap;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CostTable {
     /// Simple statement / no-op line (also charged when the implicit program
     /// loop wraps back to line 1, so an empty program can't spin for free).
@@ -59,75 +61,13 @@ pub struct CostTable {
 
 impl Default for CostTable {
     fn default() -> Self {
-        let mut builtins = BTreeMap::new();
-        // Starter set from docs/01-language.md (values are "cost" minus the
-        // call_base of 1, matching the "1 + function cost" convention).
-        for (name, cost) in [
-            ("move_to", 2),
-            ("mine", 2),
-            ("deposit", 1),
-            ("wait", 1),
-            ("rng", 1),
-            ("closest", 3),
-            ("exists", 1),
-            // `.expect()` method: total = call_base alone.
-            ("expect", 0),
-            // Container builtins & methods (VM-level, not host calls).
-            ("len", 0),
-            ("range", 2),
-            ("append", 0),
-            ("get", 0),
-            ("remove", 0),
-            ("keys", 1),
-            ("values", 1),
-            // Priced here too now that the default error handler calls it
-            // as ordinary code (the crash_dump field covers the bare-VM
-            // forced-call fallback).
-            ("upload_crash_dump", 25),
-            ("build", 2),
-            ("cargo_full", 1),
-            ("health_low", 1),
-            ("attack", 2),
-            ("scan_enemies", 4),
-            ("send", 3),
-            ("try_send", 3),
-            ("broadcast", 5),
-            ("try_broadcast", 5),
-            ("receive", 2),
-            ("try_receive", 2),
-            ("log", 1),
-            ("upload_log", 5),
-            ("last_error", 1),
-            ("drop_cargo", 1),
-            ("salvage", 2),
-            ("recover_black_box", 2),
-            ("become_disabled", 1),
-        ] {
-            builtins.insert(name.to_string(), cost);
-        }
-        Self {
-            statement: 1,
-            call_base: 1,
-            assign: 1,
-            arith: 1,
-            compare: 1,
-            if_eval: 1,
-            loop_iter: 1,
-            user_call: 2,
-            list_op: 1,
-            attr: 1,
-            enum_ctor: 1,
-            match_base: 1,
-            match_arm: 1,
-            crash_dump: 25,
-            trap_cost: 5,
-            grace_window_ticks: 10,
-            overtime_mult: 2,
-            blackbox_budget: 10,
-            range_cap: 256,
-            builtins,
-            default_builtin: 1,
-        }
+        let table: CostTable = ron::from_str(include_str!("../data/costs.ron"))
+            .expect("data/costs.ron parses (unknown fields are errors)");
+        // Load-time sanity: a zero statement cost would let empty programs
+        // spin forever for free (the wrap charge is this value).
+        assert!(table.statement > 0, "costs: statement must be > 0");
+        assert!(table.range_cap > 0, "costs: range_cap must be > 0");
+        table
     }
 }
 

@@ -6,3 +6,5 @@ description = "Deterministic world simulation (renderer-free; see docs/07-archit
 
 [dependencies]
 pyrite = { path = "../pyrite" }
+ron = "0.12.2"
+serde = { version = "1.0.228", features = ["derive"] }

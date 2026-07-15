@@ -288,12 +288,15 @@ impl pyrite::Host for BotHost<'_> {
                 [Value::Int(_)] => HostCall::Fault("wait requires a non-negative tick count".into()),
                 _ => HostCall::Fault("wait takes 1 integer argument".into()),
             },
-            // Uniform integer in [0, n) from the sim's seeded stream —
-            // the sanctioned randomness (wait(rng(20)) desyncs identical
-            // programs).
+            // Uniform integer in [0, n) from this bot's own rng.program
+            // stream, seeded by (match seed, entity ID) — the sanctioned
+            // randomness (wait(rng(20)) desyncs identical programs), and
+            // isolated so player draws can never perturb engine streams.
             "rng" => match args {
                 [Value::Int(n)] if *n > 0 => {
-                    let v = (self.world.next_rand() % *n as u64) as i64;
+                    let bot = self.world.bots.get_mut(&self.bot).expect("host bot exists");
+                    let v = (crate::world::next_rand(&mut bot.data.rng_program)
+                        % *n as u64) as i64;
                     HostCall::Ready(Value::Int(v))
                 }
                 [Value::Int(_)] => HostCall::Fault("rng requires a positive bound".into()),

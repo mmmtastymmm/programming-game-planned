@@ -22,8 +22,11 @@ use std::rc::Rc;
 /// Melee damage per hit (tuning constant; per-weapon hardware later).
 pub const ATTACK_DAMAGE: i64 = 10;
 
-/// Sim tuning constants (all numbers are data — CLAUDE.md convention).
-#[derive(Debug, Clone)]
+/// Sim tuning constants (all numbers are data — CLAUDE.md convention; the
+/// values live in `data/tuning.ron`, baked in at compile time and parsed
+/// once at load).
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Tuning {
     pub print_ticks: u32,
     /// Ore per print. DEFAULT FREE: a colony must never be soft-locked out
@@ -67,34 +70,29 @@ pub struct Tuning {
 
 impl Default for Tuning {
     fn default() -> Self {
-        Self {
-            print_ticks: 5,
-            print_cost_ore: 0,
-            repair_cost_ore: 5,
-            // Zero while prints are free — otherwise print+scrap mints ore.
-            scrap_refund_ore: 0,
-            boot_ticks: 2,
-            printed_hp: 30,
-            printed_cpu: 2,
-            printed_cargo_cap: 2,
-            capacity: 10_000,
-            bump_freeze_ticks: 50,
-            bump_victim_freeze_ticks: 15,
-            handler_init_ticks: 15,
-            bump_damage: 2,
-            bridge_cost_ore: 3,
-            bridge_build_ticks: 20,
-            overlay_cost_ore: 1,
-            fault_damage: 5,
-            regen_interval_ticks: 1000,
-            regen_amount: 1,
-        }
+        let tuning: Tuning = ron::from_str(include_str!("../data/tuning.ron"))
+            .expect("data/tuning.ron parses (unknown fields are errors)");
+        tuning.validate();
+        tuning
+    }
+}
+
+impl Tuning {
+    /// Load-time sanity: durations that gate progress must be non-zero
+    /// (a zero here means division-by-zero ticks or instant loops, not a
+    /// legitimate tuning choice).
+    fn validate(&self) {
+        assert!(self.print_ticks > 0, "tuning: print_ticks must be > 0");
+        assert!(self.bridge_build_ticks > 0, "tuning: bridge_build_ticks must be > 0");
+        assert!(self.regen_interval_ticks > 0, "tuning: regen_interval_ticks must be > 0");
+        assert!(self.printed_hp > 0, "tuning: printed_hp must be > 0");
+        assert!(self.printed_cpu > 0, "tuning: printed_cpu must be > 0");
     }
 }
 
 /// External inputs: the ONLY way anything outside the sim mutates it
 /// (single-player is lockstep with one peer).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum Command {
     /// Test/debug spawn that bypasses printers (bots normally print).
     SpawnBot {
@@ -185,12 +183,12 @@ impl Sim {
             Command::DeployProgram { faction, color, source } => {
                 let program = pyrite::parse(source, &UnlockSet::all())?;
                 let slot = (*faction, color.0);
-                let version =
-                    self.world.color_programs.get(&slot).map(|c| c.version + 1).unwrap_or(1);
+                let hash = crate::world::program_hash(source);
+                self.world.program_library.entry(hash).or_insert_with(|| source.clone());
                 let program = Rc::new(program);
                 self.world.color_programs.insert(
                     slot,
-                    ColorProgram { source: source.clone(), program: Rc::clone(&program), version },
+                    ColorProgram { source: source.clone(), program: Rc::clone(&program), hash },
                 );
                 // Hot-swap every live bot of this color at its next loop
                 // boundary (docs/01: redeploy semantics).
@@ -331,6 +329,10 @@ impl Sim {
                     xp_combat: 0,
                     xp_building: 0,
                     crash_seen: 0,
+                    rng_program: crate::world::stream_seed(
+                        self.world.seed ^ entity.0,
+                        "program",
+                    ),
                 },
                 vm: Some(vm),
             },
@@ -472,7 +474,12 @@ impl Sim {
             h.write_i32(depot.pos.y);
         }
         h.write_u64(w.stockpile_ore);
-        h.write_u64(w.rng_state);
+        h.write_u64(w.rng.combat);
+        h.write_u64(w.rng.wander);
+        h.write_u64(w.rng.explore);
+        h.write_u64(w.rng.sidestep);
+        h.write_u64(w.rng.quirk_roll);
+        h.write_u64(w.rng.feral_mutation);
         for (id, printer) in &w.printers {
             h.write_u64(id.0);
             h.write_i32(printer.pos.x);
@@ -503,8 +510,12 @@ impl Sim {
         for ((faction, color), cp) in &w.color_programs {
             h.write_u8(*faction);
             h.write_u8(*color);
-            h.write_u32(cp.version);
+            h.write_u64(cp.hash);
             h.write_str(&cp.source);
+        }
+        for (hash, source) in &w.program_library {
+            h.write_u64(*hash);
+            h.write_str(source);
         }
         for (id, bot) in &w.bots {
             h.write_u32(id.0);
@@ -522,6 +533,7 @@ impl Sim {
             h.write_u32(bot.data.booting.unwrap_or(0));
             h.write_u32(bot.data.bump_frozen);
             h.write_u8(bot.data.recall.is_some() as u8);
+            h.write_u64(bot.data.rng_program);
             h.write_u64(bot.data.xp_mining);
             h.write_u64(bot.data.xp_hauling);
             for entry in &bot.data.log_buf {

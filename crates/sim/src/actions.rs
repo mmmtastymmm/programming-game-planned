@@ -154,7 +154,8 @@ impl Sim {
                         bot.data.action = Some(Action::Move { path, ticks_left: 1, goals });
                         self.bump_both(id, entered, true);
                     } else {
-                        let pick = (self.world.next_rand() % dodges.len() as u64) as usize;
+                        let pick = (crate::world::next_rand(&mut self.world.rng.sidestep)
+                            % dodges.len() as u64) as usize;
                         let step = dodges[pick];
                         let cost = self
                             .world
@@ -318,7 +319,11 @@ impl Sim {
             .filter(|&p| self.world.grid.get(p).is_some_and(|t| t.move_ticks().is_some()))
             .collect();
         candidates.push(pos);
-        let drop_at = candidates[(self.world.next_rand() % candidates.len() as u64) as usize];
+        // Spill scatter draws from rng.combat (deaths are what spill cargo);
+        // if scatter grows beyond combat outcomes it earns its own stream in
+        // docs/07's inventory.
+        let drop_at = candidates[(crate::world::next_rand(&mut self.world.rng.combat)
+            % candidates.len() as u64) as usize];
         let existing = self
             .world
             .ore_nodes

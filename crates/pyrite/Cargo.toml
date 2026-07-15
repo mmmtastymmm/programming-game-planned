@@ -5,3 +5,5 @@ edition.workspace = true
 description = "The Pyrite unit language: lexer, gated parser, and cycle-metered stepping VM"
 
 [dependencies]
+ron = "0.12.2"
+serde = { version = "1.0.228", features = ["derive"] }

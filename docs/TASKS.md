@@ -13,31 +13,40 @@ flows through `Command`s. What's stale is the *design generation*: generic ore i
 raws → 7 refined, `desired_max` dials instead of target shares, one unified `on signal(s):`
 handler instead of seven per-signal templates, instant-explode double-handle instead of abort,
 omniscient sensing instead of the seeing/hearing model, 4 inline XP tracks instead of 5+6
-settled tracks. Each of those lands as a replay-hash change — which is fine, because **there are
-no stored golden hashes yet** (M0 fixes that first, so every later milestone pays the
-explain-your-hash-change toll the docs prescribe).
+settled tracks. Each of those lands as a replay-hash change — and since M0 landed, stored golden fixtures
+make every one of them pay the explain-your-hash-change toll the docs prescribe
+(`UPDATE_GOLDEN=1` regenerates; the PR explains why).
 
 Milestones are dependency-ordered. Within a milestone, tasks are roughly sequenced. Milestones
 marked ∥ can proceed in parallel once their prerequisites land.
 
 ---
 
-## M0 — Test & data groundwork (do first; makes every later ⚠HASH honest)
+## M0 — Test & data groundwork ✅ COMPLETE (2026-07-15)
 
-- [ ] **Serde on `Command` + serialized `(seed, command log)` replay artifact.** Today replay
-      tests compare two same-process runs — a determinism-preserving behavior change passes
-      silently. Store golden hashes as checked-in fixtures; CI fails on drift. [sim] (M)
-- [ ] **Cross-process replay test** (spawn a second process, compare hash streams) — the actual
-      lockstep guarantee. [sim] (S)
-- [ ] **Extract tuning to data files**: `costs.ron`, `stats.ron`, `tuning.ron` — move
-      `Tuning::default()` and `CostTable::default()` values verbatim (no behavior change), add
-      load-time validation. Docs convention says every number lives in data. [pyrite][sim] (S)
-- [ ] **Named RNG streams**: replace the single `World.rng_state` with the spec'd registry —
-      `rng.combat / wander / explore / sidestep / quirk_roll / feral_mutation` + per-bot
-      `rng.program` seeded by (match seed, entity ID). Today a bot calling `rng()` perturbs
-      everyone's sidestep picks. [sim] (S) ⚠HASH
-- [ ] **Program versions = source-byte hashes** (spec Q46) instead of `version: u32`; retain a
-      `ProgramLibrary` of deployed versions (decryption/Codex build on this later). [sim] (S)
+- [x] **Serde on `Command` + serialized `(seed, command log)` replay artifact.** `sim::replay`
+      module (`Replay { spec, commands, ticks }` ↔ RON); golden fixture checked in at
+      `crates/sim/tests/golden/` (a 300-tick scenario exercising every Command variant,
+      printer prints/boots, a mid-run hot-swap, sidestep RNG, and a kill); regenerate with
+      `UPDATE_GOLDEN=1 cargo test -p sim --test golden` and explain the hash change in the PR.
+      CI added (`.github/workflows/ci.yml`, sim+pyrite tests). *Note: no rustfmt gate — the
+      tree has pre-existing fmt drift; add one after a dedicated whole-tree `cargo fmt`
+      commit.* [sim] (M)
+- [x] **Cross-process replay test** — `cross_process_replay_matches` re-runs the golden
+      replay in a spawned process and compares final hashes. [sim] (S)
+- [x] **Extract tuning to data files**: `crates/sim/data/tuning.ron` +
+      `crates/pyrite/data/costs.ron` (values verbatim, `include_str!` + RON parse,
+      `deny_unknown_fields`, load-time validation asserts). *Note: `stats.ron` deferred to
+      M5 — no stat sheet exists yet to extract; the printed_* chassis defaults stay in
+      tuning.ron until then.* [pyrite][sim] (S)
+- [x] **Named RNG streams**: `World.rng: RngStreams` (combat / wander / explore / sidestep /
+      quirk_roll / feral_mutation, each seeded from (match seed, stream name)) + per-bot
+      `BotData.rng_program` seeded by (match seed, entity ID), feeding the `rng()` builtin.
+      *Judgment call to review: death cargo-spill scatter draws from `rng.combat` — that use
+      isn't in docs/07's inventory; flagged in a code comment.* [sim] (S) ⚠HASH
+- [x] **Program versions = source-byte hashes**: `ColorProgram.hash` (FNV-1a over source
+      bytes) replaces `version: u32`; `World.program_library: BTreeMap<hash, source>` retains
+      every deployed version; the editor shows short hashes. [sim] (S)
 
 ## M1 — Language core: cost model & semantics cluster (one PR, one hash explanation)
 

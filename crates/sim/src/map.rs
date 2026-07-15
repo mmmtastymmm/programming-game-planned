@@ -5,7 +5,7 @@
 
 use std::collections::{BTreeMap, BTreeSet, BinaryHeap};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
 pub struct TilePos {
     pub x: i32,
     pub y: i32,
@@ -25,7 +25,7 @@ impl TilePos {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
 pub enum Direction {
     North,
     East,
@@ -71,7 +71,7 @@ impl Direction {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum TileKind {
     Plains,
     Rubble,
@@ -116,7 +116,7 @@ pub enum TileKind {
 /// A traffic rule painted onto any tile — independent of terrain.
 /// Arrows make the tile one-way (two opposing arrowed bridges = a
 /// deadlock-free crossing; an arrowed corridor = a dedicated lane).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
 pub enum OverlayKind {
     Arrow(Direction),
 }
@@ -219,8 +219,8 @@ impl Grid {
 }
 
 /// Declarative map description; the replay format stores one of these plus
-/// the command log.
-#[derive(Debug, Clone)]
+/// the command log (see [`crate::replay`]).
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct MapSpec {
     pub width: i32,
     pub height: i32,
@@ -251,7 +251,7 @@ pub struct MapSpec {
 
 /// A printer placed by the map (docs/03: colonies start with a working
 /// Green printer and a ruined Red one).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct PrinterSpec {
     pub pos: TilePos,
     pub faction: u8,

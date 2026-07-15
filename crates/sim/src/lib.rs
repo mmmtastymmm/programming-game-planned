@@ -7,6 +7,7 @@
 //! - [`host`]: the `pyrite::Host` implementation (builtins → world)
 //! - [`sim`]: the fixed-tick phase loop and the `Command` input surface
 //! - [`hash`]: FNV-1a state hashing for desync detection / golden replays
+//! - [`replay`]: the serialized `(map spec, command log)` artifact
 
 mod actions;
 mod damage;
@@ -15,9 +16,11 @@ mod movement;
 mod printers;
 pub mod host;
 pub mod map;
+pub mod replay;
 pub mod sim;
 pub mod world;
 
 pub use map::{MapSpec, TileKind, TilePos};
+pub use replay::{Replay, TimedCommand};
 pub use sim::{Command, Sim};
 pub use world::{BotId, EntityId, World};

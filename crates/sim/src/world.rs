@@ -8,14 +8,14 @@ use pyrite::Vm;
 use std::collections::BTreeMap;
 use std::rc::Rc;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
 pub struct BotId(pub u32);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
 pub struct EntityId(pub u64);
 
 /// A program color slot (docs/01 "Program Colors"). One color = one printer.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
 pub struct Color(pub u8);
 
 impl Color {
@@ -49,7 +49,16 @@ pub struct Printer {
 pub struct ColorProgram {
     pub source: String,
     pub program: Rc<Program>,
-    pub version: u32,
+    /// Version identity = FNV-1a of the source bytes (docs/01: programs are
+    /// byte-exact; versions are identified by hashing source bytes).
+    pub hash: u64,
+}
+
+/// FNV-1a over source bytes — the program-version identity (docs/01).
+pub fn program_hash(source: &str) -> u64 {
+    let mut h = crate::hash::Fnv1a::new();
+    h.write_bytes(source.as_bytes());
+    h.finish()
 }
 
 /// The engine-fixed recall interrupt (docs/01): walk home, then re-color
@@ -149,6 +158,9 @@ pub struct BotData {
     pub xp_building: u64,
     /// Last VM crash_count charged for (fault-damage bookkeeping).
     pub crash_seen: u64,
+    /// This bot's `rng.program` stream state (docs/07): seeded from
+    /// (match seed, entity ID) so identical programs desync deterministically.
+    pub rng_program: u64,
 }
 
 #[derive(Debug)]
@@ -214,7 +226,7 @@ pub struct Blueprint {
     pub needed: u32,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum BlueprintKind {
     Bridge,
 }
@@ -272,14 +284,66 @@ pub struct World {
     pub paint: BTreeMap<TilePos, u8>,
     /// Deployed program per (faction, color slot).
     pub color_programs: BTreeMap<(u8, u8), ColorProgram>,
+    /// Every source version ever deployed, by source hash — decryption,
+    /// the Codex, and stale-version display all read from here (docs/01).
+    pub program_library: BTreeMap<u64, String>,
     pub wrecks: BTreeMap<BotId, Wreck>,
     pub black_boxes: Vec<BlackBox>,
     pub stockpile_ore: u64,
     pub archive: Vec<ArchiveEntry>,
-    /// SplitMix64 state — the sim's only randomness source (CLAUDE.md).
-    pub rng_state: u64,
+    /// The match seed (kept for seeding per-bot streams at spawn).
+    pub seed: u64,
+    /// Named seeded RNG streams — the sim's only randomness (CLAUDE.md;
+    /// inventory in docs/07). Advanced only by sim systems, in tick order.
+    pub rng: RngStreams,
     next_entity: u64,
     next_bot: u32,
+}
+
+/// The named RNG streams from docs/07's inventory. One consumer domain per
+/// stream, so e.g. a bot calling `rng()` can never perturb dodge picks.
+/// (`rng.program` is per-bot state on [`BotData`], not listed here.)
+#[derive(Debug, Clone, PartialEq)]
+pub struct RngStreams {
+    pub combat: u64,
+    pub wander: u64,
+    pub explore: u64,
+    pub sidestep: u64,
+    pub quirk_roll: u64,
+    pub feral_mutation: u64,
+}
+
+impl RngStreams {
+    fn from_seed(seed: u64) -> Self {
+        Self {
+            combat: stream_seed(seed, "combat"),
+            wander: stream_seed(seed, "wander"),
+            explore: stream_seed(seed, "explore"),
+            sidestep: stream_seed(seed, "sidestep"),
+            quirk_roll: stream_seed(seed, "quirk_roll"),
+            feral_mutation: stream_seed(seed, "feral_mutation"),
+        }
+    }
+}
+
+/// Derive a stream's initial state from the match seed and its name, then
+/// scramble once so streams with related names still decorrelate.
+pub fn stream_seed(seed: u64, name: &str) -> u64 {
+    let mut h = crate::hash::Fnv1a::new();
+    h.write_u64(seed);
+    h.write_str(name);
+    let mut state = h.finish();
+    next_rand(&mut state)
+}
+
+/// Deterministic SplitMix64 step. Every sim randomness draw goes through
+/// here, against one named stream's state.
+pub fn next_rand(state: &mut u64) -> u64 {
+    *state = state.wrapping_add(0x9E3779B97F4A7C15);
+    let mut z = *state;
+    z = (z ^ (z >> 30)).wrapping_mul(0xBF58476D1CE4E5B9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94D049BB133111EB);
+    z ^ (z >> 31)
 }
 
 impl World {
@@ -322,11 +386,13 @@ impl World {
             overlays: BTreeMap::new(),
             paint: BTreeMap::new(),
             color_programs: BTreeMap::new(),
+            program_library: BTreeMap::new(),
             wrecks: BTreeMap::new(),
             black_boxes: Vec::new(),
             stockpile_ore: 0,
             archive: Vec::new(),
-            rng_state: spec.seed,
+            seed: spec.seed,
+            rng: RngStreams::from_seed(spec.seed),
             next_entity: 1,
             next_bot: 1,
         };
@@ -381,16 +447,6 @@ impl World {
             }
         }
         count
-    }
-
-    /// Deterministic SplitMix64. Advanced only by sim systems, in tick
-    /// order — never from rendering or UI.
-    pub fn next_rand(&mut self) -> u64 {
-        self.rng_state = self.rng_state.wrapping_add(0x9E3779B97F4A7C15);
-        let mut z = self.rng_state;
-        z = (z ^ (z >> 30)).wrapping_mul(0xBF58476D1CE4E5B9);
-        z = (z ^ (z >> 27)).wrapping_mul(0x94D049BB133111EB);
-        z ^ (z >> 31)
     }
 
     pub fn alloc_entity(&mut self) -> EntityId {
