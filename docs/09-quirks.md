@@ -21,7 +21,7 @@ A **quirk** is a small per-bot deviation from the universal chassis spec ([02-ag
 | **Tail-Call Optimized** | loop-iteration overhead costs 1 cycle less (min 1) — a no-op at base costs; earns its keep under cost-raising overlays (Corruption, Loop Desert) |
 | **Branch Predictor** | an `if` that takes the same branch it took last time costs 1 cycle less |
 | **Memoized** | calling the same builtin as the immediately previous action costs 1 cycle less |
-| **Lazy Evaluation** | unused cycles carry over to the next tick (banked, cap N) |
+| **Lazy Evaluation** | end-of-tick leftover cycles persist to the next tick — everyone else's evaporate (still capped at `bank_cap`, still burned while blocked; Q75) |
 | **Borrow Checker Approved** | stack depth +1 — memory-safe by construction |
 | **Retina Display** | +1 sensor range |
 | **Huffman Coded** | +10% cargo capacity (better packing) |

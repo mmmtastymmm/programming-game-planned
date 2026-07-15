@@ -39,7 +39,7 @@ The Pyrite cycle-cost table is data with **per-biome overlays** ([01-language.md
 | Loop Desert | loop iteration ×3 | punishes iteration-heavy code, rewards unrolled/flat code |
 | Overclock Field | all ops −1 (min 1), crash-dump cost ×2 | rewards bold code, makes bugs expensive |
 
-Map authors pick overlays per biome; the editor shows *effective* per-line costs for the tile the selected bot stands on.
+Map authors pick overlays per biome; the editor shows *effective* per-line costs for the tile the selected bot stands on. Overlays may raise costs freely — `bank_cap` derives per tile from the max effective op cost (Q75), so no overlay can strand a saving-up bot — and no overlay or quirk can push an op below **1 cycle** (the global floor).
 
 ## Terraforming (build & deconstruct)
 
