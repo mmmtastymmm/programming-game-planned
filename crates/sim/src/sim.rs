@@ -14,7 +14,7 @@ use crate::map::{MapSpec, OverlayKind, TileKind, TilePos};
 use crate::world::{
     Blueprint, BlueprintKind, Bot,
     BotData, BotId, Color, ColorProgram, EntityId, PrinterState, Wreck,
-    World,
+    World, XpTrack,
 };
 use pyrite::{CostTable, Outcome, PyriteError, UnlockSet, Value, Vm, VmConfig};
 use std::rc::Rc;
@@ -131,6 +131,9 @@ pub struct Sim {
     pub costs: CostTable,
     pub vm_config: VmConfig,
     pub tuning: Tuning,
+    /// Phase-9 snapshot: the state hash of the last completed tick. The
+    /// lockstep relay compares this across peers for desync detection.
+    pub last_hash: u64,
 }
 
 impl Sim {
@@ -162,12 +165,19 @@ impl Sim {
         for kind in crate::host::KINDS {
             vm_config.constants.insert(kind.to_string(), Value::Str(kind.to_string()));
         }
-        Self {
+        let mut sim = Self {
             world: World::from_spec(spec),
             costs: CostTable::default(),
             vm_config,
             tuning,
-        }
+            last_hash: 0,
+        };
+        // Phase-0 perception seed (docs/07, round 4): tick 1's queries have
+        // a "previous tick" to read, so the pre-deployed starter program
+        // works from its first operation. A stub until M7, like phase 5.
+        sim.run_perception();
+        sim.last_hash = sim.state_hash();
+        sim
     }
 
     /// Phase 1: apply a command. Deterministic given identical call order.
@@ -341,7 +351,10 @@ impl Sim {
         id
     }
 
-    /// One fixed simulation tick (phases 2–5).
+    /// One fixed simulation tick — the nine-phase order of docs/07.
+    /// Phase 1 (agreed Commands) happens outside, via [`Sim::apply`], in
+    /// the relay's total order; everything from the VM grant to the
+    /// snapshot hash lives here, in stable id order within each phase.
     pub fn step(&mut self) {
         self.world.tick += 1;
 
@@ -377,19 +390,24 @@ impl Sim {
             self.after_vm(id, vm, outcome);
         }
 
-        // --- phase 3+4: start requested actions, advance in-flight ones ---
+        // --- phases 3+4: collect issued actions, resolve them (move →
+        // combat → mine/build), then the engine-driven walks (boot
+        // countdowns, recall walks). Damage and signals these produce are
+        // QUEUED for phase 6, not applied inline. ---
         for id in ids.iter().copied() {
             self.resolve_bot(id);
         }
-
-        // --- phase 4.5: engine-driven movement (boot countdowns, recalls) ---
         for id in ids.iter().copied() {
             self.advance_engine(id);
         }
 
-        // --- phase 4.7: fault damage — every unhandled crash this tick
-        // (from stepping or action resolution) chips the chassis. Routed
-        // through apply_damage so hurt/death signals fire normally.
+        // --- phase 5: perception (stub until M7) ---
+        self.run_perception();
+
+        // --- phase 6: damage, faults, deaths (countdowns and blasts join
+        // in M10). Fault chip first: every unhandled crash this tick (from
+        // stepping or action resolution) queues chassis damage, so its
+        // hurt/death signals ride the same dispatch. ---
         for id in ids.iter().copied() {
             let Some(bot) = self.world.bots.get_mut(&id) else { continue };
             if bot.data.dying {
@@ -400,28 +418,15 @@ impl Sim {
             let delta = crashes.saturating_sub(bot.data.crash_seen);
             if delta > 0 {
                 bot.data.crash_seen = crashes;
-                self.apply_damage(id, delta as i64 * self.tuning.fault_damage);
+                self.queue_damage(id, delta as i64 * self.tuning.fault_damage);
             }
         }
+        self.settle_damage();
+        self.dispatch_signals();
 
-        // --- phase 4.8: passive regen — and the hurt signal re-arms when
-        // health climbs back above its threshold (docs/02: edge-triggered).
-        if self.world.tick.is_multiple_of(self.tuning.regen_interval_ticks) {
-            let amount = self.tuning.regen_amount;
-            for id in ids.iter() {
-                let Some(bot) = self.world.bots.get_mut(id) else { continue };
-                if bot.data.dying || bot.data.hp >= bot.data.max_hp {
-                    continue;
-                }
-                bot.data.hp = (bot.data.hp + amount).min(bot.data.max_hp);
-                if bot.data.hurt_fired && bot.data.hp * 100 >= bot.data.max_hp * 50 {
-                    bot.data.hurt_fired = false; // fixed Damaged threshold
-                }
-            }
-        }
-
-        // --- phase 5: deaths ---
-        for id in ids {
+        // Deaths: dying bots become wrecks (the op boundary above may have
+        // added to the pile — a Died outcome lands the same tick).
+        for id in ids.iter().copied() {
             let Some(bot) = self.world.bots.get(&id) else { continue };
             if !bot.data.dying {
                 continue;
@@ -436,8 +441,57 @@ impl Sim {
             self.world.wrecks.insert(id, Wreck { pos: data.pos, cargo: 0, logs: data.log_buf });
         }
 
-        // --- phase 6: economy (printers: jobs, rebalancing, capacity) ---
+        // --- phase 7: XP settlement ---
+        self.settle_xp();
+
+        // --- phase 8: economy — self-repair first (docs/07: regen lives
+        // here; the hurt latch re-arms when health climbs back over the
+        // line, docs/02: edge-triggered), then printers (jobs,
+        // rebalancing, capacity). ---
+        if self.world.tick.is_multiple_of(self.tuning.regen_interval_ticks) {
+            let amount = self.tuning.regen_amount;
+            for id in ids.iter() {
+                let Some(bot) = self.world.bots.get_mut(id) else { continue };
+                if bot.data.dying || bot.data.hp >= bot.data.max_hp {
+                    continue;
+                }
+                bot.data.hp = (bot.data.hp + amount).min(bot.data.max_hp);
+                if bot.data.hurt_fired && bot.data.hp * 100 >= bot.data.max_hp * 50 {
+                    bot.data.hurt_fired = false; // fixed Damaged threshold
+                }
+            }
+        }
         self.run_printers();
+
+        // --- phase 9: snapshot hash for desync detection ---
+        self.last_hash = self.state_hash();
+    }
+
+    /// Phase 5: perception — seeing/hearing recomputed from post-move
+    /// positions, detection episodes, per-faction map knowledge, survey
+    /// steps (docs/07). STUB until M7 lands the two-circle model: queries
+    /// stay omniscient, but the phase slot — and the phase-0 seed call in
+    /// [`Sim::new`] — exist so M7 drops in without reordering the tick.
+    /// Phase-2 queries read the *previous* tick's perception by design.
+    pub(crate) fn run_perception(&mut self) {}
+
+    /// Phase 7: XP settlement — every award earned anywhere in the tick
+    /// queued, then settled here in arrival order (phases queue in stable
+    /// id order). The Learning multiplier applies at its start-of-tick
+    /// level; it is IDENTITY until M6 lands the body tracks, so today this
+    /// is a plain sum. Awards for bots that died in phase 6 are dropped
+    /// with them.
+    pub(crate) fn settle_xp(&mut self) {
+        let events = std::mem::take(&mut self.world.pending_xp);
+        for (id, track, amount) in events {
+            let Some(bot) = self.world.bots.get_mut(&id) else { continue };
+            match track {
+                XpTrack::Mining => bot.data.xp_mining += amount,
+                XpTrack::Hauling => bot.data.xp_hauling += amount,
+                XpTrack::Combat => bot.data.xp_combat += amount,
+                XpTrack::Building => bot.data.xp_building += amount,
+            }
+        }
     }
 
     /// Store the VM back (or destroy the bot, per the outcome).
@@ -452,7 +506,7 @@ impl Sim {
         }
     }
 
-    /// Phase 7: deterministic world hash for desync detection and golden
+    /// Phase 9: deterministic world hash for desync detection and golden
     /// replays. (VM internals are hashed shallowly for now — budget, line,
     /// blocked/dead — deep state hashing is a TODO.)
     pub fn state_hash(&self) -> u64 {

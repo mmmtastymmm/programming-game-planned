@@ -6,53 +6,42 @@ use crate::sim::Sim;
 use crate::world::{
     Action, BotId,
 };
-use pyrite::{RaiseOutcome, Signal, Value};
+use pyrite::{Signal, Value};
 use std::collections::BTreeSet;
 
 impl Sim {
     /// A collision, routed through the signal system (docs/01):
     /// the rammer gets `bump`, the victim `bumped` — signal first (impact),
     /// then chassis damage (crunch). A handler is the bot's own response;
-    /// the engine's asymmetric freeze is only the UNHANDLED default. The
-    /// double-handle rule applies as for any signal: colliding with (or as)
-    /// a bot that's mid-handler/boot/recall explodes it.
+    /// the engine's asymmetric freeze is only the UNHANDLED default. Both
+    /// the signals and the damage are QUEUED here and land in phase 6 —
+    /// co-arrivals resolve by severity there, and the double-handle rule
+    /// still applies at dispatch: colliding with (or as) a bot that's
+    /// mid-handler/boot/recall from an earlier boundary explodes it.
     /// `raise_on_mover` is false for engine-driven walks (recall): the
     /// engine's own driving is not the program's exception.
     pub(crate) fn bump_both(&mut self, mover: BotId, tile: TilePos, raise_on_mover: bool) {
-        let blocker = self
-            .world
-            .bots
-            .values()
-            .filter(|b| b.data.id != mover && !b.data.dying && b.data.pos == tile)
-            .map(|b| b.data.id)
-            .min();
+        // Lowest living occupant of the rammed tile, off the spatial index.
+        let blocker = self.world.occupancy.get(&tile).into_iter().flatten().copied().find(|b| {
+            *b != mover && self.world.bots.get(b).is_some_and(|x| !x.data.dying)
+        });
 
-        let mover_outcome = if raise_on_mover {
-            self.raise_signal(mover, Signal::Bump)
-        } else {
-            RaiseOutcome::Ignored
-        };
-        if mover_outcome == RaiseOutcome::Ignored
-            && let Some(bot) = self.world.bots.get_mut(&mover)
-        {
-            // Unhandled default: the long at-fault stun (never downgrades).
+        if raise_on_mover {
+            self.world.pending_signals.push((mover, Signal::Bump));
+        } else if let Some(bot) = self.world.bots.get_mut(&mover) {
+            // Engine walks raise nothing on the mover — but the long
+            // at-fault stun still applies (never downgrades).
             bot.data.bump_frozen = bot.data.bump_frozen.max(self.tuning.bump_freeze_ticks);
         }
 
         if let Some(blocker) = blocker {
-            let blocker_outcome = self.raise_signal(blocker, Signal::Bumped);
-            if blocker_outcome == RaiseOutcome::Ignored
-                && let Some(bot) = self.world.bots.get_mut(&blocker)
-            {
-                bot.data.bump_frozen =
-                    bot.data.bump_frozen.max(self.tuning.bump_victim_freeze_ticks);
-            }
+            self.world.pending_signals.push((blocker, Signal::Bumped));
         }
 
         let damage = self.tuning.bump_damage;
-        self.apply_damage(mover, damage);
+        self.queue_damage(mover, damage);
         if let Some(blocker) = blocker {
-            self.apply_damage(blocker, damage);
+            self.queue_damage(blocker, damage);
         }
     }
 
@@ -87,13 +76,7 @@ impl Sim {
         let Some(bot) = self.world.bots.get(&id) else { return };
         let start = bot.data.pos;
         let structures = self.world.structure_tiles();
-        let mut occupied: BTreeSet<TilePos> = self
-            .world
-            .bots
-            .values()
-            .filter(|b| b.data.id != id && !b.data.dying)
-            .map(|b| b.data.pos)
-            .collect();
+        let mut occupied: BTreeSet<TilePos> = self.world.occupied_tiles(id);
         occupied.extend(structures.iter().copied());
         let path = astar_avoiding(&self.world.grid, &self.world.overlays, start, &goals, &occupied)
             .or_else(|| {
@@ -121,13 +104,7 @@ impl Sim {
     pub(crate) fn replan_after_bump(&mut self, id: BotId) {
         let Some(bot) = self.world.bots.get(&id) else { return };
         let start = bot.data.pos;
-        let mut occupied: BTreeSet<TilePos> = self
-            .world
-            .bots
-            .values()
-            .filter(|b| b.data.id != id && !b.data.dying)
-            .map(|b| b.data.pos)
-            .collect();
+        let mut occupied: BTreeSet<TilePos> = self.world.occupied_tiles(id);
         occupied.extend(self.world.structure_tiles());
 
         // Program move.

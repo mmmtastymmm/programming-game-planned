@@ -123,6 +123,24 @@ pub enum Signal {
     Bumped,
 }
 
+impl Signal {
+    /// Co-arrival severity (docs/01, Q81): signals landing at one op
+    /// boundary resolve by **abort > error > recall > hurt > bumped >
+    /// bump** — the highest enters its template, the rest are dropped,
+    /// and co-arrival is NOT a double-handle (that needs a template
+    /// already *running*). `error` is synchronous (raised inside the op,
+    /// never queued) and `abort`/`recall` land with M3; until then Death
+    /// holds the engine-reserved top tier. Gaps left for the M3 ranks.
+    pub fn severity(self) -> u8 {
+        match self {
+            Signal::Death => 6, // the abort tier, pre-M3
+            Signal::Hurt => 3,
+            Signal::Bumped => 2,
+            Signal::Bump => 1,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Phase {
     Main,

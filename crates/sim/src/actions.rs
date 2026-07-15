@@ -5,7 +5,7 @@ use crate::host::BotHost;
 use crate::map::{astar_avoiding, TileKind, TilePos};
 use crate::sim::{Sim, ATTACK_DAMAGE};
 use crate::world::{
-    Action, ActionRequest, BlueprintKind, BotId, RecallPurpose,
+    Action, ActionRequest, BlueprintKind, BotId, RecallPurpose, XpTrack,
 };
 use pyrite::Value;
 use std::collections::BTreeSet;
@@ -213,7 +213,7 @@ impl Sim {
                 ore.amount -= 1;
                 let bot = self.world.bots.get_mut(&id).expect("bot exists");
                 bot.data.cargo += 1;
-                bot.data.xp_mining += 1;
+                self.world.pending_xp.push((id, XpTrack::Mining, 1));
                 self.finish_action(id, Ok(Value::Unit));
             }
             Action::Attack { target, ticks_left } => {
@@ -235,10 +235,9 @@ impl Sim {
                     self.finish_action(id, Err("attack: target out of range".into()));
                     return;
                 }
-                let bot = self.world.bots.get_mut(&id).expect("bot exists");
-                bot.data.xp_combat += ATTACK_DAMAGE as u64;
+                self.world.pending_xp.push((id, XpTrack::Combat, ATTACK_DAMAGE as u64));
                 self.finish_action(id, Ok(Value::Unit));
-                self.apply_damage(target_bot, ATTACK_DAMAGE);
+                self.queue_damage(target_bot, ATTACK_DAMAGE);
             }
             Action::Build { blueprint } => {
                 let pos = bot.data.pos;
@@ -254,8 +253,7 @@ impl Sim {
                 bp.progress += 1;
                 let done = bp.progress >= bp.needed;
                 let (site, kind) = (bp.pos, bp.kind);
-                let bot = self.world.bots.get_mut(&id).expect("bot exists");
-                bot.data.xp_building += 1;
+                self.world.pending_xp.push((id, XpTrack::Building, 1));
                 if done {
                     self.world.blueprints.remove(&blueprint);
                     match kind {
@@ -283,7 +281,7 @@ impl Sim {
                 }
                 let cargo = bot.data.cargo;
                 bot.data.cargo = 0;
-                bot.data.xp_hauling += cargo as u64;
+                self.world.pending_xp.push((id, XpTrack::Hauling, cargo as u64));
                 self.world.stockpile_ore += cargo as u64;
                 self.finish_action(id, Ok(Value::Unit));
             }

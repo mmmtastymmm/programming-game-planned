@@ -95,18 +95,28 @@ full charges + centicycles + wrap-surviving variables move every replay hash at 
       lands). Replaces sim's `BUILTIN_DOCS`; editor hover reads it (`builtin_doc(costs, name)`
       + `cost_display`); `signal_safe` recorded for M3's static checks. [pyrite][sim] (M)
 
-## M2 — Nine-phase tick skeleton (sim restructure the rest slots into)
+## M2 — Nine-phase tick skeleton ✅ COMPLETE (2026-07-15)
 
-- [ ] **Reorder `Sim::step()` into the nine phases** (07): Commands → VM step → collect →
+- [x] **Reorder `Sim::step()` into the nine phases** (07): Commands → VM step → collect →
       resolve → **Perception (5, stub)** → damage/countdowns/blasts (6) → **XP settlement (7)**
-      → economy (8) → snapshot hash (9). Damage moves out of inline resolution; XP credits
-      become queued events settled with a start-of-tick Learning multiplier (multiplier is
-      identity until M6b lands). Phase-0 perception seed hook at match start. [sim] (M) ⚠HASH
-- [ ] **Severity-order co-arrival**: pending-signal set resolved at op boundaries,
-      abort > error > recall > hurt > bumped > bump, extras dropped; co-arrival ≠ double-handle
-      (Q81). [pyrite][sim] (M) ⚠HASH
-- [ ] **Spatial index** (bots per tile): occupancy and proximity queries are O(bots) linear
-      scans today; perception (M6) multiplies query volume. BTreeMap<pos, ids>. [sim] (S)
+      → economy (8, regen moved in) → snapshot hash (9, stored as `Sim.last_hash` for the
+      lockstep relay). Damage moved out of inline resolution (attack, bump crunch, fault chip
+      all queue to `pending_damage`, settled 6a); XP credits queue to `pending_xp`, settled
+      phase 7 under an identity Learning multiplier (M6b makes it real — awards for bots that
+      died in phase 6 drop with them). Phase-0 perception seed hook at match start.
+      *Note: the ⚠HASH toll wasn't owed — end-of-tick states came out identical in the golden
+      scenario (the reorder only moves work within a tick), so the fixture stands unchanged.*
+      [sim] (M)
+- [x] **Severity-order co-arrival**: signals queue to `pending_signals`, dispatched once per
+      bot at the phase-6 op boundary; `Signal::severity()` orders abort > error > recall >
+      hurt > bumped > bump (Death holds the reserved top tier until M3's abort; error is sync
+      and never queued; gaps left for M3's ranks), extras dropped; co-arrival ≠ double-handle
+      (Q81) — regression-tested (`co_arriving_signals_resolve_by_severity_not_double_handle`:
+      under the old immediate-raise code that scenario exploded the bot). [pyrite][sim] (M)
+- [x] **Spatial index** (bots per tile): `World.occupancy: BTreeMap<pos, BTreeSet<id>>`, kept
+      in sync by `index_bot`/`unindex_bot`/`move_bot` at every spawn/move/death/scrap/explode;
+      `tile_occupied`, the bump blocker lookup, and both replan obstacle sets read the index
+      (`occupied_tiles`). [sim] (S)
 
 ## M3 — Signals v3: the seven-template model (largest single divergence)
 

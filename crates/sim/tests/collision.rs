@@ -325,6 +325,56 @@ wait(3)
 }
 
 #[test]
+fn co_arriving_signals_resolve_by_severity_not_double_handle() {
+    // A ram whose chip also crosses the hurt line raises bumped + hurt at
+    // the same op boundary. Q81: the severest (hurt) enters its template
+    // and the extra is dropped — co-arrival must NOT explode the bot as a
+    // double-handle, even with a player handler installed (the double-
+    // handle needs a template already *running*).
+    let victim_src = "\
+on signal(s):
+    match s:
+        case Signal.Hurt:
+            log(\"hurt-wins\")
+        case Signal.Bumped:
+            log(\"bumped-ran\")
+        case _:
+            wait(0)
+
+wait(600)
+";
+    let mut spec = MapSpec::empty(7, 3);
+    for x in 0..7 {
+        spec.water.push(TilePos::new(x, 0));
+        spec.water.push(TilePos::new(x, 2));
+    }
+    spec.depots.push(TilePos::new(0, 1));
+    let mut sim = Sim::new(&spec);
+    sim.tuning.bump_damage = 60; // one ram crosses the victim's 50% line
+    let victim = spawn(&mut sim, TilePos::new(1, 1), victim_src);
+    let rammer = spawn(&mut sim, TilePos::new(3, 1), "move_to(closest(depot).expect())\n");
+    // The rammer is too tough for its share of the crunch to cross ITS
+    // hurt line: it gets a plain bump (default freeze), so the victim's
+    // template finishes before any second ram lands.
+    sim.world.bots.get_mut(&rammer).unwrap().data.hp = 1000;
+    sim.world.bots.get_mut(&rammer).unwrap().data.max_hp = 1000;
+    for _ in 0..120 {
+        sim.step();
+        let Some(v) = sim.world.bots.get(&victim) else {
+            panic!("co-arrival is not a double-handle: the victim must survive");
+        };
+        if let Some(first) = v.data.log_buf.first() {
+            assert!(
+                first.contains("hurt-wins"),
+                "the severest co-arriving signal wins the boundary, got {first:?}"
+            );
+            return;
+        }
+    }
+    panic!("the ram never landed");
+}
+
+#[test]
 fn bumped_during_a_handler_is_a_double_handle() {
     // The victim is mid-`on bumped:` (blocking wait) when a second bump
     // lands: any signal during a handler explodes — no wreck, black box.

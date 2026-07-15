@@ -550,6 +550,21 @@ impl World {
         }
     }
 
+    /// Tiles holding a living bot other than `exclude` — the obstacle set
+    /// for path replanning, read off the spatial index instead of an
+    /// O(bots) scan.
+    pub fn occupied_tiles(&self, exclude: BotId) -> std::collections::BTreeSet<TilePos> {
+        self.occupancy
+            .iter()
+            .filter(|(_, ids)| {
+                ids.iter().any(|b| {
+                    *b != exclude && self.bots.get(b).is_some_and(|x| !x.data.dying)
+                })
+            })
+            .map(|(pos, _)| *pos)
+            .collect()
+    }
+
     /// Move a bot to a new tile, keeping the occupancy index in sync.
     /// EVERY `data.pos` write goes through here.
     pub(crate) fn move_bot(&mut self, id: BotId, to: TilePos) {
