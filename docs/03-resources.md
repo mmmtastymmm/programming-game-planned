@@ -1,6 +1,6 @@
 # Resources
 
-**Eleven raw materials → six refined products**, plus **Energy** (a rate, not a pile) and **Data** (a currency, not a mineral). Each exists to gate a *different verb*, so shortages push players toward different behavior instead of "more of everything." (All recipes/rates below are tuning values.)
+**Eleven raw materials → seven refined products**, plus **Energy** (a rate, not a pile) and **Data** (a currency, not a mineral). Each exists to gate a *different verb*, so shortages push players toward different behavior instead of "more of everything." (All recipes/rates below are tuning values.)
 
 ## The Tree
 
@@ -27,6 +27,7 @@ flowchart TD
         CHIP[Chips<br/><i>Foundry: 1 silver + 2 crystal + 1 wire</i>]
         GLASS[Glass<br/><i>Smelter: 2 sand</i>]
         LENS[Lens<br/><i>Foundry: 2 glass</i>]
+        GCHIP[Gold Chip<br/><i>Foundry: 1 chip + 1 gold</i>]
     end
 
     subgraph Special["Rates & currency"]
@@ -44,6 +45,8 @@ flowchart TD
     WIRE --> CHIP
     SAND --> GLASS
     GLASS --> LENS
+    CHIP --> GCHIP
+    AU --> GCHIP
     WOOD --> NRG
     COAL --> NRG
 
@@ -51,7 +54,8 @@ flowchart TD
     BRZ -->|tool & weapon modules| SINK2[Claws]
     WIRE -->|powered structures, electronics| SINK3[The grid]
     CHIP -->|compute upgrades, hardware| SINK4[Brains]
-    AU -->|premium catalog + Data Exchange| SINK5[Late hardware & banking]
+    AU -->|tier-4 tools + Data Exchange| SINK5[Late hardware & banking]
+    GCHIP -->|top-tier compute:<br/>Coprocessor, Backup Core| SINK4
     WAT -->|coolant| SINK6[Upgrade Station]
     STONE -->|walls, bridges, civil structures| SINK9[Fortification]
     GLASS -->|glazing for sensor structures| SINK10[Seeing]
@@ -75,7 +79,7 @@ Raw:
 | **Copper** | Veins | Wire + Bronze | *Electrification* — one ore, two competing futures. |
 | **Tin** | Sparse veins | Bronze (nothing else) | *Prospect wide* — copper is everywhere, its alloy partner isn't. |
 | **Silver** | Deep veins | Chips | *Contested wealth* — the midgame's fight-worthy vein. |
-| **Gold** | Deep veins, rare | Premium hardware (Coprocessor, Backup Core) + the best Data Exchange rates | *Raid bait* — high value per unit of cargo, worth escorting, worth stealing. |
+| **Gold** | Deep veins, rare | **Gold Chips** (top-tier compute), **tier-4 tools**, + the best Data Exchange rates | *Raid bait* — high value per unit of cargo, worth escorting, worth stealing. |
 | **Crystal** | Fields in risky terrain ([05-terrain.md](05-terrain.md)) | Chips, consumables | *Will you venture into dangerous ground?* |
 
 Refined:
@@ -88,6 +92,7 @@ Refined:
 | **Chips** | 1 Silver + 2 Crystal + 1 Wire (Foundry) | Compute upgrades ([06-progression.md](06-progression.md)), hardware | *Compute or claws?* Better brains vs. more bots |
 | **Glass** | 2 Sand (Smelter) | Lens stock; glazing for sensor structures (Sentry Post) | *Can you see?* — the seeing material. |
 | **Lens** | 2 Glass (Foundry) | The **Optics module** (2 Lens + 1 Bronze — Q53 answered, [06-progression.md](06-progression.md)) | *How far can you see?* Sensor range gets a supply chain. |
+| **Gold Chip** | 1 Chip + 1 Gold (Foundry) | Top-tier compute — the Coprocessor and Backup Core price in these ([06-progression.md](06-progression.md)) | *Is your colony rich enough to think this hard?* The best brains are gilded. |
 
 Rates & currency:
 
@@ -117,7 +122,16 @@ Harvesting requires a **tool module** ([02-agents.md](02-agents.md)), and tools 
 | Crystal | 4 |
 | Water | — (pumped by a structure, not mined) |
 
-The tier ladder is the arc of the colony: chop, dig, electrify, get rich, get brave. Higher-tier tools cost more Chips — so reaching Crystal is a hardware investment on top of a territorial risk ([05-terrain.md](05-terrain.md)): the bot that can mine it is expensive, and it's working next to Corruption. Escort it.
+The tier ladder is the arc of the colony: chop, dig, electrify, get rich, get brave. **The ladder rule (Q72): tier-N+1 tools price only in materials mineable at tier ≤ N** — no tier's key is ever locked behind its own door.
+
+| Tool tier | Priced in | Made from what you already mine |
+|---|---|---|
+| 1 | starting kit | — |
+| 2 | Steel | Iron + Coal (tier 1) |
+| 3 | Bronze | Copper + Tin (tier 2) |
+| 4 | Bronze + **Gold** | tier-2 alloy + tier-3 wealth — *get rich to get brave* |
+
+Each rung is bought with the previous rung's ore, so reaching Crystal is a wealth investment on top of a territorial risk ([05-terrain.md](05-terrain.md)): the bot that can mine it is expensive, and it's working next to Corruption. Escort it.
 
 ## Ally Aid: the Request Box
 
@@ -134,11 +148,11 @@ No free-form resource gifting. A colony builds a **Request Box** and posts a req
 | **Fabricator** (printer) | 20 Steel | Prints/reprints bots for **one program color** ([01-language.md](01-language.md)); buildable count gated by controlled nests ([04-enemies.md](04-enemies.md)). Each adds a fixed amount to the colony's **fleet cap**; printers after the first carry a **target share + selection key** for which bots wear their color (the first takes the remainder), enforced by recall ([01-language.md](01-language.md)). Loses its backing nest → **dormant**: cap contribution withdrawn, target voided, color frozen. Printers are also **the cloud**: they always accept `upload_log()` / crash-dump traffic (even dormant), and any printer's inspector is the colony's telemetry viewer — color-coded and filterable by log level ([01-language.md](01-language.md)). The colony heart; losing your last one is near-lethal — and it takes your telemetry with it. |
 | **Depot** | 5 Stone | Cargo drop-off, storage. |
 | **Smelter** | 10 Steel | The heat works: **2 Iron + 1 Coal → 1 Steel**, **1 Copper + 1 Tin → 1 Bronze**, or **2 Sand → 1 Glass** (recipe set per Smelter). Needs energy. |
-| **Foundry** | 15 Steel, 5 Chips, 3 Wire | The precision works: **1 Copper → 1 Wire**, **1 Silver + 2 Crystal + 1 Wire → 1 Chip**, or **2 Glass → 1 Lens** (recipe set per Foundry). Needs energy. |
+| **Foundry** | 25 Steel, 10 Bronze | The precision works: **1 Copper → 1 Wire**, **1 Silver + 2 Crystal + 1 Wire → 1 Chip**, **2 Glass → 1 Lens**, or **1 Chip + 1 Gold → 1 Gold Chip** (recipe set per Foundry). Needs energy. Priced in Smelter goods only (Q72): **expensive, never impossible** — the electronics age is a big Steel-and-Bronze investment, not a chicken-and-egg. |
 | **Generator** | 8 Steel | Burns fuel → Energy rate: Wood (weak) or Coal (strong). |
 | **Geothermal Tap** | 12 Steel | Free steady Energy, only on vent tiles. |
 | **Pump** | 6 Steel, 2 Wire | Placed on shoreline; extracts **Water** into its buffer for bots to haul. The only source of coolant. |
-| **Research Archive** | 10 Steel, 5 Chips | Where Data is spent: construct research (learners) and the **Data Exchange** — Data → other resources at tuned rates (everyone, forever; Chips-favored, **Gold trades best per unit**). Data is a currency; the Archive is the bank. |
+| **Research Archive** | 10 Steel, 5 Stone | Where Data is spent: construct research (learners) and the **Data Exchange** — Data → other resources at tuned rates (everyone, forever; Chips-favored, **Gold trades best per unit**). Data is a currency; the Archive is the bank. |
 | **Repair Bay** | 8 Steel | Repairs bots in range (energy drain while active). The target of hurt-handler retreat programs ([01-language.md](01-language.md)). |
 | **Upgrade Station** | 10 Steel, 5 Chips, 3 Wire | Bots walk here to buy **per-bot compute upgrades** (cycles, memory, stack, log buffer, Coprocessor — catalog in [06-progression.md](06-progression.md)) for Chips, **consuming Water as coolant per upgrade** (rate: Q69). Works like a printer (Q68, decided): the bot **mounts the pad, sits inert for the upgrade time** (tuning, per catalog entry), and steps off upgraded — one pad, one bot, so the queue is physical and everyone in it is exposed. Player-placed like any structure; parking your veterans on a pad in contested ground is a choice. |
 | **Sentry Post** | 4 Stone, 1 Glass | Wide sensor radius, nothing else. Fog of war is eyes-only ([05-terrain.md](05-terrain.md)) — fixed sightlines are cheap infrastructure, but even a watchtower needs a window. |
@@ -156,6 +170,7 @@ No free-form resource gifting. A colony builds a **Request Box** and posts a req
 - **Raw/refined split** (2026-07-13, supersedes the five-resource model). Eleven raws — Water, Stone, Sand, Wood, Coal, Iron, Copper, Tin, Silver, Gold, Crystal — feed six refined products: **Steel** (Iron+Coal), **Bronze** (Copper+Tin — bronze is an alloy, so Tin replaced it on the raw list), **Wire** (Copper), **Chips** (Silver+Crystal+Wire), **Glass** (Sand), **Lens** (Glass). Steel replaces the old generic "Metal" for machines and printing; **Stone** (added 2026-07-14) owns fortification and civil works — barricades, bridges, Depot/Sentry/Request Box; **Sand → Glass → Lens** (added 2026-07-14) is the seeing chain — glazing for sensor structures, lenses for Optics-grade sensor hardware (Q53); Gold is direct-use premium hardware + the Exchange's densest good; Water is pumped, not mined, and cools the Upgrade Station. Every raw gates a distinct verb (see Resource Roles). Tier ladder: Wood/Stone/Sand 0 → Iron/Coal 1 → Copper/Tin 2 → Silver/Gold 3 → Crystal 4. Open edges (recipes, kind constants, sim migration): Q69.
 - **Regen is a per-node-type data flag** — most node types are finite (**Wood groves are the flagship regenerating exception**); other regenerating variants exist for map design and long servers (see Design Rules).
 - **Buried veins are hidden until prospected** (2026-07-14, with Q57) — tier-1+ nodes invisible to eyes and queries until `search()`ed; tier-0 surface resources visible on sight; discoveries permanent, amounts live-only (see Design Rules; fog rules in [05-terrain.md](05-terrain.md)). The **Lantern** (2 Wood) joins the structure set as the cheap vision ward below the Sentry Post.
+- **The bootstrap works** (2026-07-14, answers Q72). The Foundry prices in Smelter goods only (25 Steel + 10 Bronze — expensive, never impossible) and the Research Archive in Steel + Stone, so the electronics age and construct research are both reachable from the starting kit. **The ladder rule**: tier-N+1 tools price only in tier-≤N materials (t2 Steel, t3 Bronze, t4 Bronze+Gold). **Bronze arms, Chips think**: tools and weapons price in Bronze, Chips buy compute only. **Gold makes better chips**: the Gold Chip (1 Chip + 1 Gold, Foundry) is the seventh refined good, and the top of the compute catalog (Coprocessor, Backup Core) requires them. **The build receipt is literal** ([02-agents.md](02-agents.md)): refunds and salvage return fractions of what was *actually* spent — a free print's chassis line is 0; upgrades and modules always count. **Modules are made at the printer, swapped at the station**: the Fabricator slots modules at print time (materials added to the print); the Upgrade Station swaps them later ([06-progression.md](06-progression.md)).
 - **Kind constants & typed yields** (2026-07-14, answers Q69's design portion). Every raw gets a Pyrite constant (`iron` … `sand`); **`ore` stays the family constant** — any discovered mineral vein or seam — so the starter program and every existing example keep working. **`mine()` yields are typed** by the node's kind: cargo is a typed manifest, hauling routes by kind, refinery buffers accept only their recipe's inputs ([01-language.md](01-language.md)). What's left of Q69 is playtest tuning and implementation, not design: recipe ratios, burn/coolant/Exchange rates, Tin's sparsity floor, and the sim's Ore→Metal migration (replay-hash change). The map-generation *procedure* that must deliver the placement guarantees is its own open question — Q71.
 - **Harvest tools are tiered** — level-N tools work resources of tier ≤ N; Ore low, Crystal high (see Harvest Tool Tiers).
 - **Ally aid = Request Box** — posted requests, voluntarily fulfilled by physical hauling; no free-form gifting (see Ally Aid).

@@ -111,16 +111,16 @@ Upgrade Station catalog:
 | CPU Mk2 / Mk3 | 5 / 15 Chips | 2 / 4 cycles per tick |
 | Memory bank | 5 Chips | +32 program lines, +4 variables, +8 log ring-buffer entries |
 | Stack extension | 8 Chips | +4 call depth (base cap is 4; recursion is legal but overflows fault — stack is what makes recursive style viable, [01-language.md](01-language.md)) |
-| Coprocessor | 20 Chips | think *while* an action resolves (removes action-blocking — huge, late) |
+| Coprocessor | 10 Chips, 3 **Gold Chips** | think *while* an action resolves (removes action-blocking — huge, late; the top of the catalog is gilded, Q72) |
 
-Slotted modules:
+Slotted modules — **made at the Fabricator** (slotted at print time, materials added to the print cost) or **swapped later at the Upgrade Station** (Q72):
 
 | Module | Cost | Effect |
 |---|---|---|
-| Backup Core | 25 Chips | preserve 50% XP on destruction (see [02-agents.md](02-agents.md)) |
+| Backup Core | 12 Chips, 4 **Gold Chips** | preserve 50% XP on destruction (see [02-agents.md](02-agents.md)) |
 | Optics | 2 Lens, 1 Bronze | +2 sensor range — one stat, so both radii widen ([05-terrain.md](05-terrain.md)); on a one-slot rookie this is the whole build (Q53) |
 
-Hardware is where the "compute vs. claws" economy bites: Chips also buy weapons/tools, so a maxed-CPU bot starved the armory. The tension lives in the Chips budget — and in the walk: every compute upgrade is a round trip to the station, paid in time and exposure.
+Hardware is where the "compute vs. claws" economy bites — as two material streams (Q72): **Bronze arms, Chips think.** Tools and weapons price in Bronze (tier-laddered with Gold at the top, [03-resources.md](03-resources.md)); Chips buy compute only. Both compete for the same mining and hauling budget, so a colony that maxes CPUs still starved its armory — and every compute upgrade is a round trip to the station, paid in time and exposure.
 
 ## Pacing Targets (a NEW player's first co-op session)
 
