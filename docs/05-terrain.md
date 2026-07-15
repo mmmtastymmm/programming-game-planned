@@ -96,6 +96,8 @@ Corruption attacks the player's core resource — computation:
 
 ## Map Composition Guidelines
 
+These are the *goals* a generated map must exhibit; the generation **procedure** that produces them (algorithm family, hard guarantees vs. tendencies, symmetry mode, seed determinism, size scaling) is open — Q71.
+
 ```mermaid
 flowchart TD
     subgraph MapRing["Typical map, center-out"]
