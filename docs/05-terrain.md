@@ -68,7 +68,7 @@ Bots are solid and bump-freezes are expensive ([02-agents.md](02-agents.md)), so
 | Tier | Tool | The fix it enables |
 |---|---|---|
 | 0 | `wait(n)` + `rng(n)` | `wait(rng(20))` desynchronizes identical programs — stagger departures, time-slice the corridor |
-| 2 | sensors + `if` | Check before committing (candidate blocks: `path_blocked()`, occupancy peeks) |
+| 2 | sensors + `if` | Check before committing (`path_blocked()` — real as of Q79 — plus occupancy peeks) |
 | 6–7 | enums + **channels** | The real answer: a one-receiver channel token **is a mutex** — hold the token to enter the corridor, `send` it back on exit; gatekeeper bots at each mouth |
 | terraform | bridges + **arrow overlays** / `clear()` | Widen the corridor — or arrow two crossings in opposite directions: a deadlock-free roundabout, no mutex required ([Terraforming](#terraforming-build--deconstruct)) |
 
@@ -124,7 +124,7 @@ flowchart TD
 - **Start zones are safe and legible** — a Tier-0 program works there. Difficulty is geographic.
 - **Template Caches ring each start zone** ([06-progression.md](06-progression.md)): basic ones close, advanced ones toward the midfield. They're non-consumable study sites — everyone can learn from them, so the deep ones are worth *holding*, not racing. The opening toolkit sweep is the first thing eyes-only fog makes interesting.
 - **Every expansion is a tradeoff**: more veins = longer haul routes; the tier ladder (Copper/Tin → Silver/Gold → Crystal, [03-resources.md](03-resources.md)) is laid out center-out, so richer material is farther material; Crystal = Corruption exposure; Vents and shorelines = contested.
-- **Chokepoints from Water/High Ground** give defensive programs something to anchor on (`guard(ramp_tile)`).
+- **Chokepoints from Water/High Ground** give defensive programs something to anchor on — `guard()` takes an **entity**, never a tile (Q79), so the idiom is a Sentry Post or Lantern at the choke: `guard(closest(sentry).expect())`.
 - PvP maps are **mirror-symmetric**; co-op maps are asymmetric with a shared frontier.
 
 ## Terrain × Systems Matrix

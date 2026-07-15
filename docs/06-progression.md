@@ -19,7 +19,7 @@ The three per-match tracks in detail (requirements 3b/3c):
 
 ## Template Caches
 
-Function blocks are **learned from Template Caches**: ruined installations holding intact old-world code templates. **Studying a template does not consume it** — a Cache is a *school*, not a pickup. Any colony, ally or enemy, can send a bot to study the same site (an `analyze()`-style action) and unlock its function colony-wide for the match.
+Function blocks are **learned from Template Caches**: ruined installations holding intact old-world code templates. **Studying a template does not consume it** — a Cache is a *school*, not a pickup. Any colony, ally or enemy, can send a bot to study the same site (the start-kit **`study()`** verb — adjacent, rooted ~10 s, Q79) and unlock its function colony-wide for the match.
 
 - **Depth ordering replaces Data pricing**: basic sensors and `attack` sit in the ruins ringing every start zone (finding them is an opening ritual, not an expedition); `scan`, `guard`/`escort`, `hijack` lie deeper — shared map features worth controlling *access* to, though never used up. (The numbers in the tree below read as *cache depth*, not Data cost.)
 - **Skill expression is the tree walk**: what your colony can do this match = which templates you've studied, in what order. Routing study trips down the function tree — under eyes-only fog ([05-terrain.md](05-terrain.md)), past whatever holds the ground — is the opening/midgame craft.
@@ -30,7 +30,7 @@ Function blocks are **learned from Template Caches**: ruined installations holdi
 
 ```mermaid
 flowchart TD
-    START([Game start:<br/>straight-line programs +<br/>move_to, mine, deposit, closest(ore)])
+    START([Game start:<br/>straight-line programs + the start kit:<br/>move_to, mine, deposit, withdraw, study,<br/>closest(ore), exists, wait, rng,<br/>drop_cargo, abort, wander])
 
     subgraph Constructs["Language constructs (one-time Data cost, PERMANENT)"]
         VAR["Variables — 10"]
@@ -49,8 +49,9 @@ flowchart TD
 
     subgraph Functions["Function blocks (found at Caches — number ≈ cache depth)"]
         F_SENSE["cargo_full, health_low — 5"]
-        F_SEARCH["search (the scouting stance) — 12"]
-        F_LOG["log, upload_log, last_error — 10"]
+        F_SEARCH["search, explore<br/>(the scouting stance) — 12"]
+        F_LOG["log, upload_log,<br/>recover_black_box, last_error — 10"]
+        F_SALV["salvage — 18"]
         F_ATK["attack, closest(enemy) — 15"]
         F_BUILD["build, repair — 20"]
         F_SCAN["scan_enemies, scan_resources — 40"]
@@ -73,6 +74,7 @@ flowchart TD
     SIG1 --> SIG2
     IF --> F_ATK
     F_ATK --> F_GUARD
+    F_ATK --> F_SALV
     IF --> F_BUILD
     WHILE --> DEF
     DEF --> IMPORT

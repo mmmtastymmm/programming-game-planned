@@ -24,7 +24,7 @@ Feral programs are **encrypted exactly like player code** ([08-multiplayer.md](0
 
 ## Feral Archetypes (initial set)
 
-Each archetype = chassis + program. Programs shown are their *actual* shipped source.
+Each archetype = chassis + program. Programs shown are their *actual* shipped source — legal Pyrite: Feral programs run with **nest-bound constants** (`nest`, `patrol_route`) pre-bound at print by their nest (the kind-constant mechanism, faction-scoped — Q79), and `deposit()` treats the nest as their depot.
 
 ### Drone (threat 1) — teaches Tier 0
 
@@ -41,9 +41,9 @@ Harmless in ones. Exists so the first program a player ever reads is trivially c
 
 ```python
 if health_low():
-    flee_to(nest)
+    move_to(nest)
 if exists(enemy):
-    chase(closest(enemy).expect())
+    move_to(closest(enemy).expect())
     attack(closest(enemy).expect())
 wander()
 ```
