@@ -1,6 +1,6 @@
 # Bot Quirks (brainstorm)
 
-**Status: proposal — nothing here is Decided.** Open questions live in [QUESTIONS.md](QUESTIONS.md) (Q44–Q48).
+**Status: DECIDED 2026-07-14** (Q44–Q48, Q60 — see Decided at the end). The individual quirk entries below remain a tunable catalog (`quirks.ron`), not commitments.
 
 A **quirk** is a small per-bot deviation from the universal chassis spec ([02-agents.md](02-agents.md)) — a positive or negative "personality" of the individual machine. With chassis classes gone, quirks and XP are the *only* things making two prints differ. Two bots printed from the same Fabricator, running the same color, are no longer perfectly identical. Quirk names are programming jokes on purpose: the audience writes code, and a joke name that *explains its own effect* (Memory Leak, Cold Start) is free documentation.
 
@@ -82,14 +82,14 @@ The most interesting shelf — whether these are good depends on the *program* t
 | **Eventual Consistency** | scan builtins cost 1 cycle less but return data that is 1 tick stale |
 | **Microservices** | channel `send()`/`broadcast()` cost 1 cycle less; every tool action costs +1 cycle — everything is a network call now |
 | **Recursion Enthusiast** | stack depth +2; function calls cost +1 cycle |
-| **Thermal Runaway** | +20% move speed; when its wreck's countdown expires, the explosion damages adjacent tiles — friend or foe (one more reason to win this rescue race). *Assumes Q55 lands with real blast damage; if wreck explosions stay cosmetic, this needs a new drawback* |
+| **Thermal Runaway** | +20% move speed; its wreck's blast damage is doubled (Q55 landed: every wreck explodes for real — this one just explodes *more*, one more reason to win its rescue race) |
 
 ## Policy quirks ride the environment
 
-Some quirks need no stat plumbing at all. Any quirk whose effect is "*when* does an engine behavior fire" is really a modified **env registry** entry ([01-language.md](01-language.md), The Environment): Defensive Programming is just a bot that ships with a higher `hurt_line`. Two strengths, chosen per quirk (Q60):
+Some quirks need no stat plumbing at all. Any quirk whose effect is "*when* does an engine behavior fire" is really a modified **env registry** entry ([01-language.md](01-language.md), The Environment): Defensive Programming is just a bot that ships with a higher `hurt_line`. Two strengths, declared per quirk in `quirks.ron` (Q60, decided):
 
 - **Temperament — a shifted default.** The key's *default* changes (unset `hurt_line` reads 60, not 50). Programs that never touch the key inherit the personality; one `setenv` in the boot window overrides it entirely. Temperaments tax only unwritten code — the quirk is real on day one and evaporates under a good dotfile, which is about as "code is the game" as a quirk can get.
-- **Compulsion — a clamped range.** The key's legal *range* narrows (`hurt_line` 55–99). Proposed semantics: `setenv` past an *engine* bound still faults (that's a program bug, identical on every bot), but `setenv` past a *quirk* clamp **clips** quietly — the hardware refuses, deterministically, and `getenv` reports where the value actually landed. One color program stays valid on every bot; the compelled bot just can't be talked out of its fear.
+- **Compulsion — a clamped range.** The key's legal *range* narrows (`hurt_line` 55–99). Decided semantics: `setenv` past an *engine* bound still faults (that's a program bug, identical on every bot), but `setenv` past a *quirk* clamp **clips** quietly — the hardware refuses, deterministically, and `getenv` reports where the value actually landed. One color program stays valid on every bot; the compelled bot just can't be talked out of its fear.
 
 Every future env key is free quirk surface — the registry is the natural home for personality, and `getenv` doubles as quirk introspection for these (relevant to Q48).
 
@@ -111,10 +111,20 @@ Every future env key is free quirk surface — the registry is the natural home 
 
 ## Visibility & intel
 
-XP levels are visible to everyone as wear/decals (pillar 2); the transparent-by-default answer is that quirks show the same way — a Loud Fans bot audibly *is* loud. Whether enemies get the exact list for free or via decryption % is open (Q47). `my_quirks()` on your own bots is always free.
+XP levels are visible to everyone as wear/decals (pillar 2); quirks show the same way (Q47, decided): **enemy-readable for free** — a Loud Fans bot audibly *is* loud, and the juicy-corpse precedent ([02-agents.md](02-agents.md), Q68) already committed to physical facts being legible. No decryption gate. `my_quirks()` / `has_quirk()` are free of any unlock whenever quirks are enabled (Q48, decided) — a rolled quirk nobody's code can read is pure noise, and per-bot adaptation (design rule 4) is the whole payoff. **Latent quirks are invisible to everyone, introspection included** — until the XP threshold, the quirk does not exist to the world or to the bot itself.
 
 ## Determinism & data notes
 
-- Roll at print time, `quirk_roll` RNG stream, weighted by `quirks.ron` rarity.
-- Reprint = new body = new roll. Recall/re-coloring and rescue keep the body, so quirks persist (like XP, they live on the bot, not the color).
-- Golden-replay note: introducing quirks changes state hashes; land behind a match setting first (Q44).
+- Roll at print time, `quirk_roll` RNG stream, weighted by `quirks.ron` rarity — but rolls are **latent**: a quirk manifests (effect + visibility + introspection) only when the bot's total XP crosses its threshold (see Decided). Manifestation is a deterministic threshold check, no RNG.
+- Reprint = new body = new roll (latent again). Recall/re-coloring and rescue keep the body, so quirks — manifested or latent — persist (like XP, they live on the bot, not the color).
+- Golden-replay note: quirks change state hashes; they live behind the quirk-probability match setting (0 = off), so hash-affecting content is always gated.
+
+## Decided
+
+- **Quirks ship, dialed by a match-set quirk probability** (2026-07-14, answers Q44). One continuous setting: the **expected quirks per bot** (0 = off; tuning presets can name points on the dial). Rolled at print from the seeded `quirk_roll` stream, rarity-weighted per `quirks.ron`. Rationale: XP drift gives every bot an *earned* divergence over time; quirks add the *rolled* spice on top — this body, not just this history. Also they're funny, and a joke that documents its own effect is free UI.
+- **Quirks manifest with experience, not at print** (same day, refinement). The roll happens at print but stays **latent** — no effect, not visible, not introspectable — until the bot's **total XP crosses a threshold** (tuning, `quirks.ron`; a second rolled quirk manifests at a higher threshold). A fresh print is always quirk-free, so **kill-and-reprint reroll-fishing buys nothing**: with prints defaulting to free, a print-time roll would be a slot machine — this way every look at a new roll costs raising a bot to the threshold, and rerolling means losing that XP (pillar 3 does the anti-fishing work). Thematic bonus: machines develop personality as they wear in — quirks join the scar-tissue family, rolled at birth but revealed by a life.
+- **V1 acquisition is print-roll only** (answers Q45). Scars, L5 merits, and corruption exposure stay designed-and-queued (above) — they touch the rescue, XP, and terrain systems and land after the core roll proves out in playtest.
+- **No removal, no reroll** (answers Q46). A quirk is for keeps; the only reroll is a reprint — new body, new roll, XP lost. A Refit Bay is shelved until scars ship (removal only matters once quirks *accumulate*).
+- **Enemy-visible for free** (answers Q47) — quirks read as wear, decals, and behavior, like XP levels. Pillar 2 plus the juicy-corpse precedent: physical facts are legible.
+- **Introspection is free whenever quirks are on** (answers Q48). `my_quirks()` / `has_quirk()` need no unlock (normal cycle costs) — per-bot adaptation is the system's payoff, so reading yourself is table stakes. For policy quirks, `getenv` already doubles as introspection.
+- **Temperament vs. compulsion is per-quirk data** (answers Q60). Each policy quirk declares its strength in `quirks.ron`: print-rolls may be either; **scars, when they ship, are compulsions** (a limp you can't configure away — a temperament scar would be weightless under any decent dotfile). `setenv` past a quirk clamp **clips quietly** and `getenv` reports the landing value — one color program stays valid on every bot.
