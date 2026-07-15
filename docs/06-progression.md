@@ -118,6 +118,7 @@ Slotted modules:
 | Module | Cost | Effect |
 |---|---|---|
 | Backup Core | 25 Chips | preserve 50% XP on destruction (see [02-agents.md](02-agents.md)) |
+| Optics | 2 Lens, 1 Bronze | +2 sensor range — one stat, so both radii widen ([05-terrain.md](05-terrain.md)); on a one-slot rookie this is the whole build (Q53) |
 
 Hardware is where the "compute vs. claws" economy bites: Chips also buy weapons/tools, so a maxed-CPU bot starved the armory. The tension lives in the Chips budget — and in the walk: every compute upgrade is a round trip to the station, paid in time and exposure.
 

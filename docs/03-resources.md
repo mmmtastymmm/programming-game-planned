@@ -87,7 +87,7 @@ Refined:
 | **Wire** | 1 Copper (Foundry) | Powered structures, cheap electronics, Chip input | *The grid* — everything electrified pays a copper tax. |
 | **Chips** | 1 Silver + 2 Crystal + 1 Wire (Foundry) | Compute upgrades ([06-progression.md](06-progression.md)), hardware | *Compute or claws?* Better brains vs. more bots |
 | **Glass** | 2 Sand (Smelter) | Lens stock; glazing for sensor structures (Sentry Post) | *Can you see?* — the seeing material. |
-| **Lens** | 2 Glass (Foundry) | **Optics** — sensor-range hardware (Q53), rangefinders | *How far can you see?* Sensor range gets a supply chain. |
+| **Lens** | 2 Glass (Foundry) | The **Optics module** (2 Lens + 1 Bronze — Q53 answered, [06-progression.md](06-progression.md)), rangefinders | *How far can you see?* Sensor range gets a supply chain. |
 
 Rates & currency:
 
