@@ -102,7 +102,7 @@ Reading the tree: **constructs gate expressiveness, functions gate verbs**, and 
 
 ## Hardware Upgrades (Chips, per-bot)
 
-Compute is **bought at the Upgrade Station** ([03-resources.md](03-resources.md)): the bot physically walks to the structure and the upgrade installs for Chips — **no module slot consumed**. Module slots hold tools (and the Backup Core).
+Compute is **bought at the Upgrade Station** ([03-resources.md](03-resources.md)): the bot physically walks to the structure, mounts the pad, and sits inert for the upgrade time — **no module slot consumed**. Module slots hold tools (and the Backup Core). **No per-bot cost escalation** (Q68): the catalog's tier prices below are the whole cost curve.
 
 Upgrade Station catalog:
 
