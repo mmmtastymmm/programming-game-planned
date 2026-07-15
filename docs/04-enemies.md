@@ -31,8 +31,8 @@ Each archetype = chassis + program. Programs shown are their *actual* shipped so
 ```python
 wander()
 wander()
-if can_see_bot():
-    attack(nearest_bot())
+if exists(enemy):
+    attack(closest(enemy).expect())
 ```
 
 Harmless in ones. Exists so the first program a player ever reads is trivially comprehensible.
@@ -42,9 +42,9 @@ Harmless in ones. Exists so the first program a player ever reads is trivially c
 ```python
 if health_low():
     flee_to(nest)
-if can_see_bot():
-    chase(nearest_bot())
-    attack(nearest_bot())
+if exists(enemy):
+    chase(closest(enemy).expect())
+    attack(closest(enemy).expect())
 wander()
 ```
 
@@ -53,7 +53,7 @@ Counterplay written in the code: hurt it and it *will* run — ambush the retrea
 ### Harvester (threat 2) — economic enemy
 
 ```python
-target = nearest_ore()
+target = closest(ore).expect()
 move_to(target)
 mine()
 move_to(nest)
@@ -67,9 +67,9 @@ Steals *your* map's ore and feeds its nest. Ignores bots entirely — a pure rac
 ```python
 for spot in patrol_route:
     move_to(spot)
-    if can_see_bot():
-        try_broadcast("intruder", nearest_bot())
-        attack(nearest_bot())
+    if exists(enemy):
+        try_broadcast("intruder", closest(enemy).expect())
+        attack(closest(enemy).expect())
 ```
 
 Patrols and *calls for help* (other Ferals block on `receive("intruder")`). Counterplay: jam or bait the call, or kill it inside one patrol leg.

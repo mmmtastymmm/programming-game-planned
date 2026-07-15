@@ -87,7 +87,7 @@ Refined:
 | **Wire** | 1 Copper (Foundry) | Powered structures, cheap electronics, Chip input | *The grid* — everything electrified pays a copper tax. |
 | **Chips** | 1 Silver + 2 Crystal + 1 Wire (Foundry) | Compute upgrades ([06-progression.md](06-progression.md)), hardware | *Compute or claws?* Better brains vs. more bots |
 | **Glass** | 2 Sand (Smelter) | Lens stock; glazing for sensor structures (Sentry Post) | *Can you see?* — the seeing material. |
-| **Lens** | 2 Glass (Foundry) | The **Optics module** (2 Lens + 1 Bronze — Q53 answered, [06-progression.md](06-progression.md)), rangefinders | *How far can you see?* Sensor range gets a supply chain. |
+| **Lens** | 2 Glass (Foundry) | The **Optics module** (2 Lens + 1 Bronze — Q53 answered, [06-progression.md](06-progression.md)) | *How far can you see?* Sensor range gets a supply chain. |
 
 Rates & currency:
 
@@ -148,7 +148,7 @@ No free-form resource gifting. A colony builds a **Request Box** and posts a req
 ## Starting State (per player)
 
 - 1 working Fabricator (the **Green** printer), 1 **ruined Red Fabricator** (repairable for Data — the first colony milestone, [01-language.md](01-language.md)), 1 Depot, 1 Generator
-- 2 bots (Green, mining tools slotted) with a working Tier-0 mining program pre-deployed (the tutorial *is* reading this program)
+- 2 bots (Green, **tier-1 mining tools** slotted — the start-zone veins are Iron and Coal, tier 1) with a working starter mining program pre-deployed (the tutorial *is* reading this program)
 - 30 Steel, 10 Iron + 5 Coal in buffer, 0 everything else (map generation guarantees Iron + Coal + Wood + Stone in the start zone; Copper/Tin within first-expansion reach — Q69)
 
 ## Decided

@@ -49,7 +49,7 @@ Domains: **Compute** (how well it thinks), **Body** (survives and carries), **Se
 | Body | **Move rate** | 14 ticks per tile | **Mileage track**: every tile traveled; Hauling L3: +10% while loaded | Response time and hauling throughput. Terrain multiplies it ([05-terrain.md](05-terrain.md)), so the map decides how much earned speed is worth. |
 | Body | **Cargo capacity** | 4 | Hauling: +10%/level | Fewer round trips. Since travel is time and time is cycles not spent working, cargo is secretly a compute stat. |
 | Body | **Module slots** | 1 | **total-XP milestones**: +1 slot at thresholds (tuning), cap 3 | Every bot starts with one slot, so *which* module fills it is the identity decision. Veterancy literally builds out the frame: total XP across all tracks unlocks the 2nd and 3rd slots — the old chassis range, now earned. |
-| Senses | **Sensor range** | 5 tiles | Scouting: +1/level; Combat L3: +1 vs enemies | **One stat, two radii** (Q57): eyes-only fog reveal = this value; the query radius (`closest()`, `exists()`, `scan_*()`, `search()`) is derived larger — × `query_factor` (tuning ~150%: base 5 eyes / 7 queries) — so sensing outranges seeing and every point here widens both. Per-kind bonuses extend queries only; beyond-eyes queries return entities on fogged tiles ([05-terrain.md](05-terrain.md)). A blind bot isn't dumb — it's uninformed, and no cycle budget fixes that. (Q53 answered: base sight is innate — no bot is ever blind; the **Optics tool module**, built from Lenses, extends it — [06-progression.md](06-progression.md).) |
+| Senses | **Sensor range** | 5 tiles | Scouting: +1/level (both radii); Combat L3: +1 vs enemies (queries only) | **One stat, two radii** (Q57): eyes-only fog reveal = this value; the query radius (`closest()`, `exists()`, `scan_*()`, `search()`) is derived larger — × `query_factor` (tuning ~150%: base 5 eyes / 7 queries) — so sensing outranges seeing and every point here widens both. Per-kind bonuses extend queries only; beyond-eyes queries return entities on fogged tiles ([05-terrain.md](05-terrain.md)). A blind bot isn't dumb — it's uninformed, and no cycle budget fixes that. (Q53 answered: base sight is innate — no bot is ever blind; the **Optics tool module**, built from Lenses, extends it — [06-progression.md](06-progression.md).) |
 | Senses | **Signature** | 0 | **Hiding track**: per **detection episode** — XP on being detected by an enemy, re-armed only after fully escaping detection (−1 signature/level, tuning) | How far away this bot is *sensed* (Q54, decided): enemy queries return it at `their query radius + this signature`, floored at 1 — adjacency always detects. Default 0 = sensed at the normal rate; noisy (+, Loud Fans) is sensed *beyond* the normal radius; quiet (−) must be approached. Being sensed ≠ being seen — fog reveal is untouched (Q57). The formal home for every "enemies sense this bot at ±N" effect. |
 | Tools | **Damage** | weapon module | Combat: +5%/level | Kill speed — which in the wreck economy is also *rescue-denial* speed. |
 | Tools | **Action time** | per tool (e.g. one `mine()` swing ~20 ticks) | Mining L3: −25% mine time | Ticks per swing once the decision is made. Cycles govern *deciding*; action time governs *doing* — a maxed CPU on slow tools is a philosopher with a shovel. |
@@ -72,7 +72,7 @@ Interpreter *costs* aren't bot stats — they live in `costs.ron` — but they s
 
 ### The ledger — per-bot facts that aren't dials
 
-Riding alongside the stats: **color** (program slot), **program version**, **XP per track** (5 task + 6 body), **quirk list**, **local log contents**, **cargo held**. XP and quirks are the two ledger entries that reach back and modify the sheet above.
+Riding alongside the stats: **color** (program slot), **program version**, **XP per track** (5 task + 6 body), **quirk list**, **env** (the policy store, [01-language.md](01-language.md)), **local log contents**, **cargo held**. XP and quirks are the two ledger entries that reach back and modify the sheet above.
 
 ### Modifier pipeline (deterministic)
 
@@ -95,6 +95,8 @@ stateDiagram-v2
     Boot --> Active: log uploaded (if any),<br/>program starts at line 1
     Active --> Damaged: HP below 50%
     Damaged --> Active: repaired
+    Active --> Disabled: become_disabled() —<br/>deliberate scuttle
+    Disabled --> Boot: hijacked (enemy) —<br/>boots under THEIR color,<br/>XP intact, never reprintable
     Damaged --> Disabled: HP hits 0 → ABORT#colon;<br/>fully reserved — forced<br/>upload_log() + become_disabled()<br/>starts SELF-DESTRUCT COUNTDOWN
     Disabled --> Boot: field-repaired before<br/>countdown ends — XP PRESERVED
     Disabled --> Destroyed: countdown expires —<br/>the ONLY explosion —<br/>or wreck salvaged/destroyed
@@ -134,9 +136,9 @@ Bots earn XP **per task track**, by doing:
 
 | Track | Earned by | Level perks (per level, cap L5) |
 |---|---|---|
-| Mining | units of ore extracted | +10% mine yield, at L3: `mine()` action time −25% |
+| Mining | units harvested, any resource kind (yields are typed, [01-language.md](01-language.md)) | +10% mine yield, at L3: `mine()` action time −25% |
 | Hauling | cargo-distance delivered | +10% cargo capacity, at L3: +10% move speed while loaded |
-| Combat | damage dealt / kills | +5% damage, at L3: +1 sensor range vs enemies |
+| Combat | damage dealt / kills | +5% damage, at L3: +1 **query range** vs enemies (queries only, per Q57) |
 | Building | build/repair progress | +10% build speed, at L3: repairs restore +25% more |
 | Scouting | new tiles revealed, resource nodes prospected via `search()` ([05-terrain.md](05-terrain.md)) | +1 sensor range, at L3: immune to Corruption's cycle tax ([05-terrain.md](05-terrain.md)) |
 

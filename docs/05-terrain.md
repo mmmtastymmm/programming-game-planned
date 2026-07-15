@@ -11,7 +11,7 @@ Rule: **every terrain type must change what a good program looks like.** If a ti
 | **Ore Vein** | 1× | minable mineral node — Iron, Coal, Copper, Tin, Silver, or Gold variant ([03-resources.md](03-resources.md)); deeper/rarer kinds sit farther from start zones | mining loops |
 | **Grove** | 1× | harvestable Wood; **regenerates** | renewable-but-thin logging loops |
 | **Outcrop** | 1× | harvestable Stone node — plentiful, near everywhere ([03-resources.md](03-resources.md)) | fortification supply lines: walls are hauled |
-| **Sand Flat** | 1× | harvestable Sand — shoreline flats and dune fringes ([03-resources.md](03-resources.md)); Q35's deep-dune terrain would make *interior* sand costly to work | glassworks supply; another reason coasts are contested |
+| **Sand Flat** | 1× | harvestable Sand — shoreline flats and dune fringes ([03-resources.md](03-resources.md)); deep **Dunes** (below) make *interior* sand risky to work: a harvesting bot is standing still, and the sinking clock ticks | glassworks supply; another reason coasts are contested |
 | **Crystal Field** | 1× | minable Crystal; usually spawns near Corruption | risk-managed harvesting (`if can_see_feral(): flee`) |
 | **Geothermal Vent** | 1× | only tile allowing Geothermal Tap | expansion targets worth fighting over |
 | **Mud** | 3×, and loaded bots 4× | — | haulers should route *around*; naive `move_to(depot)` straight-lines through it |
@@ -37,13 +37,13 @@ The Pyrite cycle-cost table is data with **per-biome overlays** ([01-language.md
 | **Corruption** (shipped first) | every op +1 | punishes long clever programs |
 | Static Wastes | `send` ×3 | punishes swarm coordination |
 | Loop Desert | loop iteration ×3 | punishes iteration-heavy code, rewards unrolled/flat code |
-| Overclock Field | all ops −1 (min 1), crash-dump cost ×2, grace window halved | rewards bold code, makes bugs expensive |
+| Overclock Field | all ops −1 (min 1), crash-dump cost ×2 | rewards bold code, makes bugs expensive |
 
 Map authors pick overlays per biome; the editor shows *effective* per-line costs for the tile the selected bot stands on.
 
 ## Terraforming (build & deconstruct)
 
-The map is editable — both directions. **Designation is the player's; labor is code**: the player places a **blueprint** on a target tile (a UI act — one lockstep Command, charged on placement), and bots service it with `move_to(nearest_blueprint())` + `build()` (1 progress/tick, adjacent, earns Building XP; several bots stack). Programs never name tiles — Pyrite has no position literals, and doesn't need them. Terraform actions (unlocked after `build`/`repair`, [06-progression.md](06-progression.md)):
+The map is editable — both directions. **Designation is the player's; labor is code**: the player places a **blueprint** on a target tile (a UI act — one lockstep Command, charged on placement), and bots service it with `move_to(closest(blueprint).expect())` + `build()` (1 progress/tick, adjacent, earns Building XP; several bots stack). Programs never name tiles — Pyrite has no position literals, and doesn't need them. Terraform actions (unlocked after `build`/`repair`, [06-progression.md](06-progression.md)):
 
 | Action | Effect | Cost |
 |---|---|---|

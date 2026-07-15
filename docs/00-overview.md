@@ -2,7 +2,7 @@
 
 ## Elevator Pitch
 
-A multiplayer RTS built in **Bevy** where you don't control units directly — you **program** them. Every bot in your colony runs a script in a Python-like language, interpreted one line at a time. Smarter programs cost more "think" cycles, so elegant code is a competitive advantage. You grow your colony by unlocking language constructs and function blocks, gathering resources, and defending against enemies whose logic you can read and exploit.
+A multiplayer RTS built in **Bevy** where you don't control units directly — you **program** them. Every bot in your colony runs a script in a Python-like language, interpreted one operation at a time. Smarter programs cost more "think" cycles, so elegant code is a competitive advantage. You grow your colony by unlocking language constructs and function blocks, gathering resources, and defending against enemies whose logic you can read and exploit.
 
 Working title: **(TBD)**. The unit language is called **Pyrite** (see [01-language.md](01-language.md)).
 
@@ -19,11 +19,11 @@ Working title: **(TBD)**. The unit language is called **Pyrite** (see [01-langua
 ```mermaid
 flowchart TD
     A[Write / edit Pyrite programs] --> B[Deploy to bots]
-    B --> C[Bots execute autonomously,<br/>one line per think-cycle]
+    B --> C[Bots execute autonomously,<br/>one operation per think-cycle]
     C --> D[Resources gathered,<br/>enemies fought, XP earned]
     D --> E{Outcome}
     E -->|Resources| F[Print more bots,<br/>build structures]
-    E -->|Research| G[Unlock constructs &<br/>function blocks]
+    E -->|Research| G[Unlock constructs —<br/>function blocks are learned<br/>at Template Caches]
     E -->|Bot destroyed| H[XP lost — reprint bot]
     F --> A
     G --> A
@@ -52,7 +52,7 @@ The loop players should feel: *observe → rewrite → redeploy → watch it pla
 | [06-progression.md](06-progression.md) | Unlock tree: constructs, function blocks, hardware |
 | [07-architecture.md](07-architecture.md) | Bevy/ECS design, tick model, interpreter integration |
 | [08-multiplayer.md](08-multiplayer.md) | Determinism rules, lockstep networking, co-op/PvP modes |
-| [09-quirks.md](09-quirks.md) | Bot quirks: per-bot positive/negative hardware traits (brainstorm) |
+| [09-quirks.md](09-quirks.md) | Bot quirks: per-bot positive/negative hardware traits (decided 2026-07-14) |
 
 ## Glossary
 
@@ -67,9 +67,9 @@ The loop players should feel: *observe → rewrite → redeploy → watch it pla
 | **Fabricator / Printer** | Structure that prints (and reprints) bots. One per program color; buildable count gated by controlled nests. Each adds a fixed amount to the colony's fleet cap; each printer after the first carries a target share + selection key choosing which bots wear its color (the first takes the remainder). |
 | **Template Cache** | Non-consumable ruin where any colony studies a function block. Basic ones ring start zones; advanced ones sit deeper. |
 | **Reprint** | Rebuilding a destroyed bot. Its program is preserved; its XP is not. |
-| **Black Box** | Object dropped by every destroyed bot: its local logs + cause of death. Readable/recoverable by anyone. |
+| **Black Box** | Object dropped by every destroyed bot: its local logs + cause of death + env snapshot. Readable/recoverable by anyone. |
 | **Color** | A colony program slot (start with Green; repair the ruined Red printer with Data; more by controlling nests, quadratic, uncapped). One color = one printer. Every bot runs one color and is tinted by it. Enemy salvages permanently decrypt a color a few % at a time. |
 | **Recall** | The engine-owned signal (un-writable): the target-share allocation re-colors a claimed bot at its new printer (XP kept); an over-capacity colony recalls its lowest-XP bot for scrap. An interrupt context — double-handle applies. |
-| **Boot Sequence** | State a bot passes through on print or rescue: auto-upload of any local logs, an optional `on boot:` window, then execute from line 1. |
+| **Boot Sequence** | State a bot passes through on print, rescue, or recall re-coloring: auto-upload of any local logs, an optional `on boot:` window, then execute from line 1. |
 | **Feral** | The PvE enemy faction: corrupted machines running real Pyrite programs, decryptable by salvage like everyone else's. |
 | **Allegiance** | A Nest's rank 0–21, named for the tarot Major Arcana. Number ≈ difficulty; arcanum ≈ personality, especially how the nest treats code (static, mutating, researching). |

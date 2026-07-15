@@ -18,7 +18,7 @@ A **quirk** is a small per-bot deviation from the universal chassis spec ([02-ag
 | Quirk | Effect |
 |---|---|
 | **Overclocked** | +1 cycle per tick |
-| **Tail-Call Optimized** | loop-iteration overhead costs 1 cycle less (min 1) |
+| **Tail-Call Optimized** | loop-iteration overhead costs 1 cycle less (min 1) — a no-op at base costs; earns its keep under cost-raising overlays (Corruption, Loop Desert) |
 | **Branch Predictor** | an `if` that takes the same branch it took last time costs 1 cycle less |
 | **Memoized** | calling the same builtin as the immediately previous action costs 1 cycle less |
 | **Lazy Evaluation** | unused cycles carry over to the next tick (banked, cap N) |
@@ -57,12 +57,12 @@ A **quirk** is a small per-bot deviation from the universal chassis spec ([02-ag
 | **Dial-Up** | channel `send()`/`broadcast()` cost +1 cycle |
 | **Logs to /dev/null** | log ring buffer half size (cause-of-death always survives — the black box invariant holds) |
 | **Abandonware** | no passive self-repair — no more patches, ever |
-| **Cold Start** | first move after idling more than N ticks costs double (pairs dangerously with Sand, Q35) |
+| **Cold Start** | first move after idling more than N ticks costs double (pairs dangerously with Dunes — the sinking clock) |
 | **Off-by-One** | every Kth `move_to()` stops one tile short of the target — defensive programs re-check arrival |
 | **Race Condition** | `handler_init()` flinch 5 ticks longer — always loses the race |
 | **Windows Update** | boot ritual twice as long — installing updates, do not power off |
 | **O(n²)** | tool-function action time +10% — it works, it just doesn't scale |
-| **Merge Conflict** | unhandled bump stuns last +50% longer |
+| **Merge Conflict** | the bump factory window's built-in `wait` runs +50% longer (irrelevant once you write your own `on bump:`) |
 | **Stripped Binary** | `log_min_level` clamped to `warn`+ — compiled without debug symbols; this bot cannot be trace-diagnosed |
 
 ## Double-edged quirks
@@ -75,7 +75,7 @@ The most interesting shelf — whether these are good depends on the *program* t
 | **Written in C** | +1 cycle per tick; stack depth −1 — fast and leaky |
 | **Move Fast and Break Things** | +10% damage dealt; `hurt_line` defaults to 40 and clamps to 1–45 (later warning — the Damaged line and its penalties stay at 50%) |
 | **Defensive Programming** | `hurt_line` defaults to 60 and clamps to 55–99 (an env compulsion — see *Policy quirks ride the environment*) — earlier retreats or wasted uptime, your handler decides which |
-| **Minified** | +1 speed tier; −20% max HP — stripped every byte that wasn't load-bearing |
+| **Minified** | +10% move rate; −20% max HP — stripped every byte that wasn't load-bearing |
 | **Monorepo** | +25% cargo; −10% speed while loaded — everything in one place, murder to move |
 | **Open Source** | salvaging this bot's wreck grants the enemy double decryption %; it prints at a discount (free as in beer, when prints cost anything) |
 | **Telemetry Enabled** | +2 sensor range; every scan builtin costs +1 cycle — it's phoning home |
