@@ -50,7 +50,7 @@ The rules every system must obey (enforced by CI replay tests):
 | Server setting | Effect |
 |---|---|
 | **Open** (default) | Players may ally, trade, raid, or war freely. Ferals escalate against everyone. |
-| **Non-PvP** | Players **cannot directly harm each other** (no damage to other players' bots/structures, no salvaging their wrecks, no hijacking their colonies' units). Competition is indirect: territory, nests, resources. Ferals remain the common enemy. |
+| **Non-PvP** | Players **cannot directly harm each other** (no damage to other players' bots/structures; no salvaging, `analyze()`-ing, or hijacking their wrecks/units — Q76). One physics exception: **wreck blasts hit friend and foe on every server type** (Q55) — standing near anyone's countdown is on you, and an "ally" who walks ticking wrecks into your base is answered socially. Competition is indirect: territory, nests, resources. Ferals remain the common enemy. |
 | **Duel** (stretch) | 2 players, tiny mirror map, fixed identical loadouts, pure program-vs-program. Esports-minimal; also the perfect balance-testing arena. |
 
 - **PvP entry gate**: joining any server where players can be harmed requires **all language constructs permanently unlocked** ([06-progression.md](06-progression.md)) — every combatant has the full language; matches are decided by usage, not vocabulary. Non-PvP servers have no gate.
@@ -80,7 +80,8 @@ Every dial a match is configured with, in one place. Each is a lockstep-shared c
 
 | Setting | Default | Owner |
 |---|---|---|
-| **Server harm setting** (non-PvP / PvP) | non-PvP | this doc (Modes) |
+| **Server harm setting** (Open / Non-PvP / Duel) | Open | this doc (Modes) |
+| **Ferals** (on / off in "pure" PvP) | on | [04-enemies.md](04-enemies.md) |
 | **Print cost** | FREE | [02-agents.md](02-agents.md) (build receipt is literal — refunds scale with what was actually spent) |
 | **Max nest arcanum** | per map | [04-enemies.md](04-enemies.md) |
 | **Quirk probability** (expected quirks per bot) | tuning | [09-quirks.md](09-quirks.md) |

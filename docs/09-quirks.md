@@ -21,7 +21,7 @@ A **quirk** is a small per-bot deviation from the universal chassis spec ([02-ag
 | **Tail-Call Optimized** | loop-iteration overhead costs 1 cycle less (min 1) — a no-op at base costs; earns its keep under cost-raising overlays (Corruption, Loop Desert) |
 | **Branch Predictor** | an `if` that takes the same branch it took last time costs 1 cycle less |
 | **Memoized** | calling the same builtin as the immediately previous action costs 1 cycle less |
-| **Lazy Evaluation** | end-of-tick leftover cycles persist to the next tick — everyone else's evaporate (still capped at `bank_cap`, still burned while blocked; Q75) |
+| **Lazy Evaluation** | its budget **accumulates while blocked** instead of burning (cap `bank_cap`) — the listening-post quirk: everyone else's waiting is wasted compute; this bot wakes from a long `receive` with a full tank |
 | **Borrow Checker Approved** | stack depth +1 — memory-safe by construction |
 | **Retina Display** | +1 sensor range |
 | **Huffman Coded** | +10% cargo capacity (better packing) |
@@ -52,7 +52,7 @@ A **quirk** is a small per-bot deviation from the universal chassis spec ([02-ag
 | **GC Pause** | every Kth action takes +1 tick — stop-the-world, deterministic counter |
 | **Heisenbug** | every Mth tool action faults `tool_jam` — the bot forces you to write error handling |
 | **Works on My Machine** | tool actions fault every Mth use, but *only* farther than N tiles from its home Fabricator — runs flawlessly in the demo |
-| **Loud Fans** | enemies sense this bot at +1 range — probably the Crypto Miner's fault |
+| **Loud Fans** | heard at +1 range *when moving* (signature is movement noise — a stationary bot is silent, Loud Fans or not) — probably the Crypto Miner's fault |
 | **Fragile Base Class** | bump collision damage taken ×2 |
 | **Dial-Up** | channel `send()`/`broadcast()` cost +1 cycle |
 | **Logs to /dev/null** | log ring buffer half size (cause-of-death always survives — the black box invariant holds) |
@@ -100,7 +100,7 @@ Every future env key is free quirk surface — the registry is the natural home 
 
   | Track (L5) | Merit | Effect |
   |---|---|---|
-  | Mining | **Ore-acle** | +2 tiles on the scouting stance's survey radius ([05-terrain.md](05-terrain.md)) — it smells veins farther |
+  | Mining | **Ore-acle** | +2 tiles of survey reach — a stance-action property of its `search()`, like action time ([01-language.md](01-language.md)) — it smells veins farther |
   | Hauling | **CDN** | +10% move speed while loaded — content, delivered |
   | Combat | **Aimbot** | +5% damage dealt |
   | Building | **Infrastructure as Code** | repairs restore +25% more |

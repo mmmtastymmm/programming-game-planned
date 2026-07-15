@@ -76,9 +76,11 @@ Programs:        ProgramLibrary resource — source + AST, shared/refcounted
 Commands:        DeployProgram, QueuePrint(loadout), PlaceBlueprint
                  (structures, terraform, repairs), EditPrinterRules
                  (targets, keys, directions, priority, check interval),
+                 QueueUpgrade(bot, catalog item — the program must bring
+                 the bot to a pad; the pad applies queued orders),
                  PlaceOverlay(arrow | paint), ExchangeData, PostRequest,
-                 Vote(sim-speed | decommission), SetRallyPoint,
-                 Research(UnlockId)
+                 Grant(faction, channel | vision | module), SetAlliance,
+                 Vote(sim-speed | decommission), Research(UnlockId)
                  — the ONLY external inputs to sim (Q77: list completed;
                  it grows only when a decided system adds a player input)
 ```
