@@ -42,12 +42,22 @@ flowchart LR
     A[1. Apply agreed<br/>Commands] --> B[2. Grant cycles,<br/>step every VM]
     B --> C[3. Collect issued<br/>Actions]
     C --> D[4. Resolve Actions<br/>move → combat → mine/build]
-    D --> E[5. Damage, faults,<br/>death, XP]
-    E --> F[6. Economy tick<br/>energy, smelters, nests]
-    F --> G[7. Snapshot hash<br/>for desync detection]
+    D --> P[5. Perception<br/>seen/heard, episodes,<br/>map knowledge, surveys]
+    P --> E[6. Damage, faults, death,<br/>countdowns, blasts]
+    E --> X[7. XP settlement<br/>awards → Learning →<br/>thresholds → stat recompute]
+    X --> F[8. Economy tick<br/>energy, upkeep, refineries,<br/>allocation, prints, pads,<br/>Corruption spread]
+    F --> G[9. Snapshot hash<br/>for desync detection]
 ```
 
-Within each phase, iterate entities in **stable ID order** — never hash-map order.
+Within each phase, iterate entities in **stable ID order** — never hash-map order. Commands within a tick apply in **(player ID, per-player sequence)** order — the relay's total order. Phase notes (Q81):
+
+- **Perception (phase 5)** recomputes seeing/hearing from post-move positions: episode open/close per (bot, enemy faction), per-faction map-knowledge writes (a seen tile is fully known), `search()`/`explore()` ring steps. **Phase-2 queries read the *previous* tick's perception** — one tick stale, deterministic, cheap. A bot is *moving* on any tick it advanced its traverse (mid-tile progress, slides, and sidesteps count); zero progress = stationary = silent. **Scale note** (the flow-fields-style escape hatch): perception must not be naive O(perceivers × bots) with per-pair raycasts — spatial hashing, event-driven episode transitions, and chunk-cached LoS are the intended shape; the check is sim-critical (it feeds Hiding XP), so whatever the optimization, results must be bit-identical to the naive check.
+- **XP settlement (phase 7)**: every XP event earned anywhere in the tick is *queued*, then settles here in fixed order (task tracks, then Age, Mileage, Hiding, Flinch, Boot). The **Learning multiplier applies at its start-of-tick level** — no intra-tick self-compounding — and Learning is fed 10% of the other tracks' post-multiplier awards. Then thresholds check (quirk manifestation, slot milestones), then the stat sheet recomputes once (state-layer flags like Damaged also recompute immediately when they flip).
+- **Deploys re-allocate in the economy phase** of their own tick ("immediate" = this tick's phase 8, not phase 1). Corruption spread is an economy-phase counter system — no RNG. Wrecks have **HP** (~25% of the bot's max, tuning) so the damage phase can resolve hits on them; countdown decrements live in phase 6.
+- **RNG streams, enumerated** (the CLAUDE.md rule's inventory): `rng.combat`, `rng.wander`, `rng.explore`, `rng.sidestep`, `rng.quirk_roll`, `rng.feral_mutation`, and `rng.program` — the `rng(n)` builtin draws from a **per-bot stream seeded by (match seed, entity ID)**, so identical programs desync deterministically, which is the builtin's whole job.
+- **Quirk scratch state** (Branch Predictor's last-branch memory, the deterministic counters of GC Pause / Heisenbug / Off-by-One / Cold Start / Crypto Miner, Eventual Consistency's one-tick perception snapshot) is declared **sim state**: serialized, hashed, cleared on restart like variables, persistent across recolor and rescue.
+- **UnlockSets** ship in the match-start data (every peer validates every player's deploys identically); `Research` Commands mutate them in lockstep order. **Runtime alliances** (`SetAlliance`) share vision, ears, and channels — **never decryption** (decryption stays per-faction forever; no merge on ally, nothing to unwind on divorce). Granted vision **feeds allied bots' queries** — the grant is a sim-level perception union, not a UI overlay.
+- **World-state shapes, refreshed**: add to the sketch — per-tile counters (scree crossings, dune sink clocks, Corruption spread), Hiding-episode state, the allocation table (assignments + check timer), comm keys per faction, colony stock, structure buffers/pads, wreck countdowns, quirk scratch, and the per-faction discovered-node map.
 
 ## Pyrite VM
 

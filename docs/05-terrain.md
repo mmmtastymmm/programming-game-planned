@@ -12,7 +12,7 @@ Rule: **every terrain type must change what a good program looks like.** If a ti
 | **Grove** | 1× | harvestable Wood; **regenerates** | renewable-but-thin logging loops |
 | **Outcrop** | 1× | harvestable Stone node — plentiful, near everywhere ([03-resources.md](03-resources.md)) | fortification supply lines: walls are hauled |
 | **Sand Flat** | 1× | harvestable Sand — shoreline flats and dune fringes ([03-resources.md](03-resources.md)); deep **Dunes** (below) make *interior* sand risky to work: a harvesting bot is standing still, and the sinking clock ticks | glassworks supply; another reason coasts are contested |
-| **Crystal Field** | 1× | minable Crystal; usually spawns near Corruption | risk-managed harvesting (`if can_see_feral(): flee`) |
+| **Crystal Field** | 1× | minable Crystal; usually spawns near Corruption | risk-managed harvesting (`if exists(enemy): move_to(closest(repair_bay).expect())`) |
 | **Geothermal Vent** | 1× | only tile allowing Geothermal Tap | expansion targets worth fighting over |
 | **Mud** | 3×, and loaded bots 4× | — | haulers should route *around*; naive `move_to(depot)` straight-lines through it |
 | **Water** | impassable (ground) | blocks ground bots; shoreline tiles accept a **Pump** (the Water resource, [03-resources.md](03-resources.md)) | natural walls; chokepoint defense — and now a resource worth holding |
@@ -22,7 +22,7 @@ Rule: **every terrain type must change what a good program looks like.** If a ti
 | **Mountain** | **edge-cost** (Q36): climbing on is expensive, descending moderate, ridge-to-ridge 1× | summit tiles carry High Ground's +2 sensor state — the soft-slope sibling of ramp-gated High Ground | ranges are highways with costly on-ramps: route *along* them, budget the climb |
 | **Ice** | 1×/tile, **uncontrolled** | entering continues the move in the same direction until non-ice — a deterministic slide (Q37); an arrow overlay mid-slide *redirects* it; sliding into an occupied tile is a normal bump (slider = rammer) and ends the slide — except engine walks (recall), which never bump the mover (Q73) | plan slide endpoints; mass-produces `on bump:` use |
 | **Ford** | 4× | mapgen-placed shallow crossings — *specific* tiles, not all water (Q38); wading grants a **signature bonus** (the water masks you — see Fog of War) | the slow, sneaky back door; bridges stay the fast contested chokepoint |
-| **Road** | ½× | terraformed (`road(tile)`, Stone — see Terraforming); the ½ exists because move costs store at ×2 scale (Q39, below) | logistics arteries worth paving — and worth raiding |
+| **Road** | ½× | terraformed (the Road blueprint, Stone — see Terraforming); the ½ exists because move costs store at ×2 scale (Q39, below) | logistics arteries worth paving — and worth raiding |
 | **Scree** | 2× | **collapses to Rubble after N crossings** (per-tile counter, Q40 — the natural-bridge-HP precedent) | the shortcut wears out: optimal programs rotate routes |
 | **Snow** | 1× | **mutes movement** (Q78): a bot on Snow makes no movement noise — undetectable by *hearing* regardless of signature; only **seeing** finds it | the silent-approach biome: attackers route assaults over snow without creeping; defenders need *eyes* on the snowline (Sentries, Lanterns, patrols) — ears are useless there |
 
@@ -43,16 +43,16 @@ Map authors pick overlays per biome; the editor shows *effective* per-line costs
 
 ## Terraforming (build & deconstruct)
 
-The map is editable — both directions. **Designation is the player's; labor is code**: the player places a **blueprint** on a target tile (a UI act — one lockstep Command, charged on placement), and bots service it with `move_to(closest(blueprint).expect())` + `build()` (1 progress/tick, adjacent, earns Building XP; several bots stack). Programs never name tiles — Pyrite has no position literals, and doesn't need them. Terraform actions (unlocked after `build`/`repair`, [06-progression.md](06-progression.md)):
+The map is editable — both directions. **Designation is the player's; labor is code**: the player places a **blueprint** on a target tile (a UI act — one lockstep Command, charged on placement), and bots service it with `move_to(closest(blueprint).expect())` + `build()` (1 progress/tick, adjacent, earns Building XP; several bots stack). Programs never name tiles — Pyrite has no position literals, and doesn't need them. Terraform **blueprint types** (Q80 — these are *not* functions: placing one is a Command, the Cache find unlocks the ability to place them, and bots service them with `build()`; unlocked after `build`/`repair`, [06-progression.md](06-progression.md)):
 
-| Action | Effect | Cost |
+| Blueprint | Effect | Cost |
 |---|---|---|
-| `clear(tile)` | Rubble → Plains; yields a little **Stone** | build time |
-| `bridge(tile)` | Water → Bridge (ground-passable) | Stone + build time |
-| `barricade(tile)` | Plains → Barricade (blocks movement **and vision** — it's tall; has HP, attackable) | Stone + build time |
-| `demolish(tile)` | remove Bridge / Barricade | build time |
-| `cleanse(tile)` | Corruption → Plains (see Corruption dynamics — it grows back) | build time, slow |
-| `road(tile)` | Plains / Rubble → Road (half plains move cost) | Stone + build time |
+| **Clear** | Rubble → Plains; yields a little **Stone** | build time |
+| **Bridge** | Water → Bridge (ground-passable) | Stone + build time |
+| **Barricade** | Plains → Barricade (blocks movement **and vision** — it's tall; has HP, attackable) | Stone + build time |
+| **Demolish** | remove Bridge / Barricade | build time |
+| **Cleanse** | Corruption → Plains (see Corruption dynamics — it grows back) | build time, slow |
+| **Road** | Plains / Rubble → Road (half plains move cost) | Stone + build time |
 
 Deconstruction is symmetric and adversarial: enemies can `demolish` **your** bridge — behind your raiding party. Chokepoints stop being facts of the map and become claims you defend.
 

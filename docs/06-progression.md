@@ -52,14 +52,14 @@ flowchart TD
         F_SEARCH["search, explore<br/>(the scouting stance) — 12"]
         F_LOG["log, upload_log,<br/>recover_black_box, last_error — 10"]
         F_SALV["salvage — 18"]
-        F_ATK["attack, closest(enemy) — 15"]
+        F_ATK["attack — 15"]
         F_BUILD["build, repair — 20"]
         F_SCAN["scan_enemies, scan_resources — 40"]
         F_AN["analyze — 30"]
         F_BC["send/broadcast + try variants,<br/>receive/try_receive — with channels"]
         F_GUARD["guard, escort — 45"]
         F_HIJACK["hijack — 70"]
-        F_TERRA["terraform: clear, bridge,<br/>barricade, demolish, cleanse — 35"]
+        F_TERRA["terraform blueprints unlocked:<br/>clear, bridge, barricade, road,<br/>demolish, cleanse — 35"]
         F_ENV["setenv / getenv (env variables:<br/>hurt_line, log_min_level) — 25"]
     end
 
