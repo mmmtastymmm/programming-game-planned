@@ -102,11 +102,26 @@ impl WithoutWhile for UnlockSet {
 }
 
 #[test]
-fn signal_handler_requires_unlock() {
-    let src = "on signal(s):\n    drop_cargo()\n";
+fn signal_windows_require_their_unlocks() {
+    let src = "on hurt:\n    drop_cargo()\n";
     let err = parse(src, &UnlockSet::none()).unwrap_err();
-    assert_eq!(err.kind, PyriteErrorKind::LockedConstruct(Construct::OnSignal));
-    assert!(parse(src, &UnlockSet::none().with(Construct::OnSignal)).is_ok());
+    assert_eq!(err.kind, PyriteErrorKind::LockedConstruct(Construct::OnHurt));
+    assert!(parse(src, &UnlockSet::none().with(Construct::OnHurt)).is_ok());
+    // bump + bumped share one unlock (docs/06's tree).
+    let bump = "on bump:\n    drop_cargo()\n";
+    let bumped = "on bumped:\n    drop_cargo()\n";
+    assert!(parse(bump, &UnlockSet::none().with(Construct::OnBumpBumped)).is_ok());
+    assert!(parse(bumped, &UnlockSet::none().with(Construct::OnBumpBumped)).is_ok());
+}
+
+#[test]
+fn abort_and_recall_have_no_windows() {
+    // Fully engine-reserved (docs/01): writing them is a parse error.
+    assert!(parse("on abort:\n    log(1)\n", &UnlockSet::all()).is_err());
+    assert!(parse("on recall:\n    log(1)\n", &UnlockSet::all()).is_err());
+    // The old unified/death handlers are gone with them.
+    assert!(parse("on signal(s):\n    log(1)\n", &UnlockSet::all()).is_err());
+    assert!(parse("on death:\n    log(1)\n", &UnlockSet::all()).is_err());
 }
 
 #[test]
@@ -407,9 +422,9 @@ fn crash_dump_cost_is_charged_as_debt() {
 }
 
 #[test]
-fn error_handler_runs_instead_of_crash_dump() {
+fn error_window_runs_instead_of_crash_dump() {
     let src = "\
-on signal(s):
+on error:
     handled()
 
 boom(1 // 0)
@@ -426,39 +441,43 @@ boom(1 // 0)
 #[test]
 fn variables_preserved_during_handler_cleared_after() {
     let src = "\
-on signal(s):
+on error:
     log(x)
 
 x = 42
 boom(1 // 0)
 ";
     let (mut vm, mut host, costs) = vm_for(src);
-    vm.grant(14); // x=42 (1), stmt(1)+call(1)+arith(1)=fault, trap(5), handler: stmt+call+log = ...
+    vm.grant(14); // x=42 (1), stmt(1)+call(1)+arith(1)=fault, trap(5), window: log(1) + init
     vm.run(&mut host, &costs);
     let logged: Vec<&Value> =
         host.calls.iter().filter(|(n, _)| n == "log").map(|(_, a)| &a[0]).collect();
-    assert_eq!(logged, [&Value::Int(42)], "handler must see pre-fault variables");
+    assert_eq!(logged, [&Value::Int(42)], "the window must see pre-fault variables");
 }
 
 #[test]
-fn fault_inside_error_handler_is_double_handle() {
+fn fault_inside_error_window_is_double_handle_abort() {
     let src = "\
-on signal(s):
+on error:
     boom(1 // 0)
 
 boom(2 // 0)
 ";
     let (mut vm, mut host, costs) = vm_for(src);
     vm.grant(100);
-    assert_eq!(vm.run(&mut host, &costs), Outcome::Exploded);
+    assert_eq!(vm.run(&mut host, &costs), Outcome::Dead, "double-handle aborts, never explodes");
+    let names = call_names(&host);
+    assert!(names.contains(&"upload_log"), "abort's logs always go home");
+    assert_eq!(*names.last().unwrap(), "become_disabled", "every death exits through abort");
+    assert!(vm.aborted());
 }
 
-// --- signals: hurt / death / double-handle ---
+// --- signals: templates, abort, double-handle ---
 
 #[test]
-fn hurt_handler_runs_then_program_restarts() {
+fn hurt_window_runs_then_program_restarts() {
     let src = "\
-on signal(s):
+on hurt:
     drop_cargo()
 
 work()
@@ -472,81 +491,62 @@ work()
     vm.grant(20);
     vm.run(&mut host, &costs);
     let names = call_names(&host);
-    assert_eq!(names[0], "handler_init", "every unified handler starts with the entry ritual");
+    assert_eq!(names[0], "handler_init", "every template starts with the forced prologue");
     assert_eq!(names[1], "drop_cargo");
-    assert!(names.contains(&"work"), "program restarts from line 1 after handler");
+    assert!(names.contains(&"work"), "program restarts from line 1 after the template");
 }
 
 #[test]
-fn hurt_without_handler_is_ignored() {
+fn hurt_without_window_still_enters_the_template() {
+    // No `on hurt:` and no factory contents: the sandwich still runs —
+    // the prologue flinch IS the default reaction (docs/01).
     let (mut vm, mut host, costs) = vm_for("work()\n");
-    assert_eq!(vm.raise(Signal::Hurt, &mut host, &costs), RaiseOutcome::Ignored);
+    assert_eq!(vm.raise(Signal::Hurt, &mut host, &costs), RaiseOutcome::Handled);
+    vm.grant(20);
+    vm.run(&mut host, &costs);
+    let names = call_names(&host);
+    assert_eq!(names[0], "handler_init", "the flinch runs even with an empty window");
+    assert!(names.contains(&"work"), "then the program restarts");
 }
 
 #[test]
-fn death_without_handler_calls_become_disabled() {
+fn abort_force_calls_upload_log_then_become_disabled() {
     let (mut vm, mut host, costs) = vm_for("work()\n");
-    assert_eq!(vm.raise(Signal::Death, &mut host, &costs), RaiseOutcome::Died);
-    assert_eq!(call_names(&host), ["become_disabled"]);
+    assert_eq!(vm.raise(Signal::Abort, &mut host, &costs), RaiseOutcome::Aborted);
+    assert_eq!(call_names(&host), ["upload_log", "become_disabled"]);
     assert!(vm.is_dead());
+    assert!(vm.aborted());
 }
 
 #[test]
-fn death_handler_runs_within_blackbox_budget() {
-    let src = "\
-on death:
-    log(1)
-    upload_log()
+fn abort_sequence_needs_no_budget_and_absorbs_signals() {
+    // The forced sequence charges as debt (the budget may go negative) and
+    // always completes; anything arriving afterwards is absorbed.
+    let (mut vm, mut host, costs) = vm_for("work()\n");
+    assert_eq!(vm.budget(), 0, "no cycles granted");
+    assert_eq!(vm.raise(Signal::Abort, &mut host, &costs), RaiseOutcome::Aborted);
+    assert!(vm.budget() < 0, "the forced upload charged as debt");
+    assert_eq!(call_names(&host), ["upload_log", "become_disabled"]);
+    host.calls.clear();
+    assert_eq!(vm.raise(Signal::Hurt, &mut host, &costs), RaiseOutcome::Ignored);
+    assert_eq!(vm.raise(Signal::Abort, &mut host, &costs), RaiseOutcome::Ignored);
+    assert!(call_names(&host).is_empty(), "aborted bots absorb everything");
+}
 
-work()
-";
-    let (mut vm, mut host, costs) = vm_for(src);
-    assert_eq!(vm.raise(Signal::Death, &mut host, &costs), RaiseOutcome::Handled);
-    vm.grant(100);
+#[test]
+fn abort_verb_is_the_player_scuttle() {
+    let (mut vm, mut host, costs) = vm_for("abort()\nnever()\n");
+    vm.grant(50);
     assert_eq!(vm.run(&mut host, &costs), Outcome::Dead);
     let names = call_names(&host);
-    // Black box: log = 1, upload_log = min(5 + 0 buffered, 25) = 5;
-    // 6 total fits the 10-cycle budget.
-    assert!(names.contains(&"log"));
-    assert!(names.contains(&"upload_log"));
-    assert_eq!(*names.last().unwrap(), "become_disabled", "death always exits through become_disabled");
+    assert_eq!(names, ["upload_log", "become_disabled"], "abort() runs the reserved sequence");
+    assert!(vm.aborted());
 }
 
 #[test]
-fn death_handler_budget_cuts_off_greedy_code() {
+fn signal_during_hurt_window_aborts() {
     let src = "\
-on death:
-    expensive_scan()
-    log(1)
-
-work()
-";
-    let (mut vm, mut host, costs) = vm_for(src);
-    // expensive_scan is unknown (default cost 1); make it pricey instead:
-    let mut costs = costs;
-    costs.builtins.insert(
-        "expensive_scan".into(),
-        pyrite::BuiltinSpec {
-            cost: pyrite::CostSpec::Fixed(30), // > the 20-cycle black-box budget
-            signal_safe: false,
-            params: None,
-            signature: "expensive_scan()".into(),
-            summary: "test-only pricey op".into(),
-            cost_note: String::new(),
-        },
-    );
-    vm.raise(Signal::Death, &mut host, &costs);
-    vm.grant(100);
-    assert_eq!(vm.run(&mut host, &costs), Outcome::Dead);
-    let names = call_names(&host);
-    assert!(!names.contains(&"expensive_scan"), "op exceeding black-box budget must not run");
-    assert_eq!(*names.last().unwrap(), "become_disabled");
-}
-
-#[test]
-fn signal_during_hurt_handler_explodes() {
-    let src = "\
-on signal(s):
+on hurt:
     limp_home()
 
 work()
@@ -556,16 +556,20 @@ work()
     vm.raise(Signal::Hurt, &mut host, &costs);
     vm.grant(10);
     assert_eq!(vm.run(&mut host, &costs), Outcome::Blocked);
-    // Lethal damage mid-retreat: double handle, no death handler runs.
-    assert_eq!(vm.raise(Signal::Death, &mut host, &costs), RaiseOutcome::Exploded);
-    assert!(!call_names(&host).contains(&"become_disabled"));
+    // A second event mid-retreat: double handle → abort (wreck, not
+    // vaporization) — the retreat is over, the rescue race starts here.
+    assert_eq!(vm.raise(Signal::Bump, &mut host, &costs), RaiseOutcome::Aborted);
+    let names = call_names(&host);
+    assert!(names.contains(&"upload_log"), "the logs still go home");
+    assert_eq!(*names.last().unwrap(), "become_disabled");
 }
 
 #[test]
-fn signal_during_engine_interrupt_explodes() {
+fn signal_during_engine_interrupt_aborts() {
     let (mut vm, mut host, costs) = vm_for("work()\n");
-    vm.set_engine_interrupt(true); // boot / recall context
-    assert_eq!(vm.raise(Signal::Hurt, &mut host, &costs), RaiseOutcome::Exploded);
+    vm.set_engine_ctx(Some(pyrite::EngineCtx::Boot)); // boot / recall context
+    assert_eq!(vm.raise(Signal::Hurt, &mut host, &costs), RaiseOutcome::Aborted);
+    assert!(vm.is_dead(), "a rescue under fire re-downs the bot");
 }
 
 
@@ -704,19 +708,19 @@ fn kind_constants_are_shadowable_and_faults_restore_them() {
 }
 
 #[test]
-fn ignored_signal_does_not_unblock_a_pending_action() {
-    // Regression: hurt with NO handler while blocked on an action must
-    // leave the VM blocked — un-blocking desynced the work/value stacks
-    // (stack underflow on the next run).
+fn signal_interrupts_a_blocked_action_cleanly() {
+    // A template entry un-blocks (the pending action is abandoned — the
+    // sim cancels the world side) and the stacks stay consistent: after
+    // the template, the program restarts from line 1 without underflow.
     let (mut vm, mut host, costs) = vm_for("move_to(5)\nlog(1)\nhalt()\n");
     host.blocking.insert("move_to".into());
     vm.grant(100);
     assert_eq!(vm.run(&mut host, &costs), Outcome::Blocked);
-    assert_eq!(vm.raise(Signal::Hurt, &mut host, &costs), RaiseOutcome::Ignored);
-    assert!(vm.is_blocked(), "ignored signal must not unblock");
-    vm.resolve_action(Ok(Value::Unit), &mut host, &costs);
-    vm.run(&mut host, &costs);
-    assert!(call_names(&host).contains(&"log"), "program continues cleanly");
+    assert_eq!(vm.raise(Signal::Hurt, &mut host, &costs), RaiseOutcome::Handled);
+    assert!(!vm.is_blocked(), "signals interrupt Blocked bots (docs/01)");
+    vm.grant(100);
+    assert_eq!(vm.run(&mut host, &costs), Outcome::Blocked, "restarted into move_to again");
+    assert!(call_names(&host).contains(&"handler_init"), "the template ran");
 }
 
 // --- engine default handlers as real code ---
@@ -732,19 +736,19 @@ fn config_with_default(kind: pyrite::ast::SignalKind, source: &str) -> VmConfig 
 }
 
 #[test]
-fn default_error_handler_runs_as_watchable_code() {
+fn factory_error_window_runs_as_watchable_code() {
     use pyrite::ast::SignalKind;
     let program = parse("boom(1 // 0)\n", &UnlockSet::all()).unwrap();
-    let config = config_with_default(SignalKind::Signal, "upload_crash_dump()\n");
+    let config = config_with_default(SignalKind::Error, "upload_crash_dump()\n");
     let mut vm = Vm::new(Rc::new(program), config);
     let mut host = TestHost::default();
     let costs = CostTable::default();
-    // Enough to reach the fault, not enough to finish the default handler:
+    // Enough to reach the fault, not enough to finish the factory window:
     // the VM sits INSIDE it, visibly (that's the point).
     vm.grant(5);
     vm.run(&mut host, &costs);
-    assert!(vm.handler_is_default(), "should be mid default handler");
-    assert_eq!(vm.crash_count(), 1, "default error handling still counts as a crash");
+    assert!(vm.handler_is_default(), "should be mid factory window");
+    assert_eq!(vm.crash_count(), 1, "factory contents are not armor — still a crash");
     // Finish it: the dump call happens FROM CODE, then restart + refault...
     vm.grant(60);
     vm.run(&mut host, &costs);
@@ -752,31 +756,30 @@ fn default_error_handler_runs_as_watchable_code() {
 }
 
 #[test]
-fn default_handlers_are_humble_not_double_handles() {
+fn factory_contents_double_handle_like_player_code() {
+    // Q50: the humble-defaults carve-out is GONE — a signal landing on a
+    // running factory window aborts exactly like one landing on yours.
     use pyrite::ast::SignalKind;
     let program = parse("boom(1 // 0)\n", &UnlockSet::all()).unwrap();
-    let config = config_with_default(SignalKind::Signal, "upload_crash_dump()\n");
+    let config = config_with_default(SignalKind::Error, "upload_crash_dump()\n");
     let mut vm = Vm::new(Rc::new(program), config);
     let mut host = TestHost::default();
     let costs = CostTable::default();
     vm.grant(5);
     vm.run(&mut host, &costs);
     assert!(vm.handler_is_default());
-    // A signal arriving mid-DEFAULT does not explode: the humble default
-    // yields, and the UNIFIED default handles the hurt fresh.
-    assert_eq!(vm.raise(Signal::Hurt, &mut host, &costs), RaiseOutcome::Handled);
-    assert!(vm.handler_is_default());
-    assert!(!vm.is_dead());
-    // Death mid-default is processed normally (wreck, not explosion).
-    assert_eq!(vm.raise(Signal::Death, &mut host, &costs), RaiseOutcome::Died);
-    assert!(call_names(&host).contains(&"become_disabled"));
+    assert_eq!(vm.raise(Signal::Hurt, &mut host, &costs), RaiseOutcome::Aborted);
+    assert!(vm.is_dead());
+    let names = call_names(&host);
+    assert!(names.contains(&"upload_log"));
+    assert_eq!(*names.last().unwrap(), "become_disabled");
 }
 
 #[test]
-fn default_bump_handler_waits_in_code() {
+fn factory_bump_window_waits_in_code() {
     use pyrite::ast::SignalKind;
     let program = parse("work()\n", &UnlockSet::all()).unwrap();
-    let config = config_with_default(SignalKind::Signal, "wait(50)\n");
+    let config = config_with_default(SignalKind::Bump, "wait(50)\n");
     let mut vm = Vm::new(Rc::new(program), config);
     let mut host = TestHost::default();
     host.blocking.insert("wait".into());
@@ -784,21 +787,20 @@ fn default_bump_handler_waits_in_code() {
     assert_eq!(vm.raise(Signal::Bump, &mut host, &costs), RaiseOutcome::Handled);
     assert!(vm.handler_is_default());
     vm.grant(20);
-    assert_eq!(vm.run(&mut host, &costs), Outcome::Blocked, "waiting inside the default");
+    assert_eq!(vm.run(&mut host, &costs), Outcome::Blocked, "waiting inside the factory stun");
     assert!(call_names(&host).contains(&"wait"));
-    // Resolve the wait: default completes, program restarts.
+    // Resolve the wait: the template completes, the program restarts.
     vm.resolve_action(Ok(Value::Unit), &mut host, &costs);
     vm.grant(20);
     vm.run(&mut host, &costs);
-    assert!(call_names(&host).contains(&"work"), "program restarts after the default");
+    assert!(call_names(&host).contains(&"work"), "program restarts after the template");
 }
-
 
 #[test]
 fn handler_init_window_is_observable() {
     use pyrite::ast::SignalKind;
     let program = parse("work()\n", &UnlockSet::all()).unwrap();
-    let config = config_with_default(SignalKind::Signal, "wait(35)\n");
+    let config = config_with_default(SignalKind::Bump, "wait(35)\n");
     let mut vm = Vm::new(Rc::new(program), config);
     let mut host = TestHost::default();
     host.blocking.insert("handler_init".into());
@@ -811,13 +813,145 @@ fn handler_init_window_is_observable() {
     vm.grant(20);
     assert_eq!(vm.run(&mut host, &costs), Outcome::Blocked, "blocked inside handler_init");
     assert!(vm.in_handler_init(), "still flinching while the init wait runs");
-    // The init resolves: ritual over, handler body proceeds (to wait(35)).
+    // The init resolves: ritual over, the window proceeds (to wait(35)).
     vm.resolve_action(Ok(Value::Unit), &mut host, &costs);
     vm.grant(20);
     vm.run(&mut host, &costs);
-    assert!(!vm.in_handler_init(), "ritual complete — now in the handler body");
+    assert!(!vm.in_handler_init(), "ritual complete — now in the window");
     assert!(vm.active_signal().is_some(), "still handling the signal");
-    assert!(call_names(&host).contains(&"wait"), "the body's wait(35) issued");
+    assert!(call_names(&host).contains(&"wait"), "the window's wait(35) issued");
+}
+
+// --- deploy-time window analysis (M3) ---
+
+#[test]
+fn window_over_cap_is_a_deploy_error() {
+    // bump's cap is 4 (costs.ron): five statements reject.
+    let src = "\
+on bump:
+    log(1)
+    log(2)
+    log(3)
+    log(4)
+    log(5)
+";
+    let program = parse(src, &UnlockSet::all()).unwrap();
+    let err = pyrite::check_windows(&program, &CostTable::default()).unwrap_err();
+    assert!(
+        matches!(err.kind, PyriteErrorKind::WindowOverCap { signal: "bump", worst: 5, cap: 4 }),
+        "got: {err}"
+    );
+}
+
+#[test]
+fn if_branches_count_their_longest_arm() {
+    // 1 (if) + max(2, 1) = 3 ≤ hurt's 6 — the worst case, not the sum.
+    let src = "\
+on hurt:
+    if health_low():
+        drop_cargo()
+        upload_log()
+    else:
+        log(1)
+";
+    let program = parse(src, &UnlockSet::all()).unwrap();
+    assert!(pyrite::check_windows(&program, &CostTable::default()).is_ok());
+}
+
+#[test]
+fn non_signal_safe_calls_are_rejected_in_windows() {
+    // attack is signal_safe: false in the registry.
+    let src = "\
+on hurt:
+    attack(closest(enemy).expect())
+";
+    let program = parse(src, &UnlockSet::all()).unwrap();
+    let err = pyrite::check_windows(&program, &CostTable::default()).unwrap_err();
+    assert!(
+        matches!(&err.kind, PyriteErrorKind::WindowUnsafeCall { signal: "hurt", func } if func == "attack"),
+        "got: {err}"
+    );
+}
+
+#[test]
+fn loops_are_banned_window_reachable() {
+    let direct = "\
+on hurt:
+    while True:
+        log(1)
+";
+    let program = parse(direct, &UnlockSet::all()).unwrap();
+    let err = pyrite::check_windows(&program, &CostTable::default()).unwrap_err();
+    assert!(matches!(err.kind, PyriteErrorKind::WindowLoop { signal: "hurt" }), "got: {err}");
+
+    // ... including through a def (docs/01: straight-line + if, all the
+    // way down).
+    let through_def = "\
+def spin():
+    while True:
+        log(1)
+
+on hurt:
+    spin()
+";
+    let program = parse(through_def, &UnlockSet::all()).unwrap();
+    let err = pyrite::check_windows(&program, &CostTable::default()).unwrap_err();
+    assert!(matches!(err.kind, PyriteErrorKind::WindowLoop { signal: "hurt" }), "got: {err}");
+}
+
+#[test]
+fn recursion_is_banned_window_reachable() {
+    let src = "\
+def a():
+    b()
+
+def b():
+    a()
+
+on hurt:
+    a()
+";
+    let program = parse(src, &UnlockSet::all()).unwrap();
+    let err = pyrite::check_windows(&program, &CostTable::default()).unwrap_err();
+    assert!(
+        matches!(err.kind, PyriteErrorKind::WindowRecursion { signal: "hurt", .. }),
+        "got: {err}"
+    );
+}
+
+#[test]
+fn def_calls_charge_their_worst_case_against_the_cap() {
+    // report() worst case = 3; the call statement charges max(1, 3) = 3,
+    // + log(9) = 4 total > bumped's cap of 4? No: 3 + 1 = 4 = cap — OK.
+    let ok = "\
+def report():
+    log(1)
+    log(2)
+    log(3)
+
+on bumped:
+    report()
+    log(9)
+";
+    let program = parse(ok, &UnlockSet::all()).unwrap();
+    assert!(pyrite::check_windows(&program, &CostTable::default()).is_ok());
+
+    // One more statement in the def pushes the worst case over the cap —
+    // you can't smuggle a long function through a short window.
+    let over = "\
+def report():
+    log(1)
+    log(2)
+    log(3)
+    log(4)
+
+on bumped:
+    report()
+    log(9)
+";
+    let program = parse(over, &UnlockSet::all()).unwrap();
+    let err = pyrite::check_windows(&program, &CostTable::default()).unwrap_err();
+    assert!(matches!(err.kind, PyriteErrorKind::WindowOverCap { .. }), "got: {err}");
 }
 
 // --- modules & imports (docs/01 "Modules & the Program Library") ---
@@ -1291,16 +1425,18 @@ halt()
 /// the host always sees the full positional form.
 #[test]
 fn builtin_kwargs_canonicalize_against_the_registry() {
-    let (mut vm, mut host, costs) = vm_for("log(9, level=\"warn\")\nlog(8)\nhalt()\n");
+    // Levels are the pre-bound int constants (trace=0 … error=4); the
+    // sim binds them — tests pass the ints directly.
+    let (mut vm, mut host, costs) = vm_for("log(9, level=3)\nlog(8)\nhalt()\n");
     vm.grant(100);
     vm.run(&mut host, &costs);
     let log_calls: Vec<&Vec<Value>> =
         host.calls.iter().filter(|(n, _)| n == "log").map(|(_, a)| a).collect();
-    assert_eq!(log_calls[0], &vec![Value::Int(9), Value::Str("warn".into())]);
+    assert_eq!(log_calls[0], &vec![Value::Int(9), Value::Int(3)]);
     assert_eq!(
         log_calls[1],
-        &vec![Value::Int(8), Value::Str("info".into())],
-        "the default level fills in"
+        &vec![Value::Int(8), Value::Int(2)],
+        "the default level (info = 2) fills in"
     );
 }
 

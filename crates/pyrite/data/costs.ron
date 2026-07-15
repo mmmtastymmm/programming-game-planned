@@ -20,11 +20,14 @@ CostTable(
     crash_dump: 25,
     // Paid to enter an `on error:` handler instead of the crash dump.
     trap_cost: 5,
-    // Hard cycle cap for `on death:` — the black-box budget. Sized so the
-    // factory report (one log + a full-ring-buffer upload_log, now payload
-    // priced: 1 + min(5+9, 25)) fits. Dies in M3: abort's forced upload
-    // charges as debt instead (Q75 — the logs always go home).
-    blackbox_budget: 20,
+    // Per-signal window instruction caps (docs/01's template table):
+    // worst-case statement counts, checked at deploy. Caps replace the
+    // old grace-window/overtime tax; abort and recall have no window.
+    window_cap_error: 8,
+    window_cap_hurt: 6,
+    window_cap_bump: 4,
+    window_cap_bumped: 4,
+    window_cap_boot: 4,
     // Longest list range() may build in one call — a fault beyond it.
     range_cap: 256,
     // Max payload units on a sized op — beyond it faults err_payload (Q82).

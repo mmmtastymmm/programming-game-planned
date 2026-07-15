@@ -16,8 +16,10 @@ Tuning(
     printed_cpu: 2,
     printed_cargo_cap: 2,
     capacity: 10000,
+    // The rammer's TOTAL at-fault stun: the bump factory window waits
+    // (this - handler_init_ticks) on top of the forced flinch. The
+    // victim's stagger is the flinch itself (M3 template model).
     bump_freeze_ticks: 50,
-    bump_victim_freeze_ticks: 15,
     handler_init_ticks: 15,
     bump_damage: 2,
     bridge_cost_ore: 3,

@@ -44,14 +44,15 @@ pub struct Tuning {
     /// Colony population the economy sustains before scrap recalls fire
     /// (Energy upkeep stands in later; docs/02).
     pub capacity: u32,
-    /// Rammer's freeze after bumping into an occupied tile (50 = 5s @10Hz).
-    /// The at-fault party sits longest — by the time it re-plans, the
-    /// victim has cleared the scene.
+    /// Rammer's total at-fault stun (50 = 5s @10Hz): expressed as the bump
+    /// FACTORY WINDOW's `wait(bump_freeze_ticks - handler_init_ticks)` on
+    /// top of the forced flinch, and applied directly on engine walks. The
+    /// at-fault party sits longest — by the time it re-plans, the victim
+    /// has cleared the scene. (The victim's shorter stagger IS the flinch:
+    /// the old bump_victim_freeze_ticks died with the template model.)
     pub bump_freeze_ticks: u32,
-    /// Victim's (shorter) freeze — a stagger, then it moves on.
-    pub bump_victim_freeze_ticks: u32,
-    /// The forced handler-entry ritual: EVERY unified-handler entry waits
-    /// this long first (the visible flinch). Death is exempt.
+    /// The forced template prologue: every entry waits this long first
+    /// (the visible flinch). Boot's prologue is the upload instead.
     pub handler_init_ticks: u32,
     /// Collisions are accidents: BOTH bots take this chassis damage.
     pub bump_damage: i64,
@@ -150,20 +151,25 @@ impl Sim {
     pub fn new(spec: &MapSpec) -> Self {
         let tuning = Tuning::default();
         let mut vm_config = VmConfig::default();
-        // Engine default handlers are REAL Pyrite (docs/01): watchable,
-        // line-highlighted, costed. There is ONE unified default — a match
-        // over everything that can go wrong (every entry already paid the
-        // forced handler_init() stagger) — plus the tiny death handler.
-        let unified = format!(
-            "match s:\n    case Signal.Error(msg):\n        upload_crash_dump()\n    case Signal.Bump:\n        wait({})\n    case _:\n        wait(0)\n",
-            tuning.bump_freeze_ticks.saturating_sub(tuning.handler_init_ticks),
-        );
-        for (kind, source) in [
-            (pyrite::ast::SignalKind::Signal, unified),
-            (pyrite::ast::SignalKind::Death, "become_disabled()\n".to_string()),
-        ] {
-            let program = pyrite::parse(&source, &UnlockSet::all())
-                .expect("engine default handlers parse");
+        // FACTORY WINDOW contents (docs/01's template table), as REAL
+        // Pyrite: watchable, line-highlighted, costed, replaceable by the
+        // player's own `on <signal>:` block. Hurt, bumped, and boot ship
+        // empty — the forced prologue flinch IS their default reaction —
+        // so they simply have no entry here.
+        let factory_windows = [
+            (pyrite::ast::SignalKind::Error, "upload_crash_dump()\n".to_string()),
+            // + the 15-tick init flinch = the rammer's 50-tick at-fault stun.
+            (
+                pyrite::ast::SignalKind::Bump,
+                format!(
+                    "wait({})\n",
+                    tuning.bump_freeze_ticks.saturating_sub(tuning.handler_init_ticks)
+                ),
+            ),
+        ];
+        for (kind, source) in factory_windows {
+            let program =
+                pyrite::parse(&source, &UnlockSet::all()).expect("factory windows parse");
             vm_config.default_handlers.insert(
                 kind,
                 pyrite::vm::DefaultHandler { source, program: Rc::new(program) },
@@ -174,6 +180,18 @@ impl Sim {
         // they survive the post-fault VM reset; assignments can shadow them.
         for kind in crate::host::KINDS {
             vm_config.constants.insert(kind.to_string(), Value::Str(kind.to_string()));
+        }
+        // Log-level constants (docs/01): ordinary shadowable names, ints so
+        // the same constants work as env values (`setenv(log_min_level,
+        // warn)`) and as `log(x, level=warn)` arguments.
+        for (name, rank) in
+            [("trace", 0i64), ("debug", 1), ("info", 2), ("warn", 3), ("error", 4)]
+        {
+            vm_config.constants.insert(name.to_string(), Value::Int(rank));
+        }
+        // Env keys as constants: `setenv(hurt_line, 30)` reads naturally.
+        for key in crate::world::ENV_KEYS {
+            vm_config.constants.insert(key.name.to_string(), Value::Str(key.name.to_string()));
         }
         let mut sim = Self {
             world: World::from_spec(spec),
@@ -196,12 +214,16 @@ impl Sim {
         match command {
             Command::SpawnBot { pos, source, cpu, cargo_cap, faction, hp, color } => {
                 let program = pyrite::parse(source, &UnlockSet::all())?;
+                // Deploy-time window analysis (M3): caps, signal safety,
+                // loop/recursion ban — rejected here, never at runtime.
+                pyrite::check_windows(&program, &self.costs)?;
                 let vm = Vm::new(Rc::new(program), self.vm_config.clone());
                 let id = self.insert_bot(*pos, *faction, *color, *hp, *cpu, *cargo_cap, vm, false);
                 Ok(Some(id))
             }
             Command::DeployProgram { faction, color, source } => {
                 let program = pyrite::parse(source, &UnlockSet::all())?;
+                pyrite::check_windows(&program, &self.costs)?;
                 let slot = (*faction, color.0);
                 let hash = crate::world::program_hash(source);
                 self.world.program_library.entry(hash).or_insert_with(|| source.clone());
@@ -318,7 +340,7 @@ impl Sim {
         let id = self.world.alloc_bot_id();
         let entity = self.world.alloc_entity();
         let booting = if boot {
-            vm.set_engine_interrupt(true);
+            vm.set_engine_ctx(Some(pyrite::EngineCtx::Boot));
             Some(self.tuning.boot_ticks)
         } else {
             None
@@ -351,6 +373,7 @@ impl Sim {
                     xp_combat: 0,
                     xp_building: 0,
                     crash_seen: 0,
+                    env: std::collections::BTreeMap::new(),
                     rng_program: crate::world::stream_seed(
                         self.world.seed ^ entity.0,
                         "program",
@@ -396,7 +419,7 @@ impl Sim {
             let cpu = bot.data.cpu;
             vm.grant(cpu);
             let outcome = {
-                let mut host = BotHost { world: &mut self.world, bot: id, tuning_handler_init_ticks: self.tuning.handler_init_ticks };
+                let mut host = BotHost { world: &mut self.world, bot: id, tuning: &self.tuning };
                 vm.run(&mut host, &self.costs)
             };
             self.after_vm(id, vm, outcome);
@@ -451,7 +474,10 @@ impl Sim {
             // Carried cargo spills to the ground rather than entombing.
             self.drop_cargo_to_ground(data.pos, data.cargo);
             // Disabled: an inert wreck (self-destruct countdown comes later).
-            self.world.wrecks.insert(id, Wreck { pos: data.pos, cargo: 0, logs: data.log_buf });
+            self.world.wrecks.insert(
+                id,
+                Wreck { pos: data.pos, cargo: 0, logs: data.log_buf, env: data.env },
+            );
         }
 
         // --- phase 7: XP settlement ---
@@ -508,15 +534,12 @@ impl Sim {
         }
     }
 
-    /// Store the VM back (or destroy the bot, per the outcome).
+    /// Store the VM back. Every outcome keeps the VM (aborted bots are
+    /// dying wrecks-to-be, not vaporized — no instant-destroy path).
     fn after_vm(&mut self, id: BotId, vm: Vm, outcome: Outcome) {
-        match outcome {
-            Outcome::Paused | Outcome::Blocked | Outcome::Dead => {
-                if let Some(bot) = self.world.bots.get_mut(&id) {
-                    bot.vm = Some(vm);
-                }
-            }
-            Outcome::Exploded => self.explode(id, &vm),
+        let _ = outcome;
+        if let Some(bot) = self.world.bots.get_mut(&id) {
+            bot.vm = Some(vm);
         }
     }
 
@@ -607,8 +630,13 @@ impl Sim {
             h.write_u64(bot.data.rng_program);
             h.write_u64(bot.data.xp_mining);
             h.write_u64(bot.data.xp_hauling);
-            for entry in &bot.data.log_buf {
+            for (level, entry) in &bot.data.log_buf {
+                h.write_u8(*level);
                 h.write_str(entry);
+            }
+            for (key, value) in &bot.data.env {
+                h.write_str(key);
+                h.write_i64(*value);
             }
             if let Some(vm) = &bot.vm {
                 h.write_i64(vm.budget());
@@ -624,16 +652,26 @@ impl Sim {
             h.write_i32(wreck.pos.x);
             h.write_i32(wreck.pos.y);
             h.write_u32(wreck.cargo);
-            for log in &wreck.logs {
+            for (level, log) in &wreck.logs {
+                h.write_u8(*level);
                 h.write_str(log);
+            }
+            for (key, value) in &wreck.env {
+                h.write_str(key);
+                h.write_i64(*value);
             }
         }
         for bb in &w.black_boxes {
             h.write_u64(bb.tick);
             h.write_u32(bb.bot.0);
             h.write_str(&bb.cause);
-            for log in &bb.logs {
+            for (level, log) in &bb.logs {
+                h.write_u8(*level);
                 h.write_str(log);
+            }
+            for (key, value) in &bb.env {
+                h.write_str(key);
+                h.write_i64(*value);
             }
         }
         h.write_u64(w.archive.len() as u64);

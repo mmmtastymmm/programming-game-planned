@@ -295,7 +295,7 @@ impl Sim {
         bot.data.action = None;
         let mut vm = bot.vm.take().expect("vm present between phases");
         {
-            let mut host = BotHost { world: &mut self.world, bot: id, tuning_handler_init_ticks: self.tuning.handler_init_ticks };
+            let mut host = BotHost { world: &mut self.world, bot: id, tuning: &self.tuning };
             vm.resolve_action(result, &mut host, &self.costs);
         }
         if let Some(bot) = self.world.bots.get_mut(&id) {

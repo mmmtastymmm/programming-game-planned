@@ -221,8 +221,10 @@
         cost_note: ""),
 
     // --- logging & lifecycle ---
+    // Levels are the pre-bound int constants trace=0 … error=4 (ints so
+    // the same constants work as env values — env is key → int).
     "log": (cost: Fixed(1), signal_safe: true,
-        params: Some([(name: "val"), (name: "level", default: Some(Str("info")))]),
+        params: Some([(name: "val"), (name: "level", default: Some(Int(2)))]),
         signature: "log(val, level=info)",
         summary: "Append one line to the local ring buffer at a level (trace/debug/info/warn/error — pre-bound constants). Drops the oldest line when full.",
         cost_note: ""),
@@ -250,11 +252,9 @@
         signature: "recover_black_box(entity)",
         summary: "Pick up a Black Box and bank its contents to the cloud.",
         cost_note: " + action"),
-    "become_disabled": (cost: Fixed(1), signal_safe: false,
-        params: Some([]),
-        signature: "become_disabled()",
-        summary: "Wreck this bot. Engine-internal once abort() lands (M3) — the player scuttle verb is abort().",
-        cost_note: ""),
+    // NOTE: become_disabled has NO entry — it is engine-only (Q76). The
+    // abort sequence force-calls it directly; a player call faults
+    // err_unknown_function like any unregistered name.
     "handler_init": (cost: Fixed(0), signal_safe: true,
         params: Some([]),
         signature: "handler_init()",

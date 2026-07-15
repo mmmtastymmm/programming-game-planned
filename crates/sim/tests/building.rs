@@ -120,7 +120,7 @@ fn rng_is_bounded_and_deterministic() {
     assert!(!a.is_empty());
     assert_eq!(a, b, "seeded rng must replay identically");
     for entry in &a {
-        let v: i64 = entry.parse().expect("logged ints");
+        let v: i64 = entry.1.parse().expect("logged ints");
         assert!((0..100).contains(&v), "rng(100) out of range: {v}");
     }
 }
@@ -278,7 +278,7 @@ fn deploy_hot_swaps_live_bots() {
         sim.step();
     }
     let logs = &sim.world.bots[&bot].data.log_buf;
-    assert!(logs.iter().any(|l| l == "2"), "live bot must hot-swap; logs: {logs:?}");
+    assert!(logs.iter().any(|l| l.1 == "2"), "live bot must hot-swap; logs: {logs:?}");
 }
 
 #[test]
@@ -288,7 +288,7 @@ fn exists_blueprint_predicate() {
     for _ in 0..12 {
         sim.step();
     }
-    assert_eq!(sim.world.bots[&bot].data.log_buf.first().map(String::as_str), Some("False"));
+    assert_eq!(sim.world.bots[&bot].data.log_buf.first().map(|l| l.1.as_str()), Some("False"));
     sim.apply(&Command::PlaceBlueprint {
         pos: TilePos::new(4, 1),
         kind: BlueprintKind::Bridge,
@@ -298,7 +298,7 @@ fn exists_blueprint_predicate() {
         sim.step();
     }
     assert!(
-        sim.world.bots[&bot].data.log_buf.iter().any(|l| l == "True"),
+        sim.world.bots[&bot].data.log_buf.iter().any(|l| l.1 == "True"),
         "predicate must flip once a blueprint exists: {:?}",
         sim.world.bots[&bot].data.log_buf
     );
@@ -330,7 +330,7 @@ fn kill_command_wrecks_bot_and_spills_cargo() {
 
     assert!(!sim.world.bots.contains_key(&bot), "killed bot is gone");
     let wreck = sim.world.wrecks.get(&bot).expect("manual kill leaves a wreck");
-    assert!(wreck.logs.iter().any(|l| l == "7"), "logs ride in the wreck");
+    assert!(wreck.logs.iter().any(|l| l.1 == "7"), "logs ride in the wreck");
     let spilled: u32 = sim
         .world
         .ore_nodes

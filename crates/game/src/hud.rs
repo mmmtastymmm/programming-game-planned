@@ -27,8 +27,15 @@ pub(crate) fn inspector_ui(
                 ui.label(format!("at ({}, {})", wreck.pos.x, wreck.pos.y));
                 ui.separator();
                 ui.strong("recovered logs");
-                for line in &wreck.logs {
-                    ui.monospace(line);
+                for (level, line) in &wreck.logs {
+                    ui.monospace(leveled_line(*level, line));
+                }
+                if !wreck.env.is_empty() {
+                    ui.separator();
+                    ui.strong("env snapshot");
+                    for (key, value) in &wreck.env {
+                        ui.monospace(format!("{key} = {value}"));
+                    }
                 }
             } else {
                 ui.heading(format!("Bot {bot_id} — DESTROYED"));
@@ -130,9 +137,10 @@ pub(crate) fn inspector_ui(
                 } else {
                     ui.strong(format!("handler: on {signal}:"));
                 }
-                // The unskippable entry ritual, as its own visible step.
-                if signal != "death" {
-                    let ritual = "  ⚙ handler_init()   # forced entry ritual — the flinch";
+                // The forced prologue, as its own visible locked line
+                // (boot's prologue is the forced upload, not the flinch).
+                if signal != "boot" {
+                    let ritual = "  ⚙ handler_init()   # forced prologue — the flinch";
                     if in_init {
                         ui.label(
                             egui::RichText::new(ritual)
@@ -148,15 +156,11 @@ pub(crate) fn inspector_ui(
                         );
                     }
                 }
-                // Default handlers: show their own source with the line
+                // Factory windows: show their own source with the line
                 // highlight (suppressed during init — the counter still
                 // points at the pre-fault line).
                 if default_running
-                    && let Some(src) = bot.default_handler_source(if signal == "death" {
-                        "death"
-                    } else {
-                        "signal"
-                    })
+                    && let Some(src) = bot.default_handler_source(signal)
                 {
                     let current = if in_init { 0 } else { vm.current_line() as usize };
                     for (i, line) in src.lines().enumerate() {
@@ -251,12 +255,24 @@ pub(crate) fn inspector_ui(
         if data.log_buf.is_empty() {
             ui.small("(empty)");
         }
-        for line in &data.log_buf {
-            ui.monospace(line);
+        for (level, line) in &data.log_buf {
+            ui.monospace(leveled_line(*level, line));
         }
     });
 
     if !open {
         editor.selected_bot = None;
     }
+}
+
+/// One log line prefixed by its severity name (trace=0 … error=4).
+fn leveled_line(level: u8, line: &str) -> String {
+    let name = match level {
+        0 => "trace",
+        1 => "debug",
+        2 => "info",
+        3 => "warn",
+        _ => "error",
+    };
+    format!("[{name}] {line}")
 }

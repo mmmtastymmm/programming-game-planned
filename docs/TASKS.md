@@ -118,38 +118,61 @@ full charges + centicycles + wrap-surviving variables move every replay hash at 
       `tile_occupied`, the bump blocker lookup, and both replan obstacle sets read the index
       (`occupied_tiles`). [sim] (S)
 
-## M3 — Signals v3: the seven-template model (largest single divergence)
+## M3 — Signals v3: the seven-template model ✅ COMPLETE (2026-07-15)
 
-Code still implements the pre-2026-07-13 design (one `on signal(s): match s:` + `on death:`).
-
-- [ ] **Per-signal reserved templates**: `on error/hurt/bump/bumped/boot:` player windows;
-      `abort`/`recall` fully reserved (zero window). Forced prologue/epilogue AST splicing;
-      delete `on death:` and `SignalKind::Death`; black box = "whatever you logged while
-      alive". [pyrite][sim] (L) ⚠HASH
-- [ ] **`abort()` verb** — the only player scuttle (forced `upload_log()` → `become_disabled()`
-      → Disabled). Remove `become_disabled` from the player-callable surface (engine-only).
-      Remove the `KillBot` dev command or mark it dev-only. [pyrite][sim] (S) ⚠HASH
-- [ ] **Double-handle → abort** (not instant destruction): kill the no-wreck `explode()` path;
-      spec says no instant-destroy path exists. Also remove the "humble engine defaults"
-      carve-out (factory contents double-handle like player code, Q50). [pyrite][sim] (M) ⚠HASH
-- [ ] **Recall as an engine-owned Pyrite program** on the same VM (ordinary signal: interrupts
-      Running AND Blocked; double-handles mid-template). Engine-fired recalls (deploy drops,
-      scrap) stay polite — and politeness must also skip **mid-handler** bots, not just
-      booting/recalling ones. [pyrite][sim] (M) ⚠HASH
-- [ ] **Per-signal instruction caps + `signal_safe`**: static analysis pass at deploy — window
-      worst-case instruction counts, safe-function set from the M1 registry, loop/recursion ban
-      in windows. Deploy-time rejection only. [pyrite] (L)
-- [ ] **Unlock surgery**: per-signal window constructs replacing `OnSignal`/`OnDeath`; `Import`
-      as its own construct; add `Channels`. Align with 06's tree. [pyrite] (S)
-- [ ] **Run-state enum to 07's shape**: `Running | Faulted | Blocked(action|channel) |
-      Template(signal, phase) | Boot | PadSit`. [pyrite] (S)
-- [ ] **Editor**: per-signal handler windows (sandwich per template), cap meter, signal-safe
-      greying, distinct abort cloud (black skull) vs death. [game] (M)
-- [ ] **Env registry**: `setenv`/`getenv`, key/default/range registry, `hurt_line` (replaces
-      the hardcoded 50% in `health_low()` and the hurt latch), `log_min_level`; env snapshot
-      into Black Boxes. [pyrite][sim] (S) ⚠HASH
-- [ ] **Log levels**: `log(msg, level=…)` with `trace…error` constants (needs M1 kwargs);
-      leveled ring buffers and archive entries. [pyrite][sim] (S)
+- [x] **Per-signal reserved templates**: `on error/hurt/bump/bumped/boot:` player windows
+      (`SignalKind` reshaped; `on signal(s):`/`on death:`/`SignalKind::Death` deleted);
+      `abort`/`recall` fully reserved — writing them is a parse error. Every signal ALWAYS
+      enters its sandwich: forced `handler_init()` prologue (boot: forced `upload_log()` when
+      the buffer is non-empty), then the player window or its FACTORY contents (error:
+      `upload_crash_dump()`, bump: the `wait(35)` stun; hurt/bumped/boot ship empty — the
+      flinch is the reaction), then restart at line 1. `RaiseOutcome::Ignored` is gone for live
+      bots — nothing is unhandled, just uncustomized. Black box = whatever you logged while
+      alive (wrecks carry leveled logs + env snapshot for M10's drop). *Note: the tuning field
+      `bump_victim_freeze_ticks` died — the victim stagger IS the flinch.* [pyrite][sim] (L) ⚠HASH
+- [x] **`abort()` verb** — the only player scuttle: VM-intercepted, runs the fully reserved
+      sequence (forced `upload_log()` charged as debt → `become_disabled()`), un-interruptible,
+      absorbs signals afterwards. `become_disabled` is off the registry (player calls fault
+      err_unknown_function; the host arm stays engine-only). `KillBot` kept, doc'd dev-only
+      (the replay fixture exercises it). [pyrite][sim] (S) ⚠HASH
+- [x] **Double-handle → abort**: `explode()`, `Outcome::Exploded`, and `State::Exploded` are
+      gone — a signal or fault landing on ANY running template (factory contents included,
+      Q50 — the humble-defaults carve-out is deleted) or engine context forces abort; the bot
+      wrecks where it stands. No instant-destroy path exists. [pyrite][sim] (M) ⚠HASH
+- [x] **Recall via the signal system**: `Signal::Recall` (severity 4) — `raise` interrupts
+      Running AND Blocked, records the engine context, and double-handles mid-template;
+      engine-fired selection (rebalance + scrap) now also skips **mid-template** bots, not just
+      booting/recalling ones (Q85 — scrap re-selects the next-lowest). *Judgment call: the walk
+      home stays an engine state machine rather than a literal Pyrite `move_to(home_printer)`
+      program on the VM — observable semantics match the doc; flagged for discussion.*
+      [pyrite][sim] (M) ⚠HASH
+- [x] **Per-signal instruction caps + `signal_safe`**: `pyrite::analysis::check_windows` at
+      deploy (sim `DeployProgram`/`SpawnBot` + the editor's live parse) — worst-case statement
+      counts (longest branch; user-def calls charge their deploy-computed worst case),
+      signal-safe-only calls from the registry flag (defs derive; methods exempt), loop +
+      recursion ban window-reachable. Caps live in costs.ron (`window_cap_error` 8 / hurt 6 /
+      bump 4 / bumped 4 / boot 4). [pyrite] (L)
+- [x] **Unlock surgery**: `OnError`/`OnHurt`/`OnBumpBumped` (one unlock for both, per 06's
+      tree)/`OnBoot` replace `OnSignal`/`OnDeath`; `Import` its own construct (gates both
+      import forms); `Channels` added (syntax lands M11). [pyrite] (S)
+- [x] **Run-state enum to 07's shape**: `RunState { Running | Faulted | Blocked |
+      Template{signal, flinching} | Boot | Recall | PadSit | Disabled }` as `Vm::run_state()`
+      — a projection the clouds/tests/inspector switch on (Blocked's channel variant lands
+      M11; PadSit is wired but unreachable until M5). [pyrite] (S)
+- [x] **Editor**: one file per signal window assembling to `on <signal>:` blocks (the unified
+      `match s:` splicer deleted); sandwich rendered as locked phantom prologue/epilogue lines;
+      live cap meter (worst-case/cap, red on overrun) in the window chrome and file-viewer
+      outline; signal-safe verdict on hover docs; deploy checks run in the live parse; thought
+      clouds switch on `run_state()` with the skull for abort/disabled. [game] (M)
+- [x] **Env registry**: `setenv`/`getenv` host arms over `ENV_KEYS` (`hurt_line` 1–99, default
+      = tuning `hurt_line_pct`; `log_min_level` 0–4) — unknown key faults err_key, out-of-range
+      err_range, unset reads default; `hurt_line` read live by the hurt latch, regen re-arm,
+      and `health_low()`; env snapshot rides wrecks (→ M10 black boxes) and the state hash.
+      [pyrite][sim] (S) ⚠HASH
+- [x] **Log levels**: `log(msg, level=info)` with `trace…error` pre-bound INT constants (ints
+      so the same names work as env values); below-`log_min_level` entries discarded at the
+      call (cost still paid); ring buffer, wrecks, black boxes, and archive entries all carry
+      the level; the inspector prints `[level]` prefixes. [pyrite][sim] (S)
 
 ## M4 — Typed resources & economy (the Ore→Metal migration the docs earmark)
 
@@ -304,23 +327,24 @@ Code still implements the pre-2026-07-13 design (one `on signal(s): match s:` + 
 
 ## Cross-cutting quick wins (small, independent, grab anytime)
 
-- [ ] Delete the spurious `become_disabled` cost entry once M3 lands. [pyrite]
-- [ ] `health_low()` reads env `hurt_line` (after M3 env). [sim]
+- [x] Delete the spurious `become_disabled` cost entry once M3 lands. [pyrite] *(with M3)*
+- [x] `health_low()` reads env `hurt_line` (after M3 env). [sim] *(with M3)*
 - [ ] Fold `PlacePaint` into `PlaceOverlay(arrow|paint)` per 07. [sim][game]
 - [ ] `RepairPrinter` re-priced in Data (~60) once Data exists (M4). [sim]
 - [ ] Tuning values to spec first-pass numbers: fault_damage 5→2, boot_ticks 2→~20,
       print_ticks 5→~100 (in the M0 data files). ⚠HASH
 - [ ] Snow tile comment cites superseded Q67 — re-point at Q78 when M7 lands. [game]
-- [ ] Thought-cloud states to the doc's list (normal/boot/handler/searching/low-health/abort)
-      switched on VM run state rather than view-derived flags. [game]
+- [x] Thought-cloud states to the doc's list (normal/boot/handler/searching/low-health/abort)
+      switched on VM run state rather than view-derived flags. [game] *(with M3; searching
+      lands with M7's stance)*
 
 ## Verb-layer index (every spec'd builtin → its milestone)
 
 | Verb | Milestone | | Verb | Milestone |
 |---|---|---|---|---|
-| `abort` | M3 | | `is_seen` | M7 |
-| `setenv`/`getenv` | M3 | | `search`/`wander`/`explore` | M7 |
-| `log(level=)` | M3 | | `path_blocked` | M7 |
+| `abort` ✅ | M3 | | `is_seen` | M7 |
+| `setenv`/`getenv` ✅ | M3 | | `search`/`wander`/`explore` | M7 |
+| `log(level=)` ✅ | M3 | | `path_blocked` | M7 |
 | `withdraw`/`try_withdraw` | M4 | | `creep` (stealth move) | M7 |
 | `deposit`/`try_deposit` | M4 | | `repair`/`salvage`/`analyze` | M10 |
 | `cargo_count` | M4 | | `hijack`/`recover_black_box` | M10 |

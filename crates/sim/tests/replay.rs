@@ -176,7 +176,7 @@ become_disabled()
     }
     assert!(!sim.world.bots.contains_key(&id), "bot must be wrecked");
     let wreck = sim.world.wrecks.get(&id).expect("wreck exists");
-    assert_eq!(wreck.logs, vec!["123".to_string()]);
+    assert_eq!(wreck.logs, vec![(2u8, "123".to_string())]);
 }
 
 #[test]

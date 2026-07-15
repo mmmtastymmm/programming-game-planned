@@ -24,20 +24,20 @@ pub(crate) enum DocKey {
     Module(u32),
 }
 
-/// The per-signal handler files (the file viewer's Handlers folder). Each
-/// signal gets its own document. Error/Hurt/Bump/Bumped are arms of the
-/// engine's ONE unified `on signal(s):` handler — colony-wide, so the
-/// editor generates the `match s:` dispatch around them at deploy — and
-/// Death is the separate black-box handler. Ord = assembly order. (Boot
-/// and recall have no player window in the language yet; the file viewer
-/// shows them as locked engine rows.)
+/// The per-signal WINDOW files (the file viewer's Handlers folder) —
+/// docs/01's five editable windows, one document per signal. Each file is
+/// exactly that window's contents; the assembler emits it as its own
+/// `on <signal>:` block (the forced prologue/epilogue never exist in
+/// source — they're engine-owned, rendered as locked phantom lines).
+/// Abort and recall have no file: fully engine-reserved, zero-size
+/// windows. Ord = assembly order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) enum HandlerSlot {
     Error,
     Hurt,
     Bump,
     Bumped,
-    Death,
+    Boot,
 }
 
 impl HandlerSlot {
@@ -46,11 +46,19 @@ impl HandlerSlot {
         HandlerSlot::Hurt,
         HandlerSlot::Bump,
         HandlerSlot::Bumped,
-        HandlerSlot::Death,
+        HandlerSlot::Boot,
     ];
-    /// The arms of the generated unified handler, in emission order.
-    const UNIFIED: [HandlerSlot; 4] =
-        [HandlerSlot::Error, HandlerSlot::Hurt, HandlerSlot::Bump, HandlerSlot::Bumped];
+
+    /// The bare signal name (block header = `on <signal>:`).
+    pub(crate) fn signal(self) -> &'static str {
+        match self {
+            HandlerSlot::Error => "error",
+            HandlerSlot::Hurt => "hurt",
+            HandlerSlot::Bump => "bump",
+            HandlerSlot::Bumped => "bumped",
+            HandlerSlot::Boot => "boot",
+        }
+    }
 
     /// Display name (also the doc name in the file viewer).
     pub(crate) fn name(self) -> &'static str {
@@ -59,38 +67,27 @@ impl HandlerSlot {
             HandlerSlot::Hurt => "on hurt",
             HandlerSlot::Bump => "on bump",
             HandlerSlot::Bumped => "on bumped",
-            HandlerSlot::Death => "on death",
+            HandlerSlot::Boot => "on boot",
         }
     }
 
-    /// The locked `case` line the engine wraps this file's code in
-    /// (unified arms only; death has its own block).
-    pub(crate) fn case_line(self) -> Option<&'static str> {
-        match self {
-            HandlerSlot::Error => Some("case Signal.Error(msg):"),
-            HandlerSlot::Hurt => Some("case Signal.Hurt:"),
-            HandlerSlot::Bump => Some("case Signal.Bump:"),
-            HandlerSlot::Bumped => Some("case Signal.Bumped:"),
-            HandlerSlot::Death => None,
-        }
-    }
-
-    /// Starter body for a freshly added handler file (written at column 0;
-    /// the assembler indents it into its block).
+    /// Starter body for a freshly added window file (written at column 0;
+    /// the assembler indents it into its block) — the factory contents
+    /// where they exist, an idiomatic line otherwise.
     pub(crate) fn stub(self) -> &'static str {
         match self {
-            HandlerSlot::Error => "log(msg)\n",
+            HandlerSlot::Error => "upload_crash_dump()\n",
             HandlerSlot::Hurt => "drop_cargo()\n",
             HandlerSlot::Bump => "wait(35)\n",
             HandlerSlot::Bumped => "wait(15)\n",
-            HandlerSlot::Death => "upload_log()\n",
+            HandlerSlot::Boot => "setenv(hurt_line, 50)\n",
         }
     }
-}
 
-const UNIFIED_HEADER: &str = "on signal(s):\n    match s:\n";
-const UNIFIED_FALLBACK: &str = "        case _:\n            wait(0)\n";
-const DEATH_HEADER: &str = "on death:\n";
+    fn from_signal(name: &str) -> Option<HandlerSlot> {
+        Self::ALL.into_iter().find(|s| s.signal() == name)
+    }
+}
 
 /// Prefix every non-blank line with `indent` (blank lines stay bare —
 /// matching what the splitter reproduces).
@@ -125,147 +122,52 @@ fn dedent_lines(text: &str, indent: usize) -> String {
     out
 }
 
-/// The deployable source for one color: the body, then the generated
-/// unified `on signal(s):` block (if any unified file has code), then the
-/// death block. Empty/whitespace-only files are treated as absent.
+/// The deployable source for one color: the body, then each written
+/// window as its own `on <signal>:` block, in slot order.
+/// Empty/whitespace-only files are treated as absent (the reserved
+/// template still runs with factory contents — nothing is unhandled,
+/// just uncustomized, docs/06).
 pub(crate) fn assemble_color(body: &str, files: &std::collections::BTreeMap<HandlerSlot, String>) -> String {
-    fn append_block(out: &mut String, block: &str) {
+    let mut out = body.to_string();
+    for slot in HandlerSlot::ALL {
+        let Some(text) = files.get(&slot).filter(|t| !t.trim().is_empty()) else { continue };
         if !out.is_empty() && !out.ends_with('\n') {
             out.push('\n');
         }
-        out.push_str(block);
-    }
-    let mut out = body.to_string();
-    let arms: Vec<(HandlerSlot, &String)> = HandlerSlot::UNIFIED
-        .iter()
-        .filter_map(|s| files.get(s).filter(|t| !t.trim().is_empty()).map(|t| (*s, t)))
-        .collect();
-    if !arms.is_empty() {
-        let mut block = String::from(UNIFIED_HEADER);
-        for (slot, arm_body) in &arms {
-            block.push_str("        ");
-            block.push_str(slot.case_line().expect("unified arms have case lines"));
-            block.push('\n');
-            block.push_str(&indent_lines(arm_body, "            "));
-        }
-        block.push_str(UNIFIED_FALLBACK);
-        append_block(&mut out, &block);
-    }
-    if let Some(death) = files.get(&HandlerSlot::Death).filter(|t| !t.trim().is_empty()) {
-        let mut block = String::from(DEATH_HEADER);
-        block.push_str(&indent_lines(death, "    "));
-        append_block(&mut out, &block);
+        out.push_str(&format!("on {}:\n", slot.signal()));
+        out.push_str(&indent_lines(text, "    "));
     }
     out
 }
 
-/// Re-split a generated unified block into its per-signal arm bodies.
-/// Returns None for anything that isn't exactly the editor's emitted
-/// shape — such blocks stay in the program body untouched.
-fn parse_unified(block: &str) -> Option<std::collections::BTreeMap<HandlerSlot, String>> {
-    enum Cur {
-        Arm(HandlerSlot, String),
-        Fallback,
-    }
-    let rest = block.strip_prefix(UNIFIED_HEADER)?;
-    let mut files = std::collections::BTreeMap::new();
-    let mut cur: Option<Cur> = None;
-    for line in rest.lines() {
-        if let Some(slot) =
-            HandlerSlot::UNIFIED.iter().find(|s| line.trim_start() == s.case_line().unwrap())
-        {
-            if !line.starts_with("        case ") {
-                return None;
-            }
-            if let Some(Cur::Arm(s, t)) = cur.take() {
-                files.insert(s, t);
-            }
-            cur = Some(Cur::Arm(*slot, String::new()));
-        } else if line == "        case _:" {
-            if let Some(Cur::Arm(s, t)) = cur.take() {
-                files.insert(s, t);
-            }
-            cur = Some(Cur::Fallback);
-        } else if line.trim().is_empty() {
-            if let Some(Cur::Arm(_, t)) = &mut cur {
-                t.push('\n');
-            }
-        } else if let Some(body_line) = line.strip_prefix("            ") {
-            match &mut cur {
-                Some(Cur::Arm(_, t)) => {
-                    t.push_str(body_line);
-                    t.push('\n');
-                }
-                Some(Cur::Fallback) => {} // the wait(0) filler — dropped
-                None => return None,
-            }
-        } else {
-            return None;
-        }
-    }
-    if let Some(Cur::Arm(s, t)) = cur {
-        files.insert(s, t);
-    }
-    Some(files)
-}
-
-/// Split a deployed source into (body, per-signal handler files) at the
-/// text level: a top-level `on …:` line starts a block owning every
-/// following blank/indented line. Death blocks become the death file
-/// (header stripped, body dedented); `on signal(s):` blocks that match the
-/// editor's generated shape become per-signal arm files; anything else
-/// stays in the body. Sources the editor itself assembled round-trip
-/// byte-exactly.
+/// Split a deployed source into (body, per-signal window files) at the
+/// text level: a top-level `on <signal>:` line starts a block owning
+/// every following blank/indented line; the block body (dedented) becomes
+/// that signal's file. Anything else stays in the body. Sources the
+/// editor itself assembled round-trip byte-exactly.
 pub(crate) fn split_source(source: &str) -> (String, std::collections::BTreeMap<HandlerSlot, String>) {
-    enum Kind {
-        Death,
-        Unified,
-    }
-    let header_kind = |line: &str| -> Option<Kind> {
+    let header_slot = |line: &str| -> Option<HandlerSlot> {
         let rest = line.strip_prefix("on ").or_else(|| line.strip_prefix("on\t"))?;
-        let rest = rest.trim_start();
-        if rest.starts_with("death") {
-            Some(Kind::Death)
-        } else if rest.starts_with("signal") {
-            Some(Kind::Unified)
-        } else {
-            None
-        }
+        let name = rest.trim_start().trim_end().strip_suffix(':')?;
+        HandlerSlot::from_signal(name.trim_end())
     };
 
     let mut body = String::new();
     let mut files = std::collections::BTreeMap::new();
-    let mut current: Option<(Kind, String)> = None;
-    let mut flush =
-        |current: &mut Option<(Kind, String)>, body: &mut String, files: &mut std::collections::BTreeMap<HandlerSlot, String>| {
-            let Some((kind, text)) = current.take() else { return };
-            match kind {
-                Kind::Death => {
-                    let body_text = text.strip_prefix(DEATH_HEADER).unwrap_or(&text);
-                    files
-                        .entry(HandlerSlot::Death)
-                        .or_insert_with(|| dedent_lines(body_text, 4));
-                }
-                Kind::Unified => match parse_unified(&text) {
-                    Some(arms) => {
-                        for (slot, arm) in arms {
-                            files.entry(slot).or_insert(arm);
-                        }
-                    }
-                    // Not our shape (hand-written) — leave it in the body.
-                    None => body.push_str(&text),
-                },
-            }
-        };
+    let mut current: Option<(HandlerSlot, String)> = None;
+    let mut flush = |current: &mut Option<(HandlerSlot, String)>,
+                     files: &mut std::collections::BTreeMap<HandlerSlot, String>| {
+        let Some((slot, text)) = current.take() else { return };
+        files.entry(slot).or_insert_with(|| dedent_lines(&text, 4));
+    };
     for line in source.split_inclusive('\n') {
         let top_level = !line.starts_with(' ') && !line.starts_with('\t') && !line.trim().is_empty();
         if top_level {
-            if let Some(kind) = header_kind(line) {
-                flush(&mut current, &mut body, &mut files);
-                current = Some((kind, line.to_string()));
+            flush(&mut current, &mut files);
+            if let Some(slot) = header_slot(line) {
+                current = Some((slot, String::new()));
                 continue;
             }
-            flush(&mut current, &mut body, &mut files);
             body.push_str(line);
         } else {
             match &mut current {
@@ -274,7 +176,7 @@ pub(crate) fn split_source(source: &str) -> (String, std::collections::BTreeMap<
             }
         }
     }
-    flush(&mut current, &mut body, &mut files);
+    flush(&mut current, &mut files);
     (body, files)
 }
 
@@ -320,7 +222,6 @@ impl Doc {
 /// in the buffer as (label, 1-based line, docstring), in source order.
 /// Unparseable buffers get no outline (the window shows the squiggle).
 pub(crate) fn doc_outline(code: &str) -> Vec<(String, u32, Option<String>)> {
-    use pyrite::ast::SignalKind;
     let Ok(prog) = pyrite::parse(code, &pyrite::UnlockSet::all()) else {
         return Vec::new();
     };
@@ -328,12 +229,11 @@ pub(crate) fn doc_outline(code: &str) -> Vec<(String, u32, Option<String>)> {
         .handlers
         .values()
         .map(|h| {
-            let label = match (h.kind, &h.binding) {
-                (SignalKind::Signal, Some(b)) => format!("on signal({b}):"),
-                (SignalKind::Signal, None) => "on signal:".into(),
-                (SignalKind::Death, _) => "on death:".into(),
-            };
-            (label, h.line, None)
+            // The cap meter: worst-case instructions vs the signal's cap.
+            let usage = pyrite::analysis::window_usage(&prog, editor_costs(), h.kind)
+                .map(|(worst, cap)| format!("  [{worst}/{cap} instr]"))
+                .unwrap_or_default();
+            (format!("on {}:{usage}", h.kind.name()), h.line, None)
         })
         .collect();
     items.extend(
@@ -367,9 +267,29 @@ enum LiveParse {
     Library(pyrite::PyriteError),
 }
 
+/// The live cost table for editor-side checks (parsed once — same data
+/// the sim prices with, so the editor can't drift).
+pub(crate) fn editor_costs() -> &'static pyrite::CostTable {
+    static COSTS: std::sync::OnceLock<pyrite::CostTable> = std::sync::OnceLock::new();
+    COSTS.get_or_init(pyrite::CostTable::default)
+}
+
 fn live_parse(prefix: &str, text: &str) -> LiveParse {
     match pyrite::parse(&format!("{prefix}{text}"), &pyrite::UnlockSet::all()) {
-        Ok(_) => LiveParse::Ok,
+        // A clean parse still has to clear the deploy-time window analysis
+        // (caps, signal safety, loops/recursion) — same rejection, live.
+        Ok(program) => match pyrite::check_windows(&program, editor_costs()) {
+            Ok(()) => LiveParse::Ok,
+            Err(mut e) => {
+                let prefix_lines = prefix.lines().count() as u32;
+                if e.line > prefix_lines {
+                    e.line -= prefix_lines;
+                    LiveParse::Local(e)
+                } else {
+                    LiveParse::Library(e)
+                }
+            }
+        },
         Err(mut e) => {
             let prefix_lines = prefix.lines().count() as u32;
             if e.line > prefix_lines {
@@ -575,6 +495,21 @@ pub(crate) fn code_editor(
                         ui.monospace(egui::RichText::new(&doc_entry.signature).color(HL_FUNCTION));
                         ui.label(&doc_entry.summary);
                         ui.small(format!("cost: {cost} cycles{}", doc_entry.cost_note));
+                        // The signal-safe gate, greyed vs warm (docs/01):
+                        // windows may only call safe functions.
+                        if doc_entry.signal_safe {
+                            ui.small(
+                                egui::RichText::new("signal-safe: callable from handler windows")
+                                    .color(egui::Color32::from_rgb(140, 170, 140)),
+                            );
+                        } else {
+                            ui.small(
+                                egui::RichText::new(
+                                    "NOT signal-safe — greyed out inside handler windows",
+                                )
+                                .color(egui::Color32::from_rgb(170, 130, 110)),
+                            );
+                        }
                     },
                 );
             } else if sim::host::KINDS.contains(&word.as_str()) {
@@ -667,10 +602,10 @@ def haul_home():
     \"\"\"Take it home.\"\"\"
     deposit()
 
-on signal(s):
+on hurt:
     wait(10)
 
-on death:
+on boot:
     log(1)
 
 mine()
@@ -680,8 +615,8 @@ mine()
             outline,
             vec![
                 ("def haul_home()".to_string(), 1, Some("Take it home.".to_string())),
-                ("on signal(s):".to_string(), 5, None),
-                ("on death:".to_string(), 8, None),
+                ("on hurt:  [1/6 instr]".to_string(), 5, None),
+                ("on boot:  [1/4 instr]".to_string(), 8, None),
             ]
         );
     }
@@ -727,16 +662,14 @@ module hauling:
     fn assemble_then_split_round_trips_per_signal_files() {
         let body = "mine()\ndeposit()\n";
         let f = files(&[
-            (HandlerSlot::Error, "log(msg)\nupload_log()\n"),
+            (HandlerSlot::Error, "log(last_error())\nupload_log()\n"),
             (HandlerSlot::Bump, "wait(35)\n"),
-            (HandlerSlot::Death, "upload_log()\n"),
+            (HandlerSlot::Boot, "setenv(hurt_line, 30)\n"),
         ]);
         let assembled = assemble_color(body, &f);
-        assert!(assembled.contains("on signal(s):"));
-        assert!(assembled.contains("        case Signal.Error(msg):"));
-        assert!(assembled.contains("            log(msg)"));
-        assert!(assembled.contains("        case _:"));
-        assert!(assembled.contains("on death:\n    upload_log()"));
+        assert!(assembled.contains("on error:\n    log(last_error())\n    upload_log()"));
+        assert!(assembled.contains("on bump:\n    wait(35)"));
+        assert!(assembled.contains("on boot:\n    setenv(hurt_line, 30)"));
         let (split_body, split_files) = split_source(&assembled);
         assert_eq!(split_body, body);
         assert_eq!(split_files, f);
@@ -745,13 +678,15 @@ module hauling:
     }
 
     #[test]
-    fn assembled_stub_files_parse_as_one_unified_handler() {
+    fn assembled_stub_files_parse_as_five_windows() {
         let f: std::collections::BTreeMap<HandlerSlot, String> =
             HandlerSlot::ALL.iter().map(|s| (*s, s.stub().to_string())).collect();
         let assembled = assemble_color("mine()\n", &f);
         let program = pyrite::parse(&assembled, &pyrite::UnlockSet::all())
             .expect("stub files must assemble into a parseable program");
-        assert_eq!(program.handlers.len(), 2); // unified signal + death
+        assert_eq!(program.handlers.len(), 5); // one window per signal
+        pyrite::check_windows(&program, editor_costs())
+            .expect("the stub windows must clear the deploy analysis");
     }
 
     #[test]
@@ -763,9 +698,9 @@ module hauling:
     }
 
     #[test]
-    fn hand_written_signal_blocks_stay_in_the_body() {
-        // Not the editor's generated shape — must survive untouched in the
-        // body rather than be mangled into per-signal files.
+    fn unknown_on_blocks_stay_in_the_body() {
+        // Not a window signal (stale syntax, typos) — survives untouched
+        // in the body, where the live parse squiggles it.
         let src = "mine()\non signal(s):\n    wait(10)\n";
         let (body, files) = split_source(src);
         assert_eq!(body, src);
@@ -774,14 +709,14 @@ module hauling:
 
     #[test]
     fn empty_files_are_left_out_of_the_assembly() {
-        let f = files(&[(HandlerSlot::Hurt, "   \n"), (HandlerSlot::Death, "")]);
+        let f = files(&[(HandlerSlot::Hurt, "   \n"), (HandlerSlot::Boot, "")]);
         assert_eq!(assemble_color("mine()\n", &f), "mine()\n");
     }
 
     #[test]
     fn assemble_adds_a_newline_when_the_body_lacks_one() {
-        let f = files(&[(HandlerSlot::Death, "log(1)\n")]);
-        assert_eq!(assemble_color("mine()", &f), "mine()\non death:\n    log(1)\n");
-        assert_eq!(assemble_color("", &f), "on death:\n    log(1)\n");
+        let f = files(&[(HandlerSlot::Boot, "log(1)\n")]);
+        assert_eq!(assemble_color("mine()", &f), "mine()\non boot:\n    log(1)\n");
+        assert_eq!(assemble_color("", &f), "on boot:\n    log(1)\n");
     }
 }

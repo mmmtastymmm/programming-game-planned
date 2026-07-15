@@ -528,43 +528,78 @@ fn doc_window(
                 });
             }
             if let DocKey::Handler(slot) = key {
-                // The engine's forced prologue, drawn as locked lines the
-                // player can see but never edit (docs/01: you always see
-                // the whole sandwich, you can only type in the middle).
-                match slot.case_line() {
-                    Some(case) => {
-                        ui.horizontal(|ui| {
-                            ui.monospace(
-                                egui::RichText::new("handler_init()").color(tint).strong(),
-                            );
-                            ui.small(
-                                egui::RichText::new(format!(
-                                    "engine flinch — {} ticks, unskippable",
-                                    game.0.tuning.handler_init_ticks
-                                ))
-                                .weak(),
-                            );
-                        });
-                        ui.horizontal(|ui| {
-                            ui.monospace(egui::RichText::new(case).color(tint).strong());
-                            ui.small(
-                                egui::RichText::new(
-                                    "your arm of the shared signal handler — every bot runs it",
-                                )
-                                .weak(),
-                            );
-                        });
+                // The template sandwich: the engine's forced prologue,
+                // drawn as locked lines the player can see but never edit
+                // (docs/01: you always see the whole sandwich, you can
+                // only type in the middle).
+                ui.horizontal(|ui| {
+                    ui.monospace(
+                        egui::RichText::new(format!("on {}:", slot.signal()))
+                            .color(tint)
+                            .strong(),
+                    );
+                    ui.small(egui::RichText::new("this window's reserved template").weak());
+                });
+                if slot == window::HandlerSlot::Boot {
+                    ui.horizontal(|ui| {
+                        ui.monospace(
+                            egui::RichText::new("    upload_log()").color(tint).strong(),
+                        );
+                        ui.small(
+                            egui::RichText::new(
+                                "forced prologue — the incident report, if the buffer is non-empty",
+                            )
+                            .weak(),
+                        );
+                    });
+                } else {
+                    ui.horizontal(|ui| {
+                        ui.monospace(
+                            egui::RichText::new("    handler_init()").color(tint).strong(),
+                        );
+                        ui.small(
+                            egui::RichText::new(format!(
+                                "forced prologue — the flinch, {} ticks, unskippable",
+                                game.0.tuning.handler_init_ticks
+                            ))
+                            .weak(),
+                        );
+                    });
+                }
+                // The cap meter: worst-case instructions vs this signal's
+                // window cap, live as you type (deploy rejects overruns).
+                let kind = match slot {
+                    window::HandlerSlot::Error => pyrite::ast::SignalKind::Error,
+                    window::HandlerSlot::Hurt => pyrite::ast::SignalKind::Hurt,
+                    window::HandlerSlot::Bump => pyrite::ast::SignalKind::Bump,
+                    window::HandlerSlot::Bumped => pyrite::ast::SignalKind::Bumped,
+                    window::HandlerSlot::Boot => pyrite::ast::SignalKind::Boot,
+                };
+                let cap = pyrite::analysis::window_cap(&game.0.costs, kind);
+                let assembled = format!("on {}:\n{}", slot.signal(), window::indent_lines(&doc.code, "    "));
+                let usage = pyrite::parse(&assembled, &pyrite::UnlockSet::all())
+                    .ok()
+                    .and_then(|p| pyrite::analysis::window_usage(&p, &game.0.costs, kind));
+                match usage {
+                    Some((worst, cap)) => {
+                        let over = worst > cap;
+                        let color = if over {
+                            egui::Color32::from_rgb(240, 120, 100)
+                        } else {
+                            egui::Color32::from_rgb(140, 170, 140)
+                        };
+                        ui.small(egui::RichText::new(format!(
+                            "cap meter: {worst}/{cap} worst-case instructions{}",
+                            if over { " — OVER CAP, deploy will reject" } else { "" }
+                        )).color(color));
                     }
                     None => {
-                        ui.horizontal(|ui| {
-                            ui.monospace(egui::RichText::new("on death:").color(tint).strong());
-                            ui.small(
-                                egui::RichText::new(
-                                    "fires at 0 HP — runs on the black-box cycle budget",
-                                )
-                                .weak(),
-                            );
-                        });
+                        ui.small(
+                            egui::RichText::new(format!(
+                                "cap meter: —/{cap} (window empty or not yet parseable)"
+                            ))
+                            .weak(),
+                        );
                     }
                 }
             }
@@ -615,28 +650,13 @@ fn doc_window(
                         ],
                         egui::Stroke::new(2.0, tint.gamma_multiply(0.55)),
                     );
-                    match slot.case_line() {
-                        Some(_) => {
-                            ui.monospace(
-                                egui::RichText::new("# engine: restart main program at line 1")
-                                    .color(tint.gamma_multiply(0.8)),
-                            );
-                        }
-                        None => {
-                            ui.horizontal(|ui| {
-                                ui.monospace(
-                                    egui::RichText::new("become_disabled()").color(tint).strong(),
-                                );
-                                ui.small(
-                                    egui::RichText::new(
-                                        "engine — every death exits through this; \
-                                         the wreck countdown starts",
-                                    )
-                                    .weak(),
-                                );
-                            });
-                        }
-                    }
+                    let _ = slot;
+                    ui.monospace(
+                        egui::RichText::new(
+                            "# forced epilogue: restart main program at line 1",
+                        )
+                        .color(tint.gamma_multiply(0.8)),
+                    );
                 }
                 DocKey::Module(_) => {
                     code_editor(ui, editor_id, doc, &game.0, rows, prelude);
@@ -1016,11 +1036,11 @@ mod tests {
             editor.docs.insert(DocKey::Handler(slot), Doc::new(slot.name(), slot.stub(), true));
         }
         let assembled = assembled_source(&editor, 0);
-        assert!(assembled.contains("on signal(s):"));
-        assert!(assembled.contains("on death:"));
+        assert!(assembled.contains("on error:"));
+        assert!(assembled.contains("on boot:"));
         let program = pyrite::parse(&assembled, &pyrite::UnlockSet::all())
-            .expect("assembled body + stub handlers must parse");
-        assert_eq!(program.handlers.len(), 2);
+            .expect("assembled body + stub windows must parse");
+        assert_eq!(program.handlers.len(), 5);
     }
 
     /// Handlers are colony-wide: every color's assembled artifact carries
@@ -1038,8 +1058,8 @@ mod tests {
         );
         let green = assembled_source(&editor, 0);
         let red = assembled_source(&editor, 1);
-        assert!(green.starts_with("mine()\n") && green.contains("case Signal.Error(msg):"));
-        assert!(red.starts_with("deposit()\n") && red.contains("case Signal.Error(msg):"));
+        assert!(green.starts_with("mine()\n") && green.contains("on error:"));
+        assert!(red.starts_with("deposit()\n") && red.contains("on error:"));
     }
 
     /// Removing a handler doc removes its block from the next deploy.
@@ -1049,11 +1069,11 @@ mod tests {
         editor.docs.remove(&DocKey::Module(0));
         editor.docs.insert(DocKey::Program(0), Doc::new("Green", "mine()\n", true));
         editor.docs.insert(
-            DocKey::Handler(HandlerSlot::Death),
-            Doc::new("on death", HandlerSlot::Death.stub(), true),
+            DocKey::Handler(HandlerSlot::Boot),
+            Doc::new("on boot", HandlerSlot::Boot.stub(), true),
         );
-        assert!(assembled_source(&editor, 0).contains("on death:"));
-        editor.docs.remove(&DocKey::Handler(HandlerSlot::Death));
+        assert!(assembled_source(&editor, 0).contains("on boot:"));
+        editor.docs.remove(&DocKey::Handler(HandlerSlot::Boot));
         assert_eq!(assembled_source(&editor, 0), "mine()\n");
     }
 

@@ -38,6 +38,17 @@ pub enum PyriteErrorKind {
     /// Module blocks hold `def`s only — a module that *did* things on
     /// import would be a program (docs/01 "Modules & the Program Library").
     StatementInModule,
+    // Deploy-time window analysis (docs/01 "Signal handlers", M3)
+    /// The window's worst-case instruction count exceeds its signal's cap.
+    WindowOverCap { signal: &'static str, worst: u64, cap: u64 },
+    /// A window (or a def it reaches) calls a function that isn't
+    /// `signal_safe` — or one the registry doesn't know at all.
+    WindowUnsafeCall { signal: &'static str, func: String },
+    /// Loops are banned in window-reachable code (straight-line + `if`,
+    /// all the way down — Q51).
+    WindowLoop { signal: &'static str },
+    /// Recursion makes a window's worst case unbounded.
+    WindowRecursion { signal: &'static str, func: String },
 }
 
 impl fmt::Display for PyriteError {
@@ -80,6 +91,34 @@ impl fmt::Display for PyriteError {
             }
             PyriteErrorKind::StatementInModule => {
                 write!(f, "modules hold only 'def' functions — no statements, handlers, or enums")
+            }
+            PyriteErrorKind::WindowOverCap { signal, worst, cap } => {
+                write!(
+                    f,
+                    "the 'on {signal}:' window can run {worst} instructions in the \
+                     worst case — its cap is {cap}"
+                )
+            }
+            PyriteErrorKind::WindowUnsafeCall { signal, func } => {
+                write!(
+                    f,
+                    "'{func}' is not signal-safe — the 'on {signal}:' window may only \
+                     call signal-safe functions"
+                )
+            }
+            PyriteErrorKind::WindowLoop { signal } => {
+                write!(
+                    f,
+                    "loops are not allowed in the 'on {signal}:' window or anything it \
+                     calls — handlers decide and delegate; loops belong to the main program"
+                )
+            }
+            PyriteErrorKind::WindowRecursion { signal, func } => {
+                write!(
+                    f,
+                    "'{func}' recurses — recursion is unbounded, so it cannot be called \
+                     from the 'on {signal}:' window"
+                )
             }
         }
     }

@@ -279,22 +279,14 @@ fn bump_handlers_replace_the_freeze() {
     // Rammer with `on bump:`: no stun — its handler logs, program restarts.
     // Victim with `on bumped:`: same, no stagger freeze.
     let rammer_src = "\
-on signal(s):
-    match s:
-        case Signal.Bump:
-            log(\"ow-my-front\")
-        case _:
-            wait(0)
+on bump:
+    log(\"ow-my-front\")
 
 move_to(closest(depot).expect())
 ";
     let victim_src = "\
-on signal(s):
-    match s:
-        case Signal.Bumped:
-            log(\"hey-watch-it\")
-        case _:
-            wait(0)
+on bumped:
+    log(\"hey-watch-it\")
 
 wait(3)
 ";
@@ -315,8 +307,8 @@ wait(3)
         let v = &sim.world.bots[&victim];
         assert_eq!(r.data.bump_frozen, 0, "handled bump must not freeze the rammer");
         assert_eq!(v.data.bump_frozen, 0, "handled bumped must not freeze the victim");
-        rammer_handled |= r.data.log_buf.iter().any(|l| l.contains("ow-my-front"));
-        victim_handled |= v.data.log_buf.iter().any(|l| l.contains("hey-watch-it"));
+        rammer_handled |= r.data.log_buf.iter().any(|l| l.1.contains("ow-my-front"));
+        victim_handled |= v.data.log_buf.iter().any(|l| l.1.contains("hey-watch-it"));
         if rammer_handled && victim_handled {
             return;
         }
@@ -332,14 +324,11 @@ fn co_arriving_signals_resolve_by_severity_not_double_handle() {
     // double-handle, even with a player handler installed (the double-
     // handle needs a template already *running*).
     let victim_src = "\
-on signal(s):
-    match s:
-        case Signal.Hurt:
-            log(\"hurt-wins\")
-        case Signal.Bumped:
-            log(\"bumped-ran\")
-        case _:
-            wait(0)
+on hurt:
+    log(\"hurt-wins\")
+
+on bumped:
+    log(\"bumped-ran\")
 
 wait(600)
 ";
@@ -365,7 +354,7 @@ wait(600)
         };
         if let Some(first) = v.data.log_buf.first() {
             assert!(
-                first.contains("hurt-wins"),
+                first.1.contains("hurt-wins"),
                 "the severest co-arriving signal wins the boundary, got {first:?}"
             );
             return;
@@ -377,9 +366,10 @@ wait(600)
 #[test]
 fn bumped_during_a_handler_is_a_double_handle() {
     // The victim is mid-`on bumped:` (blocking wait) when a second bump
-    // lands: any signal during a handler explodes — no wreck, black box.
+    // lands: any signal during a running template forces ABORT — the bot
+    // drops into a wreck where it stands (no instant-destroy path, M3).
     let victim_src = "\
-on signal(s):
+on bumped:
     wait(40)
 
 wait(3)
@@ -407,7 +397,9 @@ wait(3)
             break;
         }
     }
-    assert!(!sim.world.bots.contains_key(&victim), "second bump mid-handler must explode");
-    assert!(!sim.world.wrecks.contains_key(&victim), "double handle: no wreck");
-    assert!(sim.world.black_boxes.iter().any(|b| b.bot == victim));
+    assert!(!sim.world.bots.contains_key(&victim), "second bump mid-handler must abort");
+    assert!(
+        sim.world.wrecks.contains_key(&victim),
+        "double handle = abort = wreck (the rescue race), never vaporization"
+    );
 }

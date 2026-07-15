@@ -911,21 +911,32 @@ pub(crate) fn update_scribbles(
         let Ok((mut visibility, mut material, mut transform)) = clouds.get_mut(cloud) else {
             continue;
         };
-        // The cloud reads the bot's current state: angry squiggle for the
-        // rammer's bump, dizzy stars for the bumped victim, ?! for error,
-        // starburst for hurt, skull for death, power-on for boot, home
-        // arrow for the recall walk (docs/01 signal table).
-        let mood = if bot.data.bump_frozen > 0 {
+        // The cloud reads the VM's RUN STATE (docs/01's per-signal palette;
+        // docs/07's enum): angry squiggle for bump, dizzy stars for bumped,
+        // ?! for error, starburst for hurt, power-on for boot, home arrow
+        // for the recall walk — and the distinct black skull for ABORT
+        // (a bot mid-forced-sequence / freshly disabled), never confused
+        // with an ordinary handler tint.
+        use pyrite::{ast::SignalKind, RunState};
+        let mood = if bot.aborted() {
+            Some("death") // the skull frames — abort's cloud
+        } else if bot.data.bump_frozen > 0 {
             Some("angry")
-        } else if bot.data.recall.is_some() {
-            Some("recall")
-        } else if bot.data.booting.is_some() {
-            Some("boot")
         } else {
-            bot.handler_name().map(|name| match name {
-                "error" | "hurt" | "death" | "bumped" => name,
-                _ => "angry", // bump keeps the collision squiggle
-            })
+            match bot.vm.as_ref().map(|vm| vm.run_state()) {
+                Some(RunState::Recall) => Some("recall"),
+                Some(RunState::Boot) => Some("boot"),
+                Some(RunState::Faulted) => Some("error"),
+                Some(RunState::Template { signal, .. }) => Some(match signal {
+                    SignalKind::Hurt => "hurt",
+                    SignalKind::Bumped => "bumped",
+                    SignalKind::Boot => "boot",
+                    SignalKind::Error => "error",
+                    SignalKind::Bump => "angry",
+                }),
+                Some(RunState::Disabled) => Some("death"),
+                _ => None,
+            }
         };
         if let Some(mood) = mood {
             let frames = &palette.scribble_mats[mood];

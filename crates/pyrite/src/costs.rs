@@ -50,8 +50,14 @@ pub struct CostTable {
     pub crash_dump: u64,
     /// Paid to enter an `on error:` handler instead of the crash dump.
     pub trap_cost: u64,
-    /// Hard cycle cap for `on death:` — the black-box budget.
-    pub blackbox_budget: u64,
+    /// Per-signal window instruction caps (docs/01's template table):
+    /// worst-case STATEMENT counts, enforced at deploy by the static
+    /// analysis — caps replace the old grace-window/overtime tax.
+    pub window_cap_error: u64,
+    pub window_cap_hurt: u64,
+    pub window_cap_bump: u64,
+    pub window_cap_bumped: u64,
+    pub window_cap_boot: u64,
 
     /// Longest list `range()` may build in one call — a fault beyond it.
     pub range_cap: u64,

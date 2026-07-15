@@ -11,25 +11,18 @@ use std::collections::BTreeSet;
 use std::rc::Rc;
 
 impl Sim {
-    /// Boot step 1: forced `upload_log()` if the buffer is non-empty
-    /// (docs/02); step 2: program from line 1, interrupt context ends.
+    /// Boot countdown complete: leave the engine context and enter the
+    /// Boot TEMPLATE (docs/01) — forced `upload_log()` when the local
+    /// buffer is non-empty (the rescued veteran's automatic incident
+    /// report, run as real costed code through the ordinary host arm),
+    /// then the `on boot:` window (the dotfile), then line 1.
     pub(crate) fn finish_boot(&mut self, id: BotId) {
         let Some(bot) = self.world.bots.get_mut(&id) else { return };
         bot.data.booting = None;
-        let logs = std::mem::take(&mut bot.data.log_buf);
-        let tick = self.world.tick;
-        for text in logs {
-            self.world.archive.push(ArchiveEntry {
-                tick,
-                bot: id,
-                kind: ArchiveKind::Log,
-                line: 0,
-                text,
-            });
-        }
-        let bot = self.world.bots.get_mut(&id).expect("bot exists");
+        let upload_pending = !bot.data.log_buf.is_empty();
         if let Some(vm) = bot.vm.as_mut() {
-            vm.set_engine_interrupt(false);
+            vm.set_engine_ctx(None);
+            vm.begin_boot(upload_pending);
         }
     }
 
@@ -59,7 +52,7 @@ impl Sim {
         bot.data.recall = None;
         bot.data.booting = Some(self.tuning.boot_ticks);
         let mut vm = Vm::new(program, self.vm_config.clone());
-        vm.set_engine_interrupt(true);
+        vm.set_engine_ctx(Some(pyrite::EngineCtx::Boot));
         bot.vm = Some(vm);
         true
     }
@@ -74,11 +67,12 @@ impl Sim {
         // Orderly recycling at the printer: carried cargo goes to stores.
         self.world.stockpile_ore += bot.data.cargo as u64;
         let tick = self.world.tick;
-        for text in bot.data.log_buf {
+        for (level, text) in bot.data.log_buf {
             self.world.archive.push(ArchiveEntry {
                 tick,
                 bot: id,
                 kind: ArchiveKind::Log,
+                level,
                 line: 0,
                 text,
             });
@@ -113,7 +107,7 @@ impl Sim {
                         Some(cp) => {
                             let program = Rc::clone(&cp.program);
                             let mut vm = Vm::new(program, self.vm_config.clone());
-                            vm.set_engine_interrupt(true);
+                            vm.set_engine_ctx(Some(pyrite::EngineCtx::Boot));
                             let t = &self.tuning;
                             let (hp, cpu, cap) = (t.printed_hp, t.printed_cpu, t.printed_cargo_cap);
                             self.insert_bot(spawn_pos, faction, color, hp, cpu, cap, vm, true);
@@ -197,10 +191,15 @@ impl Sim {
                     .bots
                     .values()
                     .filter(|b| {
+                        // Engine-fired recalls stay POLITE (Q85): never at
+                        // dying, recalled, booting, or MID-TEMPLATE bots —
+                        // scrap re-selects the next-lowest instead of
+                        // wrecking its target against the decided intent.
                         b.data.faction == faction
                             && !b.data.dying
                             && b.data.recall.is_none()
                             && b.data.booting.is_none()
+                            && b.vm.as_ref().is_none_or(|vm| vm.phase() == pyrite::Phase::Main)
                     })
                     .map(|b| (b.data.xp_mining + b.data.xp_hauling + b.data.xp_combat, b.data.id))
                     .min();
@@ -222,11 +221,14 @@ impl Sim {
             .bots
             .values()
             .filter(|b| {
+                // Polite engine-fired selection: mid-template bots are
+                // skipped, not re-pulled into a double-handle (Q85/M3).
                 b.data.faction == faction
                     && b.data.color == color
                     && !b.data.dying
                     && b.data.recall.is_none()
                     && b.data.booting.is_none()
+                    && b.vm.as_ref().is_none_or(|vm| vm.phase() == pyrite::Phase::Main)
             })
             .map(|b| (b.data.xp_mining + b.data.xp_hauling + b.data.xp_combat, b.data.id))
             .min();
@@ -276,7 +278,7 @@ impl Sim {
         bot.data.action = None;
         bot.data.recall = Some(Recall { path, ticks_left, home, purpose });
         if let Some(vm) = bot.vm.as_mut() {
-            vm.set_engine_interrupt(true);
+            vm.set_engine_ctx(Some(pyrite::EngineCtx::Recall));
         }
     }
 }

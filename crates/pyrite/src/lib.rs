@@ -15,6 +15,7 @@
 //! This crate is deterministic by contract (CLAUDE.md): no floats, no
 //! hash-ordered iteration, no clocks, no I/O.
 
+pub mod analysis;
 pub mod ast;
 pub mod costs;
 pub mod error;
@@ -31,4 +32,8 @@ pub use error::{faults, PyriteError, PyriteErrorKind};
 pub use parser::parse;
 pub use unlocks::{Construct, UnlockSet};
 pub use value::{EnumValue, Value};
-pub use vm::{CallCtx, Fault, Host, HostCall, Outcome, Phase, RaiseOutcome, Signal, Vm, VmConfig};
+pub use analysis::check_windows;
+pub use vm::{
+    CallCtx, EngineCtx, Fault, Host, HostCall, Outcome, Phase, RaiseOutcome, RunState, Signal,
+    Vm, VmConfig,
+};

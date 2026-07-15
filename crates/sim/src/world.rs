@@ -150,8 +150,13 @@ pub struct BotData {
     pub bump_frozen: u32,
     /// Set by the forced `become_disabled()`; the death phase wrecks the bot.
     pub dying: bool,
-    /// Local log ring buffer (base 8 entries; hardware stat later).
-    pub log_buf: Vec<String>,
+    /// Local log ring buffer (base 8 entries; hardware stat later). Each
+    /// entry carries its severity level (trace=0 … error=4, docs/01).
+    pub log_buf: Vec<LogEntry>,
+    /// The environment (docs/01): engine-defined `key → int` policy slots
+    /// ([`ENV_KEYS`]). Survives restarts/faults/redeploys; dies with the
+    /// bot. Unset means the key's default.
+    pub env: BTreeMap<String, i64>,
     pub xp_mining: u64,
     pub xp_hauling: u64,
     pub xp_combat: u64,
@@ -190,30 +195,67 @@ impl Bot {
         self.vm.as_ref().is_some_and(|vm| vm.in_handler_init())
     }
 
-    /// Is the running handler an engine default?
+    /// Is the running window FACTORY contents?
     pub fn in_default_handler(&self) -> bool {
         self.vm.as_ref().is_some_and(|vm| vm.handler_is_default())
     }
 
-    /// Engine-default handler source for a handler kind ("signal" or
-    /// "death"), if installed.
+    /// Did this bot exit through the abort sequence? (The skull cloud.)
+    pub fn aborted(&self) -> bool {
+        self.vm.as_ref().is_some_and(|vm| vm.aborted())
+    }
+
+    /// The factory window source for a signal name, if installed.
     pub fn default_handler_source(&self, which: &str) -> Option<&str> {
-        use pyrite::ast::SignalKind;
-        let kind = match which {
-            "signal" => SignalKind::Signal,
-            "death" => SignalKind::Death,
-            _ => return None,
-        };
+        let kind = pyrite::ast::SignalKind::ALL
+            .into_iter()
+            .find(|k| k.name() == which)?;
         self.vm.as_ref().and_then(|vm| vm.default_handler(kind)).map(|d| d.source.as_str())
     }
 
-    /// (handler name, source line if the program installed one) — the two
-    /// handler kinds, inspector-ready.
-    pub fn handler_summary(&self) -> [(&'static str, Option<u32>); 2] {
-        use pyrite::ast::SignalKind;
-        let line = |kind| self.vm.as_ref().and_then(|vm| vm.handler_line(kind));
-        [("signal", line(SignalKind::Signal)), ("death", line(SignalKind::Death))]
+    /// (signal name, source line if the program wrote that window) — all
+    /// five player windows, inspector-ready.
+    pub fn handler_summary(&self) -> [(&'static str, Option<u32>); 5] {
+        pyrite::ast::SignalKind::ALL.map(|kind| {
+            (kind.name(), self.vm.as_ref().and_then(|vm| vm.handler_line(kind)))
+        })
     }
+}
+
+/// One local log line: (severity level, text). Levels are trace=0 …
+/// error=4 (docs/01); entries below the bot's `log_min_level` env are
+/// discarded at the call.
+pub type LogEntry = (u8, String);
+
+/// One engine-defined environment key (docs/01 "The Environment"): a
+/// bounded int policy slot. `hurt_line`'s default lives in tuning
+/// (`hurt_line_pct`) — the registry row's `default` is ignored for it so
+/// the number stays in a data file; see [`crate::sim::Sim::env_read`].
+pub struct EnvKey {
+    pub name: &'static str,
+    pub default: i64,
+    pub min: i64,
+    pub max: i64,
+}
+
+/// The v1 key set — grows like the function catalog.
+pub const ENV_KEYS: &[EnvKey] = &[
+    EnvKey { name: "hurt_line", default: 50, min: 1, max: 99 },
+    EnvKey { name: "log_min_level", default: 0, min: 0, max: 4 },
+];
+
+/// Read an env key with defaulting (docs/01: `getenv` never faults on an
+/// unset key — unset means default). `hurt_line`'s live default is the
+/// tuning value (`hurt_line_pct`), passed in so the number keeps living
+/// in the data file; other keys default from the registry row.
+pub fn env_read(env: &BTreeMap<String, i64>, key: &str, hurt_line_default: i64) -> i64 {
+    if let Some(v) = env.get(key) {
+        return *v;
+    }
+    if key == "hurt_line" {
+        return hurt_line_default;
+    }
+    ENV_KEYS.iter().find(|k| k.name == key).map(|k| k.default).unwrap_or(0)
 }
 
 /// A player-designated terraform site (docs/05): the player places it
@@ -231,22 +273,29 @@ pub enum BlueprintKind {
     Bridge,
 }
 
-/// A disabled bot awaiting rescue/salvage (countdown comes later).
+/// A disabled bot awaiting rescue/salvage (countdown comes later). The
+/// logs and env snapshot ride along — they become the Black Box when the
+/// countdown expires (M10).
 #[derive(Debug, Clone, PartialEq)]
 pub struct Wreck {
     pub pos: TilePos,
     pub cargo: u32,
-    pub logs: Vec<String>,
+    pub logs: Vec<LogEntry>,
+    /// Env snapshot at the moment of disablement (Q58: exact runtime
+    /// values are read on murder — the game's oldest intel rule).
+    pub env: BTreeMap<String, i64>,
 }
 
-/// Dropped by every destruction (docs/02-agents.md): logs + cause.
+/// Dropped by every destruction (docs/02-agents.md): the local log buffer
+/// at the moment of destruction, the cause, and the env snapshot (Q58).
 #[derive(Debug, Clone, PartialEq)]
 pub struct BlackBox {
     pub tick: u64,
     pub bot: BotId,
     pub pos: TilePos,
     pub cause: String,
-    pub logs: Vec<String>,
+    pub logs: Vec<LogEntry>,
+    pub env: BTreeMap<String, i64>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -262,6 +311,8 @@ pub struct ArchiveEntry {
     pub tick: u64,
     pub bot: BotId,
     pub kind: ArchiveKind,
+    /// Severity (trace=0 … error=4); crash dumps archive at error.
+    pub level: u8,
     pub line: u32,
     pub text: String,
 }

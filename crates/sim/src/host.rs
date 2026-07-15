@@ -22,8 +22,7 @@ pub fn builtin_doc<'c>(costs: &'c pyrite::CostTable, name: &str) -> Option<&'c p
 pub struct BotHost<'a> {
     pub world: &'a mut World,
     pub bot: BotId,
-    /// Duration of the forced handler-entry wait (from Tuning).
-    pub tuning_handler_init_ticks: u32,
+    pub tuning: &'a crate::sim::Tuning,
 }
 
 impl BotHost<'_> {
@@ -89,9 +88,12 @@ impl pyrite::Host for BotHost<'_> {
                 HostCall::Ready(Value::Bool(data.cargo >= data.cargo_cap))
             }
             "health_low" => {
+                // "Low" = below the bot's own hurt_line env (read live at
+                // each evaluation — moving it mid-flight is legal).
                 let data = &self.world.bots[&bot_id].data;
-                // "Low" = below the Damaged threshold (50%).
-                HostCall::Ready(Value::Bool(data.hp * 2 < data.max_hp))
+                let line =
+                    crate::world::env_read(&data.env, "hurt_line", self.tuning.hurt_line_pct);
+                HostCall::Ready(Value::Bool(data.hp * 100 < data.max_hp * line))
             }
             "last_error" => {
                 // The fault's identity constant (err_type, err_action, ...)
@@ -112,7 +114,7 @@ impl pyrite::Host for BotHost<'_> {
             // The forced handler-entry ritual: an engine wait the VM
             // injects at every unified-handler entry (the flinch).
             "handler_init" => {
-                let ticks = self.tuning_handler_init_ticks;
+                let ticks = self.tuning.handler_init_ticks;
                 if ticks == 0 {
                     HostCall::Ready(Value::Unit)
                 } else {
@@ -171,32 +173,101 @@ impl pyrite::Host for BotHost<'_> {
 
             // --- logging (docs/01: ordinary costed functions) ---
             "log" => {
-                // Registry signature: log(val, level=info). Levels get
-                // semantics in M3 (leveled buffers/filtering); until then
-                // the level argument is accepted and dropped.
+                // Registry signature: log(val, level=info) — the VM sends
+                // the canonical positional form. Entries below the bot's
+                // `log_min_level` env are discarded before they consume a
+                // slot (the call still cost its cycle).
                 let text = args.first().map(|v| v.to_string()).unwrap_or_default();
-                let buf = &mut self.world.bots.get_mut(&bot_id).expect("bot exists").data.log_buf;
-                if buf.len() >= LOG_BUFFER_CAP {
-                    buf.remove(0);
+                let level = match args.get(1) {
+                    Some(Value::Int(l)) if (0..=4).contains(l) => *l as u8,
+                    None => 2, // info
+                    Some(other) => {
+                        return HostCall::Fault(Fault::new(
+                            faults::RANGE,
+                            format!("log: level must be trace..error, got {other}"),
+                        ));
+                    }
+                };
+                let min_level = crate::world::env_read(
+                    &self.world.bots[&bot_id].data.env,
+                    "log_min_level",
+                    self.tuning.hurt_line_pct,
+                );
+                if (level as i64) >= min_level {
+                    let buf =
+                        &mut self.world.bots.get_mut(&bot_id).expect("bot exists").data.log_buf;
+                    if buf.len() >= LOG_BUFFER_CAP {
+                        buf.remove(0);
+                    }
+                    buf.push((level, text));
                 }
-                buf.push(text);
                 HostCall::Ready(Value::Unit)
             }
             "upload_log" => {
                 let logs = std::mem::take(
                     &mut self.world.bots.get_mut(&bot_id).expect("bot exists").data.log_buf,
                 );
-                for text in logs {
+                for (level, text) in logs {
                     self.world.archive.push(ArchiveEntry {
                         tick,
                         bot: bot_id,
                         kind: ArchiveKind::Log,
+                        level,
                         line: ctx.line,
                         text,
                     });
                 }
                 HostCall::Ready(Value::Unit)
             }
+
+            // --- the environment (docs/01: policy, never stats) ---
+            "setenv" => match args {
+                [Value::Str(key), Value::Int(value)] => {
+                    let Some(spec) =
+                        crate::world::ENV_KEYS.iter().find(|k| k.name == key.as_str())
+                    else {
+                        return HostCall::Fault(Fault::new(
+                            faults::KEY,
+                            format!("setenv: unknown env key {key:?} (keys are engine-defined)"),
+                        ));
+                    };
+                    if *value < spec.min || *value > spec.max {
+                        return HostCall::Fault(Fault::new(
+                            faults::RANGE,
+                            format!(
+                                "setenv: {key} must be in {}..={}, got {value}",
+                                spec.min, spec.max
+                            ),
+                        ));
+                    }
+                    let bot = self.world.bots.get_mut(&bot_id).expect("bot exists");
+                    bot.data.env.insert(key.clone(), *value);
+                    HostCall::Ready(Value::Unit)
+                }
+                _ => HostCall::Fault(Fault::new(
+                    faults::TYPE,
+                    "setenv takes (key, int) — e.g. setenv(hurt_line, 30)",
+                )),
+            },
+            "getenv" => match args {
+                // Never faults on an unset key — unset means default. An
+                // unknown key is still err_key (a typo, not a policy).
+                [Value::Str(key)] => {
+                    if !crate::world::ENV_KEYS.iter().any(|k| k.name == key.as_str()) {
+                        return HostCall::Fault(Fault::new(
+                            faults::KEY,
+                            format!("getenv: unknown env key {key:?}"),
+                        ));
+                    }
+                    let value = crate::world::env_read(
+                        &self.world.bots[&bot_id].data.env,
+                        key,
+                        self.tuning.hurt_line_pct,
+                    );
+                    HostCall::Ready(Value::Int(value))
+                }
+                _ => HostCall::Fault(Fault::new(faults::TYPE, "getenv takes an env key")),
+            },
             "upload_crash_dump" => {
                 // Force-called on unhandled faults; also player-callable.
                 let msg = match args {
@@ -207,6 +278,7 @@ impl pyrite::Host for BotHost<'_> {
                     tick,
                     bot: bot_id,
                     kind: ArchiveKind::CrashDump,
+                    level: 4, // crash dumps archive at error severity
                     line: ctx.line,
                     text: msg,
                 });
@@ -239,17 +311,24 @@ mod tests {
     #[test]
     fn registry_documents_every_host_builtin() {
         let costs = pyrite::CostTable::default();
-        // Every builtin this host implements must have a registry entry —
-        // the editor shows its signature, summary, and live cost from there.
+        // Every PLAYER-CALLABLE builtin this host implements must have a
+        // registry entry — the editor shows its signature, summary, and
+        // live cost from there. become_disabled is deliberately absent:
+        // engine-only (Q76), reachable solely through abort's forced
+        // sequence; an unregistered player call faults err_unknown_function.
         for name in [
             "closest", "exists", "cargo_full", "health_low", "last_error", "move_to",
             "mine", "wait", "rng", "build", "deposit", "attack", "log", "upload_log",
-            "upload_crash_dump", "become_disabled", "handler_init",
+            "upload_crash_dump", "handler_init", "setenv", "getenv", "abort",
         ] {
             let spec = builtin_doc(&costs, name)
                 .unwrap_or_else(|| panic!("{name} implemented but missing from builtins.ron"));
             assert!(!spec.signature.is_empty(), "{name} needs a signature");
             assert!(!spec.summary.is_empty(), "{name} needs a summary");
         }
+        assert!(
+            builtin_doc(&costs, "become_disabled").is_none(),
+            "become_disabled must stay off the player registry (engine-only, Q76)"
+        );
     }
 }

@@ -162,21 +162,48 @@ pub struct EnumDecl {
     pub line: u32,
 }
 
+/// The five signals with player-editable windows (docs/01 reserved handler
+/// templates). `abort` and `recall` are fully engine-reserved — zero-size
+/// windows, so no `on abort:`/`on recall:` exists and no variant here.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum SignalKind {
-    /// The ONE unified handler: every problem (fault, bump, bumped, hurt)
-    /// arrives here as a `Signal` enum value the body can `match` on.
-    Signal,
-    /// Death keeps its own tiny handler: the black-box budget can't afford
-    /// the unified entry ritual — the explosion doesn't wait.
-    Death,
+    /// Any runtime fault. Factory window: `upload_crash_dump()`.
+    Error,
+    /// HP crossed below the `hurt_line` env value (edge-triggered).
+    Hurt,
+    /// This bot rammed an occupied tile. Factory window: the at-fault stun.
+    Bump,
+    /// Something rammed this bot.
+    Bumped,
+    /// Print / rescue / recall re-coloring completed — the bot's dotfile.
+    Boot,
 }
 
+impl SignalKind {
+    pub fn name(self) -> &'static str {
+        match self {
+            SignalKind::Error => "error",
+            SignalKind::Hurt => "hurt",
+            SignalKind::Bump => "bump",
+            SignalKind::Bumped => "bumped",
+            SignalKind::Boot => "boot",
+        }
+    }
+
+    pub const ALL: [SignalKind; 5] = [
+        SignalKind::Error,
+        SignalKind::Hurt,
+        SignalKind::Bump,
+        SignalKind::Bumped,
+        SignalKind::Boot,
+    ];
+}
+
+/// One `on <signal>:` window — the editable middle of that signal's
+/// reserved template. The forced prologue/epilogue never appear in source.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Handler {
     pub kind: SignalKind,
-    /// `on signal(s):` — the name the incoming Signal value is bound to.
-    pub binding: Option<String>,
     pub body: Block,
     pub line: u32,
 }

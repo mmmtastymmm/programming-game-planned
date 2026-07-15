@@ -344,7 +344,7 @@ impl<'a> Parser<'a> {
 
     /// `import m` — makes qualified `m.f()` calls resolvable.
     fn parse_import(&mut self) -> Result<(), PyriteError> {
-        self.require(Construct::Functions)?;
+        self.require(Construct::Import)?;
         let import_tok = self.expect(Tok::Import, "import")?;
         let name = self.expect_ident("module name")?;
         if !self.program.modules.contains(&name) {
@@ -361,7 +361,7 @@ impl<'a> Parser<'a> {
 
     /// `from m import f, g` — binds the named functions bare.
     fn parse_from_import(&mut self) -> Result<(), PyriteError> {
-        self.require(Construct::Functions)?;
+        self.require(Construct::Import)?;
         let from_tok = self.expect(Tok::From, "from")?;
         let module = self.expect_ident("module name")?;
         if !self.program.modules.contains(&module) {
@@ -413,19 +413,18 @@ impl<'a> Parser<'a> {
 
     fn parse_handler(&mut self) -> Result<(), PyriteError> {
         let on_tok = self.expect(Tok::On, "on")?;
-        let which = self.expect_ident("handler name (signal or death)")?;
+        let which = self.expect_ident("signal name (error/hurt/bump/bumped/boot)")?;
+        // The five player windows (docs/01). `abort` and `recall` are fully
+        // engine-reserved — writing them is the same error as a typo.
         let (kind, construct) = match which.as_str() {
-            "signal" => (SignalKind::Signal, Construct::OnSignal),
-            "death" => (SignalKind::Death, Construct::OnDeath),
-            _ => return Err(self.unexpected("signal or death")),
+            "error" => (SignalKind::Error, Construct::OnError),
+            "hurt" => (SignalKind::Hurt, Construct::OnHurt),
+            "bump" => (SignalKind::Bump, Construct::OnBumpBumped),
+            "bumped" => (SignalKind::Bumped, Construct::OnBumpBumped),
+            "boot" => (SignalKind::Boot, Construct::OnBoot),
+            _ => return Err(self.unexpected("error, hurt, bump, bumped, or boot")),
         };
         self.require(construct)?;
-        // `on signal(s):` binds the incoming Signal value.
-        let mut binding = None;
-        if kind == SignalKind::Signal && self.eat(&Tok::LParen) {
-            binding = Some(self.expect_ident("binding name")?);
-            self.expect(Tok::RParen, ")")?;
-        }
         if self.program.handlers.contains_key(&kind) {
             return Err(PyriteError {
                 line: on_tok.line,
@@ -435,9 +434,7 @@ impl<'a> Parser<'a> {
         }
         self.expect(Tok::Colon, ":")?;
         let body = self.parse_block(false)?;
-        self.program
-            .handlers
-            .insert(kind, Handler { kind, binding, body, line: on_tok.line });
+        self.program.handlers.insert(kind, Handler { kind, body, line: on_tok.line });
         Ok(())
     }
 

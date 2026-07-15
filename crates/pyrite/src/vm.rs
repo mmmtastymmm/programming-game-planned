@@ -94,33 +94,40 @@ pub enum Outcome {
     Paused,
     /// Waiting on a world action; call `resolve_action` when it finishes.
     Blocked,
-    /// Death handler finished (or no handler): `become_disabled()` was
-    /// force-called. The bot is a wreck; the VM is inert.
+    /// Abort completed: `upload_log()` + `become_disabled()` were
+    /// force-called. The bot is a wreck; the VM is inert. There is no
+    /// instant-destroy outcome — every downed bot exits through abort
+    /// (docs/01: explosion is only the wreck countdown expiring).
     Dead,
-    /// Double handle. The bot is destroyed instantly: no wreck, no black box.
-    Exploded,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RaiseOutcome {
-    /// Handler entered; `run` will execute it.
+    /// Template entered; `run` will execute it.
     Handled,
-    /// No handler installed for this signal; nothing happened.
+    /// The VM is already inert (dead) — nothing happened.
     Ignored,
-    /// Double handle: signal arrived while a handler / interrupt was active.
-    Exploded,
-    /// Death with no handler: `become_disabled()` force-called immediately.
-    Died,
+    /// The signal was (or forced) an abort: the reserved `upload_log()` +
+    /// `become_disabled()` sequence ran to completion. The bot is a wreck.
+    Aborted,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Signal {
+    /// HP crossed the `hurt_line`.
     Hurt,
-    Death,
     /// This bot rammed something.
     Bump,
     /// Something rammed this bot.
     Bumped,
+    /// Printer rebalancing / over-capacity scrap. Fully engine-reserved:
+    /// the sim drives the walk home; the VM only records the interrupt
+    /// context (double-handle applies all the way home).
+    Recall,
+    /// HP hit 0, a deliberate `abort()` call, or a double-handle. Fully
+    /// engine-reserved: the forced sequence always completes and cannot
+    /// itself be interrupted.
+    Abort,
 }
 
 impl Signal {
@@ -129,11 +136,11 @@ impl Signal {
     /// bump** — the highest enters its template, the rest are dropped,
     /// and co-arrival is NOT a double-handle (that needs a template
     /// already *running*). `error` is synchronous (raised inside the op,
-    /// never queued) and `abort`/`recall` land with M3; until then Death
-    /// holds the engine-reserved top tier. Gaps left for the M3 ranks.
+    /// never queued) — its rank, 5, sits between abort and recall.
     pub fn severity(self) -> u8 {
         match self {
-            Signal::Death => 6, // the abort tier, pre-M3
+            Signal::Abort => 6,
+            Signal::Recall => 4,
             Signal::Hurt => 3,
             Signal::Bumped => 2,
             Signal::Bump => 1,
@@ -144,7 +151,10 @@ impl Signal {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Phase {
     Main,
-    Handler(SignalKind),
+    /// Inside a signal's reserved template (prologue or window — the five
+    /// player-window signals only; abort runs synchronously and recall is
+    /// an engine context, so neither appears here).
+    Template(SignalKind),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -152,7 +162,40 @@ enum State {
     Running,
     Blocked,
     Dead,
-    Exploded,
+}
+
+/// The engine-driven interrupt contexts (docs/07's run states that live
+/// outside the VM's own execution): set by the sim, participating in the
+/// double-handle rule exactly like a running template.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EngineCtx {
+    /// Boot countdown / boot template pending.
+    Boot,
+    /// The recall walk home.
+    Recall,
+    /// Sitting on an Upgrade-Station pad (lands with M5).
+    PadSit,
+}
+
+/// The public run-state view — docs/07's shape. A projection over the
+/// VM's internals for the sim, tests, and the renderer's thought clouds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RunState {
+    Running,
+    /// Inside the error template (docs/07 lists `Faulted { error }`
+    /// separately from the other templates; the payload is `last_error`).
+    Faulted,
+    /// Parked on a world action (the channel variant lands with M11).
+    Blocked,
+    /// Inside a non-error signal template. `flinching` = still in the
+    /// forced `handler_init()` prologue.
+    Template { signal: SignalKind, flinching: bool },
+    Boot,
+    /// The recall walk home (engine-owned).
+    Recall,
+    PadSit,
+    /// Aborted: the VM is inert, the bot is a wreck.
+    Disabled,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -163,15 +206,15 @@ pub struct VmConfig {
     /// Read-only fallback below globals — assignments shadow them, and they
     /// survive the reset after a fault (globals don't).
     pub constants: BTreeMap<String, Value>,
-    /// Engine default handlers, as REAL Pyrite programs: when a signal has
-    /// no player handler, the VM runs the default's body on this same VM —
-    /// visible, line-highlighted, costed like any code. Empty by default
-    /// (the host installs them); absent kinds fall back to the built-in
-    /// hard behaviors (crash dump / become_disabled / ignore).
+    /// FACTORY WINDOW contents per signal (docs/01): the engine default
+    /// that fills a window the player hasn't written, as REAL Pyrite —
+    /// visible, line-highlighted, costed, replaceable. A missing entry
+    /// means an empty factory window: the template still runs (prologue
+    /// flinch included); there is just nothing in the middle.
     pub default_handlers: BTreeMap<SignalKind, DefaultHandler>,
 }
 
-/// A default handler: its source (for inspectors) and parsed program.
+/// A factory window: its source (for inspectors) and parsed program.
 #[derive(Debug, Clone)]
 pub struct DefaultHandler {
     pub source: String,
@@ -261,20 +304,20 @@ pub struct Vm {
     /// this negative — that is cycle debt, repaid before the next op runs.
     budget: i64,
     phase: Phase,
-    /// Is the running handler an engine default? Defaults are HUMBLE:
-    /// a new signal interrupts them instead of double-handling.
+    /// Is the running window FACTORY contents? Factory code is not armor:
+    /// faults there still count as crashes, and (like any template code)
+    /// a signal landing on it is a double-handle → abort (Q50 — the old
+    /// humble-defaults carve-out is gone).
     handler_is_default: bool,
-    /// Which signal the running handler is serving ("error" / "hurt" /
-    /// "bump" / "bumped" / "death") — for inspectors and mood clouds.
-    handler_signal: Option<&'static str>,
-    /// True from handler entry until the forced handler_init() resolves —
+    /// True from template entry until the forced handler_init() resolves —
     /// the visible flinch window.
     handler_init_active: bool,
-    /// Remaining black-box budget while in the death handler (centicycles).
-    death_budget: i64,
-    /// Set by the sim during Boot / Recall — an interrupt context for the
-    /// double-handle rule.
-    engine_interrupt: bool,
+    /// Set by the sim during Boot / the recall walk / a pad-sit — an
+    /// engine-owned interrupt context for the double-handle rule.
+    engine_ctx: Option<EngineCtx>,
+    /// The abort sequence ran (the distinct skull-cloud tell, and how the
+    /// sim distinguishes an aborted wreck from a dev-killed one).
+    aborted: bool,
     state: State,
     current_line: u32,
     last_fault: Option<String>,
@@ -305,10 +348,9 @@ impl Vm {
             budget: 0,
             phase: Phase::Main,
             handler_is_default: false,
-            handler_signal: None,
             handler_init_active: false,
-            death_budget: 0,
-            engine_interrupt: false,
+            engine_ctx: None,
+            aborted: false,
             state: State::Running,
             current_line: 0,
             last_fault: None,
@@ -376,7 +418,7 @@ impl Vm {
         self.state == State::Blocked
     }
 
-    /// Is the currently running handler an engine default?
+    /// Is the currently running window FACTORY contents?
     pub fn handler_is_default(&self) -> bool {
         self.phase != Phase::Main && self.handler_is_default
     }
@@ -386,27 +428,51 @@ impl Vm {
         self.phase != Phase::Main && self.handler_init_active
     }
 
-    /// Name of the signal the running handler is serving, if any.
+    /// Name of the signal whose template is running, if any.
     pub fn active_signal(&self) -> Option<&'static str> {
-        if self.phase == Phase::Main {
-            None
-        } else {
-            self.handler_signal
+        match self.phase {
+            Phase::Main => None,
+            Phase::Template(kind) => Some(kind.name()),
         }
     }
 
-    /// The engine default handler for `kind` (source + program), if the
-    /// host installed one.
+    /// Did this VM exit through the abort sequence?
+    pub fn aborted(&self) -> bool {
+        self.aborted
+    }
+
+    /// The public run state — docs/07's shape (a projection; the sim's
+    /// thought clouds and tests switch on this, not on internals).
+    pub fn run_state(&self) -> RunState {
+        if self.state == State::Dead {
+            return RunState::Disabled;
+        }
+        match self.engine_ctx {
+            Some(EngineCtx::Boot) => return RunState::Boot,
+            Some(EngineCtx::Recall) => return RunState::Recall,
+            Some(EngineCtx::PadSit) => return RunState::PadSit,
+            None => {}
+        }
+        match self.phase {
+            Phase::Template(SignalKind::Error) => RunState::Faulted,
+            Phase::Template(signal) => {
+                RunState::Template { signal, flinching: self.handler_init_active }
+            }
+            Phase::Main if self.state == State::Blocked => RunState::Blocked,
+            Phase::Main => RunState::Running,
+        }
+    }
+
+    /// The factory window for `kind` (source + program), if the host
+    /// installed one. Absent = an empty window.
     pub fn default_handler(&self, kind: SignalKind) -> Option<&DefaultHandler> {
         self.config.default_handlers.get(&kind)
     }
 
-    /// Source line of the program's handler for `kind`, if installed.
+    /// Source line of the program's window for `kind`, if written.
     pub fn handler_line(&self, kind: SignalKind) -> Option<u32> {
         self.program.handlers.get(&kind).map(|h| h.line)
     }
-
-
 
     // --- sim-facing control ---
 
@@ -415,68 +481,75 @@ impl Vm {
         self.budget = self.budget.saturating_add(cycles as i64 * CENT);
     }
 
-    /// Mark the start/end of an engine interrupt context (Boot, Recall).
-    /// While set, any signal or fault is a double handle.
-    pub fn set_engine_interrupt(&mut self, active: bool) {
-        self.engine_interrupt = active;
+    /// Mark the start/end of an engine interrupt context (Boot, the recall
+    /// walk, a pad-sit). While set, any signal or fault is a double handle.
+    pub fn set_engine_ctx(&mut self, ctx: Option<EngineCtx>) {
+        self.engine_ctx = ctx;
     }
 
-    /// Enter a handler: player handlers index the main program's arena;
-    /// default handlers swap the active program to the default's. The
-    /// unified handler starts with a FORCED `handler_init()` call — the
-    /// engine's time punishment (the visible flinch) that no handler can
-    /// skip. Death is exempt: the black-box budget can't afford it.
-    fn enter_handler(
-        &mut self,
-        kind: SignalKind,
-        body: Vec<StmtId>,
-        default: bool,
-        signal_name: &'static str,
-        binding: Option<(String, Value)>,
-    ) {
+    /// Enter a signal's reserved template: forced prologue (the
+    /// `handler_init()` flinch no window can skip), then the window body —
+    /// the player's `on <signal>:` contents or the factory's. Boot's
+    /// template has a different prologue and enters via [`Vm::begin_boot`].
+    fn enter_template(&mut self, kind: SignalKind, body: Vec<StmtId>, factory: bool) {
         self.work = body.into_iter().rev().map(Work::Stmt).collect();
-        if kind == SignalKind::Signal {
-            self.work.push(Work::InitDone);
+        self.work.push(Work::InitDone);
+        self.work.push(Work::Discard);
+        self.work.push(Work::CallExec {
+            name: "handler_init".to_string(),
+            argc: 0,
+            kwargs: Vec::new(),
+            line: 0,
+        });
+        self.handler_init_active = true;
+        self.values.clear();
+        self.frames.clear();
+        self.phase = Phase::Template(kind);
+        self.handler_is_default = factory;
+    }
+
+    /// The window body for `kind`: the player's block if written, else the
+    /// factory contents, else empty. The bool is `factory`.
+    fn window_body(&mut self, kind: SignalKind) -> (Vec<StmtId>, bool) {
+        if let Some(handler) = self.program.handlers.get(&kind) {
+            let body = handler.body.clone();
+            self.active = Rc::clone(&self.program);
+            (body, false)
+        } else if let Some(default) = self.config.default_handlers.get(&kind) {
+            let program = Rc::clone(&default.program);
+            let body = program.body.clone();
+            self.active = program;
+            (body, true)
+        } else {
+            // No factory contents installed: an empty window. The template
+            // (and its prologue flinch) still runs.
+            self.active = Rc::clone(&self.program);
+            (Vec::new(), true)
+        }
+    }
+
+    /// Enter the Boot template: prologue — the forced `upload_log()` when
+    /// the local buffer is non-empty (the rescued veteran's automatic
+    /// incident report) — then the `on boot:` window (the dotfile), then
+    /// the main program from line 1 (the reset when the template ends).
+    /// The sim calls this as the boot countdown completes.
+    pub fn begin_boot(&mut self, upload_pending_log: bool) {
+        let (body, factory) = self.window_body(SignalKind::Boot);
+        self.work = body.into_iter().rev().map(Work::Stmt).collect();
+        if upload_pending_log {
             self.work.push(Work::Discard);
             self.work.push(Work::CallExec {
-                name: "handler_init".to_string(),
+                name: "upload_log".to_string(),
                 argc: 0,
                 kwargs: Vec::new(),
                 line: 0,
             });
-            self.handler_init_active = true;
         }
         self.values.clear();
         self.frames.clear();
-        if let Some((name, value)) = binding {
-            self.globals.insert(name, value);
-        }
-        self.phase = Phase::Handler(kind);
-        self.handler_is_default = default;
-        self.handler_signal = Some(signal_name);
-    }
-
-    /// The Signal enum value delivered to unified handlers.
-    fn signal_value(name: &'static str, fault: Option<&str>) -> Value {
-        let (variant, fields) = match name {
-            "error" => ("Error", vec![Value::Str(fault.unwrap_or("").to_string())]),
-            "hurt" => ("Hurt", vec![]),
-            "bump" => ("Bump", vec![]),
-            "bumped" => ("Bumped", vec![]),
-            other => (other, vec![]),
-        };
-        // Capitalized variant for non-error names.
-        let variant = match variant {
-            "Error" => "Error".to_string(),
-            v => {
-                let mut c = v.chars();
-                match c.next() {
-                    Some(first) => first.to_uppercase().collect::<String>() + c.as_str(),
-                    None => String::new(),
-                }
-            }
-        };
-        Value::Enum(EnumValue { enum_name: "Signal".to_string(), variant, fields })
+        self.phase = Phase::Template(SignalKind::Boot);
+        self.handler_is_default = factory;
+        self.handler_init_active = false;
     }
 
     /// Full reset: line 1, variables cleared. Used by the sim at boot.
@@ -487,14 +560,13 @@ impl Vm {
         }
         self.active = Rc::clone(&self.program);
         self.handler_is_default = false;
-        self.handler_signal = None;
         self.handler_init_active = false;
         self.work = Self::block_work(&self.program.body.clone());
         self.values.clear();
         self.frames.clear();
         self.globals.clear();
         self.phase = Phase::Main;
-        if self.state != State::Dead && self.state != State::Exploded {
+        if self.state != State::Dead {
             self.state = State::Running;
         }
     }
@@ -518,78 +590,72 @@ impl Vm {
         }
     }
 
-    /// Deliver an external signal (hurt / death).
+    /// Deliver an external signal at an op boundary. Every signal enters
+    /// its reserved template — there is no "unhandled": an unwritten
+    /// window runs its factory contents (or nothing), but the sandwich
+    /// (prologue flinch included) always runs. A signal landing while ANY
+    /// template phase or engine context is active is a double-handle →
+    /// abort, factory contents included (Q50 — no humble carve-out).
     pub fn raise(
         &mut self,
         signal: Signal,
         host: &mut dyn Host,
         costs: &CostTable,
     ) -> RaiseOutcome {
-        if matches!(self.state, State::Dead | State::Exploded) {
+        if self.state == State::Dead {
+            // Inert (aborted bots absorb everything — the forced sequence
+            // already completed; nothing can interrupt what's finished).
             return RaiseOutcome::Ignored;
         }
-        if self.engine_interrupt {
-            self.state = State::Exploded;
-            return RaiseOutcome::Exploded;
+        if signal == Signal::Abort {
+            self.abort(host, costs);
+            return RaiseOutcome::Aborted;
         }
-        if self.phase != Phase::Main {
-            if !self.handler_is_default {
-                // Double handle: YOUR handler claimed the bot.
-                self.state = State::Exploded;
-                return RaiseOutcome::Exploded;
-            }
-            // Engine defaults are humble: the new signal interrupts the
-            // default response and is processed fresh below.
+        if self.engine_ctx.is_some() || self.phase != Phase::Main {
+            self.abort(host, costs);
+            return RaiseOutcome::Aborted;
         }
-        let (kind, name) = match signal {
-            Signal::Hurt => (SignalKind::Signal, "hurt"),
-            Signal::Bump => (SignalKind::Signal, "bump"),
-            Signal::Bumped => (SignalKind::Signal, "bumped"),
-            Signal::Death => (SignalKind::Death, "death"),
+        if signal == Signal::Recall {
+            // Fully engine-reserved: the sim drives the walk home; the VM
+            // records the interrupt context so the double-handle rule
+            // holds all the way to the printer.
+            self.engine_ctx = Some(EngineCtx::Recall);
+            self.state = State::Running;
+            return RaiseOutcome::Handled;
+        }
+        let kind = match signal {
+            Signal::Hurt => SignalKind::Hurt,
+            Signal::Bump => SignalKind::Bump,
+            Signal::Bumped => SignalKind::Bumped,
+            Signal::Abort | Signal::Recall => unreachable!("handled above"),
         };
-        if let Some(handler) = self.program.handlers.get(&kind) {
-            // Player handler: abandon any pending action (the sim cancels
-            // the world side); only now is un-blocking sound.
-            self.state = State::Running;
-            let body = handler.body.clone();
-            let binding = handler
-                .binding
-                .clone()
-                .map(|b| (b, Self::signal_value(name, None)));
-            self.enter_handler(kind, body, false, name, binding);
-            if kind == SignalKind::Death {
-                self.death_budget = costs.blackbox_budget as i64 * CENT;
-            }
-            return RaiseOutcome::Handled;
+        // Entering a template abandons any pending action (the sim cancels
+        // the world side); only now is un-blocking sound.
+        self.state = State::Running;
+        let (body, factory) = self.window_body(kind);
+        self.enter_template(kind, body, factory);
+        RaiseOutcome::Handled
+    }
+
+    /// The fully reserved abort sequence (docs/01): forced `upload_log()`
+    /// then `become_disabled()`, as ordinary registry functions — charged
+    /// as debt (the budget may go negative; the sequence never waits) and
+    /// un-interruptible (it runs to completion synchronously; the VM is
+    /// inert afterwards, absorbing anything that arrives later).
+    fn abort(&mut self, host: &mut dyn Host, costs: &CostTable) {
+        if self.aborted || self.state == State::Dead {
+            return;
         }
-        if let Some(default) = self.config.default_handlers.get(&kind) {
-            // Engine default: real Pyrite, watchable and costed. Defaults
-            // always see the signal as `s`.
-            self.state = State::Running;
-            let program = Rc::clone(&default.program);
-            let body = program.body.clone();
-            self.active = program;
-            let binding = Some(("s".to_string(), Self::signal_value(name, None)));
-            self.enter_handler(kind, body, true, name, binding);
-            if kind == SignalKind::Death {
-                self.death_budget = costs.blackbox_budget as i64 * CENT;
-            }
-            return RaiseOutcome::Handled;
-        }
-        match signal {
-            Signal::Hurt | Signal::Bump | Signal::Bumped => {
-                // No handler at all: nothing happens — and critically, a
-                // Blocked VM STAYS blocked (its pending action result is
-                // still owed; un-blocking would desync the stacks).
-                RaiseOutcome::Ignored
-            }
-            Signal::Death => {
-                // No death handler: straight to the forced call.
-                let _ = host.call("become_disabled", &[], self.ctx());
-                self.state = State::Dead;
-                RaiseOutcome::Died
-            }
-        }
+        self.aborted = true;
+        let upload_cost = costs.builtin_charge("upload_log", &[], host.log_len());
+        self.budget -= upload_cost as i64 * CENT;
+        let _ = host.call("upload_log", &[], self.ctx());
+        let _ = host.call("become_disabled", &[], self.ctx());
+        self.work.clear();
+        self.phase = Phase::Main;
+        self.handler_is_default = false;
+        self.handler_init_active = false;
+        self.state = State::Dead;
     }
 
     /// Step until the budget runs out, an action blocks, or the bot dies.
@@ -598,18 +664,14 @@ impl Vm {
             match self.state {
                 State::Blocked => return Outcome::Blocked,
                 State::Dead => return Outcome::Dead,
-                State::Exploded => return Outcome::Exploded,
                 State::Running => {}
             }
 
             let Some(top) = self.work.last() else {
                 match self.phase {
-                    Phase::Handler(SignalKind::Death) => {
-                        self.finish_death(host);
-                        return Outcome::Dead;
-                    }
-                    Phase::Handler(_) => {
-                        // Handler completed: restart from line 1, full reset.
+                    Phase::Template(_) => {
+                        // Template completed: restart from line 1, full
+                        // reset (every window "exits via restart").
                         self.reset();
                         continue;
                     }
@@ -639,18 +701,10 @@ impl Vm {
             };
 
             let cost = self.cost_of(top, costs, &*host) as i64 * CENT;
-            if self.phase == Phase::Handler(SignalKind::Death) && self.death_budget < cost {
-                // Black-box budget spent: the explosion doesn't wait.
-                self.finish_death(host);
-                return Outcome::Dead;
-            }
             if self.budget < cost {
                 return Outcome::Paused;
             }
             self.budget -= cost;
-            if self.phase == Phase::Handler(SignalKind::Death) {
-                self.death_budget -= cost;
-            }
 
             let work = self.work.pop().expect("checked non-empty above");
             self.execute(work, host, costs);
@@ -756,55 +810,47 @@ impl Vm {
         }
     }
 
-    /// The unified fault path (docs/01-language.md "Errors & Signals").
+    /// The fault path: synchronous entry into the error template
+    /// (docs/01 "Errors & Signals"; error ranks right after abort in the
+    /// severity order because it happened *inside* the op).
     fn fault(&mut self, id: &'static str, msg: String, host: &mut dyn Host, costs: &CostTable) {
         self.last_fault = Some(msg.clone());
         self.last_fault_id = Some(id);
         self.fault_count += 1;
-        if self.engine_interrupt || (self.phase != Phase::Main && !self.handler_is_default) {
-            // Double handle — including a fault inside `on death:`. Faults
-            // inside an engine DEFAULT are not yours; they fall through to
-            // fresh handling below (humble defaults).
-            self.state = State::Exploded;
+        if self.engine_ctx.is_some() || self.phase != Phase::Main {
+            // A fault inside ANY template — your window, factory contents,
+            // a forced line — or an engine context is a double-handle →
+            // abort (Q50: no humble carve-out; factory contents double-
+            // handle like player code).
+            self.abort(host, costs);
             return;
         }
-        if let Some(handler) = self.program.handlers.get(&SignalKind::Signal) {
-            // Trap: pay the (cheap) trap cost, run the handler as normal
-            // code. Variables preserved; work/values cleared.
-            let body = handler.body.clone();
-            let binding = handler
-                .binding
-                .clone()
-                .map(|b| (b, Self::signal_value("error", Some(&msg))));
+        if self.program.handlers.contains_key(&SignalKind::Error)
+            || self.config.default_handlers.contains_key(&SignalKind::Error)
+        {
+            // Trap: pay the (cheap) trap cost, enter the error template.
+            // Variables preserved while it runs; cleared on the exit
+            // restart. Factory contents are not armor: a crash landing in
+            // them still counts (the sim chips the chassis per crash).
             self.budget -= costs.trap_cost as i64 * CENT;
-            self.active = Rc::clone(&self.program);
-            self.enter_handler(SignalKind::Signal, body, false, "error", binding);
-        } else if let Some(default) = self.config.default_handlers.get(&SignalKind::Signal) {
-            // Engine default as real code: the crash-dump program runs on
-            // this VM, watchable line by line. Still counts as a crash
-            // (fault damage keys off crash_count — handlers are armor,
-            // defaults are not).
-            self.crash_count += 1;
-            let program = Rc::clone(&default.program);
-            let body = program.body.clone();
-            self.active = program;
-            let binding = Some(("s".to_string(), Self::signal_value("error", Some(&msg))));
-            self.enter_handler(SignalKind::Signal, body, true, "error", binding);
+            let (body, factory) = self.window_body(SignalKind::Error);
+            if factory {
+                self.crash_count += 1;
+            }
+            self.enter_template(SignalKind::Error, body, factory);
         } else {
-            // No default configured (bare VM): the hard fallback.
+            // No factory installed (bare VM, tests): the hard fallback —
+            // dump and restart without the template machinery.
             self.crash_count += 1;
             self.budget -= costs.crash_dump as i64 * CENT;
-            let ctx =
-                CallCtx { line: self.current_line, last_fault: Some(msg.as_str()), last_fault_id: Some(id) };
+            let ctx = CallCtx {
+                line: self.current_line,
+                last_fault: Some(msg.as_str()),
+                last_fault_id: Some(id),
+            };
             let _ = host.call("upload_crash_dump", &[Value::Str(msg.clone())], ctx);
             self.reset();
         }
-    }
-
-    fn finish_death(&mut self, host: &mut dyn Host) {
-        // Every death exits through the forced ordinary function.
-        let _ = host.call("become_disabled", &[], self.ctx());
-        self.state = State::Dead;
     }
 
     fn lookup(&self, name: &str) -> Option<Value> {
@@ -1227,6 +1273,11 @@ impl Vm {
                     let body = func.body.clone();
                     self.work.push(Work::FrameEnd);
                     self.push_block(&body);
+                } else if name == "abort" {
+                    // The player scuttle (Q76) — the ONLY deliberate way
+                    // down. Runs the fully reserved sequence right here;
+                    // nothing after this call ever executes.
+                    self.abort(host, costs);
                 } else if !kwpairs.is_empty() && costs.spec(&name).is_none_or(|s| s.params.is_none()) {
                     // Keywords need a declared parameter list to bind against.
                     self.fault(

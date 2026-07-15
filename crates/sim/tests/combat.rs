@@ -1,5 +1,5 @@
-//! Combat + signal wiring: damage, hurt/death handlers, double-handle,
-//! black boxes, XP from fighting (docs/01-language.md, docs/02-agents.md).
+//! Combat + signal wiring: damage, hurt windows, the double-handle →
+//! abort rule, forced log uploads, XP from fighting (docs/01, docs/02).
 
 use sim::map::MapSpec;
 use sim::sim::{Command, Sim};
@@ -48,7 +48,7 @@ fn attacker_kills_defenseless_bot_into_wreck() {
 #[test]
 fn hurt_handler_fires_below_default_threshold() {
     let victim_src = "\
-on signal(s):
+on hurt:
     log(\"ouch\")
     upload_log()
 
@@ -78,16 +78,13 @@ log(1)
 
 
 #[test]
-fn death_handler_files_black_box_report_then_wrecks() {
-    // The victim idles rather than log-spamming: upload_log is payload
-    // priced now (M1, Q82), and a full ring buffer would stretch the death
-    // report past the attacker's next swing — a double-handle, not a clean
-    // death. One buffered line keeps the report affordable between swings.
+fn abort_files_the_logged_story_then_wrecks() {
+    // No death handler exists any more (M3): your black box is whatever
+    // you logged while alive. The victim logs during normal operation;
+    // hp 0 → abort → the forced upload_log() sends the story home, then
+    // become_disabled() drops the wreck.
     let victim_src = "\
-on death:
-    log(\"death report\")
-    upload_log()
-
+log(\"day report\")
 wait(60)
 ";
     let mut sim = Sim::new(&MapSpec::empty(5, 5));
@@ -96,26 +93,26 @@ wait(60)
     for _ in 0..300 {
         sim.step();
     }
-    assert!(sim.world.wrecks.contains_key(&victim), "clean death → wreck");
+    assert!(sim.world.wrecks.contains_key(&victim), "every death is a wreck now");
     assert!(
         sim.world
             .archive
             .iter()
-            .any(|e| e.kind == ArchiveKind::Log && e.text.contains("death report")),
-        "the black-box budget covers one log + upload; archive: {:?}",
+            .any(|e| e.kind == ArchiveKind::Log && e.text.contains("day report")),
+        "abort's forced upload always sends the logs home; archive: {:?}",
         sim.world.archive
     );
 }
 
 #[test]
-fn fault_inside_hurt_handler_is_double_handle_no_wreck() {
-    // The hurt handler calls closest(depot).expect() on a map with no
-    // depot: the fault inside the PLAYER handler is a double handle —
-    // instant destruction, no wreck, black box with the cause. (A single
-    // wound, not sustained fire: the handler must survive its own
-    // handler_init ritual to reach the faulting line.)
+fn fault_inside_hurt_window_is_double_handle_abort() {
+    // The hurt window calls closest(depot).expect() on a map with no
+    // depot: the fault inside the PLAYER window is a double handle —
+    // abort, not vaporization: the bot drops into a WRECK (the rescue
+    // race), and its logs go home via the forced upload (Q50/M3 — the
+    // explosion path is gone).
     let victim_src = "\
-on signal(s):
+on hurt:
     move_to(closest(depot).expect())
 
 log(1)
@@ -132,26 +129,24 @@ log(1)
             break;
         }
     }
-    assert!(!sim.world.bots.contains_key(&victim), "victim destroyed");
+    assert!(!sim.world.bots.contains_key(&victim), "victim downed");
     assert!(
-        !sim.world.wrecks.contains_key(&victim),
-        "double handle leaves NO wreck"
+        sim.world.wrecks.contains_key(&victim),
+        "double handle aborts into a wreck — no instant-destroy path exists"
     );
-    let bb = sim
-        .world
-        .black_boxes
-        .iter()
-        .find(|b| b.bot == victim)
-        .expect("every destruction drops a black box");
-    assert!(bb.cause.contains("no depot"), "cause records the fault: {}", bb.cause);
+    assert!(
+        sim.world.archive.iter().any(|e| e.kind == ArchiveKind::Log),
+        "the forced upload_log sent the buffer home"
+    );
 }
 
 #[test]
-fn lethal_damage_during_hurt_handler_explodes() {
-    // Retreat program: the hurt handler blocks on a long move while the
-    // brawler keeps swinging — death mid-handler is a double handle.
+fn lethal_damage_during_hurt_window_aborts() {
+    // Retreat program: the hurt window blocks on a long move while the
+    // brawler keeps swinging — hp 0 mid-template is a double handle →
+    // abort: the retreat is over, the wreck drops where the bot fell.
     let victim_src = "\
-on signal(s):
+on hurt:
     move_to(closest(depot).expect())
 
 log(1)
@@ -169,12 +164,11 @@ log(1)
     }
     assert!(!sim.world.bots.contains_key(&victim));
     // Either the retreat outran the hits (then the victim would still be
-    // alive — asserted above it isn't) or death landed mid-handler:
+    // alive — asserted above it isn't) or death landed mid-template:
     assert!(
-        !sim.world.wrecks.contains_key(&victim),
-        "death during the hurt handler must explode, not wreck"
+        sim.world.wrecks.contains_key(&victim),
+        "death during the hurt window aborts into a wreck where it stood"
     );
-    assert!(sim.world.black_boxes.iter().any(|b| b.bot == victim));
 }
 
 #[test]
@@ -185,7 +179,7 @@ fn combat_is_deterministic_tick_by_tick() {
         spawn(
             &mut sim,
             TilePos::new(2, 1),
-            "on signal(s):\n    log(\"h\")\n    upload_log()\n\nlog(1)\n",
+            "on hurt:\n    log(\"h\")\n    upload_log()\n\nlog(1)\n",
             0,
             60,
         );
@@ -214,14 +208,13 @@ fn crash_loops_are_lethal() {
         }
     }
     assert!(!sim.world.bots.contains_key(&bot), "crash loop must eventually kill");
-    assert!(sim.world.wrecks.contains_key(&bot), "fault death is a clean death: wreck");
-    // Fewer dumps than crashes: the fatal fault kills the bot inside the
-    // default handler before its dump pays off, and the hurt crossing can
-    // humbly interrupt another crash's report mid-upload. The survivors
-    // are in the cloud; the rest are only in the wreck's black box.
+    assert!(sim.world.wrecks.contains_key(&bot), "every death is a wreck now");
+    // Fewer dumps than crashes: the hurt crossing (or the fatal chip)
+    // lands mid-factory-window eventually — a double handle → abort. The
+    // dumps that completed are in the cloud; the rest ride the wreck.
     assert!(
-        sim.world.archive.iter().filter(|e| e.kind == ArchiveKind::CrashDump).count() >= 2,
-        "the earlier crashes are in the cloud"
+        sim.world.archive.iter().filter(|e| e.kind == ArchiveKind::CrashDump).count() >= 1,
+        "at least the first crash filed its dump"
     );
 }
 
@@ -229,7 +222,7 @@ fn crash_loops_are_lethal() {
 fn error_handlers_are_armor() {
     // Same faulting call, but handled: no crashes, no chassis damage.
     let src = "\
-on signal(s):
+on error:
     wait(1)
 
 move_to(closest(ore).expect())
@@ -246,7 +239,7 @@ move_to(closest(ore).expect())
 #[test]
 fn bots_regenerate_and_hurt_rearms() {
     let hurt_src = "\
-on signal(s):
+on hurt:
     log(\"ouch\")
 
 wait(2)
@@ -264,7 +257,7 @@ wait(2)
         sim.step();
     }
     let logs = sim.world.bots[&bot].data.log_buf.clone();
-    assert_eq!(logs.iter().filter(|l| *l == "\"ouch\"").count(), 1, "hurt fired once: {logs:?}");
+    assert_eq!(logs.iter().filter(|l| l.1 == "\"ouch\"").count(), 1, "hurt fired once: {logs:?}");
     // Regen climbs hp back over 50% (re-arming) and toward max.
     for _ in 0..400 {
         sim.step();
@@ -277,5 +270,5 @@ wait(2)
         sim.step();
     }
     let logs = sim.world.bots[&bot].data.log_buf.clone();
-    assert_eq!(logs.iter().filter(|l| *l == "\"ouch\"").count(), 2, "hurt re-fired: {logs:?}");
+    assert_eq!(logs.iter().filter(|l| l.1 == "\"ouch\"").count(), 2, "hurt re-fired: {logs:?}");
 }

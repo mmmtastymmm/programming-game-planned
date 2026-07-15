@@ -207,12 +207,11 @@ fn damage_during_recall_walk_is_double_handle() {
             break;
         }
     }
-    assert!(!sim.world.bots.contains_key(&victim), "victim destroyed mid-recall");
+    assert!(!sim.world.bots.contains_key(&victim), "victim downed mid-recall");
     assert!(
-        !sim.world.wrecks.contains_key(&victim),
-        "signal during recall = double handle: no wreck"
+        sim.world.wrecks.contains_key(&victim),
+        "signal during recall = double handle = abort → wreck (M3: no instant destroy)"
     );
-    assert!(sim.world.black_boxes.iter().any(|b| b.bot == victim));
 }
 
 #[test]

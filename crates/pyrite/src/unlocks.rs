@@ -20,10 +20,19 @@ pub enum Construct {
     Lists,
     /// Tier 6: `enum` declarations + `match`.
     Enums,
-    /// `on signal(s):` — the unified problem handler.
-    OnSignal,
-    /// `on death:` — the black-box handler.
-    OnDeath,
+    /// `import m` / `from m import f` — its own construct, right after
+    /// `def` (Q61): learn to write functions before you share them.
+    Import,
+    /// `on error:` window.
+    OnError,
+    /// `on hurt:` window.
+    OnHurt,
+    /// `on bump:` + `on bumped:` windows (one unlock per docs/06's tree).
+    OnBumpBumped,
+    /// `on boot:` window — the bot's dotfile.
+    OnBoot,
+    /// `send` / `receive` channel syntax (verbs land in M11).
+    Channels,
 }
 
 impl Construct {
@@ -35,20 +44,28 @@ impl Construct {
             Construct::Functions => "def / return",
             Construct::Lists => "containers (lists, dicts) + for-in",
             Construct::Enums => "enum + match",
-            Construct::OnSignal => "on signal: handler",
-            Construct::OnDeath => "on death: handler",
+            Construct::Import => "import / from-import",
+            Construct::OnError => "on error: window",
+            Construct::OnHurt => "on hurt: window",
+            Construct::OnBumpBumped => "on bump: / on bumped: windows",
+            Construct::OnBoot => "on boot: window",
+            Construct::Channels => "channels: send / receive",
         }
     }
 
-    pub const ALL: [Construct; 8] = [
+    pub const ALL: [Construct; 12] = [
         Construct::Variables,
         Construct::If,
         Construct::WhileLoop,
         Construct::Functions,
         Construct::Lists,
         Construct::Enums,
-        Construct::OnSignal,
-        Construct::OnDeath,
+        Construct::Import,
+        Construct::OnError,
+        Construct::OnHurt,
+        Construct::OnBumpBumped,
+        Construct::OnBoot,
+        Construct::Channels,
     ];
 }
 
