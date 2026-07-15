@@ -303,14 +303,22 @@ pub struct World {
     /// boundary: highest severity wins, extras dropped (Q81 — co-arrival is
     /// not a double-handle). Drained every tick.
     pub pending_signals: Vec<(BotId, pyrite::Signal)>,
-    /// Bots per tile — the spatial index (occupancy checks were O(bots)
-    /// scans; perception multiplies query volume). Derived state: kept in
-    /// sync by [`World::index_bot`]/[`World::unindex_bot`]/[`World::move_bot`],
-    /// excluded from the state hash.
+    /// BLOCKING bots per tile — the spatial index (occupancy checks were
+    /// O(bots) scans; perception multiplies query volume). Holds exactly
+    /// the live, non-dying bots by construction: kept in sync by
+    /// [`World::index_bot`]/[`World::unindex_bot`]/[`World::move_bot`],
+    /// and a bot leaves the moment `dying` is set (wrecks don't block) —
+    /// readers never need to re-filter. Derived state: excluded from the
+    /// state hash.
     pub occupancy: BTreeMap<TilePos, std::collections::BTreeSet<BotId>>,
     /// Named seeded RNG streams — the sim's only randomness (CLAUDE.md;
     /// inventory in docs/07). Advanced only by sim systems, in tick order.
     pub rng: RngStreams,
+    /// FNV-1a over the tile grid, cached so the per-tick snapshot hash
+    /// doesn't re-walk the whole map. Terrain mutates rarely (bridge
+    /// builds); EVERY post-construction tile write goes through
+    /// [`World::set_tile`], which refreshes this.
+    pub terrain_hash: u64,
     next_entity: u64,
     next_bot: u32,
 }
@@ -422,9 +430,11 @@ impl World {
             pending_signals: Vec::new(),
             occupancy: BTreeMap::new(),
             rng: RngStreams::from_seed(spec.seed),
+            terrain_hash: 0,
             next_entity: 1,
             next_bot: 1,
         };
+        world.terrain_hash = world.compute_terrain_hash();
         for &(pos, amount) in &spec.ore_nodes {
             let id = world.alloc_entity();
             world.ore_nodes.insert(id, OreNode { pos, amount });
@@ -525,14 +535,13 @@ impl World {
             })
     }
 
-    /// Is a living bot (other than `exclude`) standing on `pos`?
-    /// Backed by the occupancy index — O(log tiles), not O(bots).
+    /// Is a blocking bot (other than `exclude`) standing on `pos`?
+    /// Backed by the occupancy index — O(log tiles), not O(bots); the
+    /// index holds only live, non-dying bots, so membership is the answer.
     pub fn tile_occupied(&self, pos: TilePos, exclude: BotId) -> bool {
-        self.occupancy.get(&pos).is_some_and(|ids| {
-            ids.iter().any(|id| {
-                *id != exclude && self.bots.get(id).is_some_and(|b| !b.data.dying)
-            })
-        })
+        self.occupancy
+            .get(&pos)
+            .is_some_and(|ids| ids.iter().any(|id| *id != exclude))
     }
 
     /// Register a bot's tile in the occupancy index (spawn).
@@ -550,17 +559,30 @@ impl World {
         }
     }
 
-    /// Tiles holding a living bot other than `exclude` — the obstacle set
-    /// for path replanning, read off the spatial index instead of an
-    /// O(bots) scan.
+    /// FNV-1a over every tile, in row order. O(map) — called once at
+    /// construction and after each (rare) terrain mutation, never per tick.
+    fn compute_terrain_hash(&self) -> u64 {
+        let mut h = crate::hash::Fnv1a::new();
+        for tile in self.grid.tiles() {
+            h.write_u8(tile.as_u8());
+        }
+        h.finish()
+    }
+
+    /// Mutate terrain, keeping the cached grid hash fresh. EVERY
+    /// post-construction tile write goes through here (the phase-9
+    /// snapshot hashes `terrain_hash`, not the grid).
+    pub(crate) fn set_tile(&mut self, pos: TilePos, kind: TileKind) {
+        self.grid.set(pos, kind);
+        self.terrain_hash = self.compute_terrain_hash();
+    }
+
+    /// Tiles holding a blocking bot other than `exclude` — the obstacle
+    /// set for path replanning, read straight off the spatial index.
     pub fn occupied_tiles(&self, exclude: BotId) -> std::collections::BTreeSet<TilePos> {
         self.occupancy
             .iter()
-            .filter(|(_, ids)| {
-                ids.iter().any(|b| {
-                    *b != exclude && self.bots.get(b).is_some_and(|x| !x.data.dying)
-                })
-            })
+            .filter(|(_, ids)| ids.iter().any(|b| *b != exclude))
             .map(|(pos, _)| *pos)
             .collect()
     }

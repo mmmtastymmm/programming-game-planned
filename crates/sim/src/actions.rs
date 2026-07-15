@@ -257,7 +257,7 @@ impl Sim {
                 if done {
                     self.world.blueprints.remove(&blueprint);
                     match kind {
-                        BlueprintKind::Bridge => self.world.grid.set(site, TileKind::Bridge),
+                        BlueprintKind::Bridge => self.world.set_tile(site, TileKind::Bridge),
                     }
                     self.finish_action(id, Ok(Value::Unit));
                 } else {

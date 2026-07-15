@@ -215,7 +215,12 @@ impl pyrite::Host for BotHost<'_> {
 
             // --- lifecycle (forced calls are ordinary functions) ---
             "become_disabled" => {
-                self.world.bots.get_mut(&bot_id).expect("bot exists").data.dying = true;
+                let bot = self.world.bots.get_mut(&bot_id).expect("bot exists");
+                bot.data.dying = true;
+                // Dying bots stop blocking: out of the occupancy index the
+                // moment the flag is set (wrecks don't block).
+                let pos = bot.data.pos;
+                self.world.unindex_bot(bot_id, pos);
                 HostCall::Ready(Value::Unit)
             }
 

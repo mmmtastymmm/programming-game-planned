@@ -43,57 +43,72 @@ impl Sim {
                 self.world.pending_signals.push((id, Signal::Death));
                 continue;
             }
-            // Fixed Damaged threshold (custom thresholds went with the old
-            // per-signal handler syntax; can return as an on signal(s, n)
-            // param). Edge-triggered: the latch re-arms on regen.
-            let threshold_pct = 50;
-            if !bot.data.hurt_fired && hp * 100 < max_hp * threshold_pct {
+            // Edge-triggered at the Damaged line; the latch re-arms when
+            // regen climbs back over the SAME tuning value (phase 8).
+            if !bot.data.hurt_fired && hp * 100 < max_hp * self.tuning.hurt_line_pct {
                 bot.data.hurt_fired = true;
                 self.world.pending_signals.push((id, Signal::Hurt));
             }
         }
     }
 
-    /// Phase 6b: dispatch queued signals at the op boundary — one signal
-    /// per bot per tick. Co-arrivals resolve by severity (docs/01: abort >
-    /// error > recall > hurt > bumped > bump); the highest enters its
-    /// template, the extras are dropped. Co-arrival is NOT a double-handle
-    /// (Q81) — that rule needs a template already running, which `raise`
-    /// checks against the VM's own phase.
+    /// Phase 6b: dispatch queued signals at the op boundary — one template
+    /// entry per bot per tick. Co-arrivals resolve by severity (docs/01:
+    /// abort > error > recall > hurt > bumped > bump); the highest enters
+    /// its template, the extras are dropped. Co-arrival is NOT a
+    /// double-handle (Q81) — that rule needs a template already running,
+    /// which `raise` checks against the VM's own phase.
+    ///
+    /// Dropping is a TEMPLATE rule, not a physics rule: a dropped
+    /// bump/bumped still leaves its collision stun (docs/02 — the crunch
+    /// happened whether or not the program got to react), and the at-fault
+    /// freeze never downgrades, so a bot that rams and is rammed in one
+    /// tick keeps the longer stun even though only one template runs.
     pub(crate) fn dispatch_signals(&mut self) {
         use std::collections::BTreeMap;
         let pending = std::mem::take(&mut self.world.pending_signals);
-        let mut winner: BTreeMap<BotId, Signal> = BTreeMap::new();
+        let mut per_bot: BTreeMap<BotId, Vec<Signal>> = BTreeMap::new();
         for (id, signal) in pending {
-            winner
-                .entry(id)
-                .and_modify(|best| {
-                    if signal.severity() > best.severity() {
-                        *best = signal;
-                    }
-                })
-                .or_insert(signal);
+            per_bot.entry(id).or_default().push(signal);
         }
-        for (id, signal) in winner {
+        for (id, signals) in per_bot {
             let Some(bot) = self.world.bots.get(&id) else { continue };
             if bot.data.dying {
                 continue;
             }
-            let outcome = self.raise_signal(id, signal);
-            // No handler and no engine default installed: the collision
-            // fallback is the asymmetric bump freeze (docs/02).
+            // Ties can only be duplicates (severity is injective per kind),
+            // so max_by_key's last-wins tie-break picks an equal value.
+            let winner =
+                *signals.iter().max_by_key(|s| s.severity()).expect("group is non-empty");
+            let outcome = self.raise_signal(id, winner);
+            let mut freeze = 0;
+            // Winner unhandled with no engine default installed: the raw
+            // collision fallback is the asymmetric bump freeze (docs/02).
             if outcome == RaiseOutcome::Ignored {
-                let freeze = match signal {
-                    Signal::Bump => self.tuning.bump_freeze_ticks,
-                    Signal::Bumped => self.tuning.bump_victim_freeze_ticks,
-                    _ => 0,
-                };
-                if freeze > 0
-                    && let Some(bot) = self.world.bots.get_mut(&id)
-                {
-                    bot.data.bump_frozen = bot.data.bump_frozen.max(freeze);
+                freeze = freeze.max(self.default_freeze(winner));
+            }
+            // Dropped extras of a different kind keep their physical stun.
+            for signal in signals {
+                if signal != winner {
+                    freeze = freeze.max(self.default_freeze(signal));
                 }
             }
+            if freeze > 0
+                && let Some(bot) = self.world.bots.get_mut(&id)
+            {
+                bot.data.bump_frozen = bot.data.bump_frozen.max(freeze);
+            }
+        }
+    }
+
+    /// The engine's unhandled-default stun for a signal (docs/02: bumps
+    /// freeze asymmetrically — long for the rammer, short for the victim;
+    /// other signals carry no stun).
+    fn default_freeze(&self, signal: Signal) -> u32 {
+        match signal {
+            Signal::Bump => self.tuning.bump_freeze_ticks,
+            Signal::Bumped => self.tuning.bump_victim_freeze_ticks,
+            _ => 0,
         }
     }
 

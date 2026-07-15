@@ -21,10 +21,10 @@ impl Sim {
     /// `raise_on_mover` is false for engine-driven walks (recall): the
     /// engine's own driving is not the program's exception.
     pub(crate) fn bump_both(&mut self, mover: BotId, tile: TilePos, raise_on_mover: bool) {
-        // Lowest living occupant of the rammed tile, off the spatial index.
-        let blocker = self.world.occupancy.get(&tile).into_iter().flatten().copied().find(|b| {
-            *b != mover && self.world.bots.get(b).is_some_and(|x| !x.data.dying)
-        });
+        // Lowest blocking occupant of the rammed tile, off the spatial
+        // index (which holds only live, non-dying bots).
+        let blocker =
+            self.world.occupancy.get(&tile).into_iter().flatten().copied().find(|b| *b != mover);
 
         if raise_on_mover {
             self.world.pending_signals.push((mover, Signal::Bump));

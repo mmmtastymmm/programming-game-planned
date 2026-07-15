@@ -26,4 +26,7 @@ Tuning(
     fault_damage: 5,
     regen_interval_ticks: 1000,
     regen_amount: 1,
+    // The Damaged line (% of max hp): hurt fires below it, re-arms above
+    // it. Becomes the per-bot `hurt_line` env default when M3 lands.
+    hurt_line_pct: 50,
 )

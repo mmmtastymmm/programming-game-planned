@@ -66,6 +66,12 @@ pub struct Tuning {
     /// Passive self-repair: +regen_amount hp every regen_interval_ticks.
     pub regen_interval_ticks: u64,
     pub regen_amount: i64,
+    /// The Damaged line, in percent of max hp: the hurt signal fires when
+    /// hp drops below it and the latch re-arms when regen climbs back over
+    /// it — ONE value so the edge trigger can't drift apart. M3's env
+    /// registry makes it per-bot (`hurt_line`); this is the match-wide
+    /// default until then.
+    pub hurt_line_pct: i64,
 }
 
 impl Default for Tuning {
@@ -87,6 +93,10 @@ impl Tuning {
         assert!(self.regen_interval_ticks > 0, "tuning: regen_interval_ticks must be > 0");
         assert!(self.printed_hp > 0, "tuning: printed_hp must be > 0");
         assert!(self.printed_cpu > 0, "tuning: printed_cpu must be > 0");
+        assert!(
+            (1..=100).contains(&self.hurt_line_pct),
+            "tuning: hurt_line_pct must be a percentage in 1..=100"
+        );
     }
 }
 
@@ -270,6 +280,8 @@ impl Sim {
             Command::KillBot { bot } => {
                 if let Some(b) = self.world.bots.get_mut(bot) {
                     b.data.dying = true;
+                    let pos = b.data.pos;
+                    self.world.unindex_bot(*bot, pos);
                 }
                 Ok(None)
             }
@@ -431,9 +443,10 @@ impl Sim {
             if !bot.data.dying {
                 continue;
             }
+            // Already out of the occupancy index — dying bots leave it the
+            // moment the flag is set.
             let bot = self.world.bots.remove(&id).expect("checked above");
             let data = bot.data;
-            self.world.unindex_bot(id, data.pos);
             self.world.bot_entities.remove(&data.entity);
             // Carried cargo spills to the ground rather than entombing.
             self.drop_cargo_to_ground(data.pos, data.cargo);
@@ -450,14 +463,15 @@ impl Sim {
         // rebalancing, capacity). ---
         if self.world.tick.is_multiple_of(self.tuning.regen_interval_ticks) {
             let amount = self.tuning.regen_amount;
+            let hurt_line = self.tuning.hurt_line_pct;
             for id in ids.iter() {
                 let Some(bot) = self.world.bots.get_mut(id) else { continue };
                 if bot.data.dying || bot.data.hp >= bot.data.max_hp {
                     continue;
                 }
                 bot.data.hp = (bot.data.hp + amount).min(bot.data.max_hp);
-                if bot.data.hurt_fired && bot.data.hp * 100 >= bot.data.max_hp * 50 {
-                    bot.data.hurt_fired = false; // fixed Damaged threshold
+                if bot.data.hurt_fired && bot.data.hp * 100 >= bot.data.max_hp * hurt_line {
+                    bot.data.hurt_fired = false; // back over the Damaged line
                 }
             }
         }
@@ -515,9 +529,9 @@ impl Sim {
         h.write_u64(w.tick);
         h.write_i32(w.grid.width);
         h.write_i32(w.grid.height);
-        for tile in w.grid.tiles() {
-            h.write_u8(tile.as_u8());
-        }
+        // Cached: re-walking the map every tick made phase 9 O(map). Kept
+        // fresh by World::set_tile on the rare terrain mutation.
+        h.write_u64(w.terrain_hash);
         for (id, node) in &w.ore_nodes {
             h.write_u64(id.0);
             h.write_i32(node.pos.x);
@@ -563,15 +577,16 @@ impl Sim {
             h.write_u32(bp.progress);
             h.write_u32(bp.needed);
         }
+        // Program versions ARE source-byte hashes (CLAUDE.md rule 7), so
+        // hashing the stored u64s covers the sources without re-walking
+        // every deployed program's bytes each tick.
         for ((faction, color), cp) in &w.color_programs {
             h.write_u8(*faction);
             h.write_u8(*color);
             h.write_u64(cp.hash);
-            h.write_str(&cp.source);
         }
-        for (hash, source) in &w.program_library {
+        for hash in w.program_library.keys() {
             h.write_u64(*hash);
-            h.write_str(source);
         }
         for (id, bot) in &w.bots {
             h.write_u32(id.0);
