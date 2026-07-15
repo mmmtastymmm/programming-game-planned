@@ -47,7 +47,7 @@ impl Sim {
             let line = crate::world::env_read(
                 &bot.data.env,
                 "hurt_line",
-                self.tuning.hurt_line_pct,
+                &self.tuning,
             );
             if !bot.data.hurt_fired && hp * 100 < max_hp * line {
                 bot.data.hurt_fired = true;
@@ -59,16 +59,25 @@ impl Sim {
     /// Phase 6b: dispatch queued signals at the op boundary — one template
     /// entry per bot per tick. Co-arrivals resolve by severity (docs/01:
     /// abort > error > recall > hurt > bumped > bump); the highest enters
-    /// its template and the extras are DROPPED — the winner's forced
-    /// prologue flinch is the physical stagger, and bump's long at-fault
-    /// stun is its factory window's `wait`, so a dropped extra carries no
-    /// residue. Co-arrival is NOT a double-handle (Q81 — that rule needs a
-    /// template already running, which `raise` checks against the VM).
+    /// its template and the extras are dropped. Co-arrival is NOT a
+    /// double-handle (Q81 — that rule needs a template already running,
+    /// which `raise` checks against the VM).
+    ///
+    /// Dropping is a TEMPLATE rule, not a physics rule: only one template
+    /// runs, but a dropped bump/bumped still leaves its collision stun
+    /// (docs/02 — the crunch happened whether or not the program got to
+    /// react, and the at-fault stun never downgrades: a bot that rams and
+    /// is rammed in one tick keeps the longer stun; a rammer whose crunch
+    /// crosses its own hurt line is stunned AND hurt-handling).
     pub(crate) fn dispatch_signals(&mut self) {
         use std::collections::BTreeMap;
         let pending = std::mem::take(&mut self.world.pending_signals);
         let mut per_bot: BTreeMap<BotId, Vec<Signal>> = BTreeMap::new();
         for (id, signal) in pending {
+            // Recall carries a destination no queue entry can express: it
+            // dispatches through begin_recall_walk, never through here
+            // (player-fired triggers arrive with M9's rule edits).
+            debug_assert!(signal != Signal::Recall, "queued Recall has no destination");
             per_bot.entry(id).or_default().push(signal);
         }
         for (id, signals) in per_bot {
@@ -81,6 +90,30 @@ impl Sim {
             let winner =
                 *signals.iter().max_by_key(|s| s.severity()).expect("group is non-empty");
             self.raise_signal(id, winner);
+            // Dropped extras keep their physical stun. The values mirror
+            // the template timings they stand in for: a dropped Bump = the
+            // full at-fault stun (flinch + factory wait); a dropped Bumped
+            // = the flinch-length stagger. Applied on top of the winner's
+            // template via bump_frozen, never downgrading.
+            let mut stun = 0u32;
+            for signal in signals {
+                if signal == winner {
+                    continue;
+                }
+                stun = stun.max(match signal {
+                    Signal::Bump => self.tuning.bump_freeze_ticks,
+                    Signal::Bumped => self.tuning.handler_init_ticks,
+                    _ => 0,
+                });
+            }
+            if stun > 0
+                && let Some(bot) = self.world.bots.get_mut(&id)
+            {
+                if bot.data.dying {
+                    continue; // the winner was Abort — stuns don't outlive it
+                }
+                bot.data.bump_frozen = bot.data.bump_frozen.max(stun);
+            }
         }
     }
 

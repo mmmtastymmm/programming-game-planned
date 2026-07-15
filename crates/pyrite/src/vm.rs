@@ -618,9 +618,18 @@ impl Vm {
         if signal == Signal::Recall {
             // Fully engine-reserved: the sim drives the walk home; the VM
             // records the interrupt context so the double-handle rule
-            // holds all the way to the printer.
+            // holds all the way to the printer. Recall interrupts Blocked
+            // bots too (docs/01) — the pending action's owed result value
+            // will never arrive, so the stacks are FULLY SUSPENDED here
+            // (cleared, exactly like a template entry): every recall exit
+            // either replaces the VM (re-color, scrap) or resets it
+            // (vanished destination → boot), and a cleared VM that somehow
+            // steps just wraps cleanly to line 1.
             self.engine_ctx = Some(EngineCtx::Recall);
             self.state = State::Running;
+            self.work.clear();
+            self.values.clear();
+            self.frames.clear();
             return RaiseOutcome::Handled;
         }
         let kind = match signal {
@@ -1278,6 +1287,29 @@ impl Vm {
                     // down. Runs the fully reserved sequence right here;
                     // nothing after this call ever executes.
                     self.abort(host, costs);
+                } else if name == "become_disabled" || name == "handler_init" {
+                    // Engine-only forced calls (Q76): the host implements
+                    // them, but a PLAYER call must not reach it — deleting
+                    // the registry entry alone doesn't stop the passthrough
+                    // dispatch below, so the VM blocks them by name. The
+                    // engine invokes them via host.call directly (abort's
+                    // sequence) or engine-injected work items (the flinch,
+                    // which carries line 0 — never a player line).
+                    if name == "handler_init" && line == 0 {
+                        // The template prologue's own injected call.
+                        match host.call(&name, &[], self.ctx()) {
+                            HostCall::Ready(v) => self.values.push(v),
+                            HostCall::Block => self.state = State::Blocked,
+                            HostCall::Fault(f) => self.fault(f.id, f.msg, host, costs),
+                        }
+                    } else {
+                        self.fault(
+                            faults::UNKNOWN_FUNCTION,
+                            format!("unknown function {name}()"),
+                            host,
+                            costs,
+                        );
+                    }
                 } else if !kwpairs.is_empty() && costs.spec(&name).is_none_or(|s| s.params.is_none()) {
                     // Keywords need a declared parameter list to bind against.
                     self.fault(

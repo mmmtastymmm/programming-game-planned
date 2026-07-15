@@ -155,7 +155,7 @@ pub(crate) fn split_source(source: &str) -> (String, std::collections::BTreeMap<
     let mut body = String::new();
     let mut files = std::collections::BTreeMap::new();
     let mut current: Option<(HandlerSlot, String)> = None;
-    let mut flush = |current: &mut Option<(HandlerSlot, String)>,
+    let flush = |current: &mut Option<(HandlerSlot, String)>,
                      files: &mut std::collections::BTreeMap<HandlerSlot, String>| {
         let Some((slot, text)) = current.take() else { return };
         files.entry(slot).or_insert_with(|| dedent_lines(&text, 4));
@@ -274,26 +274,29 @@ pub(crate) fn editor_costs() -> &'static pyrite::CostTable {
     COSTS.get_or_init(pyrite::CostTable::default)
 }
 
-fn live_parse(prefix: &str, text: &str) -> LiveParse {
-    match pyrite::parse(&format!("{prefix}{text}"), &pyrite::UnlockSet::all()) {
+/// Live-parse a doc as it will deploy. `window` is the signal name when
+/// the doc IS a handler-window file: its text is then wrapped in the same
+/// `on <signal>:` block the assembler emits, so the window rules (loop
+/// ban, signal-safe gate, caps) squiggle live instead of only failing at
+/// deploy — and error positions map back into the bare window text.
+fn live_parse(prefix: &str, window: Option<&'static str>, text: &str) -> LiveParse {
+    let (assembled, skip_lines, indent) = match window {
+        Some(signal) => {
+            (format!("{prefix}on {signal}:\n{}", indent_lines(text, "    ")), 1u32, 4u32)
+        }
+        None => (format!("{prefix}{text}"), 0, 0),
+    };
+    let result = pyrite::parse(&assembled, &pyrite::UnlockSet::all())
         // A clean parse still has to clear the deploy-time window analysis
         // (caps, signal safety, loops/recursion) — same rejection, live.
-        Ok(program) => match pyrite::check_windows(&program, editor_costs()) {
-            Ok(()) => LiveParse::Ok,
-            Err(mut e) => {
-                let prefix_lines = prefix.lines().count() as u32;
-                if e.line > prefix_lines {
-                    e.line -= prefix_lines;
-                    LiveParse::Local(e)
-                } else {
-                    LiveParse::Library(e)
-                }
-            }
-        },
+        .and_then(|program| pyrite::check_windows(&program, editor_costs()));
+    match result {
+        Ok(()) => LiveParse::Ok,
         Err(mut e) => {
-            let prefix_lines = prefix.lines().count() as u32;
+            let prefix_lines = prefix.lines().count() as u32 + skip_lines;
             if e.line > prefix_lines {
                 e.line -= prefix_lines;
+                e.col = e.col.saturating_sub(indent).max(1);
                 LiveParse::Local(e)
             } else {
                 LiveParse::Library(e)
@@ -333,6 +336,10 @@ pub(crate) fn code_editor(
     sim: &sim::sim::Sim,
     rows: usize,
     prefix: &str,
+    // The signal name when this doc is a handler-window file — live
+    // parsing then wraps the text in its `on <signal>:` block so the
+    // window rules squiggle here, not first at deploy.
+    window: Option<&'static str>,
 ) {
     // A caret jump requested by the file viewer lands before the TextEdit
     // runs, using the same state-poke pattern as completion insertion.
@@ -350,7 +357,7 @@ pub(crate) fn code_editor(
         // Live parse of the in-progress text: the error location gets a
         // red squiggle. (Programs are tiny; parsing per relayout is fine.)
         // Library errors have no position in this buffer — status only.
-        let squiggle = match live_parse(prefix, text) {
+        let squiggle = match live_parse(prefix, window, text) {
             LiveParse::Local(e) => Some(error_byte_range(text, e.line, e.col)),
             LiveParse::Ok | LiveParse::Library(_) => None,
         };
@@ -565,7 +572,7 @@ pub(crate) fn code_editor(
     }
 
     // Live parse status, so squiggles come with words.
-    match live_parse(prefix, &doc.code) {
+    match live_parse(prefix, window, &doc.code) {
         LiveParse::Ok => {}
         LiveParse::Local(e) => {
             ui.colored_label(HL_ERROR, format!("parse error: {e}"));

@@ -567,7 +567,11 @@ fn doc_window(
                     });
                 }
                 // The cap meter: worst-case instructions vs this signal's
-                // window cap, live as you type (deploy rejects overruns).
+                // window cap, live as you type. Measured against the FULL
+                // assembled deploy source (module prelude + program body +
+                // every window), so helpers defined in the body or an
+                // imported module resolve exactly as the deploy check will
+                // see them.
                 let kind = match slot {
                     window::HandlerSlot::Error => pyrite::ast::SignalKind::Error,
                     window::HandlerSlot::Hurt => pyrite::ast::SignalKind::Hurt,
@@ -576,10 +580,10 @@ fn doc_window(
                     window::HandlerSlot::Boot => pyrite::ast::SignalKind::Boot,
                 };
                 let cap = pyrite::analysis::window_cap(&game.0.costs, kind);
-                let assembled = format!("on {}:\n{}", slot.signal(), window::indent_lines(&doc.code, "    "));
-                let usage = pyrite::parse(&assembled, &pyrite::UnlockSet::all())
-                    .ok()
-                    .and_then(|p| pyrite::analysis::window_usage(&p, &game.0.costs, kind));
+                let usage = deploy.first().and_then(|(_, source)| {
+                    let program = pyrite::parse(source, &pyrite::UnlockSet::all()).ok()?;
+                    pyrite::analysis::window_usage(&program, &game.0.costs, kind)
+                });
                 match usage {
                     Some((worst, cap)) => {
                         let over = worst > cap;
@@ -620,7 +624,7 @@ fn doc_window(
                     // with a tinted gutter bar tying it to the phantom
                     // `while True:` above — the handler-sandwich idiom.
                     let body = ui.indent(editor_id.with("loop_body"), |ui| {
-                        code_editor(ui, editor_id, doc, &game.0, rows, prelude);
+                        code_editor(ui, editor_id, doc, &game.0, rows, prelude, None);
                     });
                     let rect = body.response.rect;
                     ui.painter().line_segment(
@@ -640,7 +644,10 @@ fn doc_window(
                     // is indented behind a gutter, and the engine's forced
                     // exit renders as a locked line below.
                     let body = ui.indent(editor_id.with("handler_body"), |ui| {
-                        code_editor(ui, editor_id, doc, &game.0, rows, prelude);
+                        // The window's live parse wraps the text in its
+                        // `on <signal>:` block, so loop/safety/cap errors
+                        // squiggle here instead of first failing at deploy.
+                        code_editor(ui, editor_id, doc, &game.0, rows, prelude, Some(slot.signal()));
                     });
                     let rect = body.response.rect;
                     ui.painter().line_segment(
@@ -659,7 +666,7 @@ fn doc_window(
                     );
                 }
                 DocKey::Module(_) => {
-                    code_editor(ui, editor_id, doc, &game.0, rows, prelude);
+                    code_editor(ui, editor_id, doc, &game.0, rows, prelude, None);
                 }
             }
 

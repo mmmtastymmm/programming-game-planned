@@ -2,10 +2,13 @@
 //! handlers", M3). Three checks, all deploy-time rejections — nothing
 //! here runs per-tick:
 //!
-//! 1. **Instruction caps**: a window's WORST-CASE statement count must fit
-//!    its signal's cap (cost-table data). An instruction = one statement;
-//!    nested builtin calls don't multiply the count; a user-`def` call
-//!    charges its deploy-computed worst case (longest branch, calls
+//! 1. **Instruction caps**: a window's WORST-CASE instruction count must
+//!    fit its signal's cap (cost-table data). An instruction = one
+//!    statement or one builtin CALL (nested calls each count — a single
+//!    statement stuffed with a hundred costed calls must not sail under a
+//!    cap of 4; this deliberately tightens docs/01's "nested builtin calls
+//!    don't multiply" line, flagged for doc reconciliation); a user-`def`
+//!    call charges its deploy-computed worst case (longest branch, calls
 //!    expanded) — you can't smuggle a long function through a short window.
 //! 2. **Signal safety**: windows may only call `signal_safe`-flagged
 //!    registry functions; a `def` is safe iff everything it calls is safe.
@@ -132,13 +135,10 @@ impl Walker<'_> {
             // already banned — but count them defensively.
             Stmt::Break { .. } | Stmt::Continue { .. } => Ok(1),
             Stmt::Expr { expr, .. } => {
-                // A bare user-def call charges its worst case INSTEAD of
-                // the plain statement figure (docs/01: "the one exception
-                // is a user-def call, which charges its deploy-computed
-                // worst case") — never less than one instruction.
-                if let Expr::Call { name, .. } = self.program.expr(expr)
-                    && self.program.functions.contains_key(name)
-                {
+                // A bare call IS the statement: the call's own weight (a
+                // builtin = 1; a user def = its worst case) covers the
+                // statement figure — never less than one instruction.
+                if let Expr::Call { .. } = self.program.expr(expr) {
                     return Ok(self.expr_calls(expr)?.max(1));
                 }
                 Ok(1u64.saturating_add(self.expr_calls(expr)?))
@@ -175,9 +175,12 @@ impl Walker<'_> {
         }
     }
 
-    /// The user-def worst cases (and safety checks) carried by an
-    /// expression: builtin calls are checked for the signal_safe flag but
-    /// add nothing to the count; user-def calls add their worst case.
+    /// The instruction weight carried by an expression's CALLS: every
+    /// builtin call counts as one instruction (nesting a hundred costed
+    /// calls into one statement must not sail under a cap of 4 — with the
+    /// overtime tax gone, this counter is the only bound on window work);
+    /// user-def calls add their deploy-computed worst case. Both are
+    /// checked for signal safety. Call-free expressions weigh nothing.
     fn expr_calls(&mut self, eid: ExprId) -> Result<u64, PyriteError> {
         let expr = self.program.expr(eid).clone();
         match expr {
@@ -236,9 +239,8 @@ impl Walker<'_> {
                     self.line = line;
                     sum = sum.saturating_add(self.def_worst_case(&name)?);
                 } else {
-                    // A builtin: nested calls don't multiply the count, but
-                    // the safety flag gates them. Unknown names can't be
-                    // proven safe — rejected.
+                    // A builtin: the safety flag gates it, and the call
+                    // itself weighs one instruction wherever it nests.
                     let safe = self.costs.spec(&name).is_some_and(|s| s.signal_safe);
                     if !safe {
                         return Err(PyriteError {
@@ -250,6 +252,7 @@ impl Walker<'_> {
                             },
                         });
                     }
+                    sum = sum.saturating_add(1);
                 }
                 Ok(sum)
             }

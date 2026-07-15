@@ -92,7 +92,7 @@ impl pyrite::Host for BotHost<'_> {
                 // each evaluation — moving it mid-flight is legal).
                 let data = &self.world.bots[&bot_id].data;
                 let line =
-                    crate::world::env_read(&data.env, "hurt_line", self.tuning.hurt_line_pct);
+                    crate::world::env_read(&data.env, "hurt_line", self.tuning);
                 HostCall::Ready(Value::Bool(data.hp * 100 < data.max_hp * line))
             }
             "last_error" => {
@@ -191,7 +191,7 @@ impl pyrite::Host for BotHost<'_> {
                 let min_level = crate::world::env_read(
                     &self.world.bots[&bot_id].data.env,
                     "log_min_level",
-                    self.tuning.hurt_line_pct,
+                    self.tuning,
                 );
                 if (level as i64) >= min_level {
                     let buf =
@@ -262,7 +262,7 @@ impl pyrite::Host for BotHost<'_> {
                     let value = crate::world::env_read(
                         &self.world.bots[&bot_id].data.env,
                         key,
-                        self.tuning.hurt_line_pct,
+                        self.tuning,
                     );
                     HostCall::Ready(Value::Int(value))
                 }

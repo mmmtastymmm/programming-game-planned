@@ -227,35 +227,47 @@ impl Bot {
 /// discarded at the call.
 pub type LogEntry = (u8, String);
 
+/// Where an env key's default comes from: a fixed registry value, or a
+/// tuning field (so the number keeps living in `tuning.ron` — no second
+/// copy that can drift).
+pub enum EnvDefault {
+    Fixed(i64),
+    /// `tuning.hurt_line_pct`.
+    HurtLine,
+}
+
 /// One engine-defined environment key (docs/01 "The Environment"): a
-/// bounded int policy slot. `hurt_line`'s default lives in tuning
-/// (`hurt_line_pct`) — the registry row's `default` is ignored for it so
-/// the number stays in a data file; see [`crate::sim::Sim::env_read`].
+/// bounded int policy slot.
 pub struct EnvKey {
     pub name: &'static str,
-    pub default: i64,
+    pub default: EnvDefault,
     pub min: i64,
     pub max: i64,
 }
 
 /// The v1 key set — grows like the function catalog.
 pub const ENV_KEYS: &[EnvKey] = &[
-    EnvKey { name: "hurt_line", default: 50, min: 1, max: 99 },
-    EnvKey { name: "log_min_level", default: 0, min: 0, max: 4 },
+    EnvKey { name: "hurt_line", default: EnvDefault::HurtLine, min: 1, max: 99 },
+    EnvKey { name: "log_min_level", default: EnvDefault::Fixed(0), min: 0, max: 4 },
 ];
 
+/// The log severity ladder (docs/01): the ONE (name, rank) source — bound
+/// as VM constants by `Sim::new`, indexed by the HUD for display, used by
+/// `log`'s range check. Ranks are the array indices.
+pub const LEVEL_NAMES: [&str; 5] = ["trace", "debug", "info", "warn", "error"];
+
 /// Read an env key with defaulting (docs/01: `getenv` never faults on an
-/// unset key — unset means default). `hurt_line`'s live default is the
-/// tuning value (`hurt_line_pct`), passed in so the number keeps living
-/// in the data file; other keys default from the registry row.
-pub fn env_read(env: &BTreeMap<String, i64>, key: &str, hurt_line_default: i64) -> i64 {
+/// unset key — unset means default; defaults resolve against tuning where
+/// they live there).
+pub fn env_read(env: &BTreeMap<String, i64>, key: &str, tuning: &crate::sim::Tuning) -> i64 {
     if let Some(v) = env.get(key) {
         return *v;
     }
-    if key == "hurt_line" {
-        return hurt_line_default;
+    match ENV_KEYS.iter().find(|k| k.name == key).map(|k| &k.default) {
+        Some(EnvDefault::Fixed(v)) => *v,
+        Some(EnvDefault::HurtLine) => tuning.hurt_line_pct,
+        None => 0,
     }
-    ENV_KEYS.iter().find(|k| k.name == key).map(|k| k.default).unwrap_or(0)
 }
 
 /// A player-designated terraform site (docs/05): the player places it

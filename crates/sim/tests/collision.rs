@@ -364,6 +364,41 @@ wait(600)
 }
 
 #[test]
+fn mutual_ram_keeps_the_at_fault_stun() {
+    // Two movers ram each other in the same tick: each queues Bump +
+    // Bumped, Bumped wins the severity contest for both — but dropping
+    // Bump is a TEMPLATE rule, not a physics rule: the full at-fault stun
+    // still lands via bump_frozen (never downgrading to the mere flinch).
+    let mut spec = MapSpec::empty(8, 3);
+    for x in 0..8 {
+        spec.water.push(TilePos::new(x, 0));
+        spec.water.push(TilePos::new(x, 2));
+    }
+    spec.depots.push(TilePos::new(0, 1));
+    spec.ore_nodes.push((TilePos::new(7, 1), 50));
+    let mut sim = Sim::new(&spec);
+    sim.tuning.bump_damage = 0; // isolate the stun mechanics
+    let east = spawn(&mut sim, TilePos::new(2, 1), "move_to(closest(ore).expect())\n");
+    let west = spawn(&mut sim, TilePos::new(5, 1), "move_to(closest(depot).expect())\n");
+    let full_stun = sim.tuning.bump_freeze_ticks;
+    let flinch = sim.tuning.handler_init_ticks;
+    let mut saw_full_stun = (false, false);
+    for _ in 0..200 {
+        sim.step();
+        saw_full_stun.0 |= sim.world.bots[&east].data.bump_frozen > flinch;
+        saw_full_stun.1 |= sim.world.bots[&west].data.bump_frozen > flinch;
+        if saw_full_stun.0 && saw_full_stun.1 {
+            break;
+        }
+    }
+    assert!(
+        saw_full_stun.0 && saw_full_stun.1,
+        "both rammers must serve more than the flinch — the dropped Bump's \
+         {full_stun}-tick at-fault stun survives the severity drop"
+    );
+}
+
+#[test]
 fn bumped_during_a_handler_is_a_double_handle() {
     // The victim is mid-`on bumped:` (blocking wait) when a second bump
     // lands: any signal during a running template forces ABORT — the bot

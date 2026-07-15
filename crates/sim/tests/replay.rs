@@ -149,16 +149,14 @@ fn unreachable_target_faults() {
 }
 
 #[test]
-fn scuttle_becomes_a_wreck_with_logs() {
-    // become_disabled() is player-callable (deliberate scuttle). The bot
-    // wrecks; its unuploaded logs ride along in the wreck.
+fn abort_is_the_only_scuttle_and_become_disabled_is_engine_only() {
+    // abort() is the ONLY deliberate way down (Q76): the forced sequence
+    // uploads the buffer to the archive, then wrecks the bot.
     let src = "\
 log(123)
-become_disabled()
+abort()
 ";
     let mut sim = Sim::new(&MapSpec::empty(4, 4));
-    // cpu 2 = exactly one pass per tick (log 1 + become_disabled 1, full
-    // charges): the death phase wrecks the bot before a second pass logs.
     let id = sim
         .apply(&Command::SpawnBot {
             pos: TilePos::new(2, 2),
@@ -175,8 +173,37 @@ become_disabled()
         sim.step();
     }
     assert!(!sim.world.bots.contains_key(&id), "bot must be wrecked");
-    let wreck = sim.world.wrecks.get(&id).expect("wreck exists");
-    assert_eq!(wreck.logs, vec![(2u8, "123".to_string())]);
+    assert!(sim.world.wrecks.contains_key(&id), "abort exits into a wreck");
+    assert!(
+        sim.world.archive.iter().any(|e| e.text.contains("123")),
+        "abort's forced upload sent the log home"
+    );
+
+    // become_disabled() must NOT be player-callable — it faults like any
+    // unknown name (the VM blocks it before the host's engine-only arm),
+    // so the bot crash-loops instead of silently wrecking itself.
+    let mut sim = Sim::new(&MapSpec::empty(4, 4));
+    let id = sim
+        .apply(&Command::SpawnBot {
+            pos: TilePos::new(2, 2),
+            source: "become_disabled()\n".into(),
+            cpu: 8,
+            cargo_cap: 1,
+            faction: 0,
+            hp: 100,
+            color: Color::GREEN,
+        })
+        .unwrap()
+        .unwrap();
+    for _ in 0..4 {
+        sim.step();
+    }
+    let bot = &sim.world.bots[&id];
+    assert!(!bot.data.dying, "the call must not scuttle the bot");
+    assert!(
+        bot.vm.as_ref().is_some_and(|vm| vm.crash_count() >= 1),
+        "player become_disabled() faults err_unknown_function"
+    );
 }
 
 #[test]

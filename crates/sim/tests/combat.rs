@@ -237,6 +237,57 @@ move_to(closest(ore).expect())
 }
 
 #[test]
+fn hurt_latch_fires_and_rearms_on_the_same_moved_line() {
+    // The edge trigger must fire AND re-arm against the bot's own
+    // hurt_line env: with the line raised to 80, a regen tick that lifts
+    // hp over tuning's 50 but not over 80 must NOT clear the latch (the
+    // old split let the next hit re-fire Hurt mid-template — an unearned
+    // double-handle abort).
+    let hurt_src = "\
+on hurt:
+    log(\"ouch\")
+
+wait(2)
+";
+    let mut sim = Sim::new(&MapSpec::empty(5, 5));
+    sim.tuning.regen_interval_ticks = 5;
+    let bot = spawn(&mut sim, TilePos::new(2, 2), hurt_src, 0, 100);
+    sim.world.bots.get_mut(&bot).unwrap().data.env.insert("hurt_line".into(), 80);
+    let ouches = |sim: &Sim| {
+        sim.world.bots[&bot].data.log_buf.iter().filter(|l| l.1 == "\"ouch\"").count()
+    };
+    for _ in 0..4 {
+        sim.step();
+    }
+    sim.apply_damage_for_test(bot, 25); // 75 < 80% line: fires
+    for _ in 0..18 {
+        sim.step();
+    }
+    assert_eq!(ouches(&sim), 1, "hurt fired once at the moved line");
+    // Regen has lifted hp over 50 (tuning) but not over 80 (env): the
+    // latch must still be armed, so another dip must NOT re-fire.
+    let hp = sim.world.bots[&bot].data.hp;
+    assert!(hp > 50 && hp < 80, "test setup: hp {hp} between the two lines");
+    sim.apply_damage_for_test(bot, 4);
+    for _ in 0..20 {
+        sim.step();
+    }
+    assert_eq!(ouches(&sim), 1, "latched below the env line: no re-fire");
+    // Only once regen crosses THE BOT'S line does the latch re-arm.
+    for _ in 0..200 {
+        sim.step();
+        if sim.world.bots[&bot].data.hp >= 85 {
+            break;
+        }
+    }
+    sim.apply_damage_for_test(bot, 15);
+    for _ in 0..40 {
+        sim.step();
+    }
+    assert_eq!(ouches(&sim), 2, "re-armed above the env line: fires again");
+}
+
+#[test]
 fn bots_regenerate_and_hurt_rearms() {
     let hurt_src = "\
 on hurt:

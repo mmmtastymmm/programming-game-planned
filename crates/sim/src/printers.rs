@@ -273,12 +273,16 @@ impl Sim {
             .first()
             .map(|p| self.world.grid.get(*p).and_then(|t| t.move_ticks()).unwrap_or(1))
             .unwrap_or(0);
-        let bot = self.world.bots.get_mut(&id).expect("bot exists");
-        bot.data.requested = None;
-        bot.data.action = None;
-        bot.data.recall = Some(Recall { path, ticks_left, home, purpose });
-        if let Some(vm) = bot.vm.as_mut() {
-            vm.set_engine_ctx(Some(pyrite::EngineCtx::Recall));
+        // Recall dispatches like any other signal (docs/01): through raise,
+        // which suspends the VM correctly whether Running OR Blocked (the
+        // stacks clear — the pending action's owed result never arrives)
+        // and applies the double-handle if a template is somehow running.
+        // Engine-fired callers select politely, so Aborted here is a bug
+        // net, not a normal path.
+        if self.raise_signal(id, pyrite::Signal::Recall) != pyrite::RaiseOutcome::Handled {
+            return;
         }
+        let bot = self.world.bots.get_mut(&id).expect("bot exists");
+        bot.data.recall = Some(Recall { path, ticks_left, home, purpose });
     }
 }

@@ -183,11 +183,10 @@ impl Sim {
         }
         // Log-level constants (docs/01): ordinary shadowable names, ints so
         // the same constants work as env values (`setenv(log_min_level,
-        // warn)`) and as `log(x, level=warn)` arguments.
-        for (name, rank) in
-            [("trace", 0i64), ("debug", 1), ("info", 2), ("warn", 3), ("error", 4)]
-        {
-            vm_config.constants.insert(name.to_string(), Value::Int(rank));
+        // warn)`) and as `log(x, level=warn)` arguments. One source —
+        // `world::LEVEL_NAMES` — shared with the HUD's display prefixes.
+        for (rank, name) in crate::world::LEVEL_NAMES.iter().enumerate() {
+            vm_config.constants.insert(name.to_string(), Value::Int(rank as i64));
         }
         // Env keys as constants: `setenv(hurt_line, 30)` reads naturally.
         for key in crate::world::ENV_KEYS {
@@ -489,14 +488,17 @@ impl Sim {
         // rebalancing, capacity). ---
         if self.world.tick.is_multiple_of(self.tuning.regen_interval_ticks) {
             let amount = self.tuning.regen_amount;
-            let hurt_line = self.tuning.hurt_line_pct;
             for id in ids.iter() {
                 let Some(bot) = self.world.bots.get_mut(id) else { continue };
                 if bot.data.dying || bot.data.hp >= bot.data.max_hp {
                     continue;
                 }
                 bot.data.hp = (bot.data.hp + amount).min(bot.data.max_hp);
-                if bot.data.hurt_fired && bot.data.hp * 100 >= bot.data.max_hp * hurt_line {
+                // The latch re-arms against the SAME line it fires on — the
+                // bot's own hurt_line env — so a moved line can't make the
+                // edge trigger re-fire mid-template or stick forever.
+                let line = crate::world::env_read(&bot.data.env, "hurt_line", &self.tuning);
+                if bot.data.hurt_fired && bot.data.hp * 100 >= bot.data.max_hp * line {
                     bot.data.hurt_fired = false; // back over the Damaged line
                 }
             }
@@ -678,6 +680,7 @@ impl Sim {
         for entry in &w.archive {
             h.write_u64(entry.tick);
             h.write_u32(entry.bot.0);
+            h.write_u8(entry.level);
             h.write_u32(entry.line);
             h.write_str(&entry.text);
         }

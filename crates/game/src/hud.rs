@@ -265,14 +265,13 @@ pub(crate) fn inspector_ui(
     }
 }
 
-/// One log line prefixed by its severity name (trace=0 … error=4).
+/// One log line prefixed by its severity name — the names come from the
+/// sim's canonical ladder (the same list bound as VM constants), so the
+/// two can't drift.
 fn leveled_line(level: u8, line: &str) -> String {
-    let name = match level {
-        0 => "trace",
-        1 => "debug",
-        2 => "info",
-        3 => "warn",
-        _ => "error",
-    };
+    let name = sim::world::LEVEL_NAMES
+        .get(level as usize)
+        .copied()
+        .unwrap_or("error");
     format!("[{name}] {line}")
 }

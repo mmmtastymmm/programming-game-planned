@@ -544,6 +544,23 @@ fn abort_verb_is_the_player_scuttle() {
 }
 
 #[test]
+fn become_disabled_is_engine_only() {
+    // Q76: the player-facing scuttle is abort(); a direct call must fault
+    // err_unknown_function BEFORE the host ever sees it — deleting the
+    // registry entry alone can't stop the passthrough dispatch, so the VM
+    // blocks the name itself.
+    let (mut vm, mut host, costs) = vm_for("become_disabled()\nhalt()\n");
+    vm.grant(50);
+    vm.run(&mut host, &costs);
+    assert!(
+        !call_names(&host).iter().any(|n| *n == "become_disabled"),
+        "the host must never see a player become_disabled call"
+    );
+    assert!(vm.fault_count() >= 1, "the call faults");
+    assert!(!vm.is_dead(), "and the bot is NOT scuttled");
+}
+
+#[test]
 fn signal_during_hurt_window_aborts() {
     let src = "\
 on hurt:
