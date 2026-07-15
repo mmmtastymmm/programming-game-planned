@@ -157,11 +157,13 @@ log(123)
 become_disabled()
 ";
     let mut sim = Sim::new(&MapSpec::empty(4, 4));
+    // cpu 2 = exactly one pass per tick (log 1 + become_disabled 1, full
+    // charges): the death phase wrecks the bot before a second pass logs.
     let id = sim
         .apply(&Command::SpawnBot {
             pos: TilePos::new(2, 2),
             source: src.into(),
-            cpu: 8,
+            cpu: 2,
             cargo_cap: 1,
             faction: 0,
             hp: 100,

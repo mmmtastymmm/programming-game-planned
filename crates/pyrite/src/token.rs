@@ -26,6 +26,8 @@ pub enum Tok {
     Case,
     True,
     False,
+    /// Reserved word: `None` is sugar for `Option.None` (docs/01 Types).
+    NoneKw,
     Not,
     And,
     Or,
@@ -88,6 +90,7 @@ pub fn keyword(s: &str) -> Option<Tok> {
         "case" => Tok::Case,
         "True" => Tok::True,
         "False" => Tok::False,
+        "None" => Tok::NoneKw,
         "not" => Tok::Not,
         "and" => Tok::And,
         "or" => Tok::Or,

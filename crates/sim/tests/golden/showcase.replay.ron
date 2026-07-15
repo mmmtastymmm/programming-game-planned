@@ -1,0 +1,118 @@
+(
+    spec: (
+        width: 14,
+        height: 8,
+        rubble: [],
+        water: [
+            (
+                x: 7,
+                y: 0,
+            ),
+            (
+                x: 7,
+                y: 1,
+            ),
+            (
+                x: 7,
+                y: 2,
+            ),
+        ],
+        ore_nodes: [
+            ((
+                x: 11,
+                y: 3,
+            ), 30),
+        ],
+        depots: [
+            (
+                x: 2,
+                y: 3,
+            ),
+        ],
+        printers: [
+            (
+                pos: (
+                    x: 2,
+                    y: 5,
+                ),
+                faction: 0,
+                color: 0,
+                ruined: false,
+                desired_max: 0,
+            ),
+        ],
+        starting_ore: 10,
+        seed: 1592614941,
+        bridges: [],
+        mud: [],
+        corruption: [],
+        ore_veins: [],
+        crystal: [],
+        high_ground: [],
+        vents: [],
+        snow: [],
+        resource_tiles: [],
+    ),
+    commands: [
+        (
+            tick: 0,
+            command: DeployProgram(
+                faction: 0,
+                color: (0),
+                source: "move_to(closest(ore).expect())\nmine()\nmove_to(closest(depot).expect())\ndeposit()\n",
+            ),
+        ),
+        (
+            tick: 0,
+            command: SetDesiredMax(
+                printer: (3),
+                value: 2,
+            ),
+        ),
+        (
+            tick: 40,
+            command: PlaceOverlay(
+                pos: (
+                    x: 6,
+                    y: 3,
+                ),
+                overlay: Some(Arrow(East)),
+            ),
+        ),
+        (
+            tick: 60,
+            command: PlacePaint(
+                pos: (
+                    x: 5,
+                    y: 5,
+                ),
+                color: Some(2),
+            ),
+        ),
+        (
+            tick: 100,
+            command: DeployProgram(
+                faction: 0,
+                color: (0),
+                source: "move_to(closest(ore).expect())\nmine()\nmove_to(closest(depot).expect())\ndeposit()\nwait(5)\n",
+            ),
+        ),
+        (
+            tick: 150,
+            command: PlaceBlueprint(
+                pos: (
+                    x: 7,
+                    y: 1,
+                ),
+                kind: Bridge,
+            ),
+        ),
+        (
+            tick: 220,
+            command: KillBot(
+                bot: (1),
+            ),
+        ),
+    ],
+    ticks: 300,
+)

@@ -110,6 +110,27 @@ impl Value {
         })
     }
 
+    /// Payload size units for sized costs (docs/01 "Payload size units"):
+    /// int / bool / entity / bare enum = 1; string = its length; list or
+    /// enum-with-data = 1 + its contents' units (recursive, so nesting
+    /// can't smuggle bulk under a flat element count). Dicts count both
+    /// keys and values.
+    pub fn payload_units(&self) -> u64 {
+        match self {
+            Value::Int(_) | Value::Bool(_) | Value::Entity(_) | Value::Unit => 1,
+            Value::Str(s) => s.chars().count() as u64,
+            Value::List(items) => 1 + items.iter().map(|v| v.payload_units()).sum::<u64>(),
+            Value::Dict(entries) => {
+                1 + entries
+                    .iter()
+                    .map(|(k, v)| k.to_value().payload_units() + v.payload_units())
+                    .sum::<u64>()
+            }
+            Value::Enum(e) if e.fields.is_empty() => 1,
+            Value::Enum(e) => 1 + e.fields.iter().map(|v| v.payload_units()).sum::<u64>(),
+        }
+    }
+
     pub fn type_name(&self) -> &'static str {
         match self {
             Value::Int(_) => "int",

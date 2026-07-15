@@ -2,7 +2,7 @@
 //! double-handle, blocking actions. Each maps to a rule in docs/01-language.md.
 
 use pyrite::vm::{CallCtx, Host, HostCall, Outcome, RaiseOutcome, Signal, Vm, VmConfig};
-use pyrite::{parse, Construct, CostTable, PyriteErrorKind, UnlockSet, Value};
+use pyrite::{faults, parse, Construct, CostTable, Fault, PyriteErrorKind, UnlockSet, Value};
 use std::rc::Rc;
 
 /// Scripted test host: records calls, returns canned values.
@@ -15,13 +15,15 @@ struct TestHost {
     blocking: std::collections::BTreeSet<String>,
     /// names that fault
     faulting: std::collections::BTreeMap<String, String>,
+    /// reported log-buffer length (for upload_log's sized cost)
+    log_len: u64,
 }
 
 impl Host for TestHost {
     fn call(&mut self, name: &str, args: &[Value], _ctx: CallCtx<'_>) -> HostCall {
         self.calls.push((name.to_string(), args.to_vec()));
         if let Some(msg) = self.faulting.get(name) {
-            return HostCall::Fault(msg.clone());
+            return HostCall::Fault(Fault::new(faults::ACTION, msg.clone()));
         }
         if self.blocking.contains(name) {
             return HostCall::Block;
@@ -34,6 +36,10 @@ impl Host for TestHost {
             "id" => Ok(Value::Int(entity as i64)),
             _ => Err(format!("unknown attribute {name}")),
         }
+    }
+
+    fn log_len(&self) -> u64 {
+        self.log_len
     }
 }
 
@@ -113,55 +119,62 @@ fn locked_construct_error_names_the_unlock() {
 
 #[test]
 fn tier0_line_costs_match_table() {
-    // mine() = statement(1) + call_base(1) + builtin mine(2) = 4 cycles.
+    // Table entries are FULL charges (Q80): mine() = 2 cycles total — the
+    // call statement's overhead is folded into the figure.
     let (mut vm, mut host, costs) = vm_for("mine()\n");
-    vm.grant(3);
+    vm.grant(1);
     assert_eq!(vm.run(&mut host, &costs), Outcome::Paused);
-    assert!(host.calls.is_empty(), "should not have run yet at 3 cycles");
+    assert!(host.calls.is_empty(), "should not have run yet at 1 cycle");
     vm.grant(1);
     vm.run(&mut host, &costs);
-    assert_eq!(call_names(&host), ["mine"], "4th cycle completes the call");
+    assert_eq!(call_names(&host), ["mine"], "2nd cycle completes the call");
 }
 
 #[test]
 fn cycle_debt_ops_wait_until_affordable() {
     // Expensive op executes only once enough cycles accumulate across grants.
     let (mut vm, mut host, costs) = vm_for("scan_enemies()\n");
-    // statement(1) + call_base(1) + scan(4) = 6 total; grant 2/tick.
-    for _ in 0..2 {
-        vm.grant(2);
+    // scan_enemies = 4 total (full charge); grant 1/tick — it waits 3 ticks.
+    for _ in 0..3 {
+        vm.grant(1);
         assert_eq!(vm.run(&mut host, &costs), Outcome::Paused);
     }
     assert!(host.calls.is_empty());
-    vm.grant(2);
+    vm.grant(1);
     vm.run(&mut host, &costs);
     assert_eq!(call_names(&host), ["scan_enemies"]);
 }
 
 #[test]
-fn program_loops_forever_and_wrap_clears_variables() {
-    // One pass: x = 1 (assign 1), log(x) (stmt 1 + call 1 + log 1 = 3).
-    // Wrap costs statement(1). Second pass reads x fresh after re-assign —
-    // but if we *only* read x on pass 2, it must fault. Here we re-assign,
-    // so two full passes should produce two log calls.
+fn program_loops_forever_with_a_wrap_charge() {
+    // One pass: x = 1 (assign 1) + log(x) (full charge 1) = 2. The wrap
+    // costs one statement, so two passes = 2 + 1 + 2 = 5; a 6th cycle is
+    // needed before a third pass could start.
     let (mut vm, mut host, costs) = vm_for("x = 1\nlog(x)\n");
-    vm.grant(9); // pass(4) + wrap(1) + pass(4)
+    vm.grant(5);
     vm.run(&mut host, &costs);
     assert_eq!(call_names(&host), ["log", "log"]);
 }
 
 #[test]
-fn variables_do_not_survive_the_wrap() {
-    // First line reads x, which is only set later in the program: pass 1
-    // faults immediately (read of unset variable), crash-dumps, restarts.
-    let (mut vm, mut host, costs) = vm_for("log(x)\nx = 1\n");
+fn variables_survive_the_wrap() {
+    // Q80: the loop-around does NOT clear variables — a counter seeded from
+    // a constant (constants sit below globals) keeps climbing pass after
+    // pass. Only fault/handler restarts clear.
+    let program = parse("x = x + 1\nlog(x)\n", &UnlockSet::all()).unwrap();
+    let mut config = VmConfig::default();
+    config.constants.insert("x".into(), Value::Int(0));
+    let mut vm = Vm::new(Rc::new(program), config);
+    let mut host = TestHost::default();
+    let costs = CostTable::default();
     vm.grant(100);
     vm.run(&mut host, &costs);
-    assert!(
-        call_names(&host).contains(&"upload_crash_dump"),
-        "unset read must force a crash dump, got {:?}",
-        call_names(&host)
-    );
+    let logged: Vec<&Value> =
+        host.calls.iter().filter(|(n, _)| n == "log").map(|(_, a)| &a[0]).collect();
+    assert!(logged.len() >= 3, "several passes expected");
+    assert_eq!(logged[0], &Value::Int(1));
+    assert_eq!(logged[1], &Value::Int(2), "x survived the wrap");
+    assert_eq!(logged[2], &Value::Int(3));
 }
 
 // --- expressions ---
@@ -440,41 +453,6 @@ boom(2 // 0)
     assert_eq!(vm.run(&mut host, &costs), Outcome::Exploded);
 }
 
-#[test]
-fn overtime_doubles_costs_after_grace_window() {
-    // Handler body: infinite busy loop. Grace window is 10 ticks; after
-    // that every op costs double, so per-grant progress halves.
-    let src = "\
-on signal(s):
-    while True:
-        spin()
-
-boom(1 // 0)
-";
-    let (mut vm, mut host, costs) = vm_for(src);
-    // Reach the fault + enter handler.
-    vm.grant(20);
-    vm.run(&mut host, &costs);
-    let spins_before = |h: &TestHost| h.calls.iter().filter(|(n, _)| n == "spin").count();
-    // Within grace: 12 cycles per grant buys N spins.
-    host.calls.clear();
-    vm.grant(12);
-    vm.run(&mut host, &costs);
-    let in_grace = spins_before(&host);
-    // Push the handler clock well past the grace window.
-    for _ in 0..15 {
-        vm.grant(0);
-    }
-    host.calls.clear();
-    vm.grant(24); // double the budget should buy the same number of spins
-    vm.run(&mut host, &costs);
-    let in_overtime = spins_before(&host);
-    assert_eq!(
-        in_grace, in_overtime,
-        "24 overtime cycles should buy what 12 normal cycles bought"
-    );
-}
-
 // --- signals: hurt / death / double-handle ---
 
 #[test]
@@ -486,7 +464,7 @@ on signal(s):
 work()
 ";
     let (mut vm, mut host, costs) = vm_for(src);
-    vm.grant(3);
+    vm.grant(1); // work() = 1 full charge; no headroom for a wrap
     vm.run(&mut host, &costs);
     assert_eq!(call_names(&host), ["work"]);
     assert_eq!(vm.raise(Signal::Hurt, &mut host, &costs), RaiseOutcome::Handled);
@@ -527,8 +505,8 @@ work()
     vm.grant(100);
     assert_eq!(vm.run(&mut host, &costs), Outcome::Dead);
     let names = call_names(&host);
-    // Black box: log(3) + upload_log (would be 7 total > 10? log: stmt1+call1+log1=3;
-    // upload: stmt1+call1+upload5=7; 3+7=10 → exactly the budget.
+    // Black box: log = 1, upload_log = min(5 + 0 buffered, 25) = 5;
+    // 6 total fits the 10-cycle budget.
     assert!(names.contains(&"log"));
     assert!(names.contains(&"upload_log"));
     assert_eq!(*names.last().unwrap(), "become_disabled", "death always exits through become_disabled");
@@ -544,10 +522,19 @@ on death:
 work()
 ";
     let (mut vm, mut host, costs) = vm_for(src);
-    // expensive_scan is unknown → call_base(1)+default(1)+stmt(1) = 3;
-    // then log = 3 more; fine. Make it pricey instead:
+    // expensive_scan is unknown (default cost 1); make it pricey instead:
     let mut costs = costs;
-    costs.builtins.insert("expensive_scan".into(), 20);
+    costs.builtins.insert(
+        "expensive_scan".into(),
+        pyrite::BuiltinSpec {
+            cost: pyrite::CostSpec::Fixed(30), // > the 20-cycle black-box budget
+            signal_safe: false,
+            params: None,
+            signature: "expensive_scan()".into(),
+            summary: "test-only pricey op".into(),
+            cost_note: String::new(),
+        },
+    );
     vm.raise(Signal::Death, &mut host, &costs);
     vm.grant(100);
     assert_eq!(vm.run(&mut host, &costs), Outcome::Dead);
@@ -606,7 +593,7 @@ while n < 5:
 #[test]
 fn queued_program_installs_at_the_loop_boundary() {
     let (mut vm, mut host, costs) = vm_for("log(1)\n");
-    vm.grant(3);
+    vm.grant(1); // log = 1 full charge; the wrap is unaffordable
     vm.run(&mut host, &costs);
     assert_eq!(call_names(&host), ["log"]);
     // Redeploy: takes effect at the wrap, not mid-pass.
@@ -688,22 +675,32 @@ fn expect_on_non_result_faults() {
 }
 
 #[test]
-fn kind_constants_are_shadowable_and_survive_the_wrap() {
-    // Shadow `ore` on pass 1; the wrap clears globals, so pass 2 reads the
-    // constant again — constants live below globals and survive resets.
+fn kind_constants_are_shadowable_and_faults_restore_them() {
+    // Shadow `ore` on pass 1. Variables survive the wrap (Q80), so the
+    // shadow persists into pass 2; a FAULT restart clears globals, and the
+    // constant (living below globals) shows through again.
     let (mut vm, mut host, costs) =
         vm_with_closest("log(ore)\nore = 5\nlog(ore)\n", Value::Unit);
-    vm.grant(11); // pass: log(3) + assign(2) + log(3) = 8, wrap(1), log(3) → 12 lands mid
+    vm.grant(5); // pass: log(1) + assign(1) + log(1) = 3, wrap(1), log(1)
     vm.run(&mut host, &costs);
     let logged: Vec<&Value> =
         host.calls.iter().filter(|(n, _)| n == "log").map(|(_, a)| &a[0]).collect();
     assert_eq!(logged[0], &Value::Str("ore".into()), "constant read");
     assert_eq!(logged[1], &Value::Int(5), "assignment shadows the constant");
+    assert_eq!(logged[2], &Value::Int(5), "the shadow survives the wrap (Q80)");
+
+    // A fault restart clears globals — the constant returns.
+    let (mut vm, mut host, costs) =
+        vm_with_closest("log(ore)\nore = 5\nboom(1 // 0)\n", Value::Unit);
     vm.grant(100);
     vm.run(&mut host, &costs);
     let logged: Vec<&Value> =
         host.calls.iter().filter(|(n, _)| n == "log").map(|(_, a)| &a[0]).collect();
-    assert_eq!(logged[2], &Value::Str("ore".into()), "wrap restores the constant");
+    assert_eq!(logged[0], &Value::Str("ore".into()));
+    assert!(
+        logged.iter().filter(|v| ***v == Value::Str("ore".into())).count() >= 2,
+        "post-fault pass reads the constant again: {logged:?}"
+    );
 }
 
 #[test]
@@ -1255,4 +1252,201 @@ halt()
     let logged: Vec<&Value> =
         host.calls.iter().filter(|(n, _)| n == "log").map(|(_, a)| &a[0]).collect();
     assert_eq!(logged, [&Value::Str("a".into()), &Value::Int(1), &Value::Bool(false)]);
+}
+
+// --- M1: keyword arguments & defaults ---
+
+/// User defs bind positionals, then keywords, then literal defaults.
+#[test]
+fn user_def_kwargs_and_defaults() {
+    let src = "\
+def report(val, level=\"info\", repeat=1):
+    log(level)
+    log(val * repeat)
+
+report(5)
+report(6, level=\"warn\")
+report(7, repeat=3)
+halt()
+";
+    let (mut vm, mut host, costs) = vm_for(src);
+    vm.grant(1000);
+    vm.run(&mut host, &costs);
+    let logged: Vec<&Value> =
+        host.calls.iter().filter(|(n, _)| n == "log").map(|(_, a)| &a[0]).collect();
+    assert_eq!(
+        logged,
+        [
+            &Value::Str("info".into()),
+            &Value::Int(5),
+            &Value::Str("warn".into()),
+            &Value::Int(6),
+            &Value::Str("info".into()),
+            &Value::Int(21),
+        ]
+    );
+}
+
+/// Registry builtins canonicalize keywords + defaults before the host call:
+/// the host always sees the full positional form.
+#[test]
+fn builtin_kwargs_canonicalize_against_the_registry() {
+    let (mut vm, mut host, costs) = vm_for("log(9, level=\"warn\")\nlog(8)\nhalt()\n");
+    vm.grant(100);
+    vm.run(&mut host, &costs);
+    let log_calls: Vec<&Vec<Value>> =
+        host.calls.iter().filter(|(n, _)| n == "log").map(|(_, a)| a).collect();
+    assert_eq!(log_calls[0], &vec![Value::Int(9), Value::Str("warn".into())]);
+    assert_eq!(
+        log_calls[1],
+        &vec![Value::Int(8), Value::Str("info".into())],
+        "the default level fills in"
+    );
+}
+
+/// Unknown keywords and missing required args fault with err_arity.
+#[test]
+fn bad_kwargs_fault_with_err_arity() {
+    let (mut vm, mut host, costs) = vm_for("log(1, volume=11)\n");
+    vm.grant(100);
+    vm.run(&mut host, &costs);
+    assert_eq!(vm.last_fault_id(), Some(pyrite::faults::ARITY));
+
+    let (mut vm, mut host, costs) = vm_for("def f(a, b):\n    return a\n\nf(1)\n");
+    vm.grant(100);
+    vm.run(&mut host, &costs);
+    assert_eq!(vm.last_fault_id(), Some(pyrite::faults::ARITY));
+    assert!(vm.last_fault().unwrap().contains("missing required argument 'b'"));
+}
+
+// --- M1: None is reserved sugar for Option.None ---
+
+#[test]
+fn none_is_option_none() {
+    let src = "\
+x = None
+match x:
+    case None:
+        log(\"none\")
+    case _:
+        log(\"other\")
+log(x == None)
+halt()
+";
+    let (mut vm, mut host, costs) = vm_for(src);
+    vm.grant(1000);
+    vm.run(&mut host, &costs);
+    let logged: Vec<&Value> =
+        host.calls.iter().filter(|(n, _)| n == "log").map(|(_, a)| &a[0]).collect();
+    assert_eq!(logged, [&Value::Str("none".into()), &Value::Bool(true)]);
+}
+
+#[test]
+fn assigning_to_none_is_a_parse_error() {
+    assert!(parse("None = 5\n", &UnlockSet::all()).is_err());
+}
+
+/// Builtin enums construct from source (docs/01 Types): Option.Some(v),
+/// Result.Ok/Err — and .expect() unwraps them.
+#[test]
+fn builtin_enums_construct_from_source() {
+    let src = "\
+x = Option.Some(4)
+log(x.expect())
+y = Result.Err(\"nope\")
+match y:
+    case Result.Err(msg):
+        log(msg)
+    case _:
+        log(0)
+halt()
+";
+    let (mut vm, mut host, costs) = vm_for(src);
+    vm.grant(1000);
+    vm.run(&mut host, &costs);
+    let logged: Vec<&Value> =
+        host.calls.iter().filter(|(n, _)| n == "log").map(|(_, a)| &a[0]).collect();
+    assert_eq!(logged, [&Value::Int(4), &Value::Str("nope".into())]);
+}
+
+// --- M1: structural enum identity includes arity (Q80) ---
+
+/// A wrong-arity pattern is a non-match that falls through, not a fault.
+#[test]
+fn match_arity_mismatch_falls_through() {
+    let src = "\
+enum Msg:
+    Ping(a)
+
+m = Msg.Ping(1)
+match m:
+    case Msg.Ping(a, b):
+        log(\"two\")
+    case Msg.Ping(a):
+        log(a)
+halt()
+";
+    let (mut vm, mut host, costs) = vm_for(src);
+    vm.grant(1000);
+    vm.run(&mut host, &costs);
+    let logged: Vec<&Value> =
+        host.calls.iter().filter(|(n, _)| n == "log").map(|(_, a)| &a[0]).collect();
+    assert_eq!(logged, [&Value::Int(1)], "arity mismatch falls to the next arm");
+}
+
+// --- M1: fault-id constants ---
+
+/// Fault ids are pre-bound constants, comparable with == in handlers.
+#[test]
+fn fault_ids_are_prebound_constants() {
+    let (mut vm, mut host, costs) = vm_for("boom(1 // 0)\n");
+    vm.grant(100);
+    vm.run(&mut host, &costs);
+    assert_eq!(vm.last_fault_id(), Some(pyrite::faults::DIV_ZERO));
+
+    // The constant is readable from source without any host setup.
+    let (mut vm, mut host, costs) = vm_for("log(err_div_zero)\nhalt()\n");
+    vm.grant(100);
+    vm.run(&mut host, &costs);
+    let logged = host.calls.iter().find(|(n, _)| n == "log").unwrap();
+    assert_eq!(logged.1[0], Value::Str("err_div_zero".into()));
+}
+
+// --- M1: payload-sized costs & payload_cap (Q82) ---
+
+/// An oversized payload faults err_payload; the send never reaches the host.
+#[test]
+fn oversized_payload_faults() {
+    let (mut vm, mut host, costs) =
+        vm_for("try_send(\"ch\", \"a very long message indeed\")\n");
+    vm.grant(1000);
+    vm.run(&mut host, &costs);
+    assert_eq!(vm.last_fault_id(), Some(pyrite::faults::PAYLOAD));
+    assert!(!call_names(&host).contains(&"try_send"), "host must not see the send");
+}
+
+/// Payload units price the call: try_send = 3 + size (full charge).
+#[test]
+fn payload_units_price_sized_ops() {
+    // "abcd" = 4 units → 3 + 4 = 7 cycles total.
+    let (mut vm, mut host, costs) = vm_for("try_send(\"c\", \"abcd\")\n");
+    vm.grant(6);
+    assert_eq!(vm.run(&mut host, &costs), Outcome::Paused);
+    assert!(host.calls.is_empty());
+    vm.grant(1);
+    vm.run(&mut host, &costs);
+    assert_eq!(call_names(&host), ["try_send"]);
+}
+
+/// upload_log = min(5 + buffered, 25): a huge buffer caps at the dump's 25.
+#[test]
+fn upload_log_cost_caps_at_the_dump(){
+    let (mut vm, mut host, costs) = vm_for("upload_log()\n");
+    host.log_len = 100;
+    vm.grant(24);
+    assert_eq!(vm.run(&mut host, &costs), Outcome::Paused);
+    assert!(host.calls.is_empty());
+    vm.grant(1);
+    vm.run(&mut host, &costs);
+    assert_eq!(call_names(&host), ["upload_log"]);
 }

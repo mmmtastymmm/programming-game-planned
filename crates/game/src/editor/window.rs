@@ -565,20 +565,15 @@ pub(crate) fn code_editor(
             .contains(egui::pos2(rel.x, rel.y));
         if on_text && let Some(word) = word_at(&doc.code, cursor.ccursor.index) {
             let costs = &sim.costs;
-            if let Some(doc_entry) = sim::host::builtin_doc(&word) {
-                // upload_crash_dump is costed by its dedicated field.
-                let cost = if doc_entry.name == "upload_crash_dump" {
-                    costs.crash_dump
-                } else {
-                    costs.builtin_cost(doc_entry.name)
-                };
+            if let Some(doc_entry) = sim::host::builtin_doc(costs, &word) {
+                let cost = costs.cost_display(&word);
                 egui::show_tooltip_at_pointer(
                     ui.ctx(),
                     ui.layer_id(),
                     editor_id.with("hover_doc"),
                     |ui| {
-                        ui.monospace(egui::RichText::new(doc_entry.signature).color(HL_FUNCTION));
-                        ui.label(doc_entry.summary);
+                        ui.monospace(egui::RichText::new(&doc_entry.signature).color(HL_FUNCTION));
+                        ui.label(&doc_entry.summary);
                         ui.small(format!("cost: {cost} cycles{}", doc_entry.cost_note));
                     },
                 );
@@ -606,7 +601,11 @@ pub(crate) fn code_editor(
                             egui::RichText::new(format!(
                                 "{}({})",
                                 func.name,
-                                func.params.join(", ")
+                                func.params
+                                    .iter()
+                                    .map(|p| p.name.as_str())
+                                    .collect::<Vec<_>>()
+                                    .join(", ")
                             ))
                             .color(HL_FUNCTION),
                         );

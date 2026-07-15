@@ -48,33 +48,52 @@ marked ∥ can proceed in parallel once their prerequisites land.
       bytes) replaces `version: u32`; `World.program_library: BTreeMap<hash, source>` retains
       every deployed version; the editor shows short hashes. [sim] (S)
 
-## M1 — Language core: cost model & semantics cluster (one PR, one hash explanation)
+## M1 — Language core: cost model & semantics cluster ✅ COMPLETE (2026-07-15)
 
-The pyrite auditor's advice stands: these all touch every replay hash, so land together.
+Landed as one change set with one golden-fixture regeneration (the hash explanation:
+full charges + centicycles + wrap-surviving variables move every replay hash at once).
 
-- [ ] **Full-charge cost convention** (Q80): drop `call_base`, re-key `CostTable.builtins` so
-      the table figure is the total price (`closest` = 4 total). [pyrite] (S) ⚠HASH
-- [ ] **Centicycle storage** (Q56/Q75): budget/grants ×100 so future % overlays bite a 1-cycle
-      CPU. [pyrite][sim] (S) ⚠HASH
-- [ ] **Variables survive the loop-around** (Q80): delete the wrap-time `globals.clear()`;
-      only fault/handler restarts clear. Fix the now-inverted tests. [pyrite] (S) ⚠HASH
-- [ ] **Delete the grace-window/overtime tax** (`grace_window_ticks`, `overtime_mult`,
-      `adjusted()`) — superseded by per-signal caps (M3). [pyrite] (S) ⚠HASH
-- [ ] **Payload-sized costs**: `send`/`broadcast` + payload size, `upload_log` =
-      `min(5+size, 25)`, `payload_cap` (~8) faulting with `err_payload`. [pyrite][sim] (M) ⚠HASH
-- [ ] **Keyword args & optional defaults** — parser + `Function` + call eval. Prerequisite for
-      half the spec'd signatures (`log(msg, level=…)`, `send(ch, val, timeout=…, faction=…)`,
-      `receive(...)`). [pyrite] (M)
-- [ ] **`None` as a reserved word** = `Option.None` (assignment illegal, `case None:` parses);
-      make builtin-enum variants constructible from source. [pyrite] (S)
-- [ ] **Fault-id constants** (`err_timeout`, `err_tool_jam`, `err_unknown_contact`,
-      `err_payload`, …): a registry of `==`-comparable constants returned by `last_error()`,
-      replacing free-form strings. [pyrite][sim] (M) ⚠HASH
-- [ ] **Match arity fall-through** (Q80 structural identity): name+variant+arity is the match;
-      wrong arity falls to the next arm instead of faulting. [pyrite] (S) ⚠HASH
-- [ ] **Function registry as data**: one `name → (signature, cost, signal_safe, effect, doc)`
-      table replacing the `CostTable.builtins` / sim `BUILTIN_DOCS` split. Feeds M3 static
-      analysis and the editor. [pyrite][sim] (M)
+- [x] **Full-charge cost convention** (Q80): `call_base` deleted; registry figures are total
+      prices (`closest` = 4, `mine` = 2); a bare-call statement pays only the call's figure
+      (the statement overhead is folded in). [pyrite] (S) ⚠HASH
+- [x] **Centicycle storage** (Q56/Q75): budgets/debt stored ×100 (`CENT`), table entries stay
+      whole cycles, converted at charge time; `Vm::budget()` returns centicycles (the HUD
+      divides for display). [pyrite][sim] (S) ⚠HASH
+- [x] **Variables survive the loop-around** (Q80): the wrap keeps globals; fault/handler
+      restarts (and redeploys landing at the wrap) clear them. Tests inverted. [pyrite] (S) ⚠HASH
+- [x] **Grace-window/overtime tax deleted** (`grace_window_ticks`, `overtime_mult`,
+      `adjusted()`, the handler tick clock) — per-signal caps replace it in M3. [pyrite] (S) ⚠HASH
+- [x] **Payload-sized costs**: `CostSpec::{Fixed, PlusPayload, LogSized}`;
+      `Value::payload_units()` (int/bool/entity/bare-enum 1, string = length, containers
+      1 + contents recursively); `send`/`broadcast` price + payload; `upload_log` =
+      min(5+buffer, 25) via a new `Host::log_len()` hook; `payload_cap` 8, oversize faults
+      `err_payload` before the host sees the call. *Judgment call: the doc's "1 + elements/
+      fields" was read as recursive units so nesting can't smuggle bulk — flag if you meant
+      flat counts.* *Note: `blackbox_budget` 10→20 so the factory death report (log + full-
+      buffer upload at new prices) still fits; the field dies in M3 (abort's upload charges
+      as debt).* [pyrite][sim] (M) ⚠HASH
+- [x] **Keyword args & optional defaults**: `f(a, key=v)` parses (positionals-first, Python
+      rules); `def f(a, b=5)` with literal defaults (trailing-defaults enforced); user defs
+      and registry builtins bind by name with defaults filled; the host always receives the
+      canonical positional form (`log` always gets `[val, level]`). [pyrite] (M)
+- [x] **`None` reserved** = `Option.None` (assignment is a parse error; `case None:` sugar;
+      `Option.Some(v)` / `Result.Ok/Err` constructible from source). [pyrite] (S)
+- [x] **Fault-id constants**: `pyrite::faults` registry (err_type / err_name /
+      err_unknown_function / err_arity / err_stack / err_index / err_key / err_div_zero /
+      err_overflow / err_no_match / err_expect / err_range / err_payload / err_control /
+      err_action / err_timeout), auto-bound as VM constants; every fault site carries an id;
+      `HostCall::Fault(Fault{id, msg})`; `last_error()` returns the id constant (the message
+      still rides in `Signal.Error(msg)` and crash dumps). *Judgment call: the language-level
+      id list is my drafting — docs only name examples; ratify or trim before it fossilizes.
+      Host-domain ids (err_tool_jam, err_unknown_contact) land with their systems (M4/M7).*
+      [pyrite][sim] (M) ⚠HASH
+- [x] **Match arity fall-through** (Q80): name+variant+arity is the identity; wrong arity is
+      a non-match that falls to the next arm, not a fault. [pyrite] (S) ⚠HASH
+- [x] **Function registry as data**: `pyrite/data/builtins.ron` — name → (cost, signal_safe,
+      params+defaults, signature, summary, cost_note) for the FULL docs/01 table, including
+      not-yet-implemented verbs (calling one faults err_unknown_function until its system
+      lands). Replaces sim's `BUILTIN_DOCS`; editor hover reads it (`builtin_doc(costs, name)`
+      + `cost_display`); `signal_safe` recorded for M3's static checks. [pyrite][sim] (M)
 
 ## M2 — Nine-phase tick skeleton (sim restructure the rest slots into)
 

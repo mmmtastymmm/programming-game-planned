@@ -6,10 +6,15 @@
 //!   when an action blocks.
 //! - An operation only executes once its full cost has accumulated
 //!   ("cycle debt": ops costing more than the remaining budget wait).
-//! - Programs loop forever; wrapping to line 1 clears variables (state must
-//!   be re-derived each pass) and costs one statement (no free spinning).
-//! - Unified fault path: any runtime failure either enters `on error:`
-//!   (trap cost, variables preserved, overtime ×2 past the grace window) or
+//!   Budgets are STORED in centicycles (×100, Q56/Q75) — table entries stay
+//!   whole cycles, converted at charge time — and builtin table entries are
+//!   FULL charges (Q80): the figure is the total price of the call.
+//! - Programs loop forever; the wrap to line 1 costs one statement (no free
+//!   spinning) and variables SURVIVE it (Q80) — only fault/handler restarts
+//!   clear them, which is exactly when state might be corrupted.
+//! - Unified fault path: any runtime failure carries a fault-id constant
+//!   (`err_type`, `err_action`, … — see [`crate::error::faults`]) and
+//!   either enters `on error:` (trap cost, variables preserved) or
 //!   force-calls `upload_crash_dump()` — then restarts from line 1.
 //! - Double-handle rule: any signal or fault while a handler (or an
 //!   engine interrupt context: boot/recall) is active destroys the bot.
@@ -19,11 +24,31 @@
 //! Determinism: no floats, no hash-ordered iteration (BTreeMap only), no
 //! host time. All randomness must come from the Host.
 
-use crate::ast::{BinOp, Expr, ExprId, Pattern, Program, SignalKind, Stmt, StmtId, UnOp};
-use crate::costs::CostTable;
+use crate::ast::{BinOp, DefaultLit, Expr, ExprId, Pattern, Program, SignalKind, Stmt, StmtId, UnOp};
+use crate::costs::{CostSpec, CostTable};
+use crate::error::faults;
 use crate::value::{DictKey, EnumValue, Value};
 use std::collections::BTreeMap;
 use std::rc::Rc;
+
+/// Centicycles per cycle: budgets/debt are stored fine-grained (Q56/Q75)
+/// so percent effects (brownout −50%) bite even a 1-cycle CPU.
+const CENT: i64 = 100;
+
+/// A runtime fault: a pre-bound, `==`-comparable identity constant
+/// (returned by `last_error()`) plus the human-facing message (carried by
+/// `Signal.Error(msg)` and crash dumps). See [`crate::error::faults`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct Fault {
+    pub id: &'static str,
+    pub msg: String,
+}
+
+impl Fault {
+    pub fn new(id: &'static str, msg: impl Into<String>) -> Self {
+        Self { id, msg: msg.into() }
+    }
+}
 
 /// Execution context passed to every host call: enough for the host to
 /// write crash dumps (line numbers) and serve `last_error()` without
@@ -31,7 +56,10 @@ use std::rc::Rc;
 #[derive(Debug, Clone, Copy)]
 pub struct CallCtx<'a> {
     pub line: u32,
+    /// Most recent fault's message (for crash-dump prose).
     pub last_fault: Option<&'a str>,
+    /// Most recent fault's identity constant (what `last_error()` returns).
+    pub last_fault_id: Option<&'static str>,
 }
 
 /// The world-side interface. Builtins and entity attributes live here.
@@ -45,13 +73,19 @@ pub trait Host {
         let _ = entity;
         Err(format!("unknown attribute {name}"))
     }
+
+    /// Current log-buffer length, for `upload_log`'s sized cost
+    /// (min(base + size, cap) — Q82).
+    fn log_len(&self) -> u64 {
+        0
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum HostCall {
     Ready(Value),
     Block,
-    Fault(String),
+    Fault(Fault),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -135,7 +169,13 @@ impl PartialEq for DefaultHandler {
 
 impl Default for VmConfig {
     fn default() -> Self {
-        Self { stack_depth: 4, constants: BTreeMap::new(), default_handlers: BTreeMap::new() }
+        // Fault-id constants are pre-bound in every VM (docs/01, Q80):
+        // `if last_error() == err_payload:` works without host setup.
+        let mut constants = BTreeMap::new();
+        for id in faults::ALL {
+            constants.insert(id.to_string(), Value::Str(id.to_string()));
+        }
+        Self { stack_depth: 4, constants, default_handlers: BTreeMap::new() }
     }
 }
 
@@ -161,7 +201,9 @@ enum Work {
     ForIter { stmt: StmtId, items: Vec<Value>, idx: usize },
     MatchBegin { stmt: StmtId },
     MatchArm { stmt: StmtId, value: EnumValue, case: usize },
-    CallExec { name: String, argc: usize, line: u32 },
+    /// `kwargs` are the keyword names, in source order; their values sit on
+    /// the value stack after the `argc` positionals.
+    CallExec { name: String, argc: usize, kwargs: Vec<String>, line: u32 },
     /// Marker popped when the forced handler_init() completes — flips the
     /// VM out of "entry ritual" state (inspector visibility).
     InitDone,
@@ -210,9 +252,7 @@ pub struct Vm {
     /// True from handler entry until the forced handler_init() resolves —
     /// the visible flinch window.
     handler_init_active: bool,
-    /// Ticks spent in the current `on error:` handler (for the grace window).
-    handler_ticks: u32,
-    /// Remaining black-box budget while in the death handler.
+    /// Remaining black-box budget while in the death handler (centicycles).
     death_budget: i64,
     /// Set by the sim during Boot / Recall — an interrupt context for the
     /// double-handle rule.
@@ -220,6 +260,8 @@ pub struct Vm {
     state: State,
     current_line: u32,
     last_fault: Option<String>,
+    /// The most recent fault's identity constant (see error::faults).
+    last_fault_id: Option<&'static str>,
     /// Total faults so far (crash dumps AND handled traps) — lets the
     /// outside world observe fault *events*, not just the latest message.
     fault_count: u64,
@@ -247,12 +289,12 @@ impl Vm {
             handler_is_default: false,
             handler_signal: None,
             handler_init_active: false,
-            handler_ticks: 0,
             death_budget: 0,
             engine_interrupt: false,
             state: State::Running,
             current_line: 0,
             last_fault: None,
+            last_fault_id: None,
             fault_count: 0,
             crash_count: 0,
             pending_program: None,
@@ -277,6 +319,11 @@ impl Vm {
         self.last_fault.as_deref()
     }
 
+    /// The most recent fault's identity constant (`err_type`, ...).
+    pub fn last_fault_id(&self) -> Option<&'static str> {
+        self.last_fault_id
+    }
+
     /// Monotone count of faults (unhandled and handled alike).
     pub fn fault_count(&self) -> u64 {
         self.fault_count
@@ -293,6 +340,8 @@ impl Vm {
         self.pending_program = Some(program);
     }
 
+    /// Banked budget in CENTICYCLES (Q56: storage is ×100; divide by 100
+    /// for whole cycles in displays).
     pub fn budget(&self) -> i64 {
         self.budget
     }
@@ -343,12 +392,9 @@ impl Vm {
 
     // --- sim-facing control ---
 
-    /// Grant this tick's cycles. Also advances the error-handler grace clock.
+    /// Grant this tick's cycles (stored as centicycles, Q56).
     pub fn grant(&mut self, cycles: u64) {
-        self.budget = self.budget.saturating_add(cycles as i64);
-        if self.phase == Phase::Handler(SignalKind::Signal) {
-            self.handler_ticks = self.handler_ticks.saturating_add(1);
-        }
+        self.budget = self.budget.saturating_add(cycles as i64 * CENT);
     }
 
     /// Mark the start/end of an engine interrupt context (Boot, Recall).
@@ -377,6 +423,7 @@ impl Vm {
             self.work.push(Work::CallExec {
                 name: "handler_init".to_string(),
                 argc: 0,
+                kwargs: Vec::new(),
                 line: 0,
             });
             self.handler_init_active = true;
@@ -389,7 +436,6 @@ impl Vm {
         self.phase = Phase::Handler(kind);
         self.handler_is_default = default;
         self.handler_signal = Some(signal_name);
-        self.handler_ticks = 0;
     }
 
     /// The Signal enum value delivered to unified handlers.
@@ -430,7 +476,6 @@ impl Vm {
         self.frames.clear();
         self.globals.clear();
         self.phase = Phase::Main;
-        self.handler_ticks = 0;
         if self.state != State::Dead && self.state != State::Exploded {
             self.state = State::Running;
         }
@@ -449,7 +494,9 @@ impl Vm {
         self.state = State::Running;
         match result {
             Ok(v) => self.values.push(v),
-            Err(msg) => self.fault(msg, host, costs),
+            // Failed world actions carry the generic action id; finer
+            // host-domain ids (err_unreachable, ...) land with M7.
+            Err(msg) => self.fault(faults::ACTION, msg, host, costs),
         }
     }
 
@@ -493,7 +540,7 @@ impl Vm {
                 .map(|b| (b, Self::signal_value(name, None)));
             self.enter_handler(kind, body, false, name, binding);
             if kind == SignalKind::Death {
-                self.death_budget = costs.blackbox_budget as i64;
+                self.death_budget = costs.blackbox_budget as i64 * CENT;
             }
             return RaiseOutcome::Handled;
         }
@@ -507,7 +554,7 @@ impl Vm {
             let binding = Some(("s".to_string(), Self::signal_value(name, None)));
             self.enter_handler(kind, body, true, name, binding);
             if kind == SignalKind::Death {
-                self.death_budget = costs.blackbox_budget as i64;
+                self.death_budget = costs.blackbox_budget as i64 * CENT;
             }
             return RaiseOutcome::Handled;
         }
@@ -550,17 +597,21 @@ impl Vm {
                     }
                     Phase::Main => {
                         // Implicit program loop: wrap to line 1. Costs one
-                        // statement; variables do not survive the wrap.
-                        let cost = self.adjusted(costs.statement, costs);
-                        if self.budget < cost as i64 {
+                        // statement (no free spinning). Variables SURVIVE
+                        // the wrap (Q80) — only fault/handler restarts
+                        // clear them.
+                        let cost = costs.statement as i64 * CENT;
+                        if self.budget < cost {
                             return Outcome::Paused;
                         }
-                        self.budget -= cost as i64;
+                        self.budget -= cost;
                         if let Some(program) = self.pending_program.take() {
                             self.program = program; // redeploy lands here
+                            // A redeploy replaces the code out from under
+                            // the old state; stale names re-derive.
+                            self.globals.clear();
                         }
                         self.active = Rc::clone(&self.program);
-                        self.globals.clear();
                         self.values.clear();
                         self.frames.clear();
                         self.work = Self::block_work(&self.program.body.clone());
@@ -569,18 +620,18 @@ impl Vm {
                 }
             };
 
-            let cost = self.adjusted(self.cost_of(top, costs), costs);
-            if self.phase == Phase::Handler(SignalKind::Death) && self.death_budget < cost as i64 {
+            let cost = self.cost_of(top, costs, &*host) as i64 * CENT;
+            if self.phase == Phase::Handler(SignalKind::Death) && self.death_budget < cost {
                 // Black-box budget spent: the explosion doesn't wait.
                 self.finish_death(host);
                 return Outcome::Dead;
             }
-            if self.budget < cost as i64 {
+            if self.budget < cost {
                 return Outcome::Paused;
             }
-            self.budget -= cost as i64;
+            self.budget -= cost;
             if self.phase == Phase::Handler(SignalKind::Death) {
-                self.death_budget -= cost as i64;
+                self.death_budget -= cost;
             }
 
             let work = self.work.pop().expect("checked non-empty above");
@@ -590,20 +641,16 @@ impl Vm {
 
     // --- internals ---
 
-    fn adjusted(&self, cost: u64, costs: &CostTable) -> u64 {
-        if self.phase == Phase::Handler(SignalKind::Signal)
-            && self.handler_ticks > costs.grace_window_ticks
-        {
-            cost * costs.overtime_mult
-        } else {
-            cost
-        }
-    }
-
-    fn cost_of(&self, work: &Work, costs: &CostTable) -> u64 {
+    fn cost_of(&self, work: &Work, costs: &CostTable, host: &dyn Host) -> u64 {
         match work {
             Work::Stmt(id) => match self.active.stmt(*id) {
-                Stmt::Expr { .. } => costs.statement,
+                // A bare-call statement's overhead is folded into the
+                // function's full charge (Q80); other expression statements
+                // pay the plain statement figure.
+                Stmt::Expr { expr, .. } => match self.active.expr(*expr) {
+                    Expr::Call { .. } | Expr::MethodCall { .. } => 0,
+                    _ => costs.statement,
+                },
                 Stmt::Assign { .. } => 0, // StoreVar charges `assign`
                 Stmt::IndexAssign { .. } => 0, // IndexSet charges `list_op`
                 Stmt::If { .. } => 0,     // IfArm charges per arm
@@ -635,14 +682,14 @@ impl Vm {
             Work::ForIter { .. } => costs.loop_iter,
             Work::MatchBegin { .. } => 0,
             Work::MatchArm { .. } => costs.match_arm,
-            Work::CallExec { name, .. } => {
+            Work::CallExec { name, argc, kwargs, .. } => {
                 if self.active.functions.contains_key(name) {
                     costs.user_call
                 } else {
-                    costs.builtin_cost(name)
+                    self.call_charge(name, *argc, kwargs, costs, host)
                 }
             }
-            Work::MethodExec { name, .. } => costs.builtin_cost(name),
+            Work::MethodExec { name, .. } => costs.builtin_charge(name, &[], 0),
             Work::EnumCtorExec { .. } => costs.enum_ctor,
             Work::MakeList { .. } => costs.list_op,
             Work::MakeDict { .. } => costs.list_op,
@@ -655,9 +702,46 @@ impl Vm {
         }
     }
 
+    /// Full charge for a builtin about to execute (its args are already on
+    /// the value stack: positionals, then keyword values). Sized costs read
+    /// the payload argument by canonical position — positionally when
+    /// supplied that way, else by keyword name. Payload contributions clamp
+    /// to `payload_cap` (oversize faults at execution, but the charge stays
+    /// bounded either way).
+    fn call_charge(
+        &self,
+        name: &str,
+        argc: usize,
+        kwargs: &[String],
+        costs: &CostTable,
+        host: &dyn Host,
+    ) -> u64 {
+        let spec = costs.spec(name);
+        match spec.map(|s| &s.cost) {
+            Some(CostSpec::Fixed(c)) => *c,
+            Some(CostSpec::LogSized { base, cap }) => (base + host.log_len()).min(*cap),
+            Some(CostSpec::PlusPayload { base, payload_arg }) => {
+                let total = argc + kwargs.len();
+                let stack = &self.values[self.values.len() - total..];
+                let payload = if *payload_arg < argc {
+                    stack.get(*payload_arg)
+                } else {
+                    spec.and_then(|s| s.params.as_ref())
+                        .and_then(|ps| ps.get(*payload_arg))
+                        .and_then(|p| kwargs.iter().position(|k| *k == p.name))
+                        .map(|i| &stack[argc + i])
+                };
+                let units = payload.map_or(0, |v| v.payload_units());
+                base + units.min(costs.payload_cap)
+            }
+            None => costs.default_builtin,
+        }
+    }
+
     /// The unified fault path (docs/01-language.md "Errors & Signals").
-    fn fault(&mut self, msg: String, host: &mut dyn Host, costs: &CostTable) {
+    fn fault(&mut self, id: &'static str, msg: String, host: &mut dyn Host, costs: &CostTable) {
         self.last_fault = Some(msg.clone());
+        self.last_fault_id = Some(id);
         self.fault_count += 1;
         if self.engine_interrupt || (self.phase != Phase::Main && !self.handler_is_default) {
             // Double handle — including a fault inside `on death:`. Faults
@@ -674,7 +758,7 @@ impl Vm {
                 .binding
                 .clone()
                 .map(|b| (b, Self::signal_value("error", Some(&msg))));
-            self.budget -= costs.trap_cost as i64;
+            self.budget -= costs.trap_cost as i64 * CENT;
             self.active = Rc::clone(&self.program);
             self.enter_handler(SignalKind::Signal, body, false, "error", binding);
         } else if let Some(default) = self.config.default_handlers.get(&SignalKind::Signal) {
@@ -691,8 +775,9 @@ impl Vm {
         } else {
             // No default configured (bare VM): the hard fallback.
             self.crash_count += 1;
-            self.budget -= costs.crash_dump as i64;
-            let ctx = CallCtx { line: self.current_line, last_fault: Some(msg.as_str()) };
+            self.budget -= costs.crash_dump as i64 * CENT;
+            let ctx =
+                CallCtx { line: self.current_line, last_fault: Some(msg.as_str()), last_fault_id: Some(id) };
             let _ = host.call("upload_crash_dump", &[Value::Str(msg.clone())], ctx);
             self.reset();
         }
@@ -739,7 +824,7 @@ impl Vm {
             self.globals.insert(name, value);
             return;
         }
-        self.fault(format!("cannot mutate '{name}' — not a variable"), host, costs);
+        self.fault(faults::NAME, format!("cannot mutate '{name}' — not a variable"), host, costs);
     }
 
     fn pop_value(&mut self) -> Value {
@@ -747,7 +832,11 @@ impl Vm {
     }
 
     fn ctx(&self) -> CallCtx<'_> {
-        CallCtx { line: self.current_line, last_fault: self.last_fault.as_deref() }
+        CallCtx {
+            line: self.current_line,
+            last_fault: self.last_fault.as_deref(),
+            last_fault_id: self.last_fault_id,
+        }
     }
 
     fn push_block(&mut self, block: &[StmtId]) {
@@ -791,7 +880,7 @@ impl Vm {
                     Stmt::Continue { .. } => self.unwind_loop(false, host, costs),
                     Stmt::Return { value, .. } => {
                         if self.frames.is_empty() {
-                            self.fault("return outside function".into(), host, costs);
+                            self.fault(faults::CONTROL, "return outside function".into(), host, costs);
                             return;
                         }
                         match value {
@@ -821,7 +910,7 @@ impl Vm {
                     Expr::Name(name) => match self.lookup(&name) {
                         Some(v) => self.values.push(v),
                         None => {
-                            self.fault(format!("read of unset variable '{name}'"), host, costs);
+                            self.fault(faults::NAME, format!("read of unset variable '{name}'"), host, costs);
                         }
                     },
                     Expr::List(items) => {
@@ -855,9 +944,19 @@ impl Vm {
                             self.work.push(Work::Eval(arg));
                         }
                     }
-                    Expr::Call { name, args, line } => {
+                    Expr::Call { name, args, kwargs, line } => {
                         self.current_line = line;
-                        self.work.push(Work::CallExec { name, argc: args.len(), line });
+                        self.work.push(Work::CallExec {
+                            name,
+                            argc: args.len(),
+                            kwargs: kwargs.iter().map(|(k, _)| k.clone()).collect(),
+                            line,
+                        });
+                        // Evaluation order: positionals, then keyword
+                        // values, left to right (stack pushes reversed).
+                        for &(_, v) in kwargs.iter().rev() {
+                            self.work.push(Work::Eval(v));
+                        }
                         for &arg in args.iter().rev() {
                             self.work.push(Work::Eval(arg));
                         }
@@ -906,7 +1005,7 @@ impl Vm {
                 let lhs = self.pop_value();
                 match binary_op(op, lhs, rhs) {
                     Ok(v) => self.values.push(v),
-                    Err(msg) => self.fault(msg, host, costs),
+                    Err(f) => self.fault(f.id, f.msg, host, costs),
                 }
             }
             Work::Unary(op) => {
@@ -915,14 +1014,19 @@ impl Vm {
                     (UnOp::Neg, Value::Int(i)) => i
                         .checked_neg()
                         .map(Value::Int)
-                        .ok_or_else(|| "integer overflow".to_string()),
+                        .ok_or_else(|| Fault::new(faults::OVERFLOW, "integer overflow")),
                     (UnOp::Not, Value::Bool(b)) => Ok(Value::Bool(!b)),
-                    (UnOp::Neg, other) => Err(format!("cannot negate {}", other.type_name())),
-                    (UnOp::Not, other) => Err(format!("'not' requires bool, got {}", other.type_name())),
+                    (UnOp::Neg, other) => {
+                        Err(Fault::new(faults::TYPE, format!("cannot negate {}", other.type_name())))
+                    }
+                    (UnOp::Not, other) => Err(Fault::new(
+                        faults::TYPE,
+                        format!("'not' requires bool, got {}", other.type_name()),
+                    )),
                 };
                 match result {
                     Ok(v) => self.values.push(v),
-                    Err(msg) => self.fault(msg, host, costs),
+                    Err(f) => self.fault(f.id, f.msg, host, costs),
                 }
             }
             Work::AndRhs(rhs) => match self.pop_value() {
@@ -931,7 +1035,7 @@ impl Vm {
                     self.work.push(Work::AssertBool);
                     self.work.push(Work::Eval(rhs));
                 }
-                other => self.fault(format!("'and' requires bool, got {}", other.type_name()), host, costs),
+                other => self.fault(faults::TYPE, format!("'and' requires bool, got {}", other.type_name()), host, costs),
             },
             Work::OrRhs(rhs) => match self.pop_value() {
                 Value::Bool(true) => self.values.push(Value::Bool(true)),
@@ -939,14 +1043,14 @@ impl Vm {
                     self.work.push(Work::AssertBool);
                     self.work.push(Work::Eval(rhs));
                 }
-                other => self.fault(format!("'or' requires bool, got {}", other.type_name()), host, costs),
+                other => self.fault(faults::TYPE, format!("'or' requires bool, got {}", other.type_name()), host, costs),
             },
             Work::AssertBool => {
                 let v = self.pop_value();
                 if matches!(v, Value::Bool(_)) {
                     self.values.push(v);
                 } else {
-                    self.fault(format!("boolean operator requires bool, got {}", v.type_name()), host, costs);
+                    self.fault(faults::TYPE, format!("boolean operator requires bool, got {}", v.type_name()), host, costs);
                 }
             }
             Work::StoreVar(name) => {
@@ -978,7 +1082,7 @@ impl Vm {
                         }
                     }
                     other => {
-                        self.fault(format!("condition must be bool, got {}", other.type_name()), host, costs);
+                        self.fault(faults::TYPE, format!("condition must be bool, got {}", other.type_name()), host, costs);
                     }
                 }
             }
@@ -998,7 +1102,7 @@ impl Vm {
                     }
                     Value::Bool(false) => {}
                     other => {
-                        self.fault(format!("condition must be bool, got {}", other.type_name()), host, costs);
+                        self.fault(faults::TYPE, format!("condition must be bool, got {}", other.type_name()), host, costs);
                     }
                 }
             }
@@ -1014,6 +1118,7 @@ impl Vm {
                 }
                 other => {
                     self.fault(
+                        faults::TYPE,
                         format!("for-in requires a list or dict, got {}", other.type_name()),
                         host,
                         costs,
@@ -1036,7 +1141,7 @@ impl Vm {
                     self.work.push(Work::MatchArm { stmt, value: e, case: 0 });
                 }
                 other => {
-                    self.fault(format!("match requires an enum value, got {}", other.type_name()), host, costs);
+                    self.fault(faults::TYPE, format!("match requires an enum value, got {}", other.type_name()), host, costs);
                 }
             },
             Work::MatchArm { stmt, value, case } => {
@@ -1048,21 +1153,13 @@ impl Vm {
                     self.push_block(&body);
                     return;
                 };
-                if *enum_name == value.enum_name && *variant == value.variant {
-                    if binds.len() != value.fields.len() {
-                        self.fault(
-                            format!(
-                                "pattern {}.{} binds {} field(s), value has {}",
-                                enum_name,
-                                variant,
-                                binds.len(),
-                                value.fields.len()
-                            ),
-                            host,
-                            costs,
-                        );
-                        return;
-                    }
+                // Structural identity is name + variant + ARITY (Q80): a
+                // wrong-arity pattern is a non-match and falls through,
+                // like a wrong variant — not a fault.
+                if *enum_name == value.enum_name
+                    && *variant == value.variant
+                    && binds.len() == value.fields.len()
+                {
                     let binds = binds.clone();
                     let body = cases[case].body.clone();
                     for (name, field) in binds.into_iter().zip(value.fields) {
@@ -1073,6 +1170,7 @@ impl Vm {
                     self.work.push(Work::MatchArm { stmt, value, case: case + 1 });
                 } else {
                     self.fault(
+                        faults::NO_MATCH,
                         format!("no case matched {}.{}", value.enum_name, value.variant),
                         host,
                         costs,
@@ -1080,34 +1178,45 @@ impl Vm {
                 }
             }
 
-            Work::CallExec { name, argc, line } => {
+            Work::CallExec { name, argc, kwargs, line } => {
                 self.current_line = line;
+                let kwvals: Vec<Value> = self.values.split_off(self.values.len() - kwargs.len());
                 let args: Vec<Value> = self.values.split_off(self.values.len() - argc);
+                let kwpairs: Vec<(String, Value)> =
+                    kwargs.into_iter().zip(kwvals).collect();
                 if let Some(func) = program.functions.get(&name) {
                     if self.frames.len() >= self.config.stack_depth {
-                        self.fault("stack overflow".into(), host, costs);
+                        self.fault(faults::STACK, "stack overflow".into(), host, costs);
                         return;
                     }
-                    if func.params.len() != args.len() {
-                        self.fault(
-                            format!(
-                                "{name}() takes {} argument(s), got {}",
-                                func.params.len(),
-                                args.len()
-                            ),
-                            host,
-                            costs,
-                        );
-                        return;
-                    }
+                    let params: Vec<(String, Option<Value>)> = func
+                        .params
+                        .iter()
+                        .map(|p| (p.name.clone(), p.default.as_ref().map(default_lit_value)))
+                        .collect();
+                    let bound = match bind_args(&name, &params, args, kwpairs) {
+                        Ok(b) => b,
+                        Err(f) => {
+                            self.fault(f.id, f.msg, host, costs);
+                            return;
+                        }
+                    };
                     let mut locals = BTreeMap::new();
-                    for (param, arg) in func.params.iter().zip(args) {
-                        locals.insert(param.clone(), arg);
+                    for ((pname, _), arg) in params.into_iter().zip(bound) {
+                        locals.insert(pname, arg);
                     }
                     self.frames.push(Frame { locals, val_base: self.values.len() });
                     let body = func.body.clone();
                     self.work.push(Work::FrameEnd);
                     self.push_block(&body);
+                } else if !kwpairs.is_empty() && costs.spec(&name).is_none_or(|s| s.params.is_none()) {
+                    // Keywords need a declared parameter list to bind against.
+                    self.fault(
+                        faults::ARITY,
+                        format!("{name}() takes no keyword arguments"),
+                        host,
+                        costs,
+                    );
                 } else if name == "len" {
                     // Pure container builtins live in the VM, not the host.
                     match args.as_slice() {
@@ -1120,12 +1229,13 @@ impl Vm {
                         }
                         [other] => {
                             self.fault(
+                                faults::TYPE,
                                 format!("len() requires a container, got {}", other.type_name()),
                                 host,
                                 costs,
                             );
                         }
-                        _ => self.fault("len() takes one argument".into(), host, costs),
+                        _ => self.fault(faults::ARITY, "len() takes one argument".into(), host, costs),
                     }
                 } else if name == "range" {
                     let bounds = match args.as_slice() {
@@ -1134,11 +1244,12 @@ impl Vm {
                         _ => None,
                     };
                     let Some((lo, hi)) = bounds else {
-                        self.fault("range() takes one or two int arguments".into(), host, costs);
+                        self.fault(faults::ARITY, "range() takes one or two int arguments".into(), host, costs);
                         return;
                     };
                     if hi - lo > costs.range_cap as i64 {
                         self.fault(
+                            faults::RANGE,
                             format!("range too large (cap {})", costs.range_cap),
                             host,
                             costs,
@@ -1147,11 +1258,49 @@ impl Vm {
                     }
                     self.values.push(Value::List((lo..hi).map(Value::Int).collect()));
                 } else {
-                    let ctx = CallCtx { line: self.current_line, last_fault: self.last_fault.as_deref() };
-                    match host.call(&name, &args, ctx) {
+                    // Registry-declared params: resolve keywords + defaults
+                    // into canonical positional order; undeclared builtins
+                    // pass positionals through (host validates).
+                    let final_args = match costs.spec(&name).and_then(|s| s.params.as_ref()) {
+                        Some(param_specs) => {
+                            let params: Vec<(String, Option<Value>)> = param_specs
+                                .iter()
+                                .map(|p| (p.name.clone(), p.default.as_ref().map(|d| d.to_value())))
+                                .collect();
+                            match bind_args(&name, &params, args, kwpairs) {
+                                Ok(b) => b,
+                                Err(f) => {
+                                    self.fault(f.id, f.msg, host, costs);
+                                    return;
+                                }
+                            }
+                        }
+                        None => args,
+                    };
+                    // Oversized payloads fault err_payload (Q82) — the
+                    // charge above was clamped, the send never happens.
+                    if let Some(CostSpec::PlusPayload { payload_arg, .. }) =
+                        costs.spec(&name).map(|s| &s.cost)
+                        && final_args.get(*payload_arg).map_or(0, |v| v.payload_units())
+                            > costs.payload_cap
+                    {
+                        self.fault(
+                            faults::PAYLOAD,
+                            format!("payload exceeds payload_cap ({})", costs.payload_cap),
+                            host,
+                            costs,
+                        );
+                        return;
+                    }
+                    let ctx = CallCtx {
+                        line: self.current_line,
+                        last_fault: self.last_fault.as_deref(),
+                        last_fault_id: self.last_fault_id,
+                    };
+                    match host.call(&name, &final_args, ctx) {
                         HostCall::Ready(v) => self.values.push(v),
                         HostCall::Block => self.state = State::Blocked,
-                        HostCall::Fault(msg) => self.fault(msg, host, costs),
+                        HostCall::Fault(f) => self.fault(f.id, f.msg, host, costs),
                     }
                 }
             }
@@ -1164,13 +1313,14 @@ impl Vm {
                     // --- container methods ---
                     ("append", Value::List(mut items)) => {
                         let [item] = args.as_slice() else {
-                            self.fault("append() takes one argument".into(), host, costs);
+                            self.fault(faults::ARITY, "append() takes one argument".into(), host, costs);
                             return;
                         };
                         let Some(base_name) = base_name else {
                             // Containers are values: mutating a temporary
                             // would silently vanish, so it's a fault.
                             self.fault(
+                                faults::NAME,
                                 "append() needs a list variable (containers are values)".into(),
                                 host,
                                 costs,
@@ -1183,6 +1333,7 @@ impl Vm {
                     }
                     ("append", other) => {
                         self.fault(
+                            faults::TYPE,
                             format!("append() requires a list, got {}", other.type_name()),
                             host,
                             costs,
@@ -1190,7 +1341,7 @@ impl Vm {
                     }
                     ("get", Value::Dict(entries)) => {
                         let [key] = args.as_slice() else {
-                            self.fault("get() takes one argument (the key)".into(), host, costs);
+                            self.fault(faults::ARITY, "get() takes one argument (the key)".into(), host, costs);
                             return;
                         };
                         match DictKey::from_value(key.clone()) {
@@ -1198,16 +1349,17 @@ impl Vm {
                                 Some(v) => Value::option_some(v.clone()),
                                 None => Value::option_none(),
                             }),
-                            Err(msg) => self.fault(msg, host, costs),
+                            Err(msg) => self.fault(faults::KEY, msg, host, costs),
                         }
                     }
                     ("remove", Value::Dict(mut entries)) => {
                         let [key] = args.as_slice() else {
-                            self.fault("remove() takes one argument (the key)".into(), host, costs);
+                            self.fault(faults::ARITY, "remove() takes one argument (the key)".into(), host, costs);
                             return;
                         };
                         let Some(base_name) = base_name else {
                             self.fault(
+                                faults::NAME,
                                 "remove() needs a dict variable (containers are values)".into(),
                                 host,
                                 costs,
@@ -1223,7 +1375,7 @@ impl Vm {
                                     None => Value::option_none(),
                                 });
                             }
-                            Err(msg) => self.fault(msg, host, costs),
+                            Err(msg) => self.fault(faults::KEY, msg, host, costs),
                         }
                     }
                     ("keys", Value::Dict(entries)) => {
@@ -1236,6 +1388,7 @@ impl Vm {
                     }
                     (m @ ("get" | "remove" | "keys" | "values"), other) => {
                         self.fault(
+                            faults::TYPE,
                             format!("{m}() requires a dict, got {}", other.type_name()),
                             host,
                             costs,
@@ -1246,7 +1399,7 @@ impl Vm {
                             || e.enum_name == Value::OPTION_ENUM =>
                     {
                         if !args.is_empty() {
-                            self.fault("expect() takes no arguments".into(), host, costs);
+                            self.fault(faults::ARITY, "expect() takes no arguments".into(), host, costs);
                         } else if e.variant == "Ok" || e.variant == "Some" {
                             let v = e.fields.into_iter().next().unwrap_or(Value::Unit);
                             self.values.push(v);
@@ -1257,11 +1410,12 @@ impl Vm {
                                 Some(other) => other.to_string(),
                                 None => format!("expect() on {}.{}", e.enum_name, e.variant),
                             };
-                            self.fault(msg, host, costs);
+                            self.fault(faults::EXPECT, msg, host, costs);
                         }
                     }
                     ("expect", other) => {
                         self.fault(
+                            faults::TYPE,
                             format!(
                                 "expect() requires a Result or Option, got {}",
                                 other.type_name()
@@ -1271,7 +1425,7 @@ impl Vm {
                         );
                     }
                     (_, _) => {
-                        self.fault(format!("unknown method {name}()"), host, costs);
+                        self.fault(faults::UNKNOWN_FUNCTION, format!("unknown method {name}()"), host, costs);
                     }
                 }
             }
@@ -1297,7 +1451,7 @@ impl Vm {
                             entries.insert(key, v);
                         }
                         Err(msg) => {
-                            self.fault(msg, host, costs);
+                            self.fault(faults::KEY, msg, host, costs);
                             return;
                         }
                     }
@@ -1313,7 +1467,7 @@ impl Vm {
                         let len = items.len() as i64;
                         let effective = if i < 0 { i + len } else { i };
                         if effective < 0 || effective >= len {
-                            self.fault(format!("index {i} out of range (len {len})"), host, costs);
+                            self.fault(faults::INDEX, format!("index {i} out of range (len {len})"), host, costs);
                         } else {
                             self.values.push(items[effective as usize].clone());
                         }
@@ -1324,13 +1478,14 @@ impl Vm {
                             // Missing key faults, like Python's KeyError —
                             // `d.get(k)` is the fault-free Option form.
                             None => {
-                                self.fault(format!("key {key} not found"), host, costs);
+                                self.fault(faults::KEY, format!("key {key} not found"), host, costs);
                             }
                         },
-                        Err(msg) => self.fault(msg, host, costs),
+                        Err(msg) => self.fault(faults::KEY, msg, host, costs),
                     },
                     (base, index) => {
                         self.fault(
+                            faults::TYPE,
                             format!("cannot index {} with {}", base.type_name(), index.type_name()),
                             host,
                             costs,
@@ -1343,7 +1498,7 @@ impl Vm {
                 let value = self.pop_value();
                 let index = self.pop_value();
                 let Some(container) = self.lookup(&name) else {
-                    self.fault(format!("read of unset variable '{name}'"), host, costs);
+                    self.fault(faults::NAME, format!("read of unset variable '{name}'"), host, costs);
                     return;
                 };
                 match (container, index) {
@@ -1351,7 +1506,7 @@ impl Vm {
                         let len = items.len() as i64;
                         let effective = if i < 0 { i + len } else { i };
                         if effective < 0 || effective >= len {
-                            self.fault(format!("index {i} out of range (len {len})"), host, costs);
+                            self.fault(faults::INDEX, format!("index {i} out of range (len {len})"), host, costs);
                         } else {
                             items[effective as usize] = value;
                             self.store_existing(name, Value::List(items), host, costs);
@@ -1362,10 +1517,11 @@ impl Vm {
                             entries.insert(key, value);
                             self.store_existing(name, Value::Dict(entries), host, costs);
                         }
-                        Err(msg) => self.fault(msg, host, costs),
+                        Err(msg) => self.fault(faults::KEY, msg, host, costs),
                     },
                     (container, index) => {
                         self.fault(
+                            faults::TYPE,
                             format!(
                                 "cannot index {} with {}",
                                 container.type_name(),
@@ -1383,7 +1539,7 @@ impl Vm {
                 match base {
                     Value::Entity(id) => match host.attr(id, &name) {
                         Ok(v) => self.values.push(v),
-                        Err(msg) => self.fault(msg, host, costs),
+                        Err(msg) => self.fault(faults::NAME, msg, host, costs),
                     },
                     Value::Enum(e) => {
                         // Named field access on enum values, resolved via the
@@ -1399,6 +1555,7 @@ impl Vm {
                             Some(v) => self.values.push(v),
                             None => {
                                 self.fault(
+                                    faults::NAME,
                                     format!("{}.{} has no field {name}", e.enum_name, e.variant),
                                     host,
                                     costs,
@@ -1408,6 +1565,7 @@ impl Vm {
                     }
                     other => {
                         self.fault(
+                            faults::TYPE,
                             format!("cannot read attribute {name} of {}", other.type_name()),
                             host,
                             costs,
@@ -1423,7 +1581,7 @@ impl Vm {
                         Some(Work::FrameEnd) => break,
                         Some(_) => {}
                         None => {
-                            self.fault("return unwound past program root".into(), host, costs);
+                            self.fault(faults::CONTROL, "return unwound past program root".into(), host, costs);
                             return;
                         }
                     }
@@ -1455,7 +1613,7 @@ impl Vm {
                 }
                 Some(Work::FrameEnd) | None => {
                     let which = if is_break { "break" } else { "continue" };
-                    self.fault(format!("{which} outside loop"), host, costs);
+                    self.fault(faults::CONTROL, format!("{which} outside loop"), host, costs);
                     return;
                 }
                 Some(_) => {
@@ -1466,7 +1624,65 @@ impl Vm {
     }
 }
 
-fn binary_op(op: BinOp, lhs: Value, rhs: Value) -> Result<Value, String> {
+/// A `def` default literal as a runtime value.
+fn default_lit_value(lit: &DefaultLit) -> Value {
+    match lit {
+        DefaultLit::Int(i) => Value::Int(*i),
+        DefaultLit::Str(s) => Value::Str(s.clone()),
+        DefaultLit::Bool(b) => Value::Bool(*b),
+        DefaultLit::NoneVal => Value::option_none(),
+    }
+}
+
+/// Bind positional + keyword arguments against a declared parameter list,
+/// filling defaults — Python's rules (docs/01 signature convention).
+/// Returns the canonical positional argument vector.
+fn bind_args(
+    fname: &str,
+    params: &[(String, Option<Value>)],
+    args: Vec<Value>,
+    kwargs: Vec<(String, Value)>,
+) -> Result<Vec<Value>, Fault> {
+    if args.len() > params.len() {
+        return Err(Fault::new(
+            faults::ARITY,
+            format!("{fname}() takes {} argument(s), got {}", params.len(), args.len()),
+        ));
+    }
+    let positional = args.len();
+    let mut slots: Vec<Option<Value>> = args.into_iter().map(Some).collect();
+    slots.resize(params.len(), None);
+    for (key, value) in kwargs {
+        let Some(idx) = params.iter().position(|(name, _)| *name == key) else {
+            return Err(Fault::new(
+                faults::ARITY,
+                format!("{fname}() has no parameter '{key}'"),
+            ));
+        };
+        if idx < positional || slots[idx].is_some() {
+            return Err(Fault::new(
+                faults::ARITY,
+                format!("{fname}() got multiple values for '{key}'"),
+            ));
+        }
+        slots[idx] = Some(value);
+    }
+    let mut bound = Vec::with_capacity(params.len());
+    for ((name, default), slot) in params.iter().zip(slots) {
+        match slot.or_else(|| default.clone()) {
+            Some(v) => bound.push(v),
+            None => {
+                return Err(Fault::new(
+                    faults::ARITY,
+                    format!("{fname}() missing required argument '{name}'"),
+                ));
+            }
+        }
+    }
+    Ok(bound)
+}
+
+fn binary_op(op: BinOp, lhs: Value, rhs: Value) -> Result<Value, Fault> {
     use BinOp::*;
     match op {
         Eq => Ok(Value::Bool(lhs == rhs)),
@@ -1475,24 +1691,31 @@ fn binary_op(op: BinOp, lhs: Value, rhs: Value) -> Result<Value, String> {
         In => match (&lhs, &rhs) {
             (item, Value::List(items)) => Ok(Value::Bool(items.contains(item))),
             (key, Value::Dict(entries)) => {
-                let key = DictKey::from_value(key.clone())?;
+                let key = DictKey::from_value(key.clone())
+                    .map_err(|msg| Fault::new(faults::KEY, msg))?;
                 Ok(Value::Bool(entries.contains_key(&key)))
             }
             (Value::Str(needle), Value::Str(haystack)) => {
                 Ok(Value::Bool(haystack.contains(needle.as_str())))
             }
-            (l, r) => Err(format!(
-                "'in' requires a container on the right, got {} in {}",
-                l.type_name(),
-                r.type_name()
+            (l, r) => Err(Fault::new(
+                faults::TYPE,
+                format!(
+                    "'in' requires a container on the right, got {} in {}",
+                    l.type_name(),
+                    r.type_name()
+                ),
             )),
         },
         Add | Sub | Mul | FloorDiv | Mod | Lt | Gt | Le | Ge => {
             let (Value::Int(a), Value::Int(b)) = (&lhs, &rhs) else {
-                return Err(format!(
-                    "operator requires ints, got {} and {}",
-                    lhs.type_name(),
-                    rhs.type_name()
+                return Err(Fault::new(
+                    faults::TYPE,
+                    format!(
+                        "operator requires ints, got {} and {}",
+                        lhs.type_name(),
+                        rhs.type_name()
+                    ),
                 ));
             };
             let (a, b) = (*a, *b);
@@ -1502,7 +1725,7 @@ fn binary_op(op: BinOp, lhs: Value, rhs: Value) -> Result<Value, String> {
                 Mul => a.checked_mul(b).map(Value::Int).ok_or_else(overflow),
                 FloorDiv => {
                     if b == 0 {
-                        Err("division by zero".to_string())
+                        Err(Fault::new(faults::DIV_ZERO, "division by zero"))
                     } else {
                         // Python-style floor division.
                         let q = a.checked_div(b).ok_or_else(overflow)?;
@@ -1512,7 +1735,7 @@ fn binary_op(op: BinOp, lhs: Value, rhs: Value) -> Result<Value, String> {
                 }
                 Mod => {
                     if b == 0 {
-                        Err("modulo by zero".to_string())
+                        Err(Fault::new(faults::DIV_ZERO, "modulo by zero"))
                     } else {
                         // Python-style: result has the sign of the divisor.
                         let r = a % b;
@@ -1530,6 +1753,6 @@ fn binary_op(op: BinOp, lhs: Value, rhs: Value) -> Result<Value, String> {
     }
 }
 
-fn overflow() -> String {
-    "integer overflow".to_string()
+fn overflow() -> Fault {
+    Fault::new(faults::OVERFLOW, "integer overflow")
 }

@@ -86,3 +86,52 @@ impl fmt::Display for PyriteError {
 }
 
 impl std::error::Error for PyriteError {}
+
+/// Fault-identity constants (docs/01, Q80): every runtime fault carries a
+/// pre-bound, `==`-comparable id returned by `last_error()`. The ids are a
+/// data registry — each is auto-bound as a VM constant of the same name, so
+/// handlers write `if last_error() == err_payload:`. Host-domain ids
+/// (`err_tool_jam`, `err_unknown_contact`, …) arrive with their systems;
+/// this module owns the language-level set.
+pub mod faults {
+    /// Type mismatch (wrong operand/argument/condition type).
+    pub const TYPE: &str = "err_type";
+    /// Read of an unset variable, or mutation of a non-variable.
+    pub const NAME: &str = "err_name";
+    /// Unknown function or method.
+    pub const UNKNOWN_FUNCTION: &str = "err_unknown_function";
+    /// Wrong argument count / unknown or duplicate keyword.
+    pub const ARITY: &str = "err_arity";
+    /// User-function call depth exceeded.
+    pub const STACK: &str = "err_stack";
+    /// List index out of range.
+    pub const INDEX: &str = "err_index";
+    /// Dict key not found (or unusable key type).
+    pub const KEY: &str = "err_key";
+    /// Division / modulo by zero.
+    pub const DIV_ZERO: &str = "err_div_zero";
+    /// Integer overflow.
+    pub const OVERFLOW: &str = "err_overflow";
+    /// `match` fell off the end with no case matching.
+    pub const NO_MATCH: &str = "err_no_match";
+    /// `.expect()` on `Err` / `None`.
+    pub const EXPECT: &str = "err_expect";
+    /// `range()` beyond `range_cap`.
+    pub const RANGE: &str = "err_range";
+    /// Payload exceeds `payload_cap` on a sized op (Q82).
+    pub const PAYLOAD: &str = "err_payload";
+    /// `break`/`continue` outside a loop, `return` outside a def.
+    pub const CONTROL: &str = "err_control";
+    /// A world action failed (unreachable target, nothing in range, …).
+    /// Finer host-domain ids supersede this as their systems land.
+    pub const ACTION: &str = "err_action";
+    /// A blocking channel op timed out (reserved for M11 — registered now
+    /// so programs can already name it).
+    pub const TIMEOUT: &str = "err_timeout";
+
+    /// Every language-level fault id, for constant binding.
+    pub const ALL: &[&str] = &[
+        TYPE, NAME, UNKNOWN_FUNCTION, ARITY, STACK, INDEX, KEY, DIV_ZERO, OVERFLOW,
+        NO_MATCH, EXPECT, RANGE, PAYLOAD, CONTROL, ACTION, TIMEOUT,
+    ];
+}

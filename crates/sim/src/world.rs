@@ -293,11 +293,36 @@ pub struct World {
     pub archive: Vec<ArchiveEntry>,
     /// The match seed (kept for seeding per-bot streams at spawn).
     pub seed: u64,
+    /// Damage queued during phases 2–4, applied in phase 6 (docs/07: damage
+    /// is a phase, not an inline side effect). Drained every tick.
+    pub pending_damage: Vec<(BotId, i64)>,
+    /// XP earned this tick, settled in phase 7 under the start-of-tick
+    /// Learning multiplier (identity until M6). Drained every tick.
+    pub pending_xp: Vec<(BotId, XpTrack, u64)>,
+    /// Signals raised this tick, dispatched once per bot at the phase-6 op
+    /// boundary: highest severity wins, extras dropped (Q81 — co-arrival is
+    /// not a double-handle). Drained every tick.
+    pub pending_signals: Vec<(BotId, pyrite::Signal)>,
+    /// Bots per tile — the spatial index (occupancy checks were O(bots)
+    /// scans; perception multiplies query volume). Derived state: kept in
+    /// sync by [`World::index_bot`]/[`World::unindex_bot`]/[`World::move_bot`],
+    /// excluded from the state hash.
+    pub occupancy: BTreeMap<TilePos, std::collections::BTreeSet<BotId>>,
     /// Named seeded RNG streams — the sim's only randomness (CLAUDE.md;
     /// inventory in docs/07). Advanced only by sim systems, in tick order.
     pub rng: RngStreams,
     next_entity: u64,
     next_bot: u32,
+}
+
+/// One XP track (the 4 task tracks; Scouting and the body tracks land
+/// with their systems — M6/M7).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum XpTrack {
+    Mining,
+    Hauling,
+    Combat,
+    Building,
 }
 
 /// The named RNG streams from docs/07's inventory. One consumer domain per
@@ -392,6 +417,10 @@ impl World {
             stockpile_ore: 0,
             archive: Vec::new(),
             seed: spec.seed,
+            pending_damage: Vec::new(),
+            pending_xp: Vec::new(),
+            pending_signals: Vec::new(),
+            occupancy: BTreeMap::new(),
             rng: RngStreams::from_seed(spec.seed),
             next_entity: 1,
             next_bot: 1,
@@ -497,10 +526,38 @@ impl World {
     }
 
     /// Is a living bot (other than `exclude`) standing on `pos`?
+    /// Backed by the occupancy index — O(log tiles), not O(bots).
     pub fn tile_occupied(&self, pos: TilePos, exclude: BotId) -> bool {
-        self.bots
-            .values()
-            .any(|b| b.data.id != exclude && !b.data.dying && b.data.pos == pos)
+        self.occupancy.get(&pos).is_some_and(|ids| {
+            ids.iter().any(|id| {
+                *id != exclude && self.bots.get(id).is_some_and(|b| !b.data.dying)
+            })
+        })
+    }
+
+    /// Register a bot's tile in the occupancy index (spawn).
+    pub(crate) fn index_bot(&mut self, id: BotId, pos: TilePos) {
+        self.occupancy.entry(pos).or_default().insert(id);
+    }
+
+    /// Remove a bot from the occupancy index (death/explosion).
+    pub(crate) fn unindex_bot(&mut self, id: BotId, pos: TilePos) {
+        if let Some(ids) = self.occupancy.get_mut(&pos) {
+            ids.remove(&id);
+            if ids.is_empty() {
+                self.occupancy.remove(&pos);
+            }
+        }
+    }
+
+    /// Move a bot to a new tile, keeping the occupancy index in sync.
+    /// EVERY `data.pos` write goes through here.
+    pub(crate) fn move_bot(&mut self, id: BotId, to: TilePos) {
+        let Some(bot) = self.bots.get_mut(&id) else { return };
+        let from = bot.data.pos;
+        bot.data.pos = to;
+        self.unindex_bot(id, from);
+        self.index_bot(id, to);
     }
 
     /// Structures are solid: bots can neither stand on nor path through

@@ -79,12 +79,16 @@ log(1)
 
 #[test]
 fn death_handler_files_black_box_report_then_wrecks() {
+    // The victim idles rather than log-spamming: upload_log is payload
+    // priced now (M1, Q82), and a full ring buffer would stretch the death
+    // report past the attacker's next swing — a double-handle, not a clean
+    // death. One buffered line keeps the report affordable between swings.
     let victim_src = "\
 on death:
     log(\"death report\")
     upload_log()
 
-log(1)
+wait(60)
 ";
     let mut sim = Sim::new(&MapSpec::empty(5, 5));
     spawn(&mut sim, TilePos::new(1, 1), BRAWLER, 1, 100);

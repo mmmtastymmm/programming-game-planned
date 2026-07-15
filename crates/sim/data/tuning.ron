@@ -1,0 +1,29 @@
+// Sim tuning constants (docs convention: every number is data, not code).
+// Loaded at Sim construction; values are the same first-pass numbers the
+// code previously hardcoded. Spec first-pass values from docs/02–03 land
+// with their systems (e.g. fault_damage 2, boot_ticks ~20, print_ticks
+// ~100) — changing any of these changes replay hashes.
+Tuning(
+    print_ticks: 5,
+    // DEFAULT FREE: a colony must never be soft-locked out of bots
+    // (no ore + no bots = dead end). Maps/servers can set a cost.
+    print_cost_ore: 0,
+    repair_cost_ore: 5,
+    // Zero while prints are free — otherwise print+scrap mints ore.
+    scrap_refund_ore: 0,
+    boot_ticks: 2,
+    printed_hp: 30,
+    printed_cpu: 2,
+    printed_cargo_cap: 2,
+    capacity: 10000,
+    bump_freeze_ticks: 50,
+    bump_victim_freeze_ticks: 15,
+    handler_init_ticks: 15,
+    bump_damage: 2,
+    bridge_cost_ore: 3,
+    bridge_build_ticks: 20,
+    overlay_cost_ore: 1,
+    fault_damage: 5,
+    regen_interval_ticks: 1000,
+    regen_amount: 1,
+)

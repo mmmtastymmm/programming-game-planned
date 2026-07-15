@@ -14,6 +14,9 @@ pub fn parse(source: &str, unlocks: &UnlockSet) -> Result<Program, PyriteError> 
     Parser { tokens, pos: 0, unlocks, program: Program::default() }.parse_program()
 }
 
+/// (positional args, keyword args) of one call.
+type CallArgs = (Vec<ExprId>, Vec<(String, ExprId)>);
+
 struct Parser<'a> {
     tokens: Vec<Token>,
     pos: usize,
@@ -150,10 +153,23 @@ impl<'a> Parser<'a> {
             });
         }
         self.expect(Tok::LParen, "(")?;
-        let mut params = Vec::new();
+        let mut params: Vec<Param> = Vec::new();
         if !self.check(&Tok::RParen) {
             loop {
-                params.push(self.expect_ident("parameter name")?);
+                let pname = self.expect_ident("parameter name")?;
+                let default = if self.eat(&Tok::Assign) {
+                    Some(self.parse_default_literal()?)
+                } else {
+                    // Python's rule: once a default appears, every later
+                    // parameter needs one (else call binding is ambiguous).
+                    if params.iter().any(|p| p.default.is_some()) {
+                        return Err(self.unexpected(
+                            "= (parameters after a defaulted one need defaults too)",
+                        ));
+                    }
+                    None
+                };
+                params.push(Param { name: pname, default });
                 if !self.eat(&Tok::Comma) {
                     break;
                 }
@@ -166,6 +182,60 @@ impl<'a> Parser<'a> {
             .functions
             .insert(key.clone(), Function { name: key, params, body, line: def_tok.line, doc });
         Ok(())
+    }
+
+    /// Parameter defaults are literals only (docs/01: keyword defaults are
+    /// values like `None`, `100`, `info`-style constants stay call-site).
+    fn parse_default_literal(&mut self) -> Result<DefaultLit, PyriteError> {
+        let t = self.advance();
+        Ok(match t.tok {
+            Tok::Int(v) => DefaultLit::Int(v),
+            Tok::Minus => match self.advance().tok {
+                Tok::Int(v) => DefaultLit::Int(-v),
+                _ => return Err(self.unexpected("an integer after -")),
+            },
+            Tok::Str(s) => DefaultLit::Str(s),
+            Tok::True => DefaultLit::Bool(true),
+            Tok::False => DefaultLit::Bool(false),
+            Tok::NoneKw => DefaultLit::NoneVal,
+            _ => {
+                return Err(self.unexpected(
+                    "a literal default (int, string, True/False, or None)",
+                ));
+            }
+        })
+    }
+
+    /// Call arguments: positionals, then `name=value` keywords (Python
+    /// order — a positional after a keyword is an error).
+    fn parse_call_args(&mut self) -> Result<CallArgs, PyriteError> {
+        let mut args = Vec::new();
+        let mut kwargs: Vec<(String, ExprId)> = Vec::new();
+        if !self.check(&Tok::RParen) {
+            loop {
+                let is_kwarg = matches!(&self.peek().tok, Tok::Ident(_))
+                    && matches!(self.peek2().map(|t| &t.tok), Some(Tok::Assign));
+                if is_kwarg {
+                    let key = self.expect_ident("keyword name")?;
+                    if kwargs.iter().any(|(k, _)| *k == key) {
+                        return Err(self.unexpected("a distinct keyword (duplicate)"));
+                    }
+                    self.expect(Tok::Assign, "=")?;
+                    kwargs.push((key, self.parse_expr()?));
+                } else {
+                    if !kwargs.is_empty() {
+                        return Err(self
+                            .unexpected("a keyword argument (positionals precede keywords)"));
+                    }
+                    args.push(self.parse_expr()?);
+                }
+                if !self.eat(&Tok::Comma) {
+                    break;
+                }
+            }
+        }
+        self.expect(Tok::RParen, ")")?;
+        Ok((args, kwargs))
     }
 
     /// A def body: `parse_block`, plus Python's docstring rule — a leading
@@ -611,9 +681,24 @@ impl<'a> Parser<'a> {
                 cases.push(MatchCase { pattern: Pattern::Wildcard, body });
                 continue;
             }
+            // `case None:` — sugar for `case Option.None:` (docs/01 Types).
+            if self.check(&Tok::NoneKw) {
+                self.advance();
+                self.expect(Tok::Colon, ":")?;
+                let body = self.parse_block(in_function)?;
+                cases.push(MatchCase {
+                    pattern: Pattern::EnumVariant {
+                        enum_name: "Option".to_string(),
+                        variant: "None".to_string(),
+                        binds: Vec::new(),
+                    },
+                    body,
+                });
+                continue;
+            }
             let enum_name = self.expect_ident("enum name")?;
             self.expect(Tok::Dot, ".")?;
-            let variant = self.expect_ident("variant name")?;
+            let variant = self.expect_ident_or_none("variant name")?;
             let mut binds = Vec::new();
             if self.eat(&Tok::LParen) {
                 if !self.check(&Tok::RParen) {
@@ -750,11 +835,14 @@ impl<'a> Parser<'a> {
             if self.check(&Tok::Dot) {
                 let dot_line = self.peek().line;
                 self.advance();
-                let name = self.expect_ident("attribute name")?;
+                let name = self.expect_ident_or_none("attribute name")?;
                 // `EnumName.Variant` / `EnumName.Variant(args)` resolve at
                 // parse time when the enum is declared in this program.
                 let (base_enum, base_module) = match self.program.exprs[expr as usize].clone() {
                     Expr::Name(n) if self.program.enums.contains_key(&n) => (Some(n), None),
+                    // Builtin enums are constructible from source (docs/01
+                    // Types): Option.Some(v)/Option.None, Result.Ok/Err.
+                    Expr::Name(n) if n == "Option" || n == "Result" => (Some(n), None),
                     Expr::Name(n) if self.program.modules.contains(&n) => (None, Some(n)),
                     _ => (None, None),
                 };
@@ -777,28 +865,42 @@ impl<'a> Parser<'a> {
                         });
                     }
                     self.expect(Tok::LParen, "( — modules export functions, call them")?;
-                    let mut args = Vec::new();
-                    if !self.check(&Tok::RParen) {
-                        loop {
-                            args.push(self.parse_expr()?);
-                            if !self.eat(&Tok::Comma) {
-                                break;
-                            }
-                        }
-                    }
-                    self.expect(Tok::RParen, ")")?;
-                    expr = self.add_expr(Expr::Call { name: qualified, args, line: dot_line });
+                    let (args, kwargs) = self.parse_call_args()?;
+                    expr =
+                        self.add_expr(Expr::Call { name: qualified, args, kwargs, line: dot_line });
                 } else if let Some(enum_name) = base_enum {
-                    let decl = &self.program.enums[&enum_name];
-                    let Some(fields) = decl.variants.get(&name) else {
-                        let t = self.peek();
-                        return Err(PyriteError {
-                            line: t.line,
-                            col: t.col,
-                            kind: PyriteErrorKind::UnknownEnumVariant { enum_name, variant: name },
-                        });
+                    let arity = match self.program.enums.get(&enum_name) {
+                        Some(decl) => match decl.variants.get(&name) {
+                            Some(fields) => fields.len(),
+                            None => {
+                                let t = self.peek();
+                                return Err(PyriteError {
+                                    line: t.line,
+                                    col: t.col,
+                                    kind: PyriteErrorKind::UnknownEnumVariant {
+                                        enum_name,
+                                        variant: name,
+                                    },
+                                });
+                            }
+                        },
+                        // Builtin enums: fixed variants and arities.
+                        None => match (enum_name.as_str(), name.as_str()) {
+                            ("Option", "Some") | ("Result", "Ok") | ("Result", "Err") => 1,
+                            ("Option", "None") => 0,
+                            _ => {
+                                let t = self.peek();
+                                return Err(PyriteError {
+                                    line: t.line,
+                                    col: t.col,
+                                    kind: PyriteErrorKind::UnknownEnumVariant {
+                                        enum_name,
+                                        variant: name,
+                                    },
+                                });
+                            }
+                        },
                     };
-                    let arity = fields.len();
                     if self.eat(&Tok::LParen) {
                         let mut args = Vec::new();
                         if !self.check(&Tok::RParen) {
@@ -826,16 +928,10 @@ impl<'a> Parser<'a> {
                         expr = self.add_expr(Expr::EnumUnit { enum_name, variant: name });
                     }
                 } else if self.eat(&Tok::LParen) {
-                    let mut args = Vec::new();
-                    if !self.check(&Tok::RParen) {
-                        loop {
-                            args.push(self.parse_expr()?);
-                            if !self.eat(&Tok::Comma) {
-                                break;
-                            }
-                        }
+                    let (args, kwargs) = self.parse_call_args()?;
+                    if !kwargs.is_empty() {
+                        return Err(self.unexpected("positional arguments (methods take no keywords)"));
                     }
-                    self.expect(Tok::RParen, ")")?;
                     expr = self.add_expr(Expr::MethodCall {
                         base: expr,
                         name,
@@ -865,20 +961,18 @@ impl<'a> Parser<'a> {
             Tok::Str(s) => Ok(self.add_expr(Expr::Str(s))),
             Tok::True => Ok(self.add_expr(Expr::Bool(true))),
             Tok::False => Ok(self.add_expr(Expr::Bool(false))),
+            Tok::NoneKw => {
+                // `None` is reserved sugar for Option.None (docs/01 Types).
+                Ok(self.add_expr(Expr::EnumUnit {
+                    enum_name: "Option".to_string(),
+                    variant: "None".to_string(),
+                }))
+            }
             Tok::Ident(name) => {
                 if self.check(&Tok::LParen) {
                     self.advance();
-                    let mut args = Vec::new();
-                    if !self.check(&Tok::RParen) {
-                        loop {
-                            args.push(self.parse_expr()?);
-                            if !self.eat(&Tok::Comma) {
-                                break;
-                            }
-                        }
-                    }
-                    self.expect(Tok::RParen, ")")?;
-                    Ok(self.add_expr(Expr::Call { name, args, line: t.line }))
+                    let (args, kwargs) = self.parse_call_args()?;
+                    Ok(self.add_expr(Expr::Call { name, args, kwargs, line: t.line }))
                 } else {
                     Ok(self.add_expr(Expr::Name(name)))
                 }
@@ -943,5 +1037,15 @@ impl<'a> Parser<'a> {
             }
             _ => Err(self.unexpected(expected)),
         }
+    }
+
+    /// An identifier, or the reserved `None` (as the literal name "None") —
+    /// for variant positions: `Option.None` in expressions and patterns.
+    fn expect_ident_or_none(&mut self, expected: &str) -> Result<String, PyriteError> {
+        if self.check(&Tok::NoneKw) {
+            self.advance();
+            return Ok("None".to_string());
+        }
+        self.expect_ident(expected)
     }
 }

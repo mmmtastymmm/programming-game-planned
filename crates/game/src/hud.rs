@@ -102,10 +102,12 @@ pub(crate) fn inspector_ui(
 
         // VM state.
         if let Some(vm) = &bot.vm {
+            // Budget is stored in centicycles (Q56) — display whole cycles.
             ui.monospace(format!(
-                "line {}   budget {}   faults {} ({} crashes)",
+                "line {}   budget {}.{:02}   faults {} ({} crashes)",
                 vm.current_line(),
-                vm.budget(),
+                vm.budget() / 100,
+                (vm.budget() % 100).abs(),
                 vm.fault_count(),
                 vm.crash_count()
             ));

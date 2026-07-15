@@ -4,193 +4,19 @@
 
 use crate::world::{ActionRequest, ArchiveEntry, ArchiveKind, BotId, EntityId, World, LOG_BUFFER_CAP};
 use pyrite::vm::CallCtx;
-use pyrite::{HostCall, Value};
+use pyrite::{faults, Fault, HostCall, Value};
 
 /// Entity kinds understood by the generic queries (`exists(kind)`,
 /// `closest(kind)`). Each is bound as a global constant of the same name in
 /// every bot VM (see `Sim::new`), so programs write `closest(ore)` bare.
 pub const KINDS: &[&str] = &["blueprint", "depot", "enemy", "ore"];
 
-/// Editor-facing documentation for one callable (builtin or the `.expect()`
-/// method). Cycle costs are deliberately NOT written here — the editor reads
-/// them from the live cost table, so tuning changes can't leave docs stale.
-pub struct BuiltinDoc {
-    pub name: &'static str,
-    pub signature: &'static str,
-    pub summary: &'static str,
-    /// What the base cost excludes, e.g. " + travel" (empty when flat).
-    pub cost_note: &'static str,
-}
-
-/// Docs for every builtin the host implements (plus `.expect()`). Shown in
-/// the editor on hover.
-pub const BUILTIN_DOCS: &[BuiltinDoc] = &[
-    BuiltinDoc {
-        name: "closest",
-        signature: "closest(kind) -> Result",
-        summary: "Nearest entity of a kind (blueprint / depot / enemy / ore). \
-                  Gives Result.Ok(entity), or Result.Err(msg) when none exist — \
-                  unwrap with .expect() or handle with match.",
-        cost_note: "",
-    },
-    BuiltinDoc {
-        name: "exists",
-        signature: "exists(kind) -> bool",
-        summary: "True while at least one entity of the kind exists.",
-        cost_note: "",
-    },
-    BuiltinDoc {
-        name: "expect",
-        signature: "result.expect() -> entity",
-        summary: "Unwrap a Result or Option: Ok/Some gives the value; Err/None \
-                  faults with the carried message (crash dump unless an error \
-                  handler is installed).",
-        cost_note: "",
-    },
-    BuiltinDoc {
-        name: "len",
-        signature: "len(container) -> int",
-        summary: "Element count of a list, dict, or string.",
-        cost_note: "",
-    },
-    BuiltinDoc {
-        name: "range",
-        signature: "range(n) / range(a, b) -> list",
-        summary: "List of ints 0..n (or a..b), for counted for-loops. \
-                  Capped by the range_cap cost entry — too large faults.",
-        cost_note: "",
-    },
-    BuiltinDoc {
-        name: "append",
-        signature: "xs.append(v)",
-        summary: "Push onto a list variable. Containers are values: append \
-                  works through the variable, so a bare [1,2].append(3) faults.",
-        cost_note: "",
-    },
-    BuiltinDoc {
-        name: "get",
-        signature: "d.get(key) -> Option",
-        summary: "Fault-free dict lookup: Option.Some(value) or Option.None. \
-                  d[key] on a missing key faults instead.",
-        cost_note: "",
-    },
-    BuiltinDoc {
-        name: "remove",
-        signature: "d.remove(key) -> Option",
-        summary: "Delete a key from a dict variable; gives back the removed \
-                  value as an Option.",
-        cost_note: "",
-    },
-    BuiltinDoc {
-        name: "keys",
-        signature: "d.keys() -> list",
-        summary: "A dict's keys in sorted order (iteration order is always \
-                  sorted, never insertion — determinism).",
-        cost_note: "",
-    },
-    BuiltinDoc {
-        name: "values",
-        signature: "d.values() -> list",
-        summary: "A dict's values, in sorted-key order.",
-        cost_note: "",
-    },
-    BuiltinDoc {
-        name: "move_to",
-        signature: "move_to(entity)",
-        summary: "Pathfind to the target and walk there. Blocks until arrival; \
-                  faults if no route exists.",
-        cost_note: " + travel",
-    },
-    BuiltinDoc {
-        name: "mine",
-        signature: "mine()",
-        summary: "Extract ore from a node in range into cargo. Blocks; faults \
-                  with no ore in range.",
-        cost_note: " + action",
-    },
-    BuiltinDoc {
-        name: "deposit",
-        signature: "deposit()",
-        summary: "Unload all cargo into a depot in range. Blocks; faults with \
-                  no depot in range.",
-        cost_note: " + action",
-    },
-    BuiltinDoc {
-        name: "build",
-        signature: "build()",
-        summary: "Work the nearest blueprint in range, 1 progress per tick. \
-                  Blocks; faults when none is in range.",
-        cost_note: " + action",
-    },
-    BuiltinDoc {
-        name: "attack",
-        signature: "attack(entity)",
-        summary: "Strike the target while adjacent. Blocks for the swing.",
-        cost_note: " + action",
-    },
-    BuiltinDoc {
-        name: "wait",
-        signature: "wait(n)",
-        summary: "Idle for n ticks — deliberate pacing, the Tier-0 traffic tool.",
-        cost_note: " + n idle ticks",
-    },
-    BuiltinDoc {
-        name: "rng",
-        signature: "rng(n) -> int",
-        summary: "Uniform random integer in [0, n) from the sim's seeded \
-                  stream (identical programs can desync on purpose: wait(rng(20))).",
-        cost_note: "",
-    },
-    BuiltinDoc {
-        name: "cargo_full",
-        signature: "cargo_full() -> bool",
-        summary: "True when cargo is at capacity.",
-        cost_note: "",
-    },
-    BuiltinDoc {
-        name: "health_low",
-        signature: "health_low() -> bool",
-        summary: "True below 50% hp — the Damaged threshold.",
-        cost_note: "",
-    },
-    BuiltinDoc {
-        name: "last_error",
-        signature: "last_error() -> string",
-        summary: "The most recent fault message; mainly for on error: handlers.",
-        cost_note: "",
-    },
-    BuiltinDoc {
-        name: "log",
-        signature: "log(value, ...)",
-        summary: "Append one line to the bot's local ring buffer (drops the \
-                  oldest line when full).",
-        cost_note: "",
-    },
-    BuiltinDoc {
-        name: "upload_log",
-        signature: "upload_log()",
-        summary: "Transmit the log buffer to the colony cloud and clear it.",
-        cost_note: " + size",
-    },
-    BuiltinDoc {
-        name: "upload_crash_dump",
-        signature: "upload_crash_dump()",
-        summary: "File a full debug report to the cloud. The engine force-calls \
-                  this on any unhandled fault.",
-        cost_note: "",
-    },
-    BuiltinDoc {
-        name: "become_disabled",
-        signature: "become_disabled()",
-        summary: "Wreck this bot and start its self-destruct countdown — a \
-                  deliberate scuttle. Also forced at the end of on death:.",
-        cost_note: "",
-    },
-];
-
-/// Doc entry for a builtin or method, by name.
-pub fn builtin_doc(name: &str) -> Option<&'static BuiltinDoc> {
-    BUILTIN_DOCS.iter().find(|d| d.name == name)
+/// Editor-facing doc lookup, backed by the function registry
+/// (`pyrite/data/builtins.ron`): signature, summary, and cost note all come
+/// from the same data the VM prices calls with, so hover docs can't go
+/// stale against the cost table.
+pub fn builtin_doc<'c>(costs: &'c pyrite::CostTable, name: &str) -> Option<&'c pyrite::BuiltinSpec> {
+    costs.spec(name)
 }
 
 pub struct BotHost<'a> {
@@ -224,16 +50,22 @@ impl BotHost<'_> {
 fn kind_arg<'v>(func: &str, args: &'v [Value]) -> Result<&'v str, HostCall> {
     match args {
         [Value::Str(s)] if KINDS.contains(&s.as_str()) => Ok(s),
-        [other] => Err(HostCall::Fault(format!(
-            "{func} requires a kind ({}), got {}",
-            KINDS.join("/"),
-            other
+        [other] => Err(HostCall::Fault(Fault::new(
+            faults::TYPE,
+            format!("{func} requires a kind ({}), got {}", KINDS.join("/"), other),
         ))),
-        _ => Err(HostCall::Fault(format!("{func} takes 1 kind argument"))),
+        _ => Err(HostCall::Fault(Fault::new(
+            faults::ARITY,
+            format!("{func} takes 1 kind argument"),
+        ))),
     }
 }
 
 impl pyrite::Host for BotHost<'_> {
+    fn log_len(&self) -> u64 {
+        self.world.bots[&self.bot].data.log_buf.len() as u64
+    }
+
     fn call(&mut self, name: &str, args: &[Value], ctx: CallCtx<'_>) -> HostCall {
         let tick = self.world.tick;
         let bot_id = self.bot;
@@ -262,14 +94,19 @@ impl pyrite::Host for BotHost<'_> {
                 HostCall::Ready(Value::Bool(data.hp * 2 < data.max_hp))
             }
             "last_error" => {
-                HostCall::Ready(Value::Str(ctx.last_fault.unwrap_or("").to_string()))
+                // The fault's identity constant (err_type, err_action, ...)
+                // — ==-comparable against the pre-bound err_* names (Q80).
+                HostCall::Ready(Value::Str(ctx.last_fault_id.unwrap_or("").to_string()))
             }
 
             // --- blocking actions ---
             "move_to" => match args {
                 [Value::Entity(target)] => self.request(ActionRequest::MoveTo(EntityId(*target))),
-                [other] => HostCall::Fault(format!("move_to requires an entity, got {}", other.type_name())),
-                _ => HostCall::Fault("move_to takes 1 argument".into()),
+                [other] => HostCall::Fault(Fault::new(
+                    faults::TYPE,
+                    format!("move_to requires an entity, got {}", other.type_name()),
+                )),
+                _ => HostCall::Fault(Fault::new(faults::ARITY, "move_to takes 1 argument")),
             },
             "mine" => self.request(ActionRequest::Mine),
             // The forced handler-entry ritual: an engine wait the VM
@@ -285,8 +122,11 @@ impl pyrite::Host for BotHost<'_> {
             "wait" => match args {
                 [Value::Int(0)] => HostCall::Ready(Value::Unit), // waiting 0 is free
                 [Value::Int(n)] if *n > 0 => self.request(ActionRequest::Wait(*n as u32)),
-                [Value::Int(_)] => HostCall::Fault("wait requires a non-negative tick count".into()),
-                _ => HostCall::Fault("wait takes 1 integer argument".into()),
+                [Value::Int(_)] => HostCall::Fault(Fault::new(
+                    faults::TYPE,
+                    "wait requires a non-negative tick count",
+                )),
+                _ => HostCall::Fault(Fault::new(faults::TYPE, "wait takes 1 integer argument")),
             },
             // Uniform integer in [0, n) from this bot's own rng.program
             // stream, seeded by (match seed, entity ID) — the sanctioned
@@ -299,8 +139,11 @@ impl pyrite::Host for BotHost<'_> {
                         % *n as u64) as i64;
                     HostCall::Ready(Value::Int(v))
                 }
-                [Value::Int(_)] => HostCall::Fault("rng requires a positive bound".into()),
-                _ => HostCall::Fault("rng takes 1 integer argument".into()),
+                [Value::Int(_)] => HostCall::Fault(Fault::new(
+                    faults::TYPE,
+                    "rng requires a positive bound",
+                )),
+                _ => HostCall::Fault(Fault::new(faults::TYPE, "rng takes 1 integer argument")),
             },
             "build" => {
                 // Work on the nearest blueprint in range.
@@ -313,19 +156,25 @@ impl pyrite::Host for BotHost<'_> {
                     .next();
                 match target {
                     Some(id) => self.request(ActionRequest::Build(id)),
-                    None => HostCall::Fault("build: no blueprint in range".into()),
+                    None => HostCall::Fault(Fault::new(faults::ACTION, "build: no blueprint in range")),
                 }
             }
             "deposit" => self.request(ActionRequest::Deposit),
             "attack" => match args {
                 [Value::Entity(target)] => self.request(ActionRequest::Attack(EntityId(*target))),
-                [other] => HostCall::Fault(format!("attack requires an entity, got {}", other.type_name())),
-                _ => HostCall::Fault("attack takes 1 argument".into()),
+                [other] => HostCall::Fault(Fault::new(
+                    faults::TYPE,
+                    format!("attack requires an entity, got {}", other.type_name()),
+                )),
+                _ => HostCall::Fault(Fault::new(faults::ARITY, "attack takes 1 argument")),
             },
 
             // --- logging (docs/01: ordinary costed functions) ---
             "log" => {
-                let text = args.iter().map(|v| v.to_string()).collect::<Vec<_>>().join(" ");
+                // Registry signature: log(val, level=info). Levels get
+                // semantics in M3 (leveled buffers/filtering); until then
+                // the level argument is accepted and dropped.
+                let text = args.first().map(|v| v.to_string()).unwrap_or_default();
                 let buf = &mut self.world.bots.get_mut(&bot_id).expect("bot exists").data.log_buf;
                 if buf.len() >= LOG_BUFFER_CAP {
                     buf.remove(0);
@@ -370,7 +219,10 @@ impl pyrite::Host for BotHost<'_> {
                 HostCall::Ready(Value::Unit)
             }
 
-            other => HostCall::Fault(format!("unknown function {other}()")),
+            other => HostCall::Fault(Fault::new(
+                faults::UNKNOWN_FUNCTION,
+                format!("unknown function {other}()"),
+            )),
         }
     }
 }
@@ -378,25 +230,21 @@ impl pyrite::Host for BotHost<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::BTreeSet;
 
     #[test]
-    fn builtin_docs_are_unique_and_costed() {
+    fn registry_documents_every_host_builtin() {
         let costs = pyrite::CostTable::default();
-        let mut seen = BTreeSet::new();
-        for doc in BUILTIN_DOCS {
-            assert!(seen.insert(doc.name), "duplicate doc for {}", doc.name);
-            // The editor shows a live cost next to each doc — every entry
-            // must exist in the cost table or the display lies.
-            // (upload_crash_dump is costed by the dedicated crash_dump field.)
-            assert!(
-                doc.name == "upload_crash_dump" || costs.builtins.contains_key(doc.name),
-                "{} documented but missing from the cost table",
-                doc.name
-            );
-        }
-        for name in ["closest", "exists", "expect"] {
-            assert!(builtin_doc(name).is_some(), "{name} needs docs");
+        // Every builtin this host implements must have a registry entry —
+        // the editor shows its signature, summary, and live cost from there.
+        for name in [
+            "closest", "exists", "cargo_full", "health_low", "last_error", "move_to",
+            "mine", "wait", "rng", "build", "deposit", "attack", "log", "upload_log",
+            "upload_crash_dump", "become_disabled", "handler_init",
+        ] {
+            let spec = builtin_doc(&costs, name)
+                .unwrap_or_else(|| panic!("{name} implemented but missing from builtins.ron"));
+            assert!(!spec.signature.is_empty(), "{name} needs a signature");
+            assert!(!spec.summary.is_empty(), "{name} needs a summary");
         }
     }
 }

@@ -57,9 +57,12 @@ pub enum Expr {
     EnumUnit { enum_name: String, variant: String },
     /// `Order.Mine(x)` — data-carrying variant construction.
     EnumCtor { enum_name: String, variant: String, args: Vec<ExprId> },
-    /// `f(a, b)` — user function or builtin; resolved by the VM against the
-    /// program's function table, falling back to the Host.
-    Call { name: String, args: Vec<ExprId>, line: u32 },
+    /// `f(a, b, key=v)` — user function or builtin; resolved by the VM
+    /// against the program's function table, falling back to the Host.
+    /// Keyword arguments follow positionals (enforced at parse) and bind by
+    /// parameter name (docs/01: "optional parameters are Python-style
+    /// keyword defaults").
+    Call { name: String, args: Vec<ExprId>, kwargs: Vec<(String, ExprId)>, line: u32 },
     /// `e.expect()` — postfix method call, dispatched by the VM. Today the
     /// only method is `expect` on builtin `Result` values.
     MethodCall { base: ExprId, name: String, args: Vec<ExprId>, line: u32 },
@@ -120,10 +123,29 @@ pub enum Pattern {
     Wildcard,
 }
 
+/// A `def` parameter: `x` or `x=<literal>`. Defaults are literals only
+/// (evaluated at bind time, no expression machinery), and defaulted params
+/// must trail required ones — Python's rule.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Param {
+    pub name: String,
+    pub default: Option<DefaultLit>,
+}
+
+/// The literal subset legal as a parameter default.
+#[derive(Debug, Clone, PartialEq)]
+pub enum DefaultLit {
+    Int(i64),
+    Str(String),
+    Bool(bool),
+    /// `None` — binds `Option.None`.
+    NoneVal,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Function {
     pub name: String,
-    pub params: Vec<String>,
+    pub params: Vec<Param>,
     pub body: Block,
     pub line: u32,
     /// `"""docstring"""` — a leading bare string literal in the body,

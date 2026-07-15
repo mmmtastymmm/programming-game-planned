@@ -1,0 +1,21 @@
+# Determinism gate (CLAUDE.md): golden-replay fixtures are checked in, so
+# any sim behavior change fails here until the fixture is regenerated
+# (UPDATE_GOLDEN=1) — and the PR explains why. The game crate is excluded:
+# it needs Bevy's system deps and contains no sim logic by rule.
+name: ci
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # No rustfmt gate yet: the tree has pre-existing fmt drift; adding the
+      # gate means one dedicated whole-tree `cargo fmt` commit first.
+      - name: Test (sim + pyrite, incl. golden replays)
+        run: cargo test -p sim -p pyrite
