@@ -29,7 +29,7 @@ sequenceDiagram
 
 - **Input delay D**: ~3 ticks (300ms at 10 tps). Invisible here — commands are "deploy code," not "dodge left." This is why lockstep's classic weakness doesn't hurt us.
 - **Topology**: client-hosted relay for v1 (one player hosts; relay only orders commands, doesn't simulate ahead of others). Dedicated relay later if needed.
-- **Desync handling**: per-tick state hash exchange ([07-architecture.md](07-architecture.md) phase 7). On mismatch: pause, dump divergent-state diff to log (dev), attempt host-state resync (prod).
+- **Desync handling**: per-tick state hash exchange ([07-architecture.md](07-architecture.md) phase 9, the snapshot hash). On mismatch: pause, dump divergent-state diff to log (dev), attempt host-state resync (prod).
 - **Late join / reconnect**: host serializes full sim state + tick; joiner loads and enters lockstep. Same path as save/load — build once.
 
 ## Determinism Contract

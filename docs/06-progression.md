@@ -30,7 +30,7 @@ Function blocks are **learned from Template Caches**: ruined installations holdi
 
 ```mermaid
 flowchart TD
-    START([Game start:<br/>straight-line programs + the start kit:<br/>move_to, mine, deposit, withdraw, study,<br/>closest(ore), exists, wait, rng,<br/>drop_cargo, abort, wander])
+    START([Game start:<br/>straight-line programs + the start kit:<br/>move_to, mine, deposit + try_deposit,<br/>withdraw + try_withdraw, study, closest,<br/>exists, wait, rng, drop_cargo, abort,<br/>wander, cargo_count, is_seen])
 
     subgraph Constructs["Language constructs (one-time Data cost, PERMANENT)"]
         VAR["Variables — 10"]
@@ -48,9 +48,9 @@ flowchart TD
     end
 
     subgraph Functions["Function blocks (found at Caches — number ≈ cache depth)"]
-        F_SENSE["cargo_full, health_low — 5"]
+        F_SENSE["cargo_full, health_low,<br/>path_blocked — 5"]
         F_SEARCH["search, explore<br/>(the scouting stance) — 12"]
-        F_LOG["log, upload_log,<br/>recover_black_box, last_error — 10"]
+        F_LOG["log, upload_log, upload_crash_dump,<br/>recover_black_box, last_error — 10"]
         F_SALV["salvage — 18"]
         F_ATK["attack — 15"]
         F_BUILD["build, repair — 20"]

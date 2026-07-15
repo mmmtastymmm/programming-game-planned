@@ -5,7 +5,7 @@ The PvE faction: **Feral machines**, corrupted bots left over from whatever wrec
 ## Why enemies run the player's VM
 
 - **One interpreter, one truth.** No separate AI system to build or keep deterministic ([08-multiplayer.md](08-multiplayer.md)). Feral behavior is exactly as inspectable, steppable, and deterministic as player code.
-- **Reading code is the counterplay.** A Feral's program is its stat block *and* its weakness. `if attacker_count > 2: flee_to_nest()` is an instruction to the player: bring three bots. Decryption is how you earn the read.
+- **Reading code is the counterplay.** A Feral's program is its stat block *and* its weakness. `if attacker_count > 2: move_to(home)` is an instruction to the player: bring three bots. Decryption is how you earn the read.
 - **Enemies are the curriculum.** Early Feral programs are simple Tier-0/1 scripts that teach by example (and leak in a kill or two); late ones use constructs the player hasn't unlocked yet — a preview of their own future power, behind a longer decryption grind.
 
 ## Inspection & Decryption
@@ -19,12 +19,12 @@ Feral programs are **encrypted exactly like player code** ([08-multiplayer.md](0
 | Codex library | Every decrypted view, versioned and diffable (mutating nests create versions; your % persists across them) |
 
 - **Decrypt rate is per-arcanum tuning** — the difficulty knob: the Fool leaks its whole program in a couple of kills (the curriculum still works; it's just earned), while high arcana stay cryptic across a long campaign.
-- Once decrypted, the live program-counter view delivers the aha-moments: a retreating player literally watches the pursuer's code hit its `if distance_from_nest > 40: return_home()` line.
+- Once decrypted, the live program-counter view delivers the aha-moments: a retreating player literally watches the pursuer's code hit its `if leash > 40: move_to(home)` line.
 - **Channels are never included**: even at 100% decryption you can *see* the Warden calls `try_broadcast("intruder", …)`, but listening in or spoofing requires the nest's comm key — reading is reconnaissance; interacting takes fieldwork. Suppressing a nest's alarms by message-stealing, or baiting defenders with fake alerts, is intended late-game play.
 
 ## Feral Archetypes (initial set)
 
-Each archetype = chassis + program. Programs shown are their *actual* shipped source — legal Pyrite: Feral programs run with **nest-bound constants** (`nest`, `patrol_route`) pre-bound at print by their nest (the kind-constant mechanism, faction-scoped — Q79), and `deposit()` treats the nest as their depot.
+Each archetype = chassis + program. Programs shown are their *actual* shipped source — legal Pyrite: Feral programs run with **nest-bound values** — `home` (their own nest) and `patrol_route` — pre-bound at print (the kind-constant mechanism, faction-scoped — Q79), and `deposit()` treats their nest as their depot.
 
 ### Drone (threat 1) — teaches Tier 0
 
@@ -41,7 +41,7 @@ Harmless in ones. Exists so the first program a player ever reads is trivially c
 
 ```python
 if health_low():
-    move_to(nest)
+    move_to(home)
 if exists(enemy):
     move_to(closest(enemy).expect())
     attack(closest(enemy).expect())
@@ -56,7 +56,7 @@ Counterplay written in the code: hurt it and it *will* run — ambush the retrea
 target = closest(ore).expect()
 move_to(target)
 mine()
-move_to(nest)
+move_to(home)
 deposit()
 ```
 
