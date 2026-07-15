@@ -53,8 +53,8 @@ impl Sim {
         let Some(landing) = self.world.free_spawn_tile(printer_pos) else {
             return false;
         };
+        self.world.move_bot(id, landing);
         let bot = self.world.bots.get_mut(&id).expect("bot exists");
-        bot.data.pos = landing;
         bot.data.color = color;
         bot.data.recall = None;
         bot.data.booting = Some(self.tuning.boot_ticks);
@@ -69,6 +69,7 @@ impl Sim {
     /// recycling, not a destruction.
     pub(crate) fn scrap_bot(&mut self, id: BotId) {
         let Some(bot) = self.world.bots.remove(&id) else { return };
+        self.world.unindex_bot(id, bot.data.pos);
         self.world.bot_entities.remove(&bot.data.entity);
         // Orderly recycling at the printer: carried cargo goes to stores.
         self.world.stockpile_ore += bot.data.cargo as u64;

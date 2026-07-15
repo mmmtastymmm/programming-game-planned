@@ -171,9 +171,8 @@ impl Sim {
                     }
                     return;
                 }
-                let bot = self.world.bots.get_mut(&id).expect("bot exists");
                 path.remove(0);
-                bot.data.pos = entered;
+                self.world.move_bot(id, entered);
                 if path.is_empty() {
                     if goals.contains(&entered) {
                         self.finish_action(id, Ok(Value::Unit));
@@ -377,9 +376,8 @@ impl Sim {
                 self.bump_both(id, entered, false);
                 return;
             }
-            let bot = self.world.bots.get_mut(&id).expect("bot exists");
             recall.path.remove(0);
-            bot.data.pos = entered;
+            self.world.move_bot(id, entered);
             if let Some(next) = recall.path.first() {
                 recall.ticks_left = self
                     .world
@@ -391,7 +389,7 @@ impl Sim {
             // Stand on the arrival tile for one tick even when the path is
             // done — the walk's last step must be observable (the printer
             // starts its work next tick, not mid-stride).
-            bot.data.recall = Some(recall);
+            self.world.bots.get_mut(&id).expect("bot exists").data.recall = Some(recall);
             return;
         }
         // Arrived at the home printer.

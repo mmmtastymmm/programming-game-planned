@@ -70,6 +70,7 @@ impl Sim {
     /// drops a Black Box (docs/02-agents.md).
     pub(crate) fn explode(&mut self, id: BotId, vm: &Vm) {
         if let Some(bot) = self.world.bots.remove(&id) {
+            self.world.unindex_bot(id, bot.data.pos);
             self.world.bot_entities.remove(&bot.data.entity);
             self.drop_cargo_to_ground(bot.data.pos, bot.data.cargo);
             self.world.black_boxes.push(BlackBox {

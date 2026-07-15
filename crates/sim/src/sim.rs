@@ -337,6 +337,7 @@ impl Sim {
                 vm: Some(vm),
             },
         );
+        self.world.index_bot(id, pos);
         id
     }
 
@@ -427,6 +428,7 @@ impl Sim {
             }
             let bot = self.world.bots.remove(&id).expect("checked above");
             let data = bot.data;
+            self.world.unindex_bot(id, data.pos);
             self.world.bot_entities.remove(&data.entity);
             // Carried cargo spills to the ground rather than entombing.
             self.drop_cargo_to_ground(data.pos, data.cargo);
