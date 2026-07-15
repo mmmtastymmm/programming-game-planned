@@ -781,11 +781,11 @@ pub(crate) fn editor_ui(
             let (_, items) = BUILD_CATEGORIES[editor.build_category.min(BUILD_CATEGORIES.len() - 1)];
             for item in items {
                 let cost = match item.kind {
-                    ToolKind::Building(BlueprintKind::Bridge) => game.0.tuning.bridge_cost_ore,
-                    ToolKind::Overlay(Some(_)) => game.0.tuning.overlay_cost_ore,
+                    ToolKind::Building(BlueprintKind::Bridge) => game.0.tuning.bridge_cost_stone,
+                    ToolKind::Overlay(Some(_)) => game.0.tuning.overlay_cost_stone,
                     ToolKind::Overlay(None) | ToolKind::Paint(_) | ToolKind::Kill => 0,
                 };
-                let affordable = game.0.world.stockpile_ore >= cost;
+                let affordable = game.0.world.stock_get(0, sim::resources::Resource::Stone) >= cost;
                 if !editor.icons.contains_key(item.name) {
                     let tex = ctx.load_texture(
                         item.name,
@@ -864,7 +864,7 @@ pub(crate) fn editor_ui(
 
         ui.heading("Printers");
         let printer_ids: Vec<_> = game.0.world.printers.keys().copied().collect();
-        let repair_cost = game.0.tuning.repair_cost_ore;
+        let repair_cost = game.0.tuning.repair_cost_data;
         for pid in printer_ids {
             let (color, state, mut desired) = {
                 let p = &game.0.world.printers[&pid];
@@ -875,7 +875,7 @@ pub(crate) fn editor_ui(
                 ui.label(egui::RichText::new(name).color(color_tint(color.0)));
                 match state {
                     PrinterState::Ruined => {
-                        let affordable = game.0.world.stockpile_ore >= repair_cost;
+                        let affordable = game.0.world.data.get(&0).copied().unwrap_or(0) >= repair_cost;
                         if ui
                             .add_enabled(
                                 affordable,
@@ -947,17 +947,31 @@ pub(crate) fn editor_ui(
     // controls in the top right. The cloud stream stays in the side panel.
     egui::TopBottomPanel::top("world_bar").exact_height(28.0).show(ctx, |ui| {
         ui.horizontal_centered(|ui| {
-            let (tick, ore, bots, wrecks, cloud) = {
+            let (tick, stock, data, bots, wrecks, cloud) = {
                 let w = &game.0.world;
-                (w.tick, w.stockpile_ore, w.bots.len(), w.wrecks.len(), w.archive.len())
+                // Typed stock (docs/03): every nonzero kind, deci → units.
+                let stock: Vec<String> = w
+                    .stock
+                    .iter()
+                    .filter(|((f, _), deci)| *f == 0 && **deci > 0)
+                    .map(|((_, kind), deci)| {
+                        format!("{} {}", kind.name(), *deci / sim::resources::DECI as u64)
+                    })
+                    .collect();
+                let data = w.data.get(&0).copied().unwrap_or(0);
+                (w.tick, stock, data, w.bots.len(), w.wrecks.len(), w.archive.len())
             };
-            for text in [
-                format!("tick {tick}"),
-                format!("ore {ore}"),
-                format!("bots {bots}"),
-                format!("wrecks {wrecks}"),
-                format!("cloud {cloud}"),
-            ] {
+            let mut texts = vec![format!("tick {tick}")];
+            if stock.is_empty() {
+                texts.push("stock —".into());
+            } else {
+                texts.extend(stock);
+            }
+            texts.push(format!("data {data}"));
+            texts.push(format!("bots {bots}"));
+            texts.push(format!("wrecks {wrecks}"));
+            texts.push(format!("cloud {cloud}"));
+            for text in texts {
                 ui.monospace(text);
                 ui.separator();
             }

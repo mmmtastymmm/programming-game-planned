@@ -30,6 +30,7 @@ fn walled_map() -> MapSpec {
     spec.ore_nodes.push((TilePos::new(7, 2), 10));
     spec.depots.push(TilePos::new(0, 2));
     spec.starting_ore = 20;
+    spec.starting_stock.push((0, sim::resources::Resource::Stone, 20));
     spec
 }
 
@@ -47,8 +48,12 @@ fn builder_bot_bridges_the_wall() {
     let mut sim = Sim::new(&walled_map());
     let builder = spawn(&mut sim, TilePos::new(1, 2), BUILDER);
     let site = TilePos::new(4, 2);
-    sim.apply(&Command::PlaceBlueprint { pos: site, kind: BlueprintKind::Bridge }).unwrap();
-    assert_eq!(sim.world.stockpile_ore, 20 - sim.tuning.bridge_cost_ore, "placement charges ore");
+    sim.apply(&Command::PlaceBlueprint { pos: site, kind: BlueprintKind::Bridge, faction: 0 }).unwrap();
+    assert_eq!(
+        sim.world.stock_get(0, sim::resources::Resource::Stone),
+        200 - sim.tuning.bridge_cost_stone,
+        "placement charges Stone (docs/03: civil works)"
+    );
     assert_eq!(sim.world.blueprints.len(), 1);
 
     for _ in 0..200 {
@@ -74,6 +79,7 @@ fn bridge_opens_the_route_for_miners() {
     sim.apply(&Command::PlaceBlueprint {
         pos: TilePos::new(4, 2),
         kind: BlueprintKind::Bridge,
+        faction: 0,
     })
     .unwrap();
 
@@ -81,9 +87,9 @@ fn bridge_opens_the_route_for_miners() {
         sim.step();
     }
     assert!(
-        sim.world.stockpile_ore > 20 - sim.tuning.bridge_cost_ore,
-        "ore must eventually cross the bridge; stockpile {}",
-        sim.world.stockpile_ore
+        sim.world.stock_get(0, sim::resources::Resource::Iron) > 200,
+        "ore must eventually cross the bridge and grow the seed stock; stockpile {}",
+        sim.world.stock_get(0, sim::resources::Resource::Iron)
     );
 }
 
@@ -94,14 +100,19 @@ fn blueprint_placement_validates_site_and_funds() {
     sim.apply(&Command::PlaceBlueprint {
         pos: TilePos::new(1, 1),
         kind: BlueprintKind::Bridge,
+        faction: 0,
     })
     .unwrap();
     assert!(sim.world.blueprints.is_empty());
-    assert_eq!(sim.world.stockpile_ore, 20, "invalid site must not charge");
+    assert_eq!(
+        sim.world.stock_get(0, sim::resources::Resource::Stone),
+        200,
+        "invalid site must not charge Stone"
+    );
     // Duplicate site: rejected.
     let site = TilePos::new(4, 1);
-    sim.apply(&Command::PlaceBlueprint { pos: site, kind: BlueprintKind::Bridge }).unwrap();
-    sim.apply(&Command::PlaceBlueprint { pos: site, kind: BlueprintKind::Bridge }).unwrap();
+    sim.apply(&Command::PlaceBlueprint { pos: site, kind: BlueprintKind::Bridge, faction: 0 }).unwrap();
+    sim.apply(&Command::PlaceBlueprint { pos: site, kind: BlueprintKind::Bridge, faction: 0 }).unwrap();
     assert_eq!(sim.world.blueprints.len(), 1, "one blueprint per tile");
 }
 
@@ -141,11 +152,13 @@ fn one_way_bridge_only_crosses_with_the_arrow() {
     sim.apply(&Command::PlaceBlueprint {
         pos: TilePos::new(4, 2),
         kind: BlueprintKind::Bridge,
+        faction: 0,
     })
     .unwrap();
     sim.apply(&Command::PlaceOverlay {
         pos: TilePos::new(4, 2),
         overlay: Some(OverlayKind::Arrow(Direction::East)),
+        faction: 0,
     })
     .unwrap();
 
@@ -156,9 +169,9 @@ fn one_way_bridge_only_crosses_with_the_arrow() {
     assert!(miner_bot.data.xp_mining > 0, "the miner must cross east and mine");
     assert!(miner_bot.data.pos.x > 4, "and be stranded east of the wall");
     assert_eq!(
-        sim.world.stockpile_ore,
-        20 - sim.tuning.bridge_cost_ore - sim.tuning.overlay_cost_ore,
-        "no ore comes back west"
+        sim.world.stock_get(0, sim::resources::Resource::Iron),
+        200,
+        "no ore comes back west (seed iron stock untouched)"
     );
     assert!(
         sim.world
@@ -189,11 +202,13 @@ fn opposing_one_way_bridges_make_a_round_trip() {
         sim.apply(&Command::PlaceBlueprint {
             pos: TilePos::new(4, y),
             kind: BlueprintKind::Bridge,
+        faction: 0,
         })
         .unwrap();
         sim.apply(&Command::PlaceOverlay {
             pos: TilePos::new(4, y),
             overlay: Some(OverlayKind::Arrow(dir)),
+        faction: 0,
         })
         .unwrap();
     }
@@ -202,10 +217,9 @@ fn opposing_one_way_bridges_make_a_round_trip() {
         sim.step();
     }
     assert!(
-        sim.world.stockpile_ore
-            > 20 - 2 * (sim.tuning.bridge_cost_ore + sim.tuning.overlay_cost_ore),
+        sim.world.stock_get(0, sim::resources::Resource::Iron) > 200,
         "ore must round-trip over the opposing one-ways; stockpile {}",
-        sim.world.stockpile_ore
+        sim.world.stock_get(0, sim::resources::Resource::Iron)
     );
 }
 
@@ -220,10 +234,12 @@ fn arrow_overlay_works_on_plain_ground() {
     }
     spec.depots.push(TilePos::new(0, 1));
     spec.starting_ore = 10;
+    spec.starting_stock.push((0, sim::resources::Resource::Stone, 20));
     let mut sim = Sim::new(&spec);
     sim.apply(&Command::PlaceOverlay {
         pos: TilePos::new(3, 1),
         overlay: Some(OverlayKind::Arrow(Direction::East)),
+        faction: 0,
     })
     .unwrap();
     let bot = spawn(&mut sim, TilePos::new(5, 1), "move_to(closest(depot).expect())\n");
@@ -235,7 +251,7 @@ fn arrow_overlay_works_on_plain_ground() {
         "westbound travel over an east arrow must be unreachable"
     );
     // Clear the arrow: the road reopens.
-    sim.apply(&Command::PlaceOverlay { pos: TilePos::new(3, 1), overlay: None }).unwrap();
+    sim.apply(&Command::PlaceOverlay { pos: TilePos::new(3, 1), overlay: None, faction: 0 }).unwrap();
     for _ in 0..120 {
         sim.step();
     }
@@ -292,6 +308,7 @@ fn exists_blueprint_predicate() {
     sim.apply(&Command::PlaceBlueprint {
         pos: TilePos::new(4, 1),
         kind: BlueprintKind::Bridge,
+        faction: 0,
     })
     .unwrap();
     for _ in 0..30 {
@@ -313,7 +330,7 @@ fn prebuilt_bridges_are_passable_from_the_start() {
     for _ in 0..400 {
         sim.step();
     }
-    assert!(sim.world.stockpile_ore > 20, "miner crosses immediately; stockpile {}", sim.world.stockpile_ore);
+    assert!(sim.world.stock_get(0, sim::resources::Resource::Iron) > 20, "miner crosses immediately; stockpile {}", sim.world.stock_get(0, sim::resources::Resource::Iron));
 }
 
 #[test]
@@ -324,7 +341,7 @@ fn kill_command_wrecks_bot_and_spills_cargo() {
         sim.step();
     }
     // Give it cargo by hand, then pull the plug.
-    sim.world.bots.get_mut(&bot).unwrap().data.cargo = 2;
+    sim.world.bots.get_mut(&bot).unwrap().data.cargo = [(sim::resources::Resource::Iron, 20u32)].into_iter().collect();
     sim.apply(&Command::KillBot { bot }).unwrap();
     sim.step();
 
@@ -333,12 +350,12 @@ fn kill_command_wrecks_bot_and_spills_cargo() {
     assert!(wreck.logs.iter().any(|l| l.1 == "7"), "logs ride in the wreck");
     let spilled: u32 = sim
         .world
-        .ore_nodes
+        .nodes
         .values()
         .filter(|n| n.pos.chebyshev(TilePos::new(3, 3)) <= 1)
         .map(|n| n.amount)
         .sum();
-    assert_eq!(spilled, 2, "cargo spills to the ground next to the wreck");
+    assert_eq!(spilled, 20, "cargo (2 units = 20 deci) spills next to the wreck");
 }
 
 #[test]
@@ -349,7 +366,7 @@ fn spilled_cargo_is_recoverable_by_miners() {
     spec.depots.push(TilePos::new(0, 1));
     let mut sim = Sim::new(&spec);
     let mule = spawn(&mut sim, TilePos::new(6, 2), "wait(50)\n");
-    sim.world.bots.get_mut(&mule).unwrap().data.cargo = 2;
+    sim.world.bots.get_mut(&mule).unwrap().data.cargo = [(sim::resources::Resource::Iron, 20u32)].into_iter().collect();
     sim.apply(&Command::KillBot { bot: mule }).unwrap();
     sim.step();
     spawn(
@@ -360,5 +377,5 @@ fn spilled_cargo_is_recoverable_by_miners() {
     for _ in 0..400 {
         sim.step();
     }
-    assert!(sim.world.stockpile_ore >= 2, "spilled cargo makes it home; got {}", sim.world.stockpile_ore);
+    assert!(sim.world.stock_get(0, sim::resources::Resource::Iron) >= 20, "spilled cargo (2 units = 20 deci) makes it home; got {}", sim.world.stock_get(0, sim::resources::Resource::Iron));
 }

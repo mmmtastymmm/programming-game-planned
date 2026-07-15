@@ -233,10 +233,10 @@ pub(crate) fn place_blueprint(
     }
     match kind {
         ToolKind::Building(blueprint) => {
-            let _ = game.0.apply(&Command::PlaceBlueprint { pos, kind: blueprint });
+            let _ = game.0.apply(&Command::PlaceBlueprint { pos, kind: blueprint, faction: 0 });
         }
         ToolKind::Overlay(overlay) => {
-            let _ = game.0.apply(&Command::PlaceOverlay { pos, overlay });
+            let _ = game.0.apply(&Command::PlaceOverlay { pos, overlay, faction: 0 });
         }
         ToolKind::Paint(color) => {
             if editor.last_paint_tile != Some(pos) {
@@ -309,14 +309,15 @@ pub(crate) fn build_preview(
 
     let (valid, paint_ghost) = match kind {
         ToolKind::Building(BlueprintKind::Bridge) => {
-            let cost = game.0.tuning.bridge_cost_ore;
+            let cost = game.0.tuning.bridge_cost_stone;
             let ok = world.grid.get(pos) == Some(sim::TileKind::Water)
                 && !world.blueprints.values().any(|b| b.pos == pos)
-                && world.stockpile_ore >= cost;
+                && world.stock_get(0, sim::resources::Resource::Stone) >= cost;
             (ok, None)
         }
         ToolKind::Overlay(Some(_)) => {
-            (world.stockpile_ore >= game.0.tuning.overlay_cost_ore, None)
+            (world.stock_get(0, sim::resources::Resource::Stone)
+                >= game.0.tuning.overlay_cost_stone, None)
         }
         ToolKind::Overlay(None) | ToolKind::Paint(None) => (true, None),
         ToolKind::Kill => {

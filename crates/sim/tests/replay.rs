@@ -48,7 +48,7 @@ fn run_mining_sim(ticks: u64) -> Sim {
 fn tier0_miner_delivers_ore() {
     let sim = run_mining_sim(400);
     assert!(
-        sim.world.stockpile_ore > 0,
+        sim.world.stock_get(0, sim::resources::Resource::Iron) > 0,
         "the starter program must produce ore; archive: {:?}",
         sim.world.archive
     );
@@ -64,7 +64,7 @@ fn identical_runs_hash_identically() {
     let a = run_mining_sim(300);
     let b = run_mining_sim(300);
     assert_eq!(a.state_hash(), b.state_hash());
-    assert_eq!(a.world.stockpile_ore, b.world.stockpile_ore);
+    assert_eq!(a.world.stock_get(0, sim::resources::Resource::Iron), b.world.stock_get(0, sim::resources::Resource::Iron));
 }
 
 #[test]
@@ -97,7 +97,7 @@ fn ore_depletes_then_program_faults_into_crash_dumps() {
     // anywhere") → forced crash dump in the archive. Requirement: the
     // failure is *visible*, not silent.
     let sim = run_mining_sim(3000);
-    assert_eq!(sim.world.stockpile_ore, 10, "all ore ends up in the stockpile");
+    assert_eq!(sim.world.stock_get(0, sim::resources::Resource::Iron), 100, "all ore (10 units = 100 deci) ends up in stock");
     assert!(
         sim.world
             .archive
@@ -145,7 +145,7 @@ fn unreachable_target_faults() {
         "archive: {:?}",
         sim.world.archive
     );
-    assert_eq!(sim.world.stockpile_ore, 0);
+    assert_eq!(sim.world.stock_get(0, sim::resources::Resource::Iron), 0);
 }
 
 #[test]
@@ -232,7 +232,7 @@ fn rubble_slows_movement() {
         .unwrap();
         for tick in 1..=600 {
             sim.step();
-            if sim.world.stockpile_ore > 0 {
+            if sim.world.stock_get(0, sim::resources::Resource::Iron) > 0 {
                 return tick;
             }
         }

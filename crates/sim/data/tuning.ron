@@ -7,10 +7,23 @@ Tuning(
     print_ticks: 5,
     // DEFAULT FREE: a colony must never be soft-locked out of bots
     // (no ore + no bots = dead end). Maps/servers can set a cost.
-    print_cost_ore: 0,
-    repair_cost_ore: 5,
-    // Zero while prints are free — otherwise print+scrap mints ore.
-    scrap_refund_ore: 0,
+    print_cost_steel: 0,
+    // Repairing the ruined Red printer: ~60 Data (docs/03 round-4 manifest).
+    repair_cost_data: 60,
+    // Zero while prints are free — otherwise print+scrap mints steel.
+    scrap_refund_steel: 0,
+    // mine() yield per swing, deci-units (docs/03 first-pass: 2 units).
+    mine_yield_deci: 20,
+    // Grove regeneration: renewable but thin (docs/03) — per regen interval.
+    node_regen_deci: 10,
+    node_regen_cap_deci: 400,
+    // Data income: 20 Data per 500 units delivered; first kill 10.
+    delivery_milestone_deci: 5000,
+    milestone_data: 20,
+    first_kill_data: 10,
+    // Generic structure durability + refinery batch (docs/03 ~30 ticks).
+    structure_hp: 100,
+    recipe_batch_ticks: 30,
     boot_ticks: 2,
     printed_hp: 30,
     printed_cpu: 2,
@@ -22,9 +35,10 @@ Tuning(
     bump_freeze_ticks: 50,
     handler_init_ticks: 15,
     bump_damage: 2,
-    bridge_cost_ore: 3,
+    // Bridges are civil works: priced in Stone (deci-units).
+    bridge_cost_stone: 30,
     bridge_build_ticks: 20,
-    overlay_cost_ore: 1,
+    overlay_cost_stone: 10,
     fault_damage: 5,
     regen_interval_ticks: 1000,
     regen_amount: 1,

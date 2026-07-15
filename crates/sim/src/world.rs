@@ -82,10 +82,16 @@ pub enum RecallPurpose {
     Scrap,
 }
 
+/// A typed resource node (docs/03): sits on its ground tile, yields its
+/// kind to `mine()`. Amounts are deci-units.
 #[derive(Debug, Clone, PartialEq)]
-pub struct OreNode {
+pub struct ResourceNode {
+    pub kind: crate::resources::Resource,
     pub pos: TilePos,
     pub amount: u32,
+    /// Per-node-type regeneration flag (Wood groves are the flagship
+    /// exception; the rate is tuning `node_regen_deci`).
+    pub regen: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -93,12 +99,62 @@ pub struct Depot {
     pub pos: TilePos,
 }
 
+/// Structure kinds with generic state (docs/03). Printers stay their own
+/// specialized type until M9 reworks them — flagged for discussion in
+/// TASKS.md.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
+pub enum StructureKind {
+    Smelter,
+    Foundry,
+    /// The Research Archive: the Data bank (research itself is
+    /// structure-free — a Command; the Exchange lands later).
+    Archive,
+}
+
+impl StructureKind {
+    pub fn name(self) -> &'static str {
+        match self {
+            StructureKind::Smelter => "smelter",
+            StructureKind::Foundry => "foundry",
+            StructureKind::Archive => "archive",
+        }
+    }
+
+    pub fn as_u8(self) -> u8 {
+        match self {
+            StructureKind::Smelter => 0,
+            StructureKind::Foundry => 1,
+            StructureKind::Archive => 2,
+        }
+    }
+}
+
+/// A generic structure (docs/03): solid, damageable, with physical
+/// input/output buffers where its kind refines (feeds are physical;
+/// payments are abstract — Q84). Energy gating lands with M5.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Structure {
+    pub kind: StructureKind,
+    pub faction: u8,
+    pub pos: TilePos,
+    pub hp: i64,
+    pub max_hp: i64,
+    /// Physical input buffer bots feed with deposit() (deci-units).
+    pub input: BTreeMap<crate::resources::Resource, u32>,
+    /// Physical output buffer bots empty with withdraw() (deci-units).
+    pub output: BTreeMap<crate::resources::Resource, u32>,
+    /// The recipe this refinery is set to (SetRecipe command), if any.
+    pub recipe: Option<u8>,
+    /// Ticks remaining on the in-progress batch.
+    pub batch: Option<u32>,
+}
+
 /// An action a builtin asked for this tick; started in the resolve phase.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ActionRequest {
     MoveTo(EntityId),
     Mine,
-    Deposit,
+    Deposit { fault_on_fail: bool },
     Attack(EntityId),
     /// Idle deliberately for N ticks — the Tier-0 traffic tool.
     Wait(u32),
@@ -135,7 +191,10 @@ pub struct BotData {
     /// Edge-trigger latch for the hurt signal; re-arms when repaired above
     /// the threshold (no repair yet, so it fires at most once).
     pub hurt_fired: bool,
-    pub cargo: u32,
+    /// Typed cargo manifest in deci-units (docs/03: hauling routes by
+    /// kind; refinery buffers accept only their inputs).
+    pub cargo: BTreeMap<crate::resources::Resource, u32>,
+    /// Capacity in deci-units (total across kinds).
     pub cargo_cap: u32,
     /// Cycles granted per tick (CPU hardware).
     pub cpu: u64,
@@ -174,6 +233,35 @@ pub struct Bot {
     /// Taken out while running (borrow discipline); always `Some` between
     /// phases.
     pub vm: Option<Vm>,
+}
+
+impl BotData {
+    /// Total carried deci-units across all kinds.
+    pub fn cargo_total(&self) -> u32 {
+        self.cargo.values().sum()
+    }
+
+    /// Add up to `deci` of `kind`, clamped to capacity; returns the amount
+    /// actually loaded.
+    pub fn cargo_add(&mut self, kind: crate::resources::Resource, deci: u32) -> u32 {
+        let space = self.cargo_cap.saturating_sub(self.cargo_total());
+        let take = deci.min(space);
+        if take > 0 {
+            *self.cargo.entry(kind).or_insert(0) += take;
+        }
+        take
+    }
+
+    /// Remove up to `deci` of `kind`; returns the amount actually removed.
+    pub fn cargo_remove(&mut self, kind: crate::resources::Resource, deci: u32) -> u32 {
+        let Some(have) = self.cargo.get_mut(&kind) else { return 0 };
+        let take = deci.min(*have);
+        *have -= take;
+        if *have == 0 {
+            self.cargo.remove(&kind);
+        }
+        take
+    }
 }
 
 impl Bot {
@@ -256,6 +344,34 @@ pub const ENV_KEYS: &[EnvKey] = &[
 /// `log`'s range check. Ranks are the array indices.
 pub const LEVEL_NAMES: [&str; 5] = ["trace", "debug", "info", "warn", "error"];
 
+/// One-time construct research prices in Data (docs/06's tree).
+pub fn research_cost(construct: pyrite::Construct) -> u64 {
+    use pyrite::Construct as C;
+    match construct {
+        C::Variables => 10,
+        C::If => 20,
+        C::WhileLoop => 35,
+        C::OnError => 40,
+        C::OnHurt => 55,
+        C::OnBumpBumped => 30,
+        C::OnBoot => 45,
+        C::Functions => 50,
+        C::Import => 65,
+        C::Lists => 60,
+        C::Enums => 70,
+        C::Channels => 80,
+    }
+}
+
+/// The UnlockSet a faction's deploys parse against.
+pub fn faction_unlocks(world: &World, faction: u8) -> pyrite::UnlockSet {
+    if world.dev_all_unlocks {
+        pyrite::UnlockSet::all()
+    } else {
+        world.unlocks.get(&faction).cloned().unwrap_or_default()
+    }
+}
+
 /// Read an env key with defaulting (docs/01: `getenv` never faults on an
 /// unset key — unset means default; defaults resolve against tuning where
 /// they live there).
@@ -333,8 +449,11 @@ pub struct ArchiveEntry {
 pub struct World {
     pub tick: u64,
     pub grid: Grid,
-    pub ore_nodes: BTreeMap<EntityId, OreNode>,
+    pub nodes: BTreeMap<EntityId, ResourceNode>,
     pub depots: BTreeMap<EntityId, Depot>,
+    /// Generic structures (Smelter/Foundry/Archive — docs/03). Printers
+    /// stay separate until M9's rework.
+    pub structures: BTreeMap<EntityId, Structure>,
     pub bots: BTreeMap<BotId, Bot>,
     /// Entity handle -> bot, for targeting.
     pub bot_entities: BTreeMap<EntityId, BotId>,
@@ -352,13 +471,27 @@ pub struct World {
     pub program_library: BTreeMap<u64, String>,
     pub wrecks: BTreeMap<BotId, Wreck>,
     pub black_boxes: Vec<BlackBox>,
-    pub stockpile_ore: u64,
+    /// Typed colony stock, per faction, in deci-units (docs/03: payments
+    /// are abstract — they draw from here; feeds stay physical).
+    pub stock: BTreeMap<(u8, crate::resources::Resource), u64>,
+    /// Data currency per faction (docs/03: earned by doing, not mining).
+    pub data: BTreeMap<u8, u64>,
+    /// Lifetime deci-units delivered per faction (milestone Data income).
+    pub delivered: BTreeMap<u8, u64>,
+    /// Factions that already earned their first-kill Data.
+    pub first_kill_done: BTreeSet<u8>,
+    /// Per-faction construct unlocks (docs/06: permanent knowledge),
+    /// consumed at parse. Dev sandboxes get UnlockSet::all() via
+    /// MapSpec.dev_all_unlocks.
+    pub unlocks: BTreeMap<u8, pyrite::UnlockSet>,
+    /// Dev flag (from MapSpec): parse with everything unlocked.
+    pub dev_all_unlocks: bool,
     pub archive: Vec<ArchiveEntry>,
     /// The match seed (kept for seeding per-bot streams at spawn).
     pub seed: u64,
     /// Damage queued during phases 2–4, applied in phase 6 (docs/07: damage
     /// is a phase, not an inline side effect). Drained every tick.
-    pub pending_damage: Vec<(BotId, i64)>,
+    pub pending_damage: Vec<(BotId, i64, Option<u8>)>,
     /// XP earned this tick, settled in phase 7 under the start-of-tick
     /// Learning multiplier (identity until M6). Drained every tick.
     pub pending_xp: Vec<(BotId, XpTrack, u64)>,
@@ -473,8 +606,9 @@ impl World {
         let mut world = Self {
             tick: 0,
             grid,
-            ore_nodes: BTreeMap::new(),
+            nodes: BTreeMap::new(),
             depots: BTreeMap::new(),
+            structures: BTreeMap::new(),
             bots: BTreeMap::new(),
             bot_entities: BTreeMap::new(),
             printers: BTreeMap::new(),
@@ -485,7 +619,12 @@ impl World {
             program_library: BTreeMap::new(),
             wrecks: BTreeMap::new(),
             black_boxes: Vec::new(),
-            stockpile_ore: 0,
+            stock: BTreeMap::new(),
+            data: BTreeMap::new(),
+            delivered: BTreeMap::new(),
+            first_kill_done: BTreeSet::new(),
+            unlocks: BTreeMap::new(),
+            dev_all_unlocks: spec.dev_all_unlocks,
             archive: Vec::new(),
             seed: spec.seed,
             pending_damage: Vec::new(),
@@ -498,9 +637,25 @@ impl World {
             next_bot: 1,
         };
         world.terrain_hash = world.compute_terrain_hash();
+        // Legacy generic-ore specs become Iron nodes; typed nodes ride the
+        // resource-ground tiles (docs/03). Amounts are deci-units.
+        use crate::resources::{Resource, DECI};
         for &(pos, amount) in &spec.ore_nodes {
             let id = world.alloc_entity();
-            world.ore_nodes.insert(id, OreNode { pos, amount });
+            world.nodes.insert(
+                id,
+                ResourceNode { kind: Resource::Iron, pos, amount: amount * DECI, regen: false },
+            );
+        }
+        let mut node_tiles: Vec<(TilePos, TileKind)> = spec.resource_tiles.clone();
+        node_tiles.extend(spec.ore_veins.iter().map(|&p| (p, TileKind::OreVein)));
+        node_tiles.extend(spec.crystal.iter().map(|&p| (p, TileKind::CrystalField)));
+        node_tiles.sort_by_key(|(pos, tile)| (*pos, tile.as_u8()));
+        for (pos, tile) in node_tiles {
+            let Some((kind, regen)) = Resource::for_tile(tile) else { continue };
+            let id = world.alloc_entity();
+            let amount = spec.node_amount * DECI;
+            world.nodes.insert(id, ResourceNode { kind, pos, amount, regen });
         }
         for &pos in &spec.depots {
             let id = world.alloc_entity();
@@ -520,7 +675,14 @@ impl World {
                 },
             );
         }
-        world.stockpile_ore = spec.starting_ore;
+        // Typed per-faction colony stock. The legacy `starting_ore` seeds
+        // Iron for faction 0 (tests); real matches use `starting_stock`.
+        if spec.starting_ore > 0 {
+            world.stock.insert((0, Resource::Iron), spec.starting_ore * DECI as u64);
+        }
+        for &(faction, kind, units) in &spec.starting_stock {
+            *world.stock.entry((faction, kind)).or_insert(0) += units * DECI as u64;
+        }
         world
     }
 
@@ -566,9 +728,10 @@ impl World {
     /// Nearest ore node with ore remaining: (manhattan distance, id) order —
     /// fully deterministic tie-breaking.
     pub fn nearest_ore(&self, from: TilePos) -> Option<EntityId> {
-        self.ore_nodes
+        // `ore` is the family constant: any mineral vein or seam.
+        self.nodes
             .iter()
-            .filter(|(_, n)| n.amount > 0)
+            .filter(|(_, n)| n.amount > 0 && n.kind.is_ore_family())
             .map(|(id, n)| (from.manhattan(n.pos), *id))
             .min()
             .map(|(_, id)| id)
@@ -582,13 +745,50 @@ impl World {
             .map(|(_, id)| id)
     }
 
-    /// Position of a targetable entity (ore node, depot, printer, or bot).
+    /// Read a faction's stock of one kind (deci-units).
+    pub fn stock_get(&self, faction: u8, kind: crate::resources::Resource) -> u64 {
+        self.stock.get(&(faction, kind)).copied().unwrap_or(0)
+    }
+
+    /// Add deci-units to a faction's stock.
+    pub fn stock_add(&mut self, faction: u8, kind: crate::resources::Resource, deci: u64) {
+        if deci > 0 {
+            *self.stock.entry((faction, kind)).or_insert(0) += deci;
+        }
+    }
+
+    /// All-or-nothing withdrawal from stock (abstract payments, docs/03).
+    #[must_use]
+    pub fn stock_take(&mut self, faction: u8, kind: crate::resources::Resource, deci: u64) -> bool {
+        let Some(have) = self.stock.get_mut(&(faction, kind)) else { return deci == 0 };
+        if *have < deci {
+            return false;
+        }
+        *have -= deci;
+        if *have == 0 {
+            self.stock.remove(&(faction, kind));
+        }
+        true
+    }
+
+    /// Nearest live node of one specific kind, (distance, id) order.
+    pub fn nearest_node_of(&self, from: TilePos, kind: crate::resources::Resource) -> Option<EntityId> {
+        self.nodes
+            .iter()
+            .filter(|(_, n)| n.amount > 0 && n.kind == kind)
+            .map(|(id, n)| (from.manhattan(n.pos), *id))
+            .min()
+            .map(|(_, id)| id)
+    }
+
+    /// Position of a targetable entity (node, depot, printer, or bot).
     pub fn entity_pos(&self, id: EntityId) -> Option<TilePos> {
-        self.ore_nodes
+        self.nodes
             .get(&id)
             .map(|n| n.pos)
             .or_else(|| self.depots.get(&id).map(|d| d.pos))
             .or_else(|| self.printers.get(&id).map(|p| p.pos))
+            .or_else(|| self.structures.get(&id).map(|s| s.pos))
             .or_else(|| self.blueprints.get(&id).map(|b| b.pos))
             .or_else(|| {
                 self.bot_entities
@@ -665,6 +865,7 @@ impl World {
     pub fn structure_at(&self, pos: TilePos) -> bool {
         self.printers.values().any(|p| p.pos == pos)
             || self.depots.values().any(|d| d.pos == pos)
+            || self.structures.values().any(|s| s.pos == pos)
     }
 
     /// All structure tiles, for feeding A*'s blocked set.
@@ -673,6 +874,7 @@ impl World {
             .values()
             .map(|p| p.pos)
             .chain(self.depots.values().map(|d| d.pos))
+            .chain(self.structures.values().map(|s| s.pos))
             .collect()
     }
 

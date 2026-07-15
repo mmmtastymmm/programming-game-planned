@@ -42,6 +42,7 @@ fn golden_replay() -> Replay {
     let mut spec = MapSpec::empty(14, 8);
     spec.seed = 0x5EED_601D; // fixed match seed for the fixture
     spec.starting_ore = 10;
+    spec.starting_stock.push((0, sim::resources::Resource::Stone, 50));
     spec.ore_nodes.push((TilePos::new(11, 3), 30));
     spec.depots.push(TilePos::new(2, 3));
     spec.printers.push(PrinterSpec {
@@ -68,6 +69,7 @@ fn golden_replay() -> Replay {
             command: Command::PlaceOverlay {
                 pos: TilePos::new(6, 3),
                 overlay: Some(OverlayKind::Arrow(Direction::East)),
+                faction: 0,
             },
         },
         TimedCommand {
@@ -80,7 +82,7 @@ fn golden_replay() -> Replay {
         },
         TimedCommand {
             tick: 150,
-            command: Command::PlaceBlueprint { pos: TilePos::new(7, 1), kind: BlueprintKind::Bridge },
+            command: Command::PlaceBlueprint { pos: TilePos::new(7, 1), kind: BlueprintKind::Bridge, faction: 0 },
         },
         TimedCommand { tick: 220, command: Command::KillBot { bot: BotId(1) } },
     ];
@@ -114,7 +116,7 @@ fn golden_scenario_is_alive() {
         sim.step();
     }
     assert!(!sim.world.bots.is_empty(), "printer must have printed bots");
-    assert!(sim.world.stockpile_ore > 10, "miners must out-earn the starting 10 ore");
+    assert!(sim.world.stock_get(0, sim::resources::Resource::Iron) > 10, "miners must out-earn the starting 10 ore");
     assert!(sim.world.wrecks.contains_key(&BotId(1)), "KillBot(1) must leave a wreck");
     assert_eq!(sim.world.program_library.len(), 2, "both deployed versions retained");
     assert!(!sim.world.blueprints.is_empty(), "bridge blueprint placed");

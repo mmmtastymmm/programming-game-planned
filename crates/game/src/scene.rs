@@ -121,6 +121,7 @@ pub(crate) fn build_colony() -> Sim {
         desired_max: 0,
     });
     spec.starting_ore = 30;
+    spec.starting_stock.push((0, sim::resources::Resource::Stone, 50));
 
     // Signal-cloud showcase (docs/01 table): a sealed south strip where one
     // bot per state holds its cloud for inspection. Water walls keep colony
@@ -161,6 +162,7 @@ pub(crate) fn build_colony() -> Sim {
         game.apply(&Command::PlaceBlueprint {
             pos: TilePos::new(16, y),
             kind: BlueprintKind::Bridge,
+            faction: 0,
         })
         .expect("blueprint placement");
     }

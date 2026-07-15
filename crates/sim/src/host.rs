@@ -9,7 +9,14 @@ use pyrite::{faults, Fault, HostCall, Value};
 /// Entity kinds understood by the generic queries (`exists(kind)`,
 /// `closest(kind)`). Each is bound as a global constant of the same name in
 /// every bot VM (see `Sim::new`), so programs write `closest(ore)` bare.
-pub const KINDS: &[&str] = &["blueprint", "depot", "enemy", "ore"];
+pub const KINDS: &[&str] = &[
+    "blueprint", "depot", "enemy", "ore", "printer", "wreck", "smelter", "foundry", "archive",
+    // every resource kind is also a queryable kind: raw names find nodes,
+    // refined names exist for cargo_count/withdraw (closest() on a refined
+    // kind finds nothing until stock queries land)
+    "water", "stone", "sand", "wood", "coal", "iron", "copper", "tin", "silver", "gold",
+    "crystal", "steel", "bronze", "wire", "chips", "glass", "lens", "gold_chip",
+];
 
 /// Editor-facing doc lookup, backed by the function registry
 /// (`pyrite/data/builtins.ron`): signature, summary, and cost note all come
@@ -34,13 +41,49 @@ impl BotHost<'_> {
 
     /// Nearest entity of `kind` to this bot, or None if none exist.
     fn find_kind(&self, kind: &str) -> Option<EntityId> {
+        use crate::resources::Resource;
         let bot = &self.world.bots[&self.bot].data;
+        if let Some(res) = Resource::from_name(kind) {
+            return self.world.nearest_node_of(bot.pos, res);
+        }
         match kind {
             "blueprint" => self.world.nearest_blueprint(bot.pos),
             "depot" => self.world.nearest_depot(bot.pos),
             "enemy" => self.world.nearest_enemy(bot.pos, bot.faction),
             "ore" => self.world.nearest_ore(bot.pos),
+            "printer" => self
+                .world
+                .printers
+                .iter()
+                .map(|(id, p)| (bot.pos.manhattan(p.pos), *id))
+                .min()
+                .map(|(_, id)| id),
+            "wreck" => None, // wrecks are BotId-keyed; targeting lands M10
+            "smelter" | "foundry" | "archive" => self
+                .world
+                .structures
+                .iter()
+                .filter(|(_, st)| st.kind.name() == kind)
+                .map(|(id, st)| (bot.pos.manhattan(st.pos), *id))
+                .min()
+                .map(|(_, id)| id),
             _ => unreachable!("kind_arg only admits KINDS"),
+        }
+    }
+
+    /// The resource kind named by a builtin's argument.
+    fn resource_arg(func: &str, args: &[Value]) -> Result<crate::resources::Resource, HostCall> {
+        match args {
+            [Value::Str(s)] => crate::resources::Resource::from_name(s).ok_or_else(|| {
+                HostCall::Fault(Fault::new(
+                    faults::TYPE,
+                    format!("{func}: unknown resource kind {s:?}"),
+                ))
+            }),
+            _ => Err(HostCall::Fault(Fault::new(
+                faults::TYPE,
+                format!("{func} takes one resource-kind constant"),
+            ))),
         }
     }
 }
@@ -85,7 +128,7 @@ impl pyrite::Host for BotHost<'_> {
             },
             "cargo_full" => {
                 let data = &self.world.bots[&bot_id].data;
-                HostCall::Ready(Value::Bool(data.cargo >= data.cargo_cap))
+                HostCall::Ready(Value::Bool(data.cargo_total() >= data.cargo_cap))
             }
             "health_low" => {
                 // "Low" = below the bot's own hurt_line env (read live at
@@ -161,7 +204,137 @@ impl pyrite::Host for BotHost<'_> {
                     None => HostCall::Fault(Fault::new(faults::ACTION, "build: no blueprint in range")),
                 }
             }
-            "deposit" => self.request(ActionRequest::Deposit),
+            "deposit" | "try_deposit" => self.request(ActionRequest::Deposit {
+                fault_on_fail: name == "deposit",
+            }),
+            // Pull refined goods out of an adjacent refinery's output
+            // buffer (or colony stock at a depot). Instant (docs/03 prices
+            // it "+ action"; the tick cost is flagged in TASKS.md).
+            "withdraw" | "try_withdraw" => {
+                let kind = match Self::resource_arg(name, args) {
+                    Ok(k) => k,
+                    Err(fault) => return fault,
+                };
+                let (faction, space) = {
+                    let data = &self.world.bots[&bot_id].data;
+                    (data.faction, data.cargo_cap.saturating_sub(data.cargo_total()))
+                };
+                let mut got = 0u32;
+                if space > 0 {
+                    // Adjacent structure output first (lowest id wins),
+                    // then colony stock at an adjacent depot.
+                    let source = self
+                        .world
+                        .structures
+                        .iter()
+                        .filter(|(_, st)| {
+                            st.faction == faction
+                                && bot_pos.chebyshev(st.pos) <= 1
+                                && st.output.get(&kind).copied().unwrap_or(0) > 0
+                        })
+                        .map(|(id, _)| *id)
+                        .next();
+                    if let Some(sid) = source {
+                        let st = self.world.structures.get_mut(&sid).expect("just found");
+                        let have = st.output.get_mut(&kind).expect("just found");
+                        got = (*have).min(space);
+                        *have -= got;
+                        if *have == 0 {
+                            st.output.remove(&kind);
+                        }
+                    } else if self
+                        .world
+                        .depots
+                        .values()
+                        .any(|d| bot_pos.chebyshev(d.pos) <= 1)
+                    {
+                        let stocked = self.world.stock_get(faction, kind).min(space as u64);
+                        if stocked > 0 && self.world.stock_take(faction, kind, stocked) {
+                            got = stocked as u32;
+                        }
+                    }
+                }
+                if got > 0 {
+                    let bot = self.world.bots.get_mut(&bot_id).expect("bot exists");
+                    let loaded = bot.data.cargo_add(kind, got);
+                    debug_assert_eq!(loaded, got, "space was pre-checked");
+                }
+                if name == "try_withdraw" {
+                    HostCall::Ready(Value::Bool(got > 0))
+                } else if got > 0 {
+                    HostCall::Ready(Value::Unit)
+                } else {
+                    HostCall::Fault(Fault::new(
+                        faults::ACTION,
+                        format!("withdraw: no {} available here", kind.name()),
+                    ))
+                }
+            }
+            "cargo_count" => {
+                let kind = match Self::resource_arg(name, args) {
+                    Ok(k) => k,
+                    Err(fault) => return fault,
+                };
+                let deci = self.world.bots[&bot_id]
+                    .data
+                    .cargo
+                    .get(&kind)
+                    .copied()
+                    .unwrap_or(0);
+                HostCall::Ready(Value::Int((deci / crate::resources::DECI) as i64))
+            }
+            "scan_resources" => {
+                // Every live node, (distance, id) sorted — omniscient until
+                // M7 scopes queries to perception.
+                let mut nodes: Vec<(u32, u64)> = self
+                    .world
+                    .nodes
+                    .iter()
+                    .filter(|(_, n)| n.amount > 0)
+                    .map(|(id, n)| (bot_pos.manhattan(n.pos), id.0))
+                    .collect();
+                nodes.sort();
+                HostCall::Ready(Value::List(
+                    nodes.into_iter().map(|(_, id)| Value::Entity(id)).collect(),
+                ))
+            }
+            "drop_cargo" => {
+                // Spill the manifest onto the bot's own tile as nodes —
+                // mine() recovers it (deterministic: no scatter for the
+                // deliberate drop; death spills keep their RNG scatter).
+                let manifest = std::mem::take(
+                    &mut self.world.bots.get_mut(&bot_id).expect("bot exists").data.cargo,
+                );
+                for (kind, amount) in manifest {
+                    if amount == 0 {
+                        continue;
+                    }
+                    let existing = self
+                        .world
+                        .nodes
+                        .iter()
+                        .find(|(_, n)| n.pos == bot_pos && n.kind == kind)
+                        .map(|(id, _)| *id);
+                    match existing {
+                        Some(id) => {
+                            self.world.nodes.get_mut(&id).expect("just found").amount += amount;
+                        }
+                        None => {
+                            let id = self.world.alloc_entity();
+                            self.world.nodes.insert(
+                                id,
+                                crate::world::ResourceNode {
+                                    kind,
+                                    pos: bot_pos,
+                                    amount,
+                                    regen: false,
+                                },
+                            );
+                        }
+                    }
+                }
+                HostCall::Ready(Value::Unit)
+            }
             "attack" => match args {
                 [Value::Entity(target)] => self.request(ActionRequest::Attack(EntityId(*target))),
                 [other] => HostCall::Fault(Fault::new(

@@ -9,15 +9,15 @@ impl Sim {
     /// Test hook: drive the full phase-6 pipeline directly — queue, settle,
     /// dispatch — so a single hit lands with its signals, as in a real tick.
     pub fn apply_damage_for_test(&mut self, id: BotId, amount: i64) {
-        self.queue_damage(id, amount);
+        self.queue_damage(id, amount, None);
         self.settle_damage();
         self.dispatch_signals();
     }
 
     /// Queue a hit for the phase-6 settle (docs/07: damage is a phase, not
     /// an inline side effect of whichever system landed the blow).
-    pub(crate) fn queue_damage(&mut self, id: BotId, amount: i64) {
-        self.world.pending_damage.push((id, amount));
+    pub(crate) fn queue_damage(&mut self, id: BotId, amount: i64, attacker_faction: Option<u8>) {
+        self.world.pending_damage.push((id, amount, attacker_faction));
     }
 
     /// Phase 6a: drain the damage queue in arrival order (phases queue in
@@ -26,7 +26,7 @@ impl Sim {
     /// dispatch resolves co-arrivals by severity (Q81).
     pub(crate) fn settle_damage(&mut self) {
         let events = std::mem::take(&mut self.world.pending_damage);
-        for (id, amount) in events {
+        for (id, amount, attacker_faction) in events {
             let Some(bot) = self.world.bots.get_mut(&id) else { continue };
             if bot.data.dying {
                 continue; // effectively a wreck already
@@ -39,6 +39,16 @@ impl Sim {
                 // any co-arrival, and raising it on a mid-template bot is
                 // exactly the double-handle outcome anyway.
                 self.world.pending_signals.push((id, Signal::Abort));
+                // First-kill Data (docs/03: earned by doing) — once per
+                // faction, hostile kills only.
+                let victim_faction = self.world.bots[&id].data.faction;
+                if let Some(attacker) = attacker_faction
+                    && attacker != victim_faction
+                    && self.world.first_kill_done.insert(attacker)
+                {
+                    *self.world.data.entry(attacker).or_insert(0) +=
+                        self.tuning.first_kill_data;
+                }
                 continue;
             }
             // Edge-triggered at the bot's own hurt_line env (default: the

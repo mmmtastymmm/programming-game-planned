@@ -83,7 +83,7 @@ impl Sim {
                 ActionRequest::Mine => {
                     let node = self
                         .world
-                        .ore_nodes
+                        .nodes
                         .iter()
                         .filter(|(_, n)| n.amount > 0 && pos.chebyshev(n.pos) <= 1)
                         .map(|(nid, _)| *nid)
@@ -109,7 +109,15 @@ impl Sim {
                 ActionRequest::Build(blueprint) => {
                     bot.data.action = Some(Action::Build { blueprint });
                 }
-                ActionRequest::Deposit => {
+                ActionRequest::Deposit { fault_on_fail } => {
+                    // Generalized acceptor (docs/03): an adjacent depot
+                    // takes everything into colony stock; an adjacent
+                    // refinery takes only its recipe's inputs into its
+                    // physical input buffer. Depots first, then the
+                    // lowest-id accepting structure.
+                    let faction = bot.data.faction;
+                    let carrying = bot.data.cargo.clone();
+                    let empty = bot.data.cargo_total() == 0;
                     let depot = self
                         .world
                         .depots
@@ -117,15 +125,44 @@ impl Sim {
                         .filter(|(_, d)| pos.chebyshev(d.pos) <= 1)
                         .map(|(did, _)| *did)
                         .next();
-                    match depot {
-                        Some(depot) => {
-                            if bot.data.cargo == 0 {
-                                self.finish_action(id, Err("deposit: no cargo".into()));
+                    let refinery = self
+                        .world
+                        .structures
+                        .iter()
+                        .filter(|(_, st)| {
+                            st.faction == faction
+                                && pos.chebyshev(st.pos) <= 1
+                                && st.recipe.is_some_and(|idx| {
+                                    crate::resources::RECIPES[idx as usize]
+                                        .inputs
+                                        .iter()
+                                        .any(|(k, _)| carrying.contains_key(k))
+                                })
+                        })
+                        .map(|(sid, _)| *sid)
+                        .next();
+                    let target = depot.or(refinery);
+                    match target {
+                        _ if empty => {
+                            let outcome = if fault_on_fail {
+                                Err("deposit: no cargo".into())
                             } else {
-                                bot.data.action = Some(Action::Deposit { depot, ticks_left: 1 });
-                            }
+                                Ok(Value::Bool(false))
+                            };
+                            self.finish_action(id, outcome);
                         }
-                        None => self.finish_action(id, Err("deposit: no depot in range".into())),
+                        Some(target) => {
+                            bot.data.action =
+                                Some(Action::Deposit { depot: target, ticks_left: 1 });
+                        }
+                        None => {
+                            let outcome = if fault_on_fail {
+                                Err("deposit: no acceptor in range".into())
+                            } else {
+                                Ok(Value::Bool(false))
+                            };
+                            self.finish_action(id, outcome);
+                        }
                     }
                 }
             }
@@ -198,22 +235,30 @@ impl Sim {
                     bot.data.action = Some(Action::Mine { node, ticks_left });
                     return;
                 }
-                if bot.data.cargo >= bot.data.cargo_cap {
+                if bot.data.cargo_total() >= bot.data.cargo_cap {
                     self.finish_action(id, Err("mine: cargo full".into()));
                     return;
                 }
-                let Some(ore) = self.world.ore_nodes.get_mut(&node) else {
-                    self.finish_action(id, Err("mine: ore node gone".into()));
+                let Some(node_ref) = self.world.nodes.get_mut(&node) else {
+                    self.finish_action(id, Err("mine: node gone".into()));
                     return;
                 };
-                if ore.amount == 0 {
-                    self.finish_action(id, Err("mine: ore depleted".into()));
+                if node_ref.amount == 0 {
+                    self.finish_action(id, Err("mine: node depleted".into()));
                     return;
                 }
-                ore.amount -= 1;
+                // Typed yield (docs/03): the node's kind, mine_yield_deci
+                // per swing, clamped by what the node and the hold allow.
+                let kind = node_ref.kind;
+                let swing = self.tuning.mine_yield_deci.min(node_ref.amount);
                 let bot = self.world.bots.get_mut(&id).expect("bot exists");
-                bot.data.cargo += 1;
-                self.world.pending_xp.push((id, XpTrack::Mining, 1));
+                let loaded = bot.data.cargo_add(kind, swing);
+                self.world.nodes.get_mut(&node).expect("checked above").amount -= loaded;
+                self.world.pending_xp.push((
+                    id,
+                    XpTrack::Mining,
+                    (loaded / crate::resources::DECI) as u64,
+                ));
                 self.finish_action(id, Ok(Value::Unit));
             }
             Action::Attack { target, ticks_left } => {
@@ -223,6 +268,23 @@ impl Sim {
                     return;
                 }
                 let pos = bot.data.pos;
+                // Structures are attackable (docs/03, M4): direct chassis
+                // damage, no signals — a destroyed structure just falls
+                // (its buffered contents are lost with it for now).
+                if let Some(st) = self.world.structures.get_mut(&target) {
+                    if pos.chebyshev(st.pos) > 1 {
+                        self.finish_action(id, Err("attack: target out of range".into()));
+                        return;
+                    }
+                    st.hp = (st.hp - ATTACK_DAMAGE).max(0);
+                    let felled = st.hp == 0;
+                    if felled {
+                        self.world.structures.remove(&target);
+                    }
+                    self.world.pending_xp.push((id, XpTrack::Combat, ATTACK_DAMAGE as u64));
+                    self.finish_action(id, Ok(Value::Unit));
+                    return;
+                }
                 let Some(target_bot) = self.world.bot_entities.get(&target).copied() else {
                     self.finish_action(id, Err("attack: target destroyed".into()));
                     return;
@@ -237,7 +299,8 @@ impl Sim {
                 }
                 self.world.pending_xp.push((id, XpTrack::Combat, ATTACK_DAMAGE as u64));
                 self.finish_action(id, Ok(Value::Unit));
-                self.queue_damage(target_bot, ATTACK_DAMAGE);
+                let attacker_faction = self.world.bots[&id].data.faction;
+                self.queue_damage(target_bot, ATTACK_DAMAGE, Some(attacker_faction));
             }
             Action::Build { blueprint } => {
                 let pos = bot.data.pos;
@@ -279,10 +342,51 @@ impl Sim {
                     bot.data.action = Some(Action::Deposit { depot, ticks_left });
                     return;
                 }
-                let cargo = bot.data.cargo;
-                bot.data.cargo = 0;
-                self.world.pending_xp.push((id, XpTrack::Hauling, cargo as u64));
-                self.world.stockpile_ore += cargo as u64;
+                let faction = bot.data.faction;
+                let mut total = 0u32;
+                if self.world.structures.contains_key(&depot) {
+                    // Refinery feed: only the set recipe's inputs move.
+                    let st = &self.world.structures[&depot];
+                    let inputs: Vec<crate::resources::Resource> = st
+                        .recipe
+                        .map(|idx| {
+                            crate::resources::RECIPES[idx as usize]
+                                .inputs
+                                .iter()
+                                .map(|(k, _)| *k)
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    let bot = self.world.bots.get_mut(&id).expect("bot exists");
+                    let mut moved: Vec<(crate::resources::Resource, u32)> = Vec::new();
+                    for kind in inputs {
+                        let deci = bot.data.cargo_remove(kind, u32::MAX);
+                        if deci > 0 {
+                            moved.push((kind, deci));
+                            total += deci;
+                        }
+                    }
+                    let st = self.world.structures.get_mut(&depot).expect("checked above");
+                    for (kind, deci) in moved {
+                        *st.input.entry(kind).or_insert(0) += deci;
+                    }
+                } else {
+                    // Depot: the whole manifest enters colony stock
+                    // (docs/03: payments draw from this abstract pool).
+                    let bot = self.world.bots.get_mut(&id).expect("bot exists");
+                    let manifest = std::mem::take(&mut bot.data.cargo);
+                    total = manifest.values().sum();
+                    for (kind, deci) in manifest {
+                        self.world.stock_add(faction, kind, deci as u64);
+                    }
+
+                }
+                self.world.pending_xp.push((
+                    id,
+                    XpTrack::Hauling,
+                    (total / crate::resources::DECI) as u64,
+                ));
+                self.track_delivery_milestone(faction, total);
                 self.finish_action(id, Ok(Value::Unit));
             }
         }
@@ -306,8 +410,12 @@ impl Sim {
     /// Spilled cargo becomes a small ore node on a random adjacent
     /// passable tile (seeded RNG; falls back to the bot's own tile),
     /// merging with any node already there — closest(ore)/mine() recover it.
-    pub(crate) fn drop_cargo_to_ground(&mut self, pos: TilePos, amount: u32) {
-        if amount == 0 {
+    pub(crate) fn drop_cargo_to_ground(
+        &mut self,
+        pos: TilePos,
+        manifest: std::collections::BTreeMap<crate::resources::Resource, u32>,
+    ) {
+        if manifest.values().all(|&d| d == 0) {
             return;
         }
         let mut candidates: Vec<TilePos> = [(0, -1), (1, 0), (0, 1), (-1, 0)]
@@ -321,20 +429,45 @@ impl Sim {
         // docs/07's inventory.
         let drop_at = candidates[(crate::world::next_rand(&mut self.world.rng.combat)
             % candidates.len() as u64) as usize];
-        let existing = self
-            .world
-            .ore_nodes
-            .iter()
-            .find(|(_, n)| n.pos == drop_at)
-            .map(|(id, _)| *id);
-        match existing {
-            Some(id) => {
-                self.world.ore_nodes.get_mut(&id).expect("just found").amount += amount;
+        for (kind, amount) in manifest {
+            if amount == 0 {
+                continue;
             }
-            None => {
-                let id = self.world.alloc_entity();
-                self.world.ore_nodes.insert(id, crate::world::OreNode { pos: drop_at, amount });
+            let existing = self
+                .world
+                .nodes
+                .iter()
+                .find(|(_, n)| n.pos == drop_at && n.kind == kind)
+                .map(|(id, _)| *id);
+            match existing {
+                Some(id) => {
+                    self.world.nodes.get_mut(&id).expect("just found").amount += amount;
+                }
+                None => {
+                    let id = self.world.alloc_entity();
+                    self.world.nodes.insert(
+                        id,
+                        crate::world::ResourceNode { kind, pos: drop_at, amount, regen: false },
+                    );
+                }
             }
+        }
+    }
+
+    /// Data income: 20 Data per full `delivery_milestone_deci` delivered
+    /// (docs/03: "deliver 500 ore" milestones — activity, not mining).
+    pub(crate) fn track_delivery_milestone(&mut self, faction: u8, delivered_deci: u32) {
+        let step = self.tuning.delivery_milestone_deci;
+        if step == 0 {
+            return;
+        }
+        let before = self.world.delivered.get(&faction).copied().unwrap_or(0);
+        let after = before + delivered_deci as u64;
+        self.world.delivered.insert(faction, after);
+        let crossed = (after / step as u64) - (before / step as u64);
+        if crossed > 0 {
+            *self.world.data.entry(faction).or_insert(0) +=
+                crossed * self.tuning.milestone_data;
         }
     }
 

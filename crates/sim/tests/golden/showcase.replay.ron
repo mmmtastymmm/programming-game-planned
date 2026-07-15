@@ -52,6 +52,11 @@
         vents: [],
         snow: [],
         resource_tiles: [],
+        node_amount: 20,
+        starting_stock: [
+            (0, Stone, 50),
+        ],
+        dev_all_unlocks: true,
     ),
     commands: [
         (
@@ -77,6 +82,7 @@
                     y: 3,
                 ),
                 overlay: Some(Arrow(East)),
+                faction: 0,
             ),
         ),
         (
@@ -105,6 +111,7 @@
                     y: 1,
                 ),
                 kind: Bridge,
+                faction: 0,
             ),
         ),
         (

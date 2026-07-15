@@ -17,6 +17,7 @@ mod printers;
 pub mod host;
 pub mod map;
 pub mod replay;
+pub mod resources;
 pub mod sim;
 pub mod world;
 

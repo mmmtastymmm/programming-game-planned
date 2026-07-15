@@ -98,8 +98,13 @@ pub(crate) fn inspector_ui(
         };
         ui.label(status);
         ui.monospace(format!(
-            "hp {}/{}   cargo {}/{}   at ({}, {})",
-            data.hp, data.max_hp, data.cargo, data.cargo_cap, data.pos.x, data.pos.y
+            "hp {}/{}   cargo {:.1}/{:.1}   at ({}, {})",
+            data.hp,
+            data.max_hp,
+            data.cargo_total() as f32 / 10.0,
+            data.cargo_cap as f32 / 10.0,
+            data.pos.x,
+            data.pos.y
         ));
         ui.monospace(format!(
             "xp  mine {}  haul {}  fight {}  build {}",

@@ -244,9 +244,30 @@ pub struct MapSpec {
     pub vents: Vec<TilePos>,
     pub snow: Vec<TilePos>,
     /// Raw-resource ground painted at build, as (pos, kind) pairs — one
-    /// list for all nine kinds rather than nine vecs. Nodes/recipes are
-    /// pending Q69.
+    /// list for all nine kinds rather than nine vecs. Each carries a node
+    /// of its tile's resource (docs/03; `node_amount` units each).
     pub resource_tiles: Vec<(TilePos, TileKind)>,
+    /// Units per placed resource node (serde-defaulted so stored replays
+    /// keep parsing; deci conversion happens at world build).
+    #[serde(default = "default_node_amount")]
+    pub node_amount: u32,
+    /// Typed starting stock: (faction, kind, units). docs/03's opening kit
+    /// is 30 Steel + 10 Iron + 5 Coal.
+    #[serde(default)]
+    pub starting_stock: Vec<(u8, crate::resources::Resource, u64)>,
+    /// Parse deploys with every construct unlocked (dev/test sandboxes and
+    /// every existing map — real matches set this false and Research
+    /// buys the tree). Serde default TRUE keeps stored replays working.
+    #[serde(default = "default_true")]
+    pub dev_all_unlocks: bool,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn default_node_amount() -> u32 {
+    20
 }
 
 /// A printer placed by the map (docs/03: colonies start with a working
@@ -282,6 +303,9 @@ impl MapSpec {
             vents: Vec::new(),
             snow: Vec::new(),
             resource_tiles: Vec::new(),
+            node_amount: default_node_amount(),
+            starting_stock: Vec::new(),
+            dev_all_unlocks: true,
         }
     }
 }

@@ -39,9 +39,9 @@ impl Sim {
         }
 
         let damage = self.tuning.bump_damage;
-        self.queue_damage(mover, damage);
+        self.queue_damage(mover, damage, None);
         if let Some(blocker) = blocker {
-            self.queue_damage(blocker, damage);
+            self.queue_damage(blocker, damage, None);
         }
     }
 

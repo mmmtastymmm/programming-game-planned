@@ -48,9 +48,9 @@ fn printer_prints_to_its_dial() {
     assert_eq!(sim.world.bots.len(), 3, "population reaches the dial and stops");
     assert!(sim.world.bots.values().all(|b| b.data.color == Color::GREEN));
     assert_eq!(
-        sim.world.stockpile_ore,
-        100 - 3 * sim.tuning.print_cost_ore,
-        "each print costs ore"
+        sim.world.stock_get(0, sim::resources::Resource::Iron),
+        1000,
+        "prints are free by default (print_cost_steel 0) — iron stock untouched"
     );
     // Printed bots booted and are running their program (logging).
     assert!(sim.world.bots.values().all(|b| !b.data.log_buf.is_empty()));
@@ -68,17 +68,18 @@ fn ruined_printer_prints_only_after_repair() {
     }
     assert_eq!(sim.world.bots.len(), 0, "ruined printers print nothing");
 
+    // Repair prices in DATA now (docs/03): without Data it stays ruined.
+    sim.apply(&Command::RepairPrinter { printer: red }).unwrap();
+    assert_eq!(sim.world.printers[&red].state, PrinterState::Ruined, "no Data, no repair");
+    sim.world.data.insert(0, sim.tuning.repair_cost_data);
     sim.apply(&Command::RepairPrinter { printer: red }).unwrap();
     assert_eq!(sim.world.printers[&red].state, PrinterState::Working);
+    assert_eq!(sim.world.data.get(&0).copied().unwrap_or(0), 0, "repair drained the Data");
     for _ in 0..50 {
         sim.step();
     }
     assert_eq!(sim.world.bots.len(), 1);
     assert_eq!(sim.world.bots.values().next().unwrap().data.color, Color::RED);
-    assert_eq!(
-        sim.world.stockpile_ore,
-        100 - sim.tuning.repair_cost_ore - sim.tuning.print_cost_ore
-    );
 }
 
 #[test]
@@ -89,6 +90,7 @@ fn recall_recolors_the_lowest_xp_bot_keeping_xp() {
         .unwrap();
     sim.apply(&Command::DeployProgram { faction: 0, color: Color::RED, source: IDLER.into() })
         .unwrap();
+    sim.world.data.insert(0, sim.tuning.repair_cost_data);
     sim.apply(&Command::RepairPrinter { printer: red }).unwrap();
 
     // Two green bots; give one of them XP by hand-spawning a veteran.
@@ -169,6 +171,7 @@ fn damage_during_recall_walk_is_double_handle() {
         .unwrap();
     sim.apply(&Command::DeployProgram { faction: 0, color: Color::RED, source: IDLER.into() })
         .unwrap();
+    sim.world.data.insert(0, sim.tuning.repair_cost_data);
     sim.apply(&Command::RepairPrinter { printer: red }).unwrap();
 
     // Victim far from home so the walk takes a while; brawler adjacent.
@@ -244,15 +247,15 @@ fn over_capacity_scraps_lowest_xp_for_refund() {
     .unwrap();
     sim.world.bots.get_mut(&veteran).unwrap().data.xp_combat = 900;
 
-    let ore_before = sim.world.stockpile_ore;
+    let ore_before = sim.world.stock_get(0, sim::resources::Resource::Iron);
     for _ in 0..60 {
         sim.step();
     }
     assert_eq!(sim.world.bots.len(), 1, "over-capacity colony scraps down");
     assert!(sim.world.bots.contains_key(&veteran), "the veteran survives");
     assert_eq!(
-        sim.world.stockpile_ore,
-        ore_before + sim.tuning.scrap_refund_ore,
+        sim.world.stock_get(0, sim::resources::Resource::Iron),
+        ore_before + sim.tuning.scrap_refund_steel,
         "scrap refunds partial ore"
     );
     assert!(sim.world.wrecks.is_empty(), "scrapping is recycling, not destruction");
@@ -327,6 +330,7 @@ fn printer_colony_is_deterministic() {
         .unwrap();
         sim.apply(&Command::DeployProgram { faction: 0, color: Color::RED, source: IDLER.into() })
             .unwrap();
+        sim.world.data.insert(0, sim.tuning.repair_cost_data);
         sim.apply(&Command::RepairPrinter { printer: red }).unwrap();
         sim.apply(&Command::SetDesiredMax { printer: green, value: 3 }).unwrap();
         sim.apply(&Command::SetDesiredMax { printer: red, value: 2 }).unwrap();

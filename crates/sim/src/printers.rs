@@ -65,7 +65,10 @@ impl Sim {
         self.world.unindex_bot(id, bot.data.pos);
         self.world.bot_entities.remove(&bot.data.entity);
         // Orderly recycling at the printer: carried cargo goes to stores.
-        self.world.stockpile_ore += bot.data.cargo as u64;
+        let faction = bot.data.faction;
+        for (kind, deci) in &bot.data.cargo {
+            self.world.stock_add(faction, *kind, *deci as u64);
+        }
         let tick = self.world.tick;
         for (level, text) in bot.data.log_buf {
             self.world.archive.push(ArchiveEntry {
@@ -77,7 +80,7 @@ impl Sim {
                 text,
             });
         }
-        self.world.stockpile_ore += self.tuning.scrap_refund_ore;
+        self.world.stock_add(faction, crate::resources::Resource::Steel, self.tuning.scrap_refund_steel);
     }
 
     /// Phase 6: printers — advance/start print jobs, rebalance recalls,
@@ -114,7 +117,12 @@ impl Sim {
                         }
                         None => {
                             // Program was undeployed mid-print: refund.
-                            self.world.stockpile_ore += self.tuning.print_cost_ore;
+                            let f = self.world.printers[pid].faction;
+                            self.world.stock_add(
+                                f,
+                                crate::resources::Resource::Steel,
+                                self.tuning.print_cost_steel,
+                            );
                         }
                     }
                 }
@@ -165,8 +173,14 @@ impl Sim {
                 continue;
             }
             let population = self.world.color_population(faction, color);
-            if population < desired && self.world.stockpile_ore >= self.tuning.print_cost_ore {
-                self.world.stockpile_ore -= self.tuning.print_cost_ore;
+            let print_faction = self.world.printers[&pid].faction;
+            if population < desired
+                && self.world.stock_take(
+                    print_faction,
+                    crate::resources::Resource::Steel,
+                    self.tuning.print_cost_steel,
+                )
+            {
                 self.world.printers.get_mut(pid).expect("printer exists").job =
                     Some(self.tuning.print_ticks);
             }

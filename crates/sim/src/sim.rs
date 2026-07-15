@@ -32,9 +32,26 @@ pub struct Tuning {
     /// Ore per print. DEFAULT FREE: a colony must never be soft-locked out
     /// of bots (no ore + no bots = dead end). Maps/servers can set a cost;
     /// population is bounded by dials and capacity either way.
-    pub print_cost_ore: u64,
-    pub repair_cost_ore: u64,
-    pub scrap_refund_ore: u64,
+    pub print_cost_steel: u64,
+    /// Repairing the ruined Red printer prices in DATA (docs/03: ~60 —
+    /// the flagship early Data sink).
+    pub repair_cost_data: u64,
+    pub scrap_refund_steel: u64,
+    /// mine() yield per swing, deci-units (docs/03 first-pass: 2 units).
+    pub mine_yield_deci: u32,
+    /// Regenerating nodes (Groves) gain this many deci-units per
+    /// regen_interval_ticks, up to their starting amount... capped by
+    /// node_regen_cap_deci.
+    pub node_regen_deci: u32,
+    pub node_regen_cap_deci: u32,
+    /// Data income: 20 per this many deci-units delivered (docs/03).
+    pub delivery_milestone_deci: u32,
+    pub milestone_data: u64,
+    pub first_kill_data: u64,
+    /// Generic structure durability (per-kind sheets land with M5 data).
+    pub structure_hp: i64,
+    /// Refinery batch duration (docs/03 first-pass: ~30 ticks).
+    pub recipe_batch_ticks: u32,
     /// Boot Sequence duration — an engine interrupt context.
     pub boot_ticks: u32,
     /// Printed-bot chassis defaults (hardware modules come later).
@@ -56,11 +73,13 @@ pub struct Tuning {
     pub handler_init_ticks: u32,
     /// Collisions are accidents: BOTH bots take this chassis damage.
     pub bump_damage: i64,
-    pub bridge_cost_ore: u64,
+    /// Bridges price in STONE (docs/03: Stone owns civil works). Deci.
+    pub bridge_cost_stone: u64,
     /// Builder-ticks of labor a bridge takes.
     pub bridge_build_ticks: u32,
     /// Placing a traffic overlay (arrow) — instant signage.
-    pub overlay_cost_ore: u64,
+    /// Overlays (arrows) price in Stone too — signage is civil kit. Deci.
+    pub overlay_cost_stone: u64,
     /// Chassis damage per UNHANDLED fault: crash loops are lethal, and
     /// `on error:` handlers are literal armor (handled faults are free).
     pub fault_damage: i64,
@@ -124,17 +143,39 @@ pub enum Command {
     /// Fix a ruined printer (Data cost; ore stands in until Data exists).
     RepairPrinter { printer: EntityId },
     /// Designate a terraform site (the build UI's output). Bots do the
-    /// labor via closest(blueprint).expect()/build().
-    PlaceBlueprint { pos: TilePos, kind: BlueprintKind },
+    /// labor via closest(blueprint).expect()/build(). The placing faction
+    /// pays from its stock (serde-defaulted for stored replays).
+    PlaceBlueprint {
+        pos: TilePos,
+        kind: BlueprintKind,
+        #[serde(default)]
+        faction: u8,
+    },
     /// Set or clear a traffic overlay on any tile — instant signage, not
     /// construction (small ore cost to place; clearing is free).
-    PlaceOverlay { pos: TilePos, overlay: Option<OverlayKind> },
+    PlaceOverlay {
+        pos: TilePos,
+        overlay: Option<OverlayKind>,
+        #[serde(default)]
+        faction: u8,
+    },
     /// Set or clear cosmetic tile paint (free).
     PlacePaint { pos: TilePos, color: Option<u8> },
     /// Emergency stop for a stuck bot: straight to wreck (no death
     /// handler — the owner pulled the plug). Logs ride in the wreck;
     /// carried cargo spills onto the ground.
     KillBot { bot: BotId },
+    /// Place a structure, paying its typed cost from colony stock
+    /// (docs/03: payments are abstract). Instant placement for now; build
+    /// labor for structures is flagged for discussion in TASKS.md.
+    PlaceStructure { pos: TilePos, kind: crate::world::StructureKind, faction: u8 },
+    /// Set (or clear) a refinery's recipe by RECIPES index (docs/03,
+    /// round 4: recipe set per structure).
+    SetRecipe { structure: EntityId, recipe: Option<u8> },
+    /// Spend colony Data on a permanent construct unlock (docs/03/06:
+    /// research is structure-free — the Archive is the bank, not the
+    /// school).
+    Research { faction: u8, construct: pyrite::Construct },
 }
 
 pub struct Sim {
@@ -212,7 +253,8 @@ impl Sim {
     pub fn apply(&mut self, command: &Command) -> Result<Option<BotId>, PyriteError> {
         match command {
             Command::SpawnBot { pos, source, cpu, cargo_cap, faction, hp, color } => {
-                let program = pyrite::parse(source, &UnlockSet::all())?;
+                let unlocks = crate::world::faction_unlocks(&self.world, *faction);
+                let program = pyrite::parse(source, &unlocks)?;
                 // Deploy-time window analysis (M3): caps, signal safety,
                 // loop/recursion ban — rejected here, never at runtime.
                 pyrite::check_windows(&program, &self.costs)?;
@@ -221,7 +263,8 @@ impl Sim {
                 Ok(Some(id))
             }
             Command::DeployProgram { faction, color, source } => {
-                let program = pyrite::parse(source, &UnlockSet::all())?;
+                let unlocks = crate::world::faction_unlocks(&self.world, *faction);
+                let program = pyrite::parse(source, &unlocks)?;
                 pyrite::check_windows(&program, &self.costs)?;
                 let slot = (*faction, color.0);
                 let hash = crate::world::program_hash(source);
@@ -250,27 +293,33 @@ impl Sim {
                 Ok(None)
             }
             Command::RepairPrinter { printer } => {
-                let cost = self.tuning.repair_cost_ore;
+                // Re-priced in Data (docs/03: the first colony milestone).
+                let cost = self.tuning.repair_cost_data;
                 if let Some(p) = self.world.printers.get_mut(printer)
                     && p.state == PrinterState::Ruined
-                    && self.world.stockpile_ore >= cost
                 {
-                    p.state = PrinterState::Working;
-                    self.world.stockpile_ore -= cost;
+                    let faction = p.faction;
+                    let have = self.world.data.get(&faction).copied().unwrap_or(0);
+                    if have >= cost {
+                        p.state = PrinterState::Working;
+                        self.world.data.insert(faction, have - cost);
+                    }
                 }
                 Ok(None)
             }
-            Command::PlaceBlueprint { pos, kind } => {
+            Command::PlaceBlueprint { pos, kind, faction } => {
                 let valid_site = match kind {
                     BlueprintKind::Bridge => self.world.grid.get(*pos) == Some(TileKind::Water),
                 };
                 let occupied_by_blueprint =
                     self.world.blueprints.values().any(|b| b.pos == *pos);
                 let cost = match kind {
-                    BlueprintKind::Bridge => self.tuning.bridge_cost_ore,
+                    BlueprintKind::Bridge => self.tuning.bridge_cost_stone,
                 };
-                if valid_site && !occupied_by_blueprint && self.world.stockpile_ore >= cost {
-                    self.world.stockpile_ore -= cost;
+                if valid_site
+                    && !occupied_by_blueprint
+                    && self.world.stock_take(*faction, crate::resources::Resource::Stone, cost)
+                {
                     let needed = match kind {
                         BlueprintKind::Bridge => self.tuning.bridge_build_ticks,
                     };
@@ -281,13 +330,16 @@ impl Sim {
                 }
                 Ok(None)
             }
-            Command::PlaceOverlay { pos, overlay } => {
+            Command::PlaceOverlay { pos, overlay, faction } => {
                 if self.world.grid.in_bounds(*pos) {
                     match overlay {
                         Some(kind) => {
-                            let cost = self.tuning.overlay_cost_ore;
-                            if self.world.stockpile_ore >= cost {
-                                self.world.stockpile_ore -= cost;
+                            let cost = self.tuning.overlay_cost_stone;
+                            if self.world.stock_take(
+                                *faction,
+                                crate::resources::Resource::Stone,
+                                cost,
+                            ) {
                                 self.world.overlays.insert(*pos, *kind);
                             }
                         }
@@ -295,6 +347,70 @@ impl Sim {
                             self.world.overlays.remove(pos);
                         }
                     }
+                }
+                Ok(None)
+            }
+            Command::PlaceStructure { pos, kind, faction } => {
+                use crate::resources::{Resource, DECI};
+                use crate::world::StructureKind;
+                let free = self.world.grid.get(*pos).is_some_and(|t| t.move_ticks().is_some())
+                    && !self.world.structure_at(*pos)
+                    && !self.world.tile_occupied(*pos, BotId(u32::MAX));
+                // docs/03 costs (units): Smelter 10 Steel; Foundry 25 Steel
+                // + 10 Bronze; Archive 10 Steel + 5 Stone.
+                let cost: &[(Resource, u32)] = match kind {
+                    StructureKind::Smelter => &[(Resource::Steel, 10)],
+                    StructureKind::Foundry => &[(Resource::Steel, 25), (Resource::Bronze, 10)],
+                    StructureKind::Archive => &[(Resource::Steel, 10), (Resource::Stone, 5)],
+                };
+                let affordable = cost.iter().all(|(k, units)| {
+                    self.world.stock_get(*faction, *k) >= (*units * DECI) as u64
+                });
+                if free && affordable {
+                    for (k, units) in cost {
+                        let taken =
+                            self.world.stock_take(*faction, *k, (*units * DECI) as u64);
+                        debug_assert!(taken, "checked affordable above");
+                    }
+                    let id = self.world.alloc_entity();
+                    self.world.structures.insert(
+                        id,
+                        crate::world::Structure {
+                            kind: *kind,
+                            faction: *faction,
+                            pos: *pos,
+                            hp: self.tuning.structure_hp,
+                            max_hp: self.tuning.structure_hp,
+                            input: std::collections::BTreeMap::new(),
+                            output: std::collections::BTreeMap::new(),
+                            recipe: None,
+                            batch: None,
+                        },
+                    );
+                }
+                Ok(None)
+            }
+            Command::SetRecipe { structure, recipe } => {
+                if let Some(st) = self.world.structures.get_mut(structure) {
+                    let valid = recipe.is_none_or(|idx| {
+                        crate::resources::RECIPES
+                            .get(idx as usize)
+                            .is_some_and(|r| r.station == st.kind.name())
+                    });
+                    if valid && st.recipe != *recipe {
+                        st.recipe = *recipe;
+                        st.batch = None; // recipe change scraps the batch
+                    }
+                }
+                Ok(None)
+            }
+            Command::Research { faction, construct } => {
+                let cost = crate::world::research_cost(*construct);
+                let have = self.world.data.get(faction).copied().unwrap_or(0);
+                let set = self.world.unlocks.entry(*faction).or_default();
+                if !set.has(*construct) && have >= cost {
+                    set.unlock(*construct);
+                    self.world.data.insert(*faction, have - cost);
                 }
                 Ok(None)
             }
@@ -356,8 +472,8 @@ impl Sim {
                     hp,
                     max_hp: hp,
                     hurt_fired: false,
-                    cargo: 0,
-                    cargo_cap,
+                    cargo: std::collections::BTreeMap::new(),
+                    cargo_cap: cargo_cap * crate::resources::DECI,
                     cpu,
                     color,
                     requested: None,
@@ -452,7 +568,7 @@ impl Sim {
             let delta = crashes.saturating_sub(bot.data.crash_seen);
             if delta > 0 {
                 bot.data.crash_seen = crashes;
-                self.queue_damage(id, delta as i64 * self.tuning.fault_damage);
+                self.queue_damage(id, delta as i64 * self.tuning.fault_damage, None);
             }
         }
         self.settle_damage();
@@ -472,6 +588,7 @@ impl Sim {
             self.world.bot_entities.remove(&data.entity);
             // Carried cargo spills to the ground rather than entombing.
             self.drop_cargo_to_ground(data.pos, data.cargo);
+
             // Disabled: an inert wreck (self-destruct countdown comes later).
             self.world.wrecks.insert(
                 id,
@@ -487,6 +604,14 @@ impl Sim {
         // line, docs/02: edge-triggered), then printers (jobs,
         // rebalancing, capacity). ---
         if self.world.tick.is_multiple_of(self.tuning.regen_interval_ticks) {
+            // Regenerating nodes (Groves — docs/03: renewable but thin).
+            let regen = self.tuning.node_regen_deci;
+            let cap = self.tuning.node_regen_cap_deci;
+            for node in self.world.nodes.values_mut() {
+                if node.regen && node.amount < cap {
+                    node.amount = (node.amount + regen).min(cap);
+                }
+            }
             let amount = self.tuning.regen_amount;
             for id in ids.iter() {
                 let Some(bot) = self.world.bots.get_mut(id) else { continue };
@@ -503,10 +628,51 @@ impl Sim {
                 }
             }
         }
+        self.run_refineries();
         self.run_printers();
 
         // --- phase 9: snapshot hash for desync detection ---
         self.last_hash = self.state_hash();
+    }
+
+    /// Phase 8: refineries (docs/03 — refinement is a logistics step).
+    /// Each Smelter/Foundry with a recipe consumes its inputs from its
+    /// physically-fed buffer, runs a batch timer, and emits into its
+    /// output buffer for bots to withdraw(). Stable id order; energy
+    /// gating lands with M5.
+    pub(crate) fn run_refineries(&mut self) {
+        use crate::resources::{DECI, RECIPES};
+        let ids: Vec<EntityId> = self.world.structures.keys().copied().collect();
+        for id in ids {
+            let st = self.world.structures.get_mut(&id).expect("structure exists");
+            let Some(recipe_idx) = st.recipe else { continue };
+            let Some(recipe) = RECIPES.get(recipe_idx as usize) else { continue };
+            if let Some(ticks) = st.batch {
+                if ticks > 1 {
+                    st.batch = Some(ticks - 1);
+                } else {
+                    st.batch = None;
+                    let (out_kind, out_units) = recipe.output;
+                    *st.output.entry(out_kind).or_insert(0) += out_units * DECI;
+                }
+                continue;
+            }
+            // Start a batch when every input is buffered.
+            let ready = recipe
+                .inputs
+                .iter()
+                .all(|(k, units)| st.input.get(k).copied().unwrap_or(0) >= units * DECI);
+            if ready {
+                for (k, units) in recipe.inputs {
+                    let have = st.input.get_mut(k).expect("checked ready");
+                    *have -= units * DECI;
+                    if *have == 0 {
+                        st.input.remove(k);
+                    }
+                }
+                st.batch = Some(self.tuning.recipe_batch_ticks);
+            }
+        }
     }
 
     /// Phase 5: perception — seeing/hearing recomputed from post-move
@@ -557,18 +723,59 @@ impl Sim {
         // Cached: re-walking the map every tick made phase 9 O(map). Kept
         // fresh by World::set_tile on the rare terrain mutation.
         h.write_u64(w.terrain_hash);
-        for (id, node) in &w.ore_nodes {
+        for (id, node) in &w.nodes {
             h.write_u64(id.0);
+            h.write_u8(node.kind.as_u8());
             h.write_i32(node.pos.x);
             h.write_i32(node.pos.y);
             h.write_u32(node.amount);
+            h.write_u8(node.regen as u8);
         }
         for (id, depot) in &w.depots {
             h.write_u64(id.0);
             h.write_i32(depot.pos.x);
             h.write_i32(depot.pos.y);
         }
-        h.write_u64(w.stockpile_ore);
+        for (id, st) in &w.structures {
+            h.write_u64(id.0);
+            h.write_u8(st.kind.as_u8());
+            h.write_u8(st.faction);
+            h.write_i32(st.pos.x);
+            h.write_i32(st.pos.y);
+            h.write_i64(st.hp);
+            for (k, deci) in &st.input {
+                h.write_u8(k.as_u8());
+                h.write_u32(*deci);
+            }
+            for (k, deci) in &st.output {
+                h.write_u8(k.as_u8());
+                h.write_u32(*deci);
+            }
+            h.write_u8(st.recipe.map(|r| r + 1).unwrap_or(0));
+            h.write_u32(st.batch.unwrap_or(0));
+        }
+        for (faction, set) in &w.unlocks {
+            h.write_u8(*faction);
+            for c in pyrite::Construct::ALL {
+                h.write_u8(set.has(c) as u8);
+            }
+        }
+        for ((faction, kind), deci) in &w.stock {
+            h.write_u8(*faction);
+            h.write_u8(kind.as_u8());
+            h.write_u64(*deci);
+        }
+        for (faction, data) in &w.data {
+            h.write_u8(*faction);
+            h.write_u64(*data);
+        }
+        for (faction, delivered) in &w.delivered {
+            h.write_u8(*faction);
+            h.write_u64(*delivered);
+        }
+        for faction in &w.first_kill_done {
+            h.write_u8(*faction);
+        }
         h.write_u64(w.rng.combat);
         h.write_u64(w.rng.wander);
         h.write_u64(w.rng.explore);
@@ -617,7 +824,11 @@ impl Sim {
             h.write_u32(id.0);
             h.write_i32(bot.data.pos.x);
             h.write_i32(bot.data.pos.y);
-            h.write_u32(bot.data.cargo);
+            for (kind, deci) in &bot.data.cargo {
+                h.write_u8(kind.as_u8());
+                h.write_u32(*deci);
+            }
+            h.write_u32(bot.data.cargo_cap);
             h.write_u64(bot.data.cpu);
             h.write_u8(bot.data.faction);
             h.write_u8(bot.data.color.0);

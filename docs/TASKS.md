@@ -174,29 +174,51 @@ full charges + centicycles + wrap-surviving variables move every replay hash at 
       call (cost still paid); ring buffer, wrecks, black boxes, and archive entries all carry
       the level; the inspector prints `[level]` prefixes. [pyrite][sim] (S)
 
-## M4 — Typed resources & economy (the Ore→Metal migration the docs earmark)
+## M4 — Typed resources & economy ✅ CORE COMPLETE (2026-07-15) — discussion items below
 
-- [ ] **11 raws → 7 refined as first-class kinds**; typed colony stock, typed cargo manifest
-      (deci-units), typed costs. Wire nodes onto the nine already-rendered resource-ground
-      tiles (+ water, stone) with amounts/regen (Grove regenerates); `mine()` yields the node's
-      kind. Retire `stockpile_ore`/`OreNode`. [sim] (L) ⚠HASH
-- [ ] **Generic `Structure { kind, hp, pos, buffers, recipe, pad }`** replacing per-type maps;
-      structures gain HP and can be attacked. [sim] (M) ⚠HASH
-- [ ] **Smelter + Foundry** with recipes (Steel 2Fe+1Coal, Bronze 1Cu+1Sn, Glass 2Sand; Wire,
-      Chips 1Ag+2Crystal+1Wire, Lens 2Glass, Gold Chip 1Chip+1Au), `SetRecipe` command,
-      physical input feeds / abstract payments split (Q84), lowest-ID tie-breaks. [sim] (L)
-- [ ] **Re-price everything typed**: tool ladder rule, Bridge in Stone, printer repair in Data,
-      print cost, build-tool Steel exception. Values already inventoried in 03. [sim] (M) ⚠HASH
-- [ ] **Data currency + Research Archive** (structure-free research rule), `Research` command,
-      UnlockSets consumed at parse (replace the `UnlockSet::all()` sandbox default with
-      per-faction sets; keep a dev flag). [pyrite][sim][game] (M)
-- [ ] **Verbs**: `withdraw(kind)`/`try_withdraw`, generalized `deposit`/`try_deposit` (any
-      acceptor, faults on full/empty), `cargo_count(kind)`, `study()`, `scan_resources`,
-      `drop_cargo` host impl. Most are host-arm + cost-entry cheap once cargo is typed.
-      [pyrite][sim] (M)
-- [ ] **Kind-constant catalog**: bind the full ~40-name set (all raws incl. water, all refined,
-      `ore` family, structures, wreck/black_box/blueprint/cache/nest, enemy/ally, per-match
-      factions) — today `KINDS` has 4 entries. [sim] (S)
+- [x] **11 raws → 7 refined as first-class kinds** (`sim::resources`): typed per-faction colony
+      stock + typed cargo manifests, all deci-units; nodes ride the nine resource-ground tiles
+      (+ legacy OreVein→Iron, CrystalField→Crystal); Grove regenerates (per-node-type flag,
+      `node_regen_deci` per regen interval); `mine()` yields the node's kind
+      (`mine_yield_deci` 20 = the 2/swing manifest); `stockpile_ore`/`OreNode` retired
+      (`starting_ore` seeds Iron for old specs; `starting_stock` is the typed kit). [sim] (L) ⚠HASH
+- [x] **Generic `Structure { kind, faction, pos, hp, input, output, recipe, batch }`** for
+      Smelter/Foundry/Archive (placed by `PlaceStructure`, typed docs/03 prices from stock);
+      solid, attackable, fall at 0 HP. *NEEDS DISCUSSION: printers/depots staying separate —
+      Printer carries color/job/dial state M9 reworks anyway, and Depot is load-bearing in the
+      deposit path; migrating them into Structure now churns M9's ground. Also: structures
+      place instantly (blueprint-labor for structures wasn't specced — Bridge keeps its
+      blueprint flow).* [sim] (M) ⚠HASH
+- [x] **Smelter + Foundry** running the full docs/03 recipe book (`resources::RECIPES`:
+      steel/bronze/glass at the Smelter, wire/chips/lens/gold_chip at the Foundry),
+      `SetRecipe` command (validates station, scraps the in-flight batch), physical
+      input/output buffers bots feed and empty, phase-8 batch timer (`recipe_batch_ticks`
+      ~30), lowest-ID acceptor/source tie-breaks. Energy gating lands with M5. [sim] (L)
+- [x] **Re-priced typed**: Bridge + overlays in Stone (faction-paid placement commands),
+      printer repair 60 Data, print cost in Steel (default free), scrap refund Steel. *NEEDS
+      DISCUSSION: tool-ladder + build-tool-Steel pricing belongs to M5's tool modules (no
+      tools exist to price yet) — the tier data (`Resource::tool_tier`) is in place,
+      unenforced.* [sim] (M) ⚠HASH
+- [x] **Data currency** per faction: first hostile kill (10), delivery milestones (20 per 500
+      units), printer-repair sink; `Research { faction, construct }` command spends Data on
+      docs/06's price tree; per-faction UnlockSets consumed at parse (`MapSpec.
+      dev_all_unlocks`, default true, keeps sandboxes/tests/replays on the old behavior).
+      *NEEDS DISCUSSION: the Research Archive structure exists but the Data EXCHANGE
+      (Data→resources, Chips-favored) has no tuned rates in docs — left unimplemented.*
+      [pyrite][sim][game] (M)
+- [x] **Verbs**: `withdraw(kind)`/`try_withdraw` (adjacent refinery output first, colony stock
+      at a depot second), `deposit`/`try_deposit` generalized (depot → stock; refinery → only
+      its recipe's inputs; try_ returns False instead of faulting), `cargo_count(kind)`,
+      `scan_resources` (all live nodes, distance/id order — omniscient until M7),
+      `drop_cargo` (deliberate spill: typed nodes on the bot's tile, no scatter). *NEEDS
+      DISCUSSION: `study()` deferred — it needs Template Caches (map placement is Q71
+      territory) and the per-match FUNCTION-block unlock model (docs/06's F_* sets), a whole
+      subsystem the other M4 tasks don't touch. withdraw/deposit run instant/1-tick rather
+      than "+ action" costed ticks — flag if the action-time matters before M5.* [pyrite][sim] (M)
+- [x] **Kind constants**: all 11 raws + 7 refined + `ore` family + smelter/foundry/archive/
+      printer/depot/blueprint/enemy/wreck bound; `closest()`/`exists()` resolve resource kinds
+      to nodes and structure kinds to structures. *(cache/nest/ally/faction constants land
+      with their systems — M12/M13.)* [sim] (S)
 - [ ] **Game**: render Smelter/Foundry/Archive/etc., typed stock in the world bar, structure
       HP bars. [game] (M)
 
@@ -330,7 +352,7 @@ full charges + centicycles + wrap-surviving variables move every replay hash at 
 - [x] Delete the spurious `become_disabled` cost entry once M3 lands. [pyrite] *(with M3)*
 - [x] `health_low()` reads env `hurt_line` (after M3 env). [sim] *(with M3)*
 - [ ] Fold `PlacePaint` into `PlaceOverlay(arrow|paint)` per 07. [sim][game]
-- [ ] `RepairPrinter` re-priced in Data (~60) once Data exists (M4). [sim]
+- [x] `RepairPrinter` re-priced in Data (~60) once Data exists (M4). [sim] *(with M4)*
 - [ ] Tuning values to spec first-pass numbers: fault_damage 5→2, boot_ticks 2→~20,
       print_ticks 5→~100 (in the M0 data files). ⚠HASH
 - [ ] Snow tile comment cites superseded Q67 — re-point at Q78 when M7 lands. [game]
@@ -354,4 +376,4 @@ full charges + centicycles + wrap-surviving variables move every replay hash at 
 
 Existing and staying: `closest`, `exists`, `move_to`, `mine`, `build`, `attack`, `wait`,
 `rng`, `log`, `upload_log`, `upload_crash_dump`, `cargo_full`, `health_low`, `last_error`,
-`handler_init`, `drop_cargo` (cost entry exists; host impl in M4).
+`handler_init`, `drop_cargo` ✅ (host impl landed with M4).

@@ -451,8 +451,9 @@ pub(crate) fn sync_view(
         }
     }
 
-    // Ore: spinning gold gems, scaled by remaining amount.
-    for (id, node) in &world.ore_nodes {
+    // Nodes: spinning gems, scaled by remaining amount (typed tints
+    // land with the M4 game pass; gold gem stands in for all kinds).
+    for (id, node) in &world.nodes {
         if node.amount == 0 {
             if let Some(entity) = index.ore.remove(&id.0) {
                 commands.entity(entity).despawn();
@@ -496,7 +497,7 @@ pub(crate) fn sync_view(
             if let Ok(kids) = children.get(entity) {
                 for kid in kids {
                     if let Ok((slot, mut vis)) = slots.get_mut(*kid) {
-                        *vis = if bot.data.cargo > slot.0 {
+                        *vis = if bot.data.cargo_total() > slot.0 * sim::resources::DECI {
                             Visibility::Visible
                         } else {
                             Visibility::Hidden
