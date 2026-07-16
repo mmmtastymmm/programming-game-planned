@@ -67,7 +67,7 @@ impl Sim {
         let tick = self.world.tick;
         // Perceivers per faction: (pos, seeing, hearing, elevated).
         let mut perceivers: BTreeMap<u8, Vec<(TilePos, u32, u32, bool)>> = BTreeMap::new();
-        let ctx = crate::stats::StatCtx { stats: &self.stats, xp: &self.xp, quirks: &self.quirks, tuning: &self.tuning };
+        let ctx = self.ctx();
         for bot in self.world.bots.values() {
             if bot.data.dying {
                 continue;

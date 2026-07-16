@@ -82,41 +82,6 @@ pub(crate) const BUILD_CATEGORIES: &[(&str, &[BuildItem])] = &[
     ),
 ];
 
-/// Stone price of a blueprint kind — one place, so the bar, the ghost,
-/// and the hover text can't drift from the sim's charge.
-pub(crate) fn blueprint_cost(tuning: &sim::sim::Tuning, kind: BlueprintKind) -> u64 {
-    match kind {
-        BlueprintKind::Bridge => tuning.bridge_cost_stone,
-        BlueprintKind::Barricade => tuning.barricade_cost_stone,
-        BlueprintKind::Road => tuning.road_cost_stone,
-        BlueprintKind::Clear | BlueprintKind::Demolish | BlueprintKind::Cleanse => 0,
-    }
-}
-
-/// Mirror of the sim's PlaceBlueprint site rule (the ghost previews what
-/// the command will accept).
-pub(crate) fn blueprint_site_ok(
-    world: &sim::World,
-    kind: BlueprintKind,
-    pos: sim::TilePos,
-) -> bool {
-    use sim::TileKind;
-    let tile = world.grid.get(pos);
-    let ok = match kind {
-        BlueprintKind::Bridge => tile == Some(TileKind::Water),
-        BlueprintKind::Clear => tile == Some(TileKind::Rubble),
-        BlueprintKind::Barricade => tile == Some(TileKind::Plains),
-        BlueprintKind::Demolish => {
-            matches!(tile, Some(TileKind::Bridge) | Some(TileKind::Barricade))
-        }
-        BlueprintKind::Cleanse => tile == Some(TileKind::Corruption),
-        BlueprintKind::Road => {
-            matches!(tile, Some(TileKind::Plains) | Some(TileKind::Rubble))
-        }
-    };
-    ok && (kind == BlueprintKind::Bridge || !world.structure_at(pos))
-}
-
 /// The build-bar hint line for a blueprint tool.
 pub(crate) fn blueprint_hint(kind: BlueprintKind) -> &'static str {
     match kind {
@@ -446,8 +411,11 @@ pub(crate) fn build_preview(
 
     let (valid, paint_ghost) = match kind {
         ToolKind::Building(kind) => {
-            let cost = blueprint_cost(&game.0.tuning, kind);
-            let ok = blueprint_site_ok(world, kind, pos)
+            // The ghost previews exactly what the sim command will
+            // accept: rule and price both come from the sim's shared
+            // helpers, never a copy (review 2026-07-16).
+            let cost = kind.cost_stone(&game.0.tuning);
+            let ok = world.blueprint_site_ok(kind, pos)
                 && !world.blueprints.values().any(|b| b.pos == pos)
                 && world.stock_get(0, sim::resources::Resource::Stone) >= cost;
             (ok, None)

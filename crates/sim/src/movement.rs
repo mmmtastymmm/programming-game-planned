@@ -117,7 +117,7 @@ impl Sim {
             Some(path) if path.is_empty() => self.complete_move(id),
             Some(path) => {
                 let first_cost = crate::stats::step_ticks(
-                    crate::stats::StatCtx { stats: &self.stats, xp: &self.xp, quirks: &self.quirks, tuning: &self.tuning },
+                    self.ctx(),
                     &self.world.grid,
                     &self.world.bots[&id].data,
                     path[0],
@@ -149,7 +149,7 @@ impl Sim {
                 }
                 Some(path) => {
                     let first_cost = crate::stats::step_ticks(
-                        crate::stats::StatCtx { stats: &self.stats, xp: &self.xp, quirks: &self.quirks, tuning: &self.tuning },
+                        self.ctx(),
                         &self.world.grid,
                         &self.world.bots[&id].data,
                         path[0],
@@ -174,7 +174,7 @@ impl Sim {
             let mut goals = BTreeSet::new();
             for (dx, dy) in [(0, -1), (1, 0), (0, 1), (-1, 0)] {
                 let g = TilePos::new(home_pos.x + dx, home_pos.y + dy);
-                if self.world.grid.get(g).is_some_and(|t| t.move_ticks().is_some())
+                if self.world.grid.get(g).is_some_and(|t| t.passable())
                     && !self.world.structure_at(g)
                 {
                     goals.insert(g);
@@ -187,7 +187,7 @@ impl Sim {
                     .first()
                     .map(|p| {
                         crate::stats::step_ticks(
-                            crate::stats::StatCtx { stats: &self.stats, xp: &self.xp, quirks: &self.quirks, tuning: &self.tuning },
+                            self.ctx(),
                             &self.world.grid,
                             &self.world.bots[&id].data,
                             *p,

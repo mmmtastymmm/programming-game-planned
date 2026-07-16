@@ -165,12 +165,23 @@ impl Tuning {
             (1..=100).contains(&self.hurt_line_pct),
             "tuning: hurt_line_pct must be a percentage in 1..=100"
         );
-        // Terrain v2: A*'s heuristic is manhattan × 1, admissible only
-        // while every edge costs at least 1; and Water/Barricade are the
-        // impassable kinds, so the table must not price them.
-        for &(kind, cost) in &self.tile_costs.x2 {
-            assert!(cost >= 1, "tuning: tile_costs.x2 must be >= 1 ({kind:?})");
-            assert!(kind.passable(), "tuning: tile_costs.x2 prices impassable {kind:?}");
+        // Terrain v2: the cost table and the passability predicate are
+        // two sources for one fact — validate the BICONDITIONAL, or a
+        // tuning edit that drops one entry loads cleanly and panics at
+        // the first step onto the unpriced tile (edge_allowed approves
+        // via passable(), step_ticks returns None, callers .expect()).
+        // Also: A*'s heuristic is manhattan × 1, admissible only while
+        // every edge costs at least 1 (review 2026-07-16).
+        for kind in crate::map::TileKind::ALL {
+            let priced = self.tile_costs.cost_x2(kind);
+            assert_eq!(
+                priced.is_some(),
+                kind.passable(),
+                "tuning: tile_costs.x2 must price exactly the passable kinds ({kind:?})"
+            );
+            if let Some(cost) = priced {
+                assert!(cost >= 1, "tuning: tile_costs.x2 must be >= 1 ({kind:?})");
+            }
         }
         for cost in [
             self.tile_costs.mountain_climb_x2,
@@ -194,6 +205,34 @@ impl Tuning {
             self.corruption_spread_ticks > 0,
             "tuning: corruption_spread_ticks must be > 0"
         );
+    }
+}
+
+impl crate::world::BlueprintKind {
+    /// Stone price (deci) — beside [`Tuning`], the price sheet's home.
+    /// Clear/Demolish/Cleanse are labor-only. Shared with the build bar
+    /// so the ghost can't drift from the command (review 2026-07-16).
+    pub fn cost_stone(self, tuning: &Tuning) -> u64 {
+        use crate::world::BlueprintKind as K;
+        match self {
+            K::Bridge => tuning.bridge_cost_stone,
+            K::Barricade => tuning.barricade_cost_stone,
+            K::Road => tuning.road_cost_stone,
+            K::Clear | K::Demolish | K::Cleanse => 0,
+        }
+    }
+
+    /// Builder-ticks at the unleveled rate.
+    pub fn build_ticks(self, tuning: &Tuning) -> u32 {
+        use crate::world::BlueprintKind as K;
+        match self {
+            K::Bridge => tuning.bridge_build_ticks,
+            K::Clear => tuning.clear_ticks,
+            K::Barricade => tuning.barricade_build_ticks,
+            K::Demolish => tuning.demolish_ticks,
+            K::Cleanse => tuning.cleanse_ticks,
+            K::Road => tuning.road_build_ticks,
+        }
     }
 }
 
@@ -454,8 +493,9 @@ impl Sim {
             Command::SpawnBot { pos, source, cpu, cargo_cap, faction, hp, color } => {
                 // Bots are solid: a spawn onto an impassable, structure, or
                 // occupied tile is rejected (dev command or not — nothing
-                // may stack two live bots on one tile).
-                let free = self.world.grid.get(*pos).is_some_and(|t| t.move_ticks().is_some())
+                // may stack two live bots on one tile). Spawnable, not
+                // merely passable: nothing materializes on High Ground.
+                let free = self.world.grid.get(*pos).is_some_and(|t| t.spawnable())
                     && !self.world.structure_at(*pos)
                     && !self.world.tile_occupied(*pos, BotId(u32::MAX));
                 if !free {
@@ -536,34 +576,14 @@ impl Sim {
                 Ok(None)
             }
             Command::PlaceBlueprint { pos, kind, faction } => {
-                let tile = self.world.grid.get(*pos);
-                // Site rules (M8-D): each terraform kind names the ground
-                // it works. The terraform kinds also refuse structure
-                // tiles (walling under a depot bricks it) — Bridge keeps
-                // its water-only rule untouched.
-                let valid_site = match kind {
-                    BlueprintKind::Bridge => tile == Some(TileKind::Water),
-                    BlueprintKind::Clear => tile == Some(TileKind::Rubble),
-                    BlueprintKind::Barricade => tile == Some(TileKind::Plains),
-                    BlueprintKind::Demolish => {
-                        matches!(tile, Some(TileKind::Bridge) | Some(TileKind::Barricade))
-                    }
-                    BlueprintKind::Cleanse => tile == Some(TileKind::Corruption),
-                    BlueprintKind::Road => {
-                        matches!(tile, Some(TileKind::Plains) | Some(TileKind::Rubble))
-                    }
-                } && (*kind == BlueprintKind::Bridge || !self.world.structure_at(*pos));
+                // Site + price + duration all come from the shared rule
+                // set (BlueprintKind::site_ok / cost_stone / build_ticks)
+                // so the build bar's ghost can't drift from what this
+                // command accepts (review 2026-07-16).
+                let valid_site = self.world.blueprint_site_ok(*kind, *pos);
                 let occupied_by_blueprint =
                     self.world.blueprints.values().any(|b| b.pos == *pos);
-                let cost = match kind {
-                    BlueprintKind::Bridge => self.tuning.bridge_cost_stone,
-                    BlueprintKind::Barricade => self.tuning.barricade_cost_stone,
-                    BlueprintKind::Road => self.tuning.road_cost_stone,
-                    // Labor-only: demolition and cleansing price in ticks.
-                    BlueprintKind::Clear
-                    | BlueprintKind::Demolish
-                    | BlueprintKind::Cleanse => 0,
-                };
+                let cost = kind.cost_stone(&self.tuning);
                 if valid_site
                     && !occupied_by_blueprint
                     && self.world.stock_take(*faction, crate::resources::Resource::Stone, cost)
@@ -571,14 +591,7 @@ impl Sim {
                     // Progress is deci-units (Q56): base build rate is 10
                     // deci/tick, so ticks-to-complete stays the tuning
                     // figure for an unleveled builder.
-                    let needed = match kind {
-                        BlueprintKind::Bridge => self.tuning.bridge_build_ticks,
-                        BlueprintKind::Clear => self.tuning.clear_ticks,
-                        BlueprintKind::Barricade => self.tuning.barricade_build_ticks,
-                        BlueprintKind::Demolish => self.tuning.demolish_ticks,
-                        BlueprintKind::Cleanse => self.tuning.cleanse_ticks,
-                        BlueprintKind::Road => self.tuning.road_build_ticks,
-                    } * crate::resources::DECI;
+                    let needed = kind.build_ticks(&self.tuning) * crate::resources::DECI;
                     let id = self.world.alloc_entity();
                     self.world
                         .blueprints
@@ -609,7 +622,7 @@ impl Sim {
             Command::PlaceStructure { pos, kind, faction } => {
                 use crate::resources::{Resource, DECI};
                 use crate::world::StructureKind;
-                let free = self.world.grid.get(*pos).is_some_and(|t| t.move_ticks().is_some())
+                let free = self.world.grid.get(*pos).is_some_and(|t| t.spawnable())
                     && !self.world.structure_at(*pos)
                     && !self.world.tile_occupied(*pos, BotId(u32::MAX))
                     // The Tap harnesses a vent — vent tiles only (docs/03).
@@ -923,12 +936,7 @@ impl Sim {
                 bot.data.crash_seen = crashes;
                 // Per-bot chip (M6): Statically Typed halves it, `unsafe`
                 // Block doubles it.
-                let chip = crate::stats::StatCtx {
-                    stats: &self.stats,
-                    xp: &self.xp,
-                    quirks: &self.quirks,
-                    tuning: &self.tuning,
-                }
+                let chip = crate::stats::StatCtx { stats: &self.stats, xp: &self.xp, quirks: &self.quirks, tuning: &self.tuning }
                 .fault_damage_for(&bot.data, self.tuning.fault_damage);
                 self.queue_damage(id, delta as i64 * chip, None);
             }
@@ -986,12 +994,7 @@ impl Sim {
                     continue; // unpaid Steel maintenance: self-repair halts (Q84)
                 }
                 // Seniority mends (docs/02): Age raises the trickle.
-                let amount = crate::stats::StatCtx {
-                    stats: &self.stats,
-                    xp: &self.xp,
-                    quirks: &self.quirks,
-                    tuning: &self.tuning,
-                }
+                let amount = crate::stats::StatCtx { stats: &self.stats, xp: &self.xp, quirks: &self.quirks, tuning: &self.tuning }
                 .regen_for(&bot.data, self.tuning.regen_amount);
                 bot.data.hp = (bot.data.hp + amount).min(bot.data.max_hp);
                 // The latch re-arms against the SAME line it fires on — the
@@ -1009,6 +1012,14 @@ impl Sim {
         self.settle_terrain();
         if self.world.tick.is_multiple_of(self.tuning.corruption_spread_ticks) {
             self.spread_corruption();
+        }
+
+        // Terrain hash refresh: set_tile only marks dirty (M8 made
+        // terrain mutate routinely — per-mutation recompute was O(map)
+        // each); one recompute per tick at most, before the snapshot.
+        if self.world.terrain_dirty {
+            self.world.terrain_hash = self.world.compute_terrain_hash();
+            self.world.terrain_dirty = false;
         }
 
         // --- phase 9: snapshot hash for desync detection ---
@@ -1250,8 +1261,11 @@ impl Sim {
     /// its radius — nearest by (chebyshev, y, x), so the creep front is
     /// deterministic. Cleansed ground inside the radius is simply the
     /// nearest clean tile again: re-corruption falls out for free while
-    /// the source lives. Bridges are spared — creep over a river would
-    /// delete the crossing outright (cleanse yields Plains; flagged).
+    /// the source lives. Bridges, Ramps, and Roads are spared: creep
+    /// over a river would delete the crossing outright, a corrupted Ramp
+    /// permanently traps every bot on its plateau (Cleanse yields
+    /// Plains, never Ramp — review 2026-07-16), and Roads are paid civil
+    /// works exactly like bridges.
     pub(crate) fn spread_corruption(&mut self) {
         let cores: Vec<(crate::map::TilePos, u32)> =
             self.world.blight_cores.values().map(|c| (c.pos, c.radius)).collect();
@@ -1262,9 +1276,13 @@ impl Sim {
                 for dx in -r..=r {
                     let t = crate::map::TilePos::new(pos.x + dx, pos.y + dy);
                     let Some(kind) = self.world.grid.get(t) else { continue };
-                    if kind == crate::map::TileKind::Corruption
-                        || kind == crate::map::TileKind::Bridge
-                        || !kind.passable()
+                    if matches!(
+                        kind,
+                        crate::map::TileKind::Corruption
+                            | crate::map::TileKind::Bridge
+                            | crate::map::TileKind::Ramp
+                            | crate::map::TileKind::Road
+                    ) || !kind.passable()
                     {
                         continue;
                     }
@@ -1603,6 +1621,10 @@ impl Sim {
         }
         for (id, bp) in &w.blueprints {
             h.write_u64(id.0);
+            // The kind was implied while Bridge was the only one; with
+            // six kinds a divergence must desync NOW, not at completion
+            // when the wrong tile lands (review 2026-07-16).
+            h.write_u8(bp.kind.as_u8());
             h.write_i32(bp.pos.x);
             h.write_i32(bp.pos.y);
             h.write_u32(bp.progress);

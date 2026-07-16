@@ -387,8 +387,15 @@ hash: statline, XP map, quirk rolls, upkeep settlements).* ✅ CORE COMPLETE (20
       `set_tile` drops the counter). HighGround entry Ramp-gated (or via Mountain); Mountain
       summits join `on_high_ground` (sensor bonus + LoS exemption) and block ground-level LoS.
       Game: Mountain takes the full block + cliff art from Rubble (now flat debris);
-      placeholder art reuse for the other kinds; the slab layer rebuilds on terrain-hash
-      change (`resync_terrain` — terrain mutates now); demolished bridge planks despawn.
+      placeholder art reuse for the other kinds; the slab layer rebuilds INCREMENTALLY on
+      terrain change (`resync_terrain` diffs a grid snapshot, redraws changed tiles + 3×3
+      neighborhoods); demolished bridge planks despawn. Review 2026-07-16 hardening:
+      `move_ticks` is GONE — `passable()` is the one passability source and the tuning table
+      the one cost source, validated as a biconditional at load; `spawnable()` gates every
+      materialization site (prints, dev spawns, structure placement, cargo spills — nothing
+      pops into existence on High Ground); ground hardening under an in-flight plan (new
+      barricade, demolished bridge) re-plans instead of panicking, for program walks and
+      recall walks both.
       *NEEDS DISCUSSION: (1) Snow stays 1× and mute-only (Q67 open — no cost/tracks effects
       invented); (2) HighGround's +2 bonus and the Chebyshev spread metric are still
       hardcoded first-pass; (3) slide steps cost normal step ticks (no momentum speed-up);
@@ -413,7 +420,8 @@ hash: statline, XP map, quirk rolls, upkeep settlements).* ✅ CORE COMPLETE (20
       while the source lives. Cores are solid, perceivable (seen-only, like structures),
       queryable (`closest(blight)`), and attackable like structures; killing one stops the
       spread, the creep stays. *NEEDS DISCUSSION: (1) channel jamming waits for M11 channels;
-      (2) Bridges are spared from spread (creep would delete the river crossing); (3)
+      (2) Bridges, Ramps, and Roads are spared from spread (creep would delete the river
+      crossing; a corrupted Ramp would permanently trap a plateau — review 2026-07-16); (3)
       `closest(blight)` is perception-UNGATED (the creep front is visible terrain — but the
       heart's exact position leaking is a choice); (4) cores render nowhere in the viewer —
       neither do Smelters/Foundries (the M4 structure-rendering gap).* [sim] (M) ⚠HASH
@@ -421,9 +429,14 @@ hash: statline, XP map, quirk rolls, upkeep settlements).* ✅ CORE COMPLETE (20
       `clear_yield_stone` to the builder's faction), Barricade (Plains→Barricade, Stone;
       solid + blocks LoS for everyone), Demolish (Bridge→Water / Barricade→Plains, labor-
       only, re-checks the tile at completion), Cleanse (Corruption→Plains, slow), Road
-      (Plains|Rubble→Road, Stone). Site rules at placement; terraform kinds refuse structure
-      tiles (walling a depot in). Build bar: Terraform tab + icons; ghost/costs/hints share
-      one helper with the sim's rule (`tools::blueprint_cost/site_ok/hint`). Tests:
+      (Plains|Rubble→Road, Stone). ONE rule set (`BlueprintKind::site_ok/cost_stone/
+      build_ticks` + `World::blueprint_site_ok`) drives the placement command, the
+      completion re-check (EVERY kind re-validates its ground at completion — void work
+      stamps nothing, so a 10-tick Road can't erase creep 4× faster than Cleanse), and the
+      build bar's ghost (review 2026-07-16). Blueprint `kind` joined the phase-9 hash (a
+      kind divergence desyncs immediately, not at completion); the terrain hash refreshes
+      once per tick off a dirty flag instead of once per set_tile. Terraform tab + icons.
+      Tests:
       `tests/terrain.rs` (16 tests: cost table, mountain edges, ramp gate, A* road detours,
       ice slide overshoot, dune sink/reset, scree collapse, ford quieting, corruption tax,
       blight lifecycle, all five blueprints, site validation). *NEEDS DISCUSSION: (1)

@@ -2,7 +2,7 @@
 //! world actions bots issue (move, mine, build, ...).
 
 use crate::host::BotHost;
-use crate::map::{astar_avoiding, TileKind, TilePos};
+use crate::map::{astar_avoiding, edge_allowed, TileKind, TilePos};
 use crate::sim::Sim;
 use crate::world::{
     Action, ActionRequest, BlueprintKind, BotId, RecallPurpose, XpTrack,
@@ -47,7 +47,7 @@ impl Sim {
                     for dy in -1..=1 {
                         for dx in -1..=1 {
                             let goal = TilePos::new(target_pos.x + dx, target_pos.y + dy);
-                            if self.world.grid.get(goal).is_some_and(|t| t.move_ticks().is_some())
+                            if self.world.grid.get(goal).is_some_and(|t| t.passable())
                                 && !structures.contains(&goal)
                             {
                                 goals.insert(goal);
@@ -69,7 +69,7 @@ impl Sim {
                             // Ticks per step come from the move-rate stat
                             // through the pipeline; terrain multiplies (M5).
                             let first_cost = crate::stats::step_ticks(
-                                crate::stats::StatCtx { stats: &self.stats, xp: &self.xp, quirks: &self.quirks, tuning: &self.tuning },
+                                self.ctx(),
                                 &self.world.grid,
                                 &self.world.bots[&id].data,
                                 path[0],
@@ -134,7 +134,7 @@ impl Sim {
                                     .world
                                     .grid
                                     .get(t)
-                                    .is_some_and(|k| k.move_ticks().is_some())
+                                    .is_some_and(|k| k.passable())
                                 && !self.world.structure_at(t)
                                 && !self.world.tile_occupied(t, id)
                             {
@@ -165,7 +165,7 @@ impl Sim {
                                     .world
                                     .grid
                                     .get(t)
-                                    .is_some_and(|k| k.move_ticks().is_some())
+                                    .is_some_and(|k| k.passable())
                                 && !self.world.structure_at(t)
                                 && !self.world.tile_occupied(t, id)
                                 && !self.tile_visible(faction, t)
@@ -256,11 +256,20 @@ impl Sim {
                 // toward the goal; only when boxed in, bump-freeze (and
                 // re-plan on thaw).
                 let entered = path[0];
+                let from = self.world.bots[&id].data.pos;
+                // Terraforming can HARDEN ground under an in-flight plan
+                // (M8: a demolished bridge, a finished barricade): re-check
+                // the step's edge and re-plan around works that landed
+                // since — never walk into water or panic on an unpriced
+                // tile (review 2026-07-16).
+                if !edge_allowed(&self.world.grid, &self.world.overlays, from, entered) {
+                    self.replan_move(id, goals);
+                    return;
+                }
                 // Structures are solid too: one placed on the route AFTER
                 // this path was planned blocks the step exactly like a bot
                 // (plan-time A* only sees structures that already exist).
                 if self.world.tile_occupied(entered, id) || self.world.structure_at(entered) {
-                    let from = self.world.bots[&id].data.pos;
                     let dodges = self.sidestep_candidates(id, from, entered, &goals);
                     if dodges.is_empty() {
                         let bot = self.world.bots.get_mut(&id).expect("bot exists");
@@ -271,7 +280,7 @@ impl Sim {
                             % dodges.len() as u64) as usize;
                         let step = dodges[pick];
                         let cost = crate::stats::step_ticks(
-                            crate::stats::StatCtx { stats: &self.stats, xp: &self.xp, quirks: &self.quirks, tuning: &self.tuning },
+                            self.ctx(),
                             &self.world.grid,
                             &self.world.bots[&id].data,
                             step,
@@ -286,7 +295,6 @@ impl Sim {
                     return;
                 }
                 path.remove(0);
-                let from = self.world.bots[&id].data.pos;
                 self.world.move_bot(id, entered);
                 self.credit_travel(id);
                 // Ice slides (M8, Q37): momentum carries the mover one
@@ -299,7 +307,7 @@ impl Sim {
                         self.bump_both(id, target, true);
                     } else {
                         let cost = crate::stats::step_ticks(
-                            crate::stats::StatCtx { stats: &self.stats, xp: &self.xp, quirks: &self.quirks, tuning: &self.tuning },
+                            self.ctx(),
                             &self.world.grid,
                             &self.world.bots[&id].data,
                             target,
@@ -322,15 +330,21 @@ impl Sim {
                         self.replan_move(id, goals);
                     }
                 } else {
-                    let next_cost = crate::stats::step_ticks(
-                        crate::stats::StatCtx { stats: &self.stats, xp: &self.xp, quirks: &self.quirks, tuning: &self.tuning },
+                    // The rest of the plan can harden too — a None here
+                    // means terrain changed since A* ran: re-plan.
+                    match crate::stats::step_ticks(
+                        self.ctx(),
                         &self.world.grid,
                         &self.world.bots[&id].data,
                         path[0],
-                    )
-                    .expect("path tiles are passable");
-                    let bot = self.world.bots.get_mut(&id).expect("bot exists");
-                    bot.data.action = Some(Action::Move { path, ticks_left: next_cost, goals });
+                    ) {
+                        Some(next_cost) => {
+                            let bot = self.world.bots.get_mut(&id).expect("bot exists");
+                            bot.data.action =
+                                Some(Action::Move { path, ticks_left: next_cost, goals });
+                        }
+                        None => self.replan_move(id, goals),
+                    }
                 }
             }
             Action::Mine { node, ticks_left } => {
@@ -341,12 +355,7 @@ impl Sim {
                 }
                 // Field-precise ctx literal: `bot` still borrows the world
                 // mutably here, and `Sim::ctx()` would borrow all of self.
-                let ctx = crate::stats::StatCtx {
-                    stats: &self.stats,
-                    xp: &self.xp,
-                    quirks: &self.quirks,
-                    tuning: &self.tuning,
-                };
+                let ctx = crate::stats::StatCtx { stats: &self.stats, xp: &self.xp, quirks: &self.quirks, tuning: &self.tuning };
                 let cap = ctx.cargo_cap_for(&bot.data);
                 if bot.data.cargo_total() >= cap {
                     self.finish_action(id, Err("mine: cargo full".into()));
@@ -384,12 +393,7 @@ impl Sim {
                 // Structures are attackable (docs/03, M4): direct chassis
                 // damage, no signals — a destroyed structure just falls
                 // (its buffered contents are lost with it for now).
-                let damage = crate::stats::StatCtx {
-                    stats: &self.stats,
-                    xp: &self.xp,
-                    quirks: &self.quirks,
-                    tuning: &self.tuning,
-                }
+                let damage = self.ctx()
                 .attack_damage_for(&self.world.bots[&id].data, self.tuning.attack_damage);
                 if let Some(st) = self.world.structures.get_mut(&target) {
                     if pos.chebyshev(st.pos) > 1 {
@@ -445,12 +449,7 @@ impl Sim {
                 let pos = bot.data.pos;
                 // Build rate through the pipeline (Building +10%/level),
                 // in deci-progress per tick (Q56 fine-grained units).
-                let rate = crate::stats::StatCtx {
-                    stats: &self.stats,
-                    xp: &self.xp,
-                    quirks: &self.quirks,
-                    tuning: &self.tuning,
-                }
+                let rate = crate::stats::StatCtx { stats: &self.stats, xp: &self.xp, quirks: &self.quirks, tuning: &self.tuning }
                 .build_rate_for(&bot.data);
                 let Some(bp) = self.world.blueprints.get_mut(&blueprint) else {
                     // Someone else finished it: that's success.
@@ -468,47 +467,58 @@ impl Sim {
                 self.world.pending_xp.push((id, XpTrack::Building, (rate / 10).max(1) as u64));
                 if done {
                     self.world.blueprints.remove(&blueprint);
-                    match kind {
-                        BlueprintKind::Bridge => self.world.set_tile(site, TileKind::Bridge),
-                        // Cleared rubble yields Stone to the BUILDER's
-                        // faction (the blueprint records none) — salvage
-                        // pays whoever swings the shovel.
-                        BlueprintKind::Clear => {
-                            self.world.set_tile(site, TileKind::Plains);
-                            let faction = self.world.bots[&id].data.faction;
-                            self.world.stock_add(
-                                faction,
-                                crate::resources::Resource::Stone,
-                                self.tuning.clear_yield_stone,
-                            );
-                        }
-                        // A bot standing on the site is NOT trapped: only
-                        // entering a Barricade is blocked, leaving isn't.
-                        BlueprintKind::Barricade => {
-                            self.world.set_tile(site, TileKind::Barricade)
-                        }
-                        // Un-build to what the works stood on: planks over
-                        // water, a wall over plains. (Site rules pin the
-                        // tile at placement; re-check for the demolished
-                        // kind, not the placement snapshot — terrain may
-                        // have changed under a slow build.)
-                        BlueprintKind::Demolish => {
-                            match self.world.grid.get(site) {
-                                Some(TileKind::Bridge) => {
-                                    self.world.set_tile(site, TileKind::Water)
+                    // The ground may have changed under a slow build
+                    // (corruption spread, another crew's works): EVERY
+                    // kind re-checks its site rule at completion, and
+                    // void work stamps nothing — a 10-tick Road build
+                    // must not erase creep 4× faster than the 40-tick
+                    // Cleanse (review 2026-07-16). The labor still ends
+                    // Ok: the crew finished the job it was given.
+                    if kind.site_ok(self.world.grid.get(site)) {
+                        match kind {
+                            BlueprintKind::Bridge => {
+                                self.world.set_tile(site, TileKind::Bridge)
+                            }
+                            // Cleared rubble yields Stone to the BUILDER's
+                            // faction (the blueprint records none) —
+                            // salvage pays whoever swings the shovel.
+                            BlueprintKind::Clear => {
+                                self.world.set_tile(site, TileKind::Plains);
+                                let faction = self.world.bots[&id].data.faction;
+                                self.world.stock_add(
+                                    faction,
+                                    crate::resources::Resource::Stone,
+                                    self.tuning.clear_yield_stone,
+                                );
+                            }
+                            // A bot standing on the site is NOT trapped:
+                            // only entering a Barricade is blocked,
+                            // leaving isn't.
+                            BlueprintKind::Barricade => {
+                                self.world.set_tile(site, TileKind::Barricade)
+                            }
+                            // Un-build to what the works stand on: planks
+                            // over water, a wall over plains.
+                            BlueprintKind::Demolish => {
+                                match self.world.grid.get(site) {
+                                    Some(TileKind::Bridge) => {
+                                        self.world.set_tile(site, TileKind::Water)
+                                    }
+                                    Some(TileKind::Barricade) => {
+                                        self.world.set_tile(site, TileKind::Plains)
+                                    }
+                                    _ => unreachable!("site_ok pinned the kind"),
                                 }
-                                Some(TileKind::Barricade) => {
-                                    self.world.set_tile(site, TileKind::Plains)
-                                }
-                                _ => {} // demolished out from under us
+                            }
+                            // Cleanse yields PLAINS — the pre-creep kind
+                            // is not preserved (flagged in TASKS.md).
+                            BlueprintKind::Cleanse => {
+                                self.world.set_tile(site, TileKind::Plains)
+                            }
+                            BlueprintKind::Road => {
+                                self.world.set_tile(site, TileKind::Road)
                             }
                         }
-                        // Cleanse yields PLAINS — the pre-creep kind is
-                        // not preserved (flagged in TASKS.md).
-                        BlueprintKind::Cleanse => {
-                            self.world.set_tile(site, TileKind::Plains)
-                        }
-                        BlueprintKind::Road => self.world.set_tile(site, TileKind::Road),
                     }
                     self.finish_action(id, Ok(Value::Unit));
                 } else {
@@ -665,12 +675,7 @@ impl Sim {
     /// now? (Tile-level visibility for explore()'s fogged-tile pick and
     /// the fog renderer; entities go through `world.perception`.)
     pub fn tile_visible(&self, faction: u8, tile: TilePos) -> bool {
-        let ctx = crate::stats::StatCtx {
-                    stats: &self.stats,
-                    xp: &self.xp,
-                    quirks: &self.quirks,
-                    tuning: &self.tuning,
-                };
+        let ctx = self.ctx();
         for bot in self.world.bots.values() {
             if bot.data.faction != faction || bot.data.dying {
                 continue;
@@ -712,12 +717,7 @@ impl Sim {
     /// Enter the scouting stance (M7, docs/05): root in place; the seeing
     /// circle expands one ring per interval out to the HEARING radius.
     pub(crate) fn start_search(&mut self, id: BotId) {
-        let ctx = crate::stats::StatCtx {
-                    stats: &self.stats,
-                    xp: &self.xp,
-                    quirks: &self.quirks,
-                    tuning: &self.tuning,
-                };
+        let ctx = self.ctx();
         let data = &self.world.bots[&id].data;
         let seeing = ctx.sensors_for(data);
         let reach = seeing * self.tuning.sense_factor_pct / 100;
@@ -791,7 +791,8 @@ impl Sim {
         let mut candidates: Vec<TilePos> = [(0, -1), (1, 0), (0, 1), (-1, 0)]
             .iter()
             .map(|(dx, dy)| TilePos::new(pos.x + dx, pos.y + dy))
-            .filter(|&p| self.world.grid.get(p).is_some_and(|t| t.move_ticks().is_some()))
+            // Spawnable, not merely passable: spills don't fly up cliffs.
+            .filter(|&p| self.world.grid.get(p).is_some_and(|t| t.spawnable()))
             .collect();
         candidates.push(pos);
         // Spill scatter draws from rng.combat (deaths are what spill cargo);
@@ -879,6 +880,15 @@ impl Sim {
                 return;
             }
             let entered = recall.path[0];
+            // Terraforming can harden ground under the walk (M8): a
+            // blocked edge is not a collision — hold a tick, re-plan.
+            let from = self.world.bots[&id].data.pos;
+            if !edge_allowed(&self.world.grid, &self.world.overlays, from, entered) {
+                recall.ticks_left = 1;
+                self.world.bots.get_mut(&id).expect("bot exists").data.recall = Some(recall);
+                self.replan_after_bump(id);
+                return;
+            }
             // Same solidity rule as the program walk: a structure placed
             // mid-route blocks the step (the post-bump replan threads
             // around it).
@@ -890,7 +900,6 @@ impl Sim {
                 return;
             }
             recall.path.remove(0);
-            let from = self.world.bots[&id].data.pos;
             self.world.move_bot(id, entered);
             self.credit_travel(id); // Mileage counts engine walks too
             // Ice slides carry engine walks too (M8, Q37) — but the
@@ -902,7 +911,7 @@ impl Sim {
                     self.bump_both(id, target, false);
                 } else {
                     recall.ticks_left = crate::stats::step_ticks(
-                        crate::stats::StatCtx { stats: &self.stats, xp: &self.xp, quirks: &self.quirks, tuning: &self.tuning },
+                        self.ctx(),
                         &self.world.grid,
                         &self.world.bots[&id].data,
                         target,
@@ -915,13 +924,15 @@ impl Sim {
                 }
             }
             if let Some(next) = recall.path.first() {
+                // A hardened next tile costs None: hold one tick — the
+                // entry re-check above replans on the next advance.
                 recall.ticks_left = crate::stats::step_ticks(
-                    crate::stats::StatCtx { stats: &self.stats, xp: &self.xp, quirks: &self.quirks, tuning: &self.tuning },
+                    self.ctx(),
                     &self.world.grid,
                     &self.world.bots[&id].data,
                     *next,
                 )
-                .expect("recall path tiles are passable");
+                .unwrap_or(1);
             }
             // Stand on the arrival tile for one tick even when the path is
             // done — the walk's last step must be observable (the printer

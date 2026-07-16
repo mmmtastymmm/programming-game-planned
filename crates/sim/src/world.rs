@@ -635,6 +635,38 @@ pub enum BlueprintKind {
     Road,
 }
 
+impl BlueprintKind {
+    /// Stable hash tag (phase-9 snapshot).
+    pub fn as_u8(self) -> u8 {
+        match self {
+            BlueprintKind::Bridge => 0,
+            BlueprintKind::Clear => 1,
+            BlueprintKind::Barricade => 2,
+            BlueprintKind::Demolish => 3,
+            BlueprintKind::Cleanse => 4,
+            BlueprintKind::Road => 5,
+        }
+    }
+
+    /// Which ground this kind works (M8-D) — ONE rule shared by the
+    /// placement command, the completion re-check, and the build bar's
+    /// ghost, so they cannot drift.
+    pub fn site_ok(self, tile: Option<TileKind>) -> bool {
+        match self {
+            BlueprintKind::Bridge => tile == Some(TileKind::Water),
+            BlueprintKind::Clear => tile == Some(TileKind::Rubble),
+            BlueprintKind::Barricade => tile == Some(TileKind::Plains),
+            BlueprintKind::Demolish => {
+                matches!(tile, Some(TileKind::Bridge | TileKind::Barricade))
+            }
+            BlueprintKind::Cleanse => tile == Some(TileKind::Corruption),
+            BlueprintKind::Road => {
+                matches!(tile, Some(TileKind::Plains | TileKind::Rubble))
+            }
+        }
+    }
+}
+
 /// A disabled bot awaiting rescue/salvage (countdown comes later). The
 /// logs and env snapshot ride along — they become the Black Box when the
 /// countdown expires (M10).
@@ -788,10 +820,14 @@ pub struct World {
     /// inventory in docs/07). Advanced only by sim systems, in tick order.
     pub rng: RngStreams,
     /// FNV-1a over the tile grid, cached so the per-tick snapshot hash
-    /// doesn't re-walk the whole map. Terrain mutates rarely (bridge
-    /// builds); EVERY post-construction tile write goes through
-    /// [`World::set_tile`], which refreshes this.
+    /// doesn't re-walk the whole map. EVERY post-construction tile write
+    /// goes through [`World::set_tile`], which marks it dirty; the
+    /// refresh runs once per tick before the phase-9 snapshot (M8 made
+    /// terrain mutate routinely — one recompute per mutation was O(map)
+    /// each). Derived state: excluded from the hash itself.
     pub terrain_hash: u64,
+    /// Set by [`World::set_tile`]; cleared by the per-tick refresh.
+    pub(crate) terrain_dirty: bool,
     next_entity: u64,
     next_bot: u32,
 }
@@ -981,6 +1017,7 @@ impl World {
             occupancy: BTreeMap::new(),
             rng: RngStreams::from_seed(spec.seed),
             terrain_hash: 0,
+            terrain_dirty: false,
             next_entity: 1,
             next_bot: 1,
         };
@@ -1184,7 +1221,7 @@ impl World {
 
     /// FNV-1a over every tile, in row order. O(map) — called once at
     /// construction and after each (rare) terrain mutation, never per tick.
-    fn compute_terrain_hash(&self) -> u64 {
+    pub(crate) fn compute_terrain_hash(&self) -> u64 {
         let mut h = crate::hash::Fnv1a::new();
         for tile in self.grid.tiles() {
             h.write_u8(tile.as_u8());
@@ -1200,7 +1237,10 @@ impl World {
         // A rewritten tile starts fresh: wear belongs to the Scree that
         // was, not whatever stands there now (M8, Q40).
         self.scree_wear.remove(&pos);
-        self.terrain_hash = self.compute_terrain_hash();
+        // Terrain mutates routinely now (M8: scree settles, creep
+        // spreads, works land) — mark dirty; the cached hash refreshes
+        // at most once per tick, right before the phase-9 snapshot.
+        self.terrain_dirty = true;
     }
 
     /// Tiles holding a blocking bot other than `exclude` — the obstacle
@@ -1253,16 +1293,26 @@ impl World {
             .collect()
     }
 
-    /// First free, passable tile at/around `center`, in a fixed
-    /// deterministic order. Used for print/re-color placement.
+    /// First free, SPAWNABLE tile at/around `center`, in a fixed
+    /// deterministic order. Used for print/re-color placement — a print
+    /// may not materialize on High Ground (the Ramp is the only way up,
+    /// docs/05; review 2026-07-16).
     pub fn free_spawn_tile(&self, center: TilePos) -> Option<TilePos> {
         const ORDER: [(i32, i32); 9] =
             [(0, 0), (0, -1), (1, 0), (0, 1), (-1, 0), (1, -1), (1, 1), (-1, 1), (-1, -1)];
         ORDER.iter().map(|(dx, dy)| TilePos::new(center.x + dx, center.y + dy)).find(|&p| {
-            self.grid.get(p).is_some_and(|t| t.move_ticks().is_some())
+            self.grid.get(p).is_some_and(|t| t.spawnable())
                 && !self.structure_at(p)
                 && !self.tile_occupied(p, BotId(u32::MAX))
         })
+    }
+
+    /// The full terraform-site predicate: the kind's ground rule plus
+    /// the structure guard (walling a depot in stone is refused; Bridge
+    /// keeps its water-only rule where structures cannot stand anyway).
+    pub fn blueprint_site_ok(&self, kind: BlueprintKind, pos: TilePos) -> bool {
+        kind.site_ok(self.grid.get(pos))
+            && (kind == BlueprintKind::Bridge || !self.structure_at(pos))
     }
 
     pub fn nearest_blueprint(&self, from: TilePos) -> Option<EntityId> {

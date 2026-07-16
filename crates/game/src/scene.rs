@@ -251,7 +251,7 @@ pub(crate) fn tile_xyz(world: &sim::World, pos: TilePos, y: f32) -> Vec3 {
 /// One entity of the terrain slab layer — despawned wholesale and
 /// rebuilt by [`resync_terrain`] when the map changes (M8).
 #[derive(Component)]
-pub(crate) struct TerrainTile;
+pub(crate) struct TerrainTile(i32, i32);
 
 /// Spawn the full terrain slab layer (base slabs + edge/corner overlay
 /// art). Called at startup and again on every terrain change.
@@ -269,343 +269,381 @@ pub(crate) fn spawn_terrain(commands: &mut Commands, palette: &Palette, world: &
     // the sim's cached terrain hash moves.
     for y in 0..world.grid.height {
         for x in 0..world.grid.width {
-            let pos = TilePos::new(x, y);
-            let kind = world.grid.get(pos).expect("in bounds");
-            let mask_of = |same: fn(TileKind) -> bool| -> usize {
-                let mut mask = 0usize;
-                for (bit, (dx, dy)) in
-                    [(0, -1), (1, 0), (0, 1), (-1, 0)].into_iter().enumerate()
-                {
-                    if world.grid.get(TilePos::new(x + dx, y + dy)).is_none_or(same) {
-                        mask |= 1 << bit;
-                    }
-                }
-                mask
-            };
-            // Raw-resource grounds all autotile against "not myself"; one
-            // fn-pointer table keeps the per-kind predicates non-capturing
-            // (mask_of takes `fn`, not a closure).
-            let same_resource: Option<fn(TileKind) -> bool> = match kind {
-                TileKind::Sand => Some(|t| matches!(t, TileKind::Sand)),
-                TileKind::StoneOutcrop => Some(|t| matches!(t, TileKind::StoneOutcrop)),
-                TileKind::Grove => Some(|t| matches!(t, TileKind::Grove)),
-                TileKind::CoalSeam => Some(|t| matches!(t, TileKind::CoalSeam)),
-                TileKind::IronVein => Some(|t| matches!(t, TileKind::IronVein)),
-                TileKind::CopperVein => Some(|t| matches!(t, TileKind::CopperVein)),
-                TileKind::TinVein => Some(|t| matches!(t, TileKind::TinVein)),
-                TileKind::SilverVein => Some(|t| matches!(t, TileKind::SilverVein)),
-                TileKind::GoldVein => Some(|t| matches!(t, TileKind::GoldVein)),
-                _ => None,
-            };
-            let (mesh, mat, y_off) = match kind {
-                // Sand fringes where the meadow meets the river — Bridge
-                // counts as water (same beach before and after the planks
-                // land, keeping the no-resync invariant). Mountains count
-                // as grass; the block would hide a fringe anyway.
-                TileKind::Plains => {
-                    let mask =
-                        mask_of(|t| !matches!(t, TileKind::Water | TileKind::Bridge));
-                    (palette.tex_slab.clone(), palette.grass_tex_mats[mask].clone(), 0.0)
-                }
-                // Mountains rise a full block: crossing costs double, and
-                // the silhouette should say so. The summit grows a cliff
-                // rim wherever the range ends.
-                // M8 moved the full block from Rubble to Mountain; Rubble
-                // is LOW DEBRIS now — flat broken rock you drive over
-                // (and what worn Scree collapses into).
-                TileKind::Mountain => {
-                    let mask = mask_of(|t| matches!(t, TileKind::Mountain));
-                    (
-                        palette.mountain_block.clone(),
-                        palette.mountain_tex_mats[mask].clone(),
-                        MOUNTAIN_TOP - 0.10,
-                    )
-                }
-                TileKind::Rubble => {
-                    (palette.tex_slab.clone(), palette.mountain_tex_mats[15].clone(), 0.0)
-                }
-                // Scree sits slightly sunken; the stone-strewn overlay
-                // below distinguishes it from settled Rubble.
-                TileKind::Scree => {
-                    (palette.tex_slab.clone(), palette.mountain_tex_mats[15].clone(), -0.02)
-                }
-                // The mesa doorstep: tan plateau art at ground level reads
-                // as the cut in the cliff (a true sloped mesh can come
-                // with real art passes).
-                TileKind::Ramp => {
-                    (palette.tex_slab.clone(), palette.highground_tex_mats[15].clone(), 0.0)
-                }
-                // A frozen sheet: open-water art, flat and grounded —
-                // distinct from the sunken, banked river.
-                TileKind::Ice => {
-                    (palette.tex_slab.clone(), palette.water_tex_mats[15].clone(), 0.0)
-                }
-                // Shallows: water art raised toward the banks.
-                TileKind::Ford => {
-                    let mask = mask_of(|t| {
-                        matches!(t, TileKind::Water | TileKind::Bridge | TileKind::Ford)
-                    });
-                    (palette.tex_slab.clone(), palette.water_tex_mats[mask].clone(), -0.03)
-                }
-                // Terraformed artery: the circuit "tech" tile IS the road.
-                TileKind::Road => {
-                    (palette.tex_slab.clone(), palette.ground_tex_mat.clone(), 0.0)
-                }
-                // Built mass at wall height, teched-over.
-                TileKind::Barricade => {
-                    (
-                        palette.mountain_block.clone(),
-                        palette.ground_tex_mat.clone(),
-                        MOUNTAIN_TOP - 0.10,
-                    )
-                }
-                // Dunes wear Sand's art (autotiling against both).
-                TileKind::Dunes => {
-                    let mask = mask_of(|t| matches!(t, TileKind::Dunes | TileKind::Sand));
-                    (
-                        palette.tex_slab.clone(),
-                        palette.resource_tex_mats[&TileKind::Sand.as_u8()][mask].clone(),
-                        0.0,
-                    )
-                }
-                // Banks on the sides that border land. Bridges count as
-                // water: the river visibly flows under the planks.
-                TileKind::Water => {
-                    let mask =
-                        mask_of(|t| matches!(t, TileKind::Water | TileKind::Bridge));
-                    (palette.tex_slab.clone(), palette.water_tex_mats[mask].clone(), -0.05)
-                }
-                // Bridges only exist after terraforming; at startup none do
-                // (sync_view overlays planks when they appear).
-                TileKind::Bridge => {
-                    (palette.tex_slab.clone(), palette.ground_tex_mat.clone(), 0.0)
-                }
-                // Each remaining terrain owns its boundary art: a dried
-                // crust, a creep frontier, a broken-rock lip, a frost band
-                // — all against anything that isn't itself.
-                TileKind::Mud => {
-                    let mask = mask_of(|t| matches!(t, TileKind::Mud));
-                    (palette.tex_slab.clone(), palette.mud_tex_mats[mask].clone(), -0.02)
-                }
-                TileKind::Corruption => {
-                    let mask = mask_of(|t| matches!(t, TileKind::Corruption));
-                    (palette.tex_slab.clone(), palette.corruption_tex_mats[mask].clone(), 0.0)
-                }
-                TileKind::OreVein => {
-                    let mask = mask_of(|t| matches!(t, TileKind::OreVein));
-                    (palette.tex_slab.clone(), palette.ore_tex_mats[mask].clone(), 0.0)
-                }
-                TileKind::CrystalField => {
-                    let mask = mask_of(|t| matches!(t, TileKind::CrystalField));
-                    (palette.tex_slab.clone(), palette.crystal_tex_mats[mask].clone(), 0.0)
-                }
-                TileKind::Snow => {
-                    let mask = mask_of(|t| matches!(t, TileKind::Snow));
-                    (palette.tex_slab.clone(), palette.snow_tex_mats[mask].clone(), 0.0)
-                }
-                // High ground is a mesa: same block as the mountain, tan
-                // plateau top, cliff rim wherever the mesa ends.
-                TileKind::HighGround => {
-                    let mask = mask_of(|t| matches!(t, TileKind::HighGround));
-                    (
-                        palette.mountain_block.clone(),
-                        palette.highground_tex_mats[mask].clone(),
-                        MOUNTAIN_TOP - 0.10,
-                    )
-                }
-                // Vents are point features: one crater, no autotiling.
-                TileKind::Vent => {
-                    (palette.tex_slab.clone(), palette.vent_tex_mat.clone(), 0.0)
-                }
-                TileKind::Sand
-                | TileKind::StoneOutcrop
-                | TileKind::Grove
-                | TileKind::CoalSeam
-                | TileKind::IronVein
-                | TileKind::CopperVein
-                | TileKind::TinVein
-                | TileKind::SilverVein
-                | TileKind::GoldVein => {
-                    let mask = mask_of(same_resource.expect("resource kind has predicate"));
-                    (
-                        palette.tex_slab.clone(),
-                        palette.resource_tex_mats[&kind.as_u8()][mask].clone(),
-                        0.0,
-                    )
-                }
-            };
-            commands.spawn((
-                TerrainTile,
-                Mesh3d(mesh),
-                MeshMaterial3d(mat),
-                Transform::from_translation(tile_xyz(world, pos, y_off - 0.05)),
-            ));
-            // Inner corners: both flanking neighbors match but the
-            // diagonal doesn't — a nub caps that corner (bit unset = nub;
-            // 15 = no nubs). Same bit walk as the edge masks: NW/NE/SE/SW.
-            let corner_mask_of = |same: fn(TileKind) -> bool| -> usize {
-                const CORNERS: [((i32, i32), (i32, i32), (i32, i32)); 4] = [
-                    ((0, -1), (-1, 0), (-1, -1)), // NW: flanks N+W
-                    ((0, -1), (1, 0), (1, -1)),   // NE
-                    ((0, 1), (1, 0), (1, 1)),     // SE
-                    ((0, 1), (-1, 0), (-1, 1)),   // SW
-                ];
-                let is_same = |(dx, dy): (i32, i32)| {
-                    world.grid.get(TilePos::new(x + dx, y + dy)).is_none_or(same)
-                };
-                let mut mask = 15usize;
-                for (bit, (a, b, diag)) in CORNERS.into_iter().enumerate() {
-                    if is_same(a) && is_same(b) && !is_same(diag) {
-                        mask &= !(1 << bit);
-                    }
-                }
-                mask
-            };
-            // Overlay quads float just above the tile surface; stacked
-            // overlays on one tile get distinct epsilons to avoid z-fights.
-            let overlay = |commands: &mut Commands,
-                               mats: &Vec<Handle<StandardMaterial>>,
-                               mask: usize,
-                               eps: f32| {
-                if mask != 15 {
-                    let top = terrain_top(world, pos);
-                    commands.spawn((
-                TerrainTile,
-                        Mesh3d(palette.tex_slab.clone()),
-                        MeshMaterial3d(mats[mask].clone()),
-                        Transform::from_translation(tile_xyz(world, pos, top - 0.05 + eps)),
-                    ));
-                }
-            };
-            match kind {
-                TileKind::Plains => {
-                    // Scree at a cliff's base (mountain or mesa): contact
-                    // shadow + stones on the looming sides, plus corner
-                    // clusters.
-                    let not_cliff = |t: TileKind| {
-                        !matches!(
-                            t,
-                            TileKind::Mountain | TileKind::HighGround | TileKind::Barricade
-                        )
-                    };
-                    overlay(commands, &palette.scree_mats, mask_of(not_cliff), 0.012);
-                    overlay(
-                        commands,
-                        &palette.scree_corner_mats,
-                        corner_mask_of(not_cliff),
-                        0.015,
-                    );
-                    overlay(
-                        commands,
-                        &palette.grass_corner_mats,
-                        corner_mask_of(|t| !matches!(t, TileKind::Water | TileKind::Bridge)),
-                        0.0135,
-                    );
-                }
-                TileKind::Water => overlay(
-                    commands,
-                    &palette.water_corner_mats,
-                    corner_mask_of(|t| matches!(t, TileKind::Water | TileKind::Bridge)),
-                    0.012,
-                ),
-                TileKind::Mountain => overlay(
-                    commands,
-                    &palette.mountain_corner_mats,
-                    corner_mask_of(|t| matches!(t, TileKind::Mountain)),
-                    0.012,
-                ),
-                // Scree reads as stone-strewn ground: the cliff-base
-                // stones drawn unconditionally (mask 0 = all sides).
-                TileKind::Scree => overlay(commands, &palette.scree_mats, 0, 0.012),
-                TileKind::Mud => overlay(
-                    commands,
-                    &palette.mud_corner_mats,
-                    corner_mask_of(|t| matches!(t, TileKind::Mud)),
-                    0.012,
-                ),
-                TileKind::Corruption => overlay(
-                    commands,
-                    &palette.corruption_corner_mats,
-                    corner_mask_of(|t| matches!(t, TileKind::Corruption)),
-                    0.012,
-                ),
-                TileKind::OreVein => overlay(
-                    commands,
-                    &palette.ore_corner_mats,
-                    corner_mask_of(|t| matches!(t, TileKind::OreVein)),
-                    0.012,
-                ),
-                TileKind::CrystalField => overlay(
-                    commands,
-                    &palette.crystal_corner_mats,
-                    corner_mask_of(|t| matches!(t, TileKind::CrystalField)),
-                    0.012,
-                ),
-                TileKind::Snow => overlay(
-                    commands,
-                    &palette.snow_corner_mats,
-                    corner_mask_of(|t| matches!(t, TileKind::Snow)),
-                    0.012,
-                ),
-                TileKind::HighGround => overlay(
-                    commands,
-                    &palette.highground_corner_mats,
-                    corner_mask_of(|t| matches!(t, TileKind::HighGround)),
-                    0.012,
-                ),
-                TileKind::Sand
-                | TileKind::StoneOutcrop
-                | TileKind::Grove
-                | TileKind::CoalSeam
-                | TileKind::IronVein
-                | TileKind::CopperVein
-                | TileKind::TinVein
-                | TileKind::SilverVein
-                | TileKind::GoldVein => overlay(
-                    commands,
-                    &palette.resource_corner_mats[&kind.as_u8()],
-                    corner_mask_of(same_resource.expect("resource kind has predicate")),
-                    0.012,
-                ),
-                TileKind::Bridge
-                | TileKind::Vent
-                | TileKind::Rubble
-                | TileKind::Ramp
-                | TileKind::Dunes
-                | TileKind::Ice
-                | TileKind::Ford
-                | TileKind::Road
-                | TileKind::Barricade => {}
-            }
+            spawn_tile(commands, palette, world, x, y);
         }
     }
 }
 
-/// Terrain mutates now (M8): scree collapses to rubble, corruption
-/// spreads, terraform works land. Rebuild the whole slab layer when the
-/// sim's cached terrain hash moves — rare, and autotile fringes depend
-/// on neighbors, so partial updates would redraw wrong edges anyway.
+/// Spawn one tile's slab + edge/corner overlay art. The autotile masks
+/// read the four neighbors (and corners the diagonals), so a rebuild of
+/// tile T must also rebuild T's 3×3 neighborhood.
+fn spawn_tile(commands: &mut Commands, palette: &Palette, world: &sim::World, x: i32, y: i32) {
+    let pos = TilePos::new(x, y);
+    let kind = world.grid.get(pos).expect("in bounds");
+    let mask_of = |same: fn(TileKind) -> bool| -> usize {
+        let mut mask = 0usize;
+        for (bit, (dx, dy)) in
+            [(0, -1), (1, 0), (0, 1), (-1, 0)].into_iter().enumerate()
+        {
+            if world.grid.get(TilePos::new(x + dx, y + dy)).is_none_or(same) {
+                mask |= 1 << bit;
+            }
+        }
+        mask
+    };
+    // Raw-resource grounds all autotile against "not myself"; one
+    // fn-pointer table keeps the per-kind predicates non-capturing
+    // (mask_of takes `fn`, not a closure).
+    let same_resource: Option<fn(TileKind) -> bool> = match kind {
+        TileKind::Sand => Some(|t| matches!(t, TileKind::Sand)),
+        TileKind::StoneOutcrop => Some(|t| matches!(t, TileKind::StoneOutcrop)),
+        TileKind::Grove => Some(|t| matches!(t, TileKind::Grove)),
+        TileKind::CoalSeam => Some(|t| matches!(t, TileKind::CoalSeam)),
+        TileKind::IronVein => Some(|t| matches!(t, TileKind::IronVein)),
+        TileKind::CopperVein => Some(|t| matches!(t, TileKind::CopperVein)),
+        TileKind::TinVein => Some(|t| matches!(t, TileKind::TinVein)),
+        TileKind::SilverVein => Some(|t| matches!(t, TileKind::SilverVein)),
+        TileKind::GoldVein => Some(|t| matches!(t, TileKind::GoldVein)),
+        _ => None,
+    };
+    let (mesh, mat, y_off) = match kind {
+        // Sand fringes where the meadow meets the river — Bridge
+        // counts as water (same beach before and after the planks
+        // land, keeping the no-resync invariant). Mountains count
+        // as grass; the block would hide a fringe anyway.
+        TileKind::Plains => {
+            let mask =
+                mask_of(|t| !matches!(t, TileKind::Water | TileKind::Bridge));
+            (palette.tex_slab.clone(), palette.grass_tex_mats[mask].clone(), 0.0)
+        }
+        // Mountains rise a full block: crossing costs double, and
+        // the silhouette should say so. The summit grows a cliff
+        // rim wherever the range ends.
+        // M8 moved the full block from Rubble to Mountain; Rubble
+        // is LOW DEBRIS now — flat broken rock you drive over
+        // (and what worn Scree collapses into).
+        TileKind::Mountain => {
+            let mask = mask_of(|t| matches!(t, TileKind::Mountain));
+            (
+                palette.mountain_block.clone(),
+                palette.mountain_tex_mats[mask].clone(),
+                MOUNTAIN_TOP - 0.10,
+            )
+        }
+        TileKind::Rubble => {
+            (palette.tex_slab.clone(), palette.mountain_tex_mats[15].clone(), 0.0)
+        }
+        // Scree sits slightly sunken; the stone-strewn overlay
+        // below distinguishes it from settled Rubble.
+        TileKind::Scree => {
+            (palette.tex_slab.clone(), palette.mountain_tex_mats[15].clone(), -0.02)
+        }
+        // The mesa doorstep: tan plateau art at ground level reads
+        // as the cut in the cliff (a true sloped mesh can come
+        // with real art passes).
+        TileKind::Ramp => {
+            (palette.tex_slab.clone(), palette.highground_tex_mats[15].clone(), 0.0)
+        }
+        // A frozen sheet: open-water art, flat and grounded —
+        // distinct from the sunken, banked river.
+        TileKind::Ice => {
+            (palette.tex_slab.clone(), palette.water_tex_mats[15].clone(), 0.0)
+        }
+        // Shallows: water art raised toward the banks.
+        TileKind::Ford => {
+            let mask = mask_of(|t| {
+                matches!(t, TileKind::Water | TileKind::Bridge | TileKind::Ford)
+            });
+            (palette.tex_slab.clone(), palette.water_tex_mats[mask].clone(), -0.03)
+        }
+        // Terraformed artery: the circuit "tech" tile IS the road.
+        TileKind::Road => {
+            (palette.tex_slab.clone(), palette.ground_tex_mat.clone(), 0.0)
+        }
+        // Built mass at wall height, teched-over.
+        TileKind::Barricade => {
+            (
+                palette.mountain_block.clone(),
+                palette.ground_tex_mat.clone(),
+                MOUNTAIN_TOP - 0.10,
+            )
+        }
+        // Dunes wear Sand's art (autotiling against both).
+        TileKind::Dunes => {
+            let mask = mask_of(|t| matches!(t, TileKind::Dunes | TileKind::Sand));
+            (
+                palette.tex_slab.clone(),
+                palette.resource_tex_mats[&TileKind::Sand.as_u8()][mask].clone(),
+                0.0,
+            )
+        }
+        // Banks on the sides that border land. Bridges count as
+        // water: the river visibly flows under the planks.
+        TileKind::Water => {
+            let mask =
+                mask_of(|t| matches!(t, TileKind::Water | TileKind::Bridge));
+            (palette.tex_slab.clone(), palette.water_tex_mats[mask].clone(), -0.05)
+        }
+        // Bridges only exist after terraforming; at startup none do
+        // (sync_view overlays planks when they appear).
+        TileKind::Bridge => {
+            (palette.tex_slab.clone(), palette.ground_tex_mat.clone(), 0.0)
+        }
+        // Each remaining terrain owns its boundary art: a dried
+        // crust, a creep frontier, a broken-rock lip, a frost band
+        // — all against anything that isn't itself.
+        TileKind::Mud => {
+            let mask = mask_of(|t| matches!(t, TileKind::Mud));
+            (palette.tex_slab.clone(), palette.mud_tex_mats[mask].clone(), -0.02)
+        }
+        TileKind::Corruption => {
+            let mask = mask_of(|t| matches!(t, TileKind::Corruption));
+            (palette.tex_slab.clone(), palette.corruption_tex_mats[mask].clone(), 0.0)
+        }
+        TileKind::OreVein => {
+            let mask = mask_of(|t| matches!(t, TileKind::OreVein));
+            (palette.tex_slab.clone(), palette.ore_tex_mats[mask].clone(), 0.0)
+        }
+        TileKind::CrystalField => {
+            let mask = mask_of(|t| matches!(t, TileKind::CrystalField));
+            (palette.tex_slab.clone(), palette.crystal_tex_mats[mask].clone(), 0.0)
+        }
+        TileKind::Snow => {
+            let mask = mask_of(|t| matches!(t, TileKind::Snow));
+            (palette.tex_slab.clone(), palette.snow_tex_mats[mask].clone(), 0.0)
+        }
+        // High ground is a mesa: same block as the mountain, tan
+        // plateau top, cliff rim wherever the mesa ends.
+        TileKind::HighGround => {
+            let mask = mask_of(|t| matches!(t, TileKind::HighGround));
+            (
+                palette.mountain_block.clone(),
+                palette.highground_tex_mats[mask].clone(),
+                MOUNTAIN_TOP - 0.10,
+            )
+        }
+        // Vents are point features: one crater, no autotiling.
+        TileKind::Vent => {
+            (palette.tex_slab.clone(), palette.vent_tex_mat.clone(), 0.0)
+        }
+        TileKind::Sand
+        | TileKind::StoneOutcrop
+        | TileKind::Grove
+        | TileKind::CoalSeam
+        | TileKind::IronVein
+        | TileKind::CopperVein
+        | TileKind::TinVein
+        | TileKind::SilverVein
+        | TileKind::GoldVein => {
+            let mask = mask_of(same_resource.expect("resource kind has predicate"));
+            (
+                palette.tex_slab.clone(),
+                palette.resource_tex_mats[&kind.as_u8()][mask].clone(),
+                0.0,
+            )
+        }
+    };
+    commands.spawn((
+        TerrainTile(x, y),
+        Mesh3d(mesh),
+        MeshMaterial3d(mat),
+        Transform::from_translation(tile_xyz(world, pos, y_off - 0.05)),
+    ));
+    // Inner corners: both flanking neighbors match but the
+    // diagonal doesn't — a nub caps that corner (bit unset = nub;
+    // 15 = no nubs). Same bit walk as the edge masks: NW/NE/SE/SW.
+    let corner_mask_of = |same: fn(TileKind) -> bool| -> usize {
+        const CORNERS: [((i32, i32), (i32, i32), (i32, i32)); 4] = [
+            ((0, -1), (-1, 0), (-1, -1)), // NW: flanks N+W
+            ((0, -1), (1, 0), (1, -1)),   // NE
+            ((0, 1), (1, 0), (1, 1)),     // SE
+            ((0, 1), (-1, 0), (-1, 1)),   // SW
+        ];
+        let is_same = |(dx, dy): (i32, i32)| {
+            world.grid.get(TilePos::new(x + dx, y + dy)).is_none_or(same)
+        };
+        let mut mask = 15usize;
+        for (bit, (a, b, diag)) in CORNERS.into_iter().enumerate() {
+            if is_same(a) && is_same(b) && !is_same(diag) {
+                mask &= !(1 << bit);
+            }
+        }
+        mask
+    };
+    // Overlay quads float just above the tile surface; stacked
+    // overlays on one tile get distinct epsilons to avoid z-fights.
+    let overlay = |commands: &mut Commands,
+                       mats: &Vec<Handle<StandardMaterial>>,
+                       mask: usize,
+                       eps: f32| {
+        if mask != 15 {
+            let top = terrain_top(world, pos);
+            commands.spawn((
+        TerrainTile(x, y),
+                Mesh3d(palette.tex_slab.clone()),
+                MeshMaterial3d(mats[mask].clone()),
+                Transform::from_translation(tile_xyz(world, pos, top - 0.05 + eps)),
+            ));
+        }
+    };
+    match kind {
+        TileKind::Plains => {
+            // Scree at a cliff's base (mountain or mesa): contact
+            // shadow + stones on the looming sides, plus corner
+            // clusters.
+            let not_cliff = |t: TileKind| {
+                !matches!(
+                    t,
+                    TileKind::Mountain | TileKind::HighGround | TileKind::Barricade
+                )
+            };
+            overlay(commands, &palette.scree_mats, mask_of(not_cliff), 0.012);
+            overlay(
+                commands,
+                &palette.scree_corner_mats,
+                corner_mask_of(not_cliff),
+                0.015,
+            );
+            overlay(
+                commands,
+                &palette.grass_corner_mats,
+                corner_mask_of(|t| !matches!(t, TileKind::Water | TileKind::Bridge)),
+                0.0135,
+            );
+        }
+        TileKind::Water => overlay(
+            commands,
+            &palette.water_corner_mats,
+            corner_mask_of(|t| matches!(t, TileKind::Water | TileKind::Bridge)),
+            0.012,
+        ),
+        TileKind::Mountain => overlay(
+            commands,
+            &palette.mountain_corner_mats,
+            corner_mask_of(|t| matches!(t, TileKind::Mountain)),
+            0.012,
+        ),
+        // Scree reads as stone-strewn ground: the cliff-base
+        // stones drawn unconditionally (mask 0 = all sides).
+        TileKind::Scree => overlay(commands, &palette.scree_mats, 0, 0.012),
+        TileKind::Mud => overlay(
+            commands,
+            &palette.mud_corner_mats,
+            corner_mask_of(|t| matches!(t, TileKind::Mud)),
+            0.012,
+        ),
+        TileKind::Corruption => overlay(
+            commands,
+            &palette.corruption_corner_mats,
+            corner_mask_of(|t| matches!(t, TileKind::Corruption)),
+            0.012,
+        ),
+        TileKind::OreVein => overlay(
+            commands,
+            &palette.ore_corner_mats,
+            corner_mask_of(|t| matches!(t, TileKind::OreVein)),
+            0.012,
+        ),
+        TileKind::CrystalField => overlay(
+            commands,
+            &palette.crystal_corner_mats,
+            corner_mask_of(|t| matches!(t, TileKind::CrystalField)),
+            0.012,
+        ),
+        TileKind::Snow => overlay(
+            commands,
+            &palette.snow_corner_mats,
+            corner_mask_of(|t| matches!(t, TileKind::Snow)),
+            0.012,
+        ),
+        TileKind::HighGround => overlay(
+            commands,
+            &palette.highground_corner_mats,
+            corner_mask_of(|t| matches!(t, TileKind::HighGround)),
+            0.012,
+        ),
+        TileKind::Sand
+        | TileKind::StoneOutcrop
+        | TileKind::Grove
+        | TileKind::CoalSeam
+        | TileKind::IronVein
+        | TileKind::CopperVein
+        | TileKind::TinVein
+        | TileKind::SilverVein
+        | TileKind::GoldVein => overlay(
+            commands,
+            &palette.resource_corner_mats[&kind.as_u8()],
+            corner_mask_of(same_resource.expect("resource kind has predicate")),
+            0.012,
+        ),
+        TileKind::Bridge
+        | TileKind::Vent
+        | TileKind::Rubble
+        | TileKind::Ramp
+        | TileKind::Dunes
+        | TileKind::Ice
+        | TileKind::Ford
+        | TileKind::Road
+        | TileKind::Barricade => {}
+    }
+}
+
+/// Terrain mutates routinely now (M8): scree collapses, corruption
+/// spreads, terraform works land. Rebuild ONLY the changed tiles plus
+/// their 3×3 neighborhoods (autotile edge/corner masks read neighbors
+/// and diagonals) — a living Blight Core moves the hash every spread
+/// interval, and a full-layer rebuild per one-tile change re-spawned
+/// thousands of entities each time (review 2026-07-16). The diff runs
+/// against a grid snapshot; the terrain hash is the cheap fast-path.
 pub(crate) fn resync_terrain(
     mut commands: Commands,
     game: NonSend<GameSim>,
     palette: Res<Palette>,
-    mut last: Local<Option<u64>>,
-    tiles: Query<Entity, With<TerrainTile>>,
+    mut last: Local<Option<(u64, sim::map::Grid)>>,
+    tiles: Query<(Entity, &TerrainTile)>,
 ) {
     let world = &game.0.world;
     let hash = world.terrain_hash;
-    if *last == Some(hash) {
+    let Some((last_hash, prev)) = last.as_mut() else {
+        // setup_scene already spawned the layer; just take the baseline.
+        *last = Some((hash, world.grid.clone()));
+        return;
+    };
+    if *last_hash == hash {
         return;
     }
-    let first = last.is_none();
-    *last = Some(hash);
-    if first {
-        return; // setup_scene already spawned the layer
+    *last_hash = hash;
+
+    // Changed tiles, dilated one step (masks look at neighbors).
+    let mut rebuild: std::collections::HashSet<(i32, i32)> = std::collections::HashSet::new();
+    for y in 0..world.grid.height {
+        for x in 0..world.grid.width {
+            let pos = TilePos::new(x, y);
+            if prev.get(pos) == world.grid.get(pos) {
+                continue;
+            }
+            for dy in -1..=1 {
+                for dx in -1..=1 {
+                    let (nx, ny) = (x + dx, y + dy);
+                    if nx >= 0 && ny >= 0 && nx < world.grid.width && ny < world.grid.height {
+                        rebuild.insert((nx, ny));
+                    }
+                }
+            }
+        }
     }
-    for e in &tiles {
-        commands.entity(e).despawn();
+    *prev = world.grid.clone();
+    if rebuild.is_empty() {
+        return; // hash moved without a kind change (can't happen today)
     }
-    spawn_terrain(&mut commands, &palette, world);
+    for (entity, tile) in &tiles {
+        if rebuild.contains(&(tile.0, tile.1)) {
+            commands.entity(entity).despawn();
+        }
+    }
+    for &(x, y) in &rebuild {
+        spawn_tile(&mut commands, &palette, world, x, y);
+    }
 }
 
 pub(crate) fn setup_scene(

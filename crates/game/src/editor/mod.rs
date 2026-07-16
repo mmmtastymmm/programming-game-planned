@@ -781,7 +781,7 @@ pub(crate) fn editor_ui(
             let (_, items) = BUILD_CATEGORIES[editor.build_category.min(BUILD_CATEGORIES.len() - 1)];
             for item in items {
                 let cost = match item.kind {
-                    ToolKind::Building(kind) => crate::tools::blueprint_cost(&game.0.tuning, kind),
+                    ToolKind::Building(kind) => kind.cost_stone(&game.0.tuning),
                     ToolKind::Overlay(Some(_)) => game.0.tuning.overlay_cost_stone,
                     ToolKind::Overlay(None) | ToolKind::Paint(_) | ToolKind::Kill => 0,
                 };

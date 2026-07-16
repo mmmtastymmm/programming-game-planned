@@ -52,7 +52,7 @@ impl Sim {
         let config = self.vm_config_for(&self.world.bots[&id].data);
         // Boot ritual through the pipeline (Hot Reload / Windows Update /
         // the Boot track).
-        let boot = crate::stats::StatCtx { stats: &self.stats, xp: &self.xp, quirks: &self.quirks, tuning: &self.tuning }
+        let boot = self.ctx()
             .boot_ticks_for(&self.world.bots[&id].data, self.tuning.boot_ticks);
         let bot = self.world.bots.get_mut(&id).expect("bot exists");
         bot.data.color = color;
@@ -513,7 +513,7 @@ impl Sim {
         let mut goals = BTreeSet::new();
         for (dx, dy) in [(0, -1), (1, 0), (0, 1), (-1, 0)] {
             let g = TilePos::new(home_pos.x + dx, home_pos.y + dy);
-            if self.world.grid.get(g).is_some_and(|t| t.move_ticks().is_some())
+            if self.world.grid.get(g).is_some_and(|t| t.passable())
                 && !structures.contains(&g)
             {
                 goals.insert(g);
@@ -532,7 +532,7 @@ impl Sim {
         let ticks_left = path
             .first()
             .map(|p| {
-                crate::stats::step_ticks(crate::stats::StatCtx { stats: &self.stats, xp: &self.xp, quirks: &self.quirks, tuning: &self.tuning }, &self.world.grid, &self.world.bots[&id].data, *p)
+                crate::stats::step_ticks(self.ctx(), &self.world.grid, &self.world.bots[&id].data, *p)
                     .unwrap_or(1)
             })
             .unwrap_or(0);

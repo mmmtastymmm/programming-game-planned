@@ -150,41 +150,6 @@ impl OverlayKind {
 }
 
 impl TileKind {
-    /// Ticks required to *enter* a tile of this kind; `None` = impassable.
-    pub fn move_ticks(self) -> Option<u32> {
-        match self {
-            TileKind::Plains => Some(1),
-            TileKind::Rubble => Some(2),
-            TileKind::Water => None,
-            TileKind::Bridge => Some(1),
-            TileKind::Mud => Some(3),
-            TileKind::Corruption => Some(1),
-            TileKind::OreVein => Some(1),
-            TileKind::CrystalField => Some(1),
-            TileKind::HighGround => Some(1), // Ramp-gated (edge_allowed)
-            TileKind::Vent => Some(1),
-            TileKind::Snow => Some(1),
-            TileKind::Mountain => Some(1), // edge-costed (tuning table)
-            TileKind::Ramp => Some(1),
-            TileKind::Dunes => Some(2),
-            TileKind::Ice => Some(1),
-            TileKind::Ford => Some(4),
-            TileKind::Road => Some(1),
-            TileKind::Scree => Some(2),
-            TileKind::Barricade => None,
-            // Resource ground is cost-neutral until Q69 decides otherwise.
-            TileKind::Sand
-            | TileKind::StoneOutcrop
-            | TileKind::Grove
-            | TileKind::CoalSeam
-            | TileKind::IronVein
-            | TileKind::CopperVein
-            | TileKind::TinVein
-            | TileKind::SilverVein
-            | TileKind::GoldVein => Some(1),
-        }
-    }
-
     pub fn as_u8(self) -> u8 {
         match self {
             TileKind::Plains => 0,
@@ -220,6 +185,49 @@ impl TileKind {
 
     /// Can ground bots ever stand here? (Costs live in tuning's ×2 table;
     /// High Ground is passable but Ramp-gated — see `edge_allowed`.)
+    /// Every kind, for exhaustive data validation (tuning's cost table
+    /// must price exactly the passable set — Tuning::validate).
+    pub const ALL: [TileKind; 28] = [
+        TileKind::Plains,
+        TileKind::Rubble,
+        TileKind::Water,
+        TileKind::Bridge,
+        TileKind::Mud,
+        TileKind::Corruption,
+        TileKind::OreVein,
+        TileKind::CrystalField,
+        TileKind::HighGround,
+        TileKind::Vent,
+        TileKind::Snow,
+        TileKind::Sand,
+        TileKind::StoneOutcrop,
+        TileKind::Grove,
+        TileKind::CoalSeam,
+        TileKind::IronVein,
+        TileKind::CopperVein,
+        TileKind::TinVein,
+        TileKind::SilverVein,
+        TileKind::GoldVein,
+        TileKind::Mountain,
+        TileKind::Ramp,
+        TileKind::Dunes,
+        TileKind::Ice,
+        TileKind::Ford,
+        TileKind::Road,
+        TileKind::Scree,
+        TileKind::Barricade,
+    ];
+
+    /// May things MATERIALIZE here — prints, recolors, dev spawns,
+    /// structure placement, cargo spills? Passable ground that is not
+    /// elevation-gated: High Ground is reached only by climbing a Ramp
+    /// (docs/05), so nothing may pop into existence on the plateau from
+    /// ground level. (Standing there after a legitimate climb is fine —
+    /// this gates appearance, not presence.)
+    pub fn spawnable(self) -> bool {
+        self.passable() && self != TileKind::HighGround
+    }
+
     pub fn passable(self) -> bool {
         !matches!(self, TileKind::Water | TileKind::Barricade)
     }
@@ -425,7 +433,7 @@ pub fn edge_allowed(
     to: TilePos,
 ) -> bool {
     let Some(to_kind) = grid.get(to) else { return false };
-    if to_kind.move_ticks().is_none() {
+    if !to_kind.passable() {
         return false;
     }
     let from_kind = grid.get(from);

@@ -539,3 +539,151 @@ fn terraform_sites_are_validated() {
     .unwrap();
     assert!(sim.world.blueprints.is_empty(), "structure tiles refuse terraform works");
 }
+
+// -------------------------------------------------- review 2026-07-16 fixes
+
+#[test]
+fn ground_hardening_under_a_plan_replans_instead_of_panicking() {
+    // A barricade lands on the mover's only route mid-walk: the step must
+    // re-plan (and fault "unreachable"), never panic on the unpriced tile
+    // or walk through the new wall.
+    let mut spec = MapSpec::empty(8, 3);
+    for x in 0..8 {
+        spec.water.push(TilePos::new(x, 0));
+        spec.water.push(TilePos::new(x, 2));
+    }
+    spec.depots.push(TilePos::new(0, 1));
+    spec.starting_stock.push((0, sim::resources::Resource::Stone, 20));
+    let mut sim = Sim::new(&spec);
+    let wall = TilePos::new(3, 1);
+    let builder = spawn(&mut sim, TilePos::new(2, 1), BUILDER);
+    let _ = builder;
+    // The handler matters: once the wall lands, move_to faults
+    // "unreachable" every loop — unhandled, that crash loop would chip
+    // the mover to death (docs/01), which is correct but not this test.
+    let mover = spawn(
+        &mut sim,
+        TilePos::new(6, 1),
+        "move_to(closest(depot).expect())\nwait(500)\non error:\n  wait(50)\n",
+    );
+    sim.apply(&Command::PlaceBlueprint { pos: wall, kind: BlueprintKind::Barricade, faction: 0 })
+        .unwrap();
+    for _ in 0..400 {
+        sim.step();
+        let pos = sim.world.bots[&mover].data.pos;
+        let tile = sim.world.grid.get(pos).unwrap();
+        assert_ne!(tile, TileKind::Water, "never walk into water");
+        assert_ne!(tile, TileKind::Barricade, "never walk into the wall");
+    }
+    assert_eq!(sim.world.grid.get(wall), Some(TileKind::Barricade), "the wall landed");
+    assert!(
+        sim.world.bots[&mover].data.pos.x >= 4,
+        "the mover is stuck on its own side of the wall, alive"
+    );
+}
+
+#[test]
+fn corruption_spares_ramps_and_roads() {
+    let mut spec = MapSpec::empty(9, 5);
+    spec.blight_cores.push((TilePos::new(4, 2), 2, 1000));
+    let mut sim = Sim::new(&spec);
+    let ramp = TilePos::new(3, 2);
+    let road = TilePos::new(5, 2);
+    sim.world.grid.set(ramp, TileKind::Ramp);
+    sim.world.grid.set(road, TileKind::Road);
+    sim.tuning.corruption_spread_ticks = 5;
+    for _ in 0..300 {
+        sim.step();
+    }
+    assert_eq!(sim.world.grid.get(ramp), Some(TileKind::Ramp), "the plateau doorway survives");
+    assert_eq!(sim.world.grid.get(road), Some(TileKind::Road), "paid civil works survive");
+    assert_eq!(
+        sim.world.grid.get(TilePos::new(3, 1)),
+        Some(TileKind::Corruption),
+        "ordinary ground still corrupts"
+    );
+}
+
+#[test]
+fn nothing_materializes_on_high_ground() {
+    let spec = MapSpec::empty(8, 6);
+    let mut sim = Sim::new(&spec);
+    let hg = TilePos::new(3, 2);
+    sim.world.grid.set(hg, TileKind::HighGround);
+    // Dev spawn straight onto the plateau: rejected.
+    let rejected = sim
+        .apply(&Command::SpawnBot {
+            pos: hg,
+            source: IDLER.into(),
+            cpu: 4,
+            cargo_cap: 1,
+            faction: 0,
+            hp: 100,
+            color: Color::GREEN,
+        })
+        .unwrap();
+    assert!(rejected.is_none(), "spawns may not materialize on High Ground");
+    // Print placement skips plateau tiles: ring the center with mesa,
+    // leave one plains gap — the pick lands there.
+    let center = TilePos::new(2, 4);
+    for dy in -1..=1 {
+        for dx in -1..=1 {
+            sim.world.grid.set(TilePos::new(center.x + dx, center.y + dy), TileKind::HighGround);
+        }
+    }
+    let gap = TilePos::new(3, 5); // ORDER offset (1,1)
+    sim.world.grid.set(gap, TileKind::Plains);
+    assert_eq!(
+        sim.world.free_spawn_tile(center),
+        Some(gap),
+        "free_spawn_tile must skip the plateau"
+    );
+}
+
+#[test]
+fn a_build_voided_by_changed_ground_stamps_nothing() {
+    let mut sim = Sim::new(&terraform_map());
+    let site = TilePos::new(4, 2);
+    spawn(&mut sim, TilePos::new(2, 2), BUILDER);
+    sim.apply(&Command::PlaceBlueprint { pos: site, kind: BlueprintKind::Road, faction: 0 })
+        .unwrap();
+    // Corruption claims the site mid-build (what spread does).
+    sim.world.grid.set(site, TileKind::Corruption);
+    for _ in 0..400 {
+        sim.step();
+        if sim.world.blueprints.is_empty() {
+            break;
+        }
+    }
+    assert!(sim.world.blueprints.is_empty(), "the labor still completes");
+    assert_eq!(
+        sim.world.grid.get(site),
+        Some(TileKind::Corruption),
+        "a 10-tick road must not erase creep the 40-tick cleanse exists for"
+    );
+}
+
+#[test]
+fn blueprint_kind_is_pinned_by_the_state_hash() {
+    // Two worlds identical except for the KIND of one in-progress
+    // blueprint must hash apart immediately, not at completion.
+    let build = |kind: BlueprintKind| -> u64 {
+        let mut spec = terraform_map();
+        spec.starting_stock.clear();
+        let mut spec = spec;
+        let site = TilePos::new(4, 2);
+        spec.resource_tiles.clear();
+        let mut sim = Sim::new(&spec);
+        sim.world.grid.set(site, TileKind::Rubble);
+        sim.tuning.road_cost_stone = 0; // isolate the kind: equal price,
+        sim.tuning.road_build_ticks = sim.tuning.clear_ticks; // equal needed
+        sim.apply(&Command::PlaceBlueprint { pos: site, kind, faction: 0 }).unwrap();
+        assert_eq!(sim.world.blueprints.len(), 1, "placement accepted");
+        sim.state_hash()
+    };
+    assert_ne!(
+        build(BlueprintKind::Clear),
+        build(BlueprintKind::Road),
+        "kind divergence must desync NOW"
+    );
+}
