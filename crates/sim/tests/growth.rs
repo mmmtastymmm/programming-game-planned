@@ -64,6 +64,8 @@ fn hauling_pays_cargo_distance_at_delivery_and_mileage_per_tile() {
     spec.depots.push(TilePos::new(1, 1));
     let mut sim = Sim::new(&spec);
     sim.stats.move_rate_deci = 10; // 1 tick/tile: pacing isn't under test
+    sim.stats.sensors = 12; // start-zone sight guarantee (docs/03): the
+    // node is discovered from the spawn tile; vision isn't under test
     let bot = spawn(
         &mut sim,
         TilePos::new(2, 1),

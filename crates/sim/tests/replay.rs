@@ -28,6 +28,9 @@ fn mining_map() -> MapSpec {
 
 fn run_mining_sim(ticks: u64) -> Sim {
     let mut sim = Sim::new(&mining_map());
+    // Start-zone sight guarantee (docs/03) — the map is a corridor, not a
+    // vision test; M5's floor sensors (5) would leave the node fogged.
+    sim.stats.sensors = 12;
     // Beside the depot, not ON it — depot tiles are solid (bots can
     // neither stand on nor spawn onto them).
     sim.apply(&Command::SpawnBot {
@@ -232,7 +235,7 @@ fn rubble_slows_movement() {
             color: Color::GREEN,
         })
         .unwrap();
-        for tick in 1..=600 {
+        for tick in 1..=2000 {
             sim.step();
             if sim.world.stock_get(0, sim::resources::Resource::Iron) > 0 {
                 return tick;

@@ -430,6 +430,12 @@ impl Sim {
                     vm,
                     false,
                 );
+                // The phase-0 perception seed extends to spawns (docs/07:
+                // tick 1's queries must have a "previous tick" to read —
+                // otherwise a spawned starter program eats one blind-crash
+                // before its first perception pass). Deterministic:
+                // commands apply in relay order.
+                self.run_perception();
                 Ok(Some(id))
             }
             Command::DeployProgram { faction, color, source } => {
