@@ -225,6 +225,9 @@ fn rubble_slows_movement() {
             }
         }
         let mut sim = Sim::new(&spec);
+        // Start-zone sight guarantee (docs/03): the node sits 9 tiles out
+        // and this map tests rubble PACING, not fog.
+        sim.stats.sensors = 14;
         sim.apply(&Command::SpawnBot {
             pos: TilePos::new(1, 1),
             source: MINER.into(),

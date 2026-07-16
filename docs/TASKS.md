@@ -235,7 +235,7 @@ full charges + centicycles + wrap-surviving variables move every replay hash at 
 - [ ] **Game**: render Smelter/Foundry/Archive/etc., typed stock in the world bar, structure
       HP bars. [game] (M)
 
-## M5 — Universal chassis: stats, energy, upgrades ✅ CORE COMPLETE (2026-07-15) — discussion items below
+## M5 — Universal chassis: stats, energy, upgrades ✅ COMPLETE (2026-07-16) — notes below ✅ CORE COMPLETE (2026-07-15) — discussion items below
 
 - [x] **Floor statline + stat pipeline**: `stats.ron` (HP 40, move 140 deci-ticks/tile — a real
       move-rate stat, terrain multiplies it; cargo 40 deci, sensors 5, slots 1, cpu 100 centi,
@@ -286,7 +286,20 @@ full charges + centicycles + wrap-surviving variables move every replay hash at 
       in-game alongside M4's still-open structure rendering (Smelter/Foundry/Archive/
       Generator/Tap/Station have no sprites yet).* [game] (M)
 
-## M6 — XP v2 & quirks ✅ CORE COMPLETE (2026-07-16) — discussion items below
+## M6 — XP v2 & quirks ✅ COMPLETE (2026-07-16) — notes below
+
+*Landed together with M5 (and the M7 perception core the tests pulled in) against the
+authored data files (`stats.ron`, `xp.ron`, `quirks.ron`, `upkeep.ron`) and acceptance
+suites (`chassis.rs`, `station.rs`, `energy.rs`, `growth.rs`). NEEDS DISCUSSION, carried
+from the data files: xp.ron body-perk magnitudes are first-pass inventions; upkeep.ron
+figures likewise (and `rust_scraps` ships off); Coprocessor is purchasable but its
+think-while-acting VM support is pending; program_lines/variable_slots enforcement is
+M9's deploy bar; the Station coolant source (Pump) is still open from M4. Integration
+notes: the phase-0 perception seed now also runs after `SpawnBot` (tick-1 blindness ate
+one crash per spawned starter program); legacy pacing/vision test maps carry explicit
+`sim.stats` overrides where fog/pacing wasn't what they test; the golden scenario gained
+a within-sight node and a 1500-tick window (fixture regenerated — M5/M6 change every
+hash: statline, XP map, quirk rolls, upkeep settlements).* ✅ CORE COMPLETE (2026-07-16) — discussion items below
 
 - [x] **Five task tracks + deci-XP** (`data/xp.ron`, `sim::xp`): `BotData.xp` is a
       `BTreeMap<XpTrack, u64>` in deci-XP (all 11 tracks exist — storage never migrates

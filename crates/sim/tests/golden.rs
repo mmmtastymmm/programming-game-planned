@@ -43,6 +43,11 @@ fn golden_replay() -> Replay {
     spec.seed = 0x5EED_601D; // fixed match seed for the fixture
     spec.starting_ore = 10;
     spec.starting_stock.push((0, sim::resources::Resource::Stone, 50));
+    // A worked node WITHIN the start cluster's floor sight (M5: sensors
+    // 5 — printed miners must discover it from the printer/depot), plus
+    // the far one that keeps the fault-path flavor once the near node
+    // drains (blind faults are still faults).
+    spec.ore_nodes.push((TilePos::new(5, 3), 30));
     spec.ore_nodes.push((TilePos::new(11, 3), 30));
     spec.depots.push(TilePos::new(2, 3));
     spec.printers.push(PrinterSpec {
@@ -56,8 +61,8 @@ fn golden_replay() -> Replay {
     for y in 0..3 {
         spec.water.push(TilePos::new(7, y));
     }
-    // Entity IDs from from_spec order: ore node = 1, depot = 2, printer = 3.
-    let printer = EntityId(3);
+    // Entity IDs from from_spec order: ore nodes = 1,2, depot = 3, printer = 4.
+    let printer = EntityId(4);
     let commands = vec![
         TimedCommand {
             tick: 0,
