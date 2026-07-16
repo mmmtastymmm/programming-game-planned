@@ -57,8 +57,8 @@ fn tier0_miner_delivers_ore() {
     // The bot is alive and working, not crash-looping.
     assert_eq!(sim.world.bots.len(), 1);
     let bot = sim.world.bots.values().next().unwrap();
-    assert!(bot.data.xp_mining > 0, "mining XP accrues from doing");
-    assert!(bot.data.xp_hauling > 0, "hauling XP accrues from delivering");
+    assert!(bot.data.xp(sim::world::XpTrack::Mining) > 0, "mining XP accrues from doing");
+    assert!(bot.data.xp(sim::world::XpTrack::Hauling) > 0, "hauling XP accrues from delivering");
 }
 
 #[test]

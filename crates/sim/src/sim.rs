@@ -21,8 +21,8 @@ use crate::world::{
 use pyrite::{CostTable, Outcome, PyriteError, UnlockSet, Value, Vm, VmConfig};
 use std::rc::Rc;
 
-/// Melee damage per hit (tuning constant; per-weapon hardware later).
-pub const ATTACK_DAMAGE: i64 = 10;
+// (Melee damage moved to tuning.ron `attack_damage` with M6 — every
+// number is data; per-weapon hardware still lands later.)
 
 /// Sim tuning constants (all numbers are data — CLAUDE.md convention; the
 /// values live in `data/tuning.ron`, baked in at compile time and parsed
@@ -62,6 +62,8 @@ pub struct Tuning {
     /// Typed build prices per structure kind (docs/03), in UNITS —
     /// every number is data, not code (CLAUDE.md).
     pub structure_costs: Vec<(crate::world::StructureKind, Vec<(crate::resources::Resource, u32)>)>,
+    /// Melee damage per hit (per-weapon hardware lands later).
+    pub attack_damage: i64,
     // (printed_* chassis defaults moved to data/stats.ron with M5 — the
     // universal floor statline is the print.)
     /// Colony population the economy sustains before scrap recalls fire
@@ -98,6 +100,14 @@ pub struct Tuning {
     /// registry makes it per-bot (`hurt_line`); this is the match-wide
     /// default until then.
     pub hurt_line_pct: i64,
+    // --- perception (M7, docs/05) ---
+    pub sense_factor_pct: u32,
+    pub structure_sensors: u32,
+    pub episode_rearm_ticks: u32,
+    pub search_ring_ticks: u32,
+    pub explore_radius: u32,
+    pub wander_leg: u32,
+    pub ford_quiet: i64,
 }
 
 impl Default for Tuning {
@@ -165,6 +175,8 @@ pub struct Upkeep {
     pub base_draw: u64,
     pub draw_per_upgrade: u64,
     pub draw_per_module: u64,
+    /// Per XP track LEVEL (M6, docs/02: veterans cost more to run).
+    pub draw_per_track_level: u64,
     pub draw_per_refinery: u64,
     pub generator_output_wood: u64,
     pub generator_output_coal: u64,
@@ -266,6 +278,10 @@ pub struct Sim {
     pub stats: crate::stats::Stats,
     /// Energy + Steel upkeep config (`data/upkeep.ron`, M5).
     pub upkeep: Upkeep,
+    /// XP curve, incomes, and perk magnitudes (`data/xp.ron`, M6).
+    pub xp: crate::xp::XpConfig,
+    /// The quirk catalog + manifestation thresholds (`data/quirks.ron`, M6).
+    pub quirks: crate::quirks::QuirkCatalog,
     /// Phase-9 snapshot: the state hash of the last completed tick. The
     /// lockstep relay compares this across peers for desync detection.
     pub last_hash: u64,
@@ -316,6 +332,17 @@ impl Sim {
         for key in crate::world::ENV_KEYS {
             vm_config.constants.insert(key.name.to_string(), Value::Str(key.name.to_string()));
         }
+        // Host-domain fault ids (M7): comparable via last_error().
+        vm_config.constants.insert(
+            crate::host::UNKNOWN_CONTACT.to_string(),
+            Value::Str(crate::host::UNKNOWN_CONTACT.to_string()),
+        );
+        // Quirk names as constants (docs/09: pre-bound like kind
+        // constants, no enum): `has_quirk(overclocked)` reads naturally.
+        let quirk_catalog = crate::quirks::QuirkCatalog::default();
+        for quirk in &quirk_catalog.quirks {
+            vm_config.constants.insert(quirk.name.clone(), Value::Str(quirk.name.clone()));
+        }
         let mut sim = Self {
             world: World::from_spec(spec),
             costs: CostTable::default(),
@@ -323,6 +350,8 @@ impl Sim {
             tuning,
             stats: crate::stats::Stats::default(),
             upkeep: Upkeep::default(),
+            xp: crate::xp::XpConfig::default(),
+            quirks: quirk_catalog,
             last_hash: 0,
         };
         // Map-authored structures place free; Generators start STOKED
@@ -461,9 +490,12 @@ impl Sim {
                     && !occupied_by_blueprint
                     && self.world.stock_take(*faction, crate::resources::Resource::Stone, cost)
                 {
+                    // Progress is deci-units (Q56): base build rate is 10
+                    // deci/tick, so ticks-to-complete stays the tuning
+                    // figure for an unleveled builder.
                     let needed = match kind {
                         BlueprintKind::Bridge => self.tuning.bridge_build_ticks,
-                    };
+                    } * crate::resources::DECI;
                     let id = self.world.alloc_entity();
                     self.world
                         .blueprints
@@ -625,6 +657,27 @@ impl Sim {
     ) -> BotId {
         let id = self.world.alloc_bot_id();
         let entity = self.world.alloc_entity();
+        // Latent quirk rolls (docs/09): at print, from the seeded
+        // `quirk_roll` stream, gated by the match's expected-quirks-per-
+        // bot dial (per-mille; slot n's chance is the dial minus n×1000,
+        // clamped — 500 = 50% of one quirk, 2000 = both certain). Rolls
+        // stay LATENT until total XP crosses the manifestation thresholds.
+        let mut latent_quirks = Vec::new();
+        if self.world.quirk_permille > 0 {
+            for slot in 0..self.quirks.manifest_at.len() {
+                let prob =
+                    self.world.quirk_permille.saturating_sub(slot as u32 * 1000).min(1000);
+                if prob == 0 {
+                    continue;
+                }
+                if crate::world::next_rand(&mut self.world.rng.quirk_roll) % 1000
+                    < prob as u64
+                {
+                    let r = crate::world::next_rand(&mut self.world.rng.quirk_roll);
+                    latent_quirks.push(self.quirks.pick(r));
+                }
+            }
+        }
         let booting = if boot {
             vm.set_engine_ctx(Some(pyrite::EngineCtx::Boot));
             Some(self.tuning.boot_ticks)
@@ -654,6 +707,7 @@ impl Sim {
                     modules: Vec::new(),
                     upgrade_queue: Vec::new(),
                     pad_sit: false,
+                    survey_after_move: false,
                     withdrawn_aboard: 0,
                     color,
                     requested: None,
@@ -663,10 +717,13 @@ impl Sim {
                     bump_frozen: 0,
                     dying: false,
                     log_buf: Vec::new(),
-                    xp_mining: 0,
-                    xp_hauling: 0,
-                    xp_combat: 0,
-                    xp_building: 0,
+                    xp: std::collections::BTreeMap::new(),
+                    haul_accum: 0,
+                    learning_carry: 0,
+                    moved_tick: 0,
+                    episodes: std::collections::BTreeMap::new(),
+                    latent_quirks,
+                    quirks: Vec::new(),
                     crash_seen: 0,
                     env: std::collections::BTreeMap::new(),
                     rng_program: crate::world::stream_seed(
@@ -709,7 +766,7 @@ impl Sim {
             // exempts one bot per faction) → clamp.
             let faction = bot.data.faction;
             let centi = crate::stats::cpu_centi(
-                &self.stats,
+                self.ctx(),
                 &bot.data,
                 self.world.brownout.contains(&faction),
                 self.world.powered_bot.get(&faction) == Some(&id),
@@ -728,7 +785,7 @@ impl Sim {
                 continue;
             }
             let outcome = {
-                let mut host = BotHost { world: &mut self.world, bot: id, tuning: &self.tuning };
+                let mut host = BotHost { world: &mut self.world, bot: id, tuning: &self.tuning, ctx: crate::stats::StatCtx { stats: &self.stats, xp: &self.xp, quirks: &self.quirks } };
                 vm.run(&mut host, &self.costs)
             };
             self.after_vm(id, vm, outcome);
@@ -764,7 +821,15 @@ impl Sim {
             let delta = crashes.saturating_sub(bot.data.crash_seen);
             if delta > 0 {
                 bot.data.crash_seen = crashes;
-                self.queue_damage(id, delta as i64 * self.tuning.fault_damage, None);
+                // Per-bot chip (M6): Statically Typed halves it, `unsafe`
+                // Block doubles it.
+                let chip = crate::stats::StatCtx {
+                    stats: &self.stats,
+                    xp: &self.xp,
+                    quirks: &self.quirks,
+                }
+                .fault_damage_for(&bot.data, self.tuning.fault_damage);
+                self.queue_damage(id, delta as i64 * chip, None);
             }
         }
         self.settle_damage();
@@ -811,7 +876,6 @@ impl Sim {
                     node.amount = (node.amount + regen).min(cap);
                 }
             }
-            let amount = self.tuning.regen_amount;
             for id in ids.iter() {
                 let Some(bot) = self.world.bots.get_mut(id) else { continue };
                 if bot.data.dying || bot.data.hp >= bot.data.max_hp {
@@ -820,11 +884,18 @@ impl Sim {
                 if self.world.rusting.contains(&bot.data.faction) {
                     continue; // unpaid Steel maintenance: self-repair halts (Q84)
                 }
+                // Seniority mends (docs/02): Age raises the trickle.
+                let amount = crate::stats::StatCtx {
+                    stats: &self.stats,
+                    xp: &self.xp,
+                    quirks: &self.quirks,
+                }
+                .regen_for(&bot.data, self.tuning.regen_amount);
                 bot.data.hp = (bot.data.hp + amount).min(bot.data.max_hp);
                 // The latch re-arms against the SAME line it fires on — the
                 // bot's own hurt_line env — so a moved line can't make the
                 // edge trigger re-fire mid-template or stick forever.
-                let line = crate::world::env_read(&bot.data.env, "hurt_line", &self.tuning);
+                let line = crate::world::env_read(&bot.data, "hurt_line", &self.tuning, &self.quirks);
                 if bot.data.hurt_fired && bot.data.hp * 100 >= bot.data.max_hp * line {
                     bot.data.hurt_fired = false; // back over the Damaged line
                 }
@@ -866,9 +937,16 @@ impl Sim {
                 self.world.bots.values().filter(|b| b.data.faction == faction && !b.data.dying)
             {
                 bot_count += 1;
+                let levels: u64 = bot
+                    .data
+                    .xp
+                    .values()
+                    .map(|&deci| self.xp.level(deci) as u64)
+                    .sum();
                 draw += self.upkeep.base_draw
                     + self.upkeep.draw_per_upgrade * bot.data.upgrades.len() as u64
-                    + self.upkeep.draw_per_module * bot.data.modules.len() as u64;
+                    + self.upkeep.draw_per_module * bot.data.modules.len() as u64
+                    + self.upkeep.draw_per_track_level * levels;
             }
             draw += self.upkeep.draw_per_refinery
                 * self
@@ -1025,11 +1103,6 @@ impl Sim {
 
     /// Phase 5: perception — seeing/hearing recomputed from post-move
     /// positions, detection episodes, per-faction map knowledge, survey
-    /// steps (docs/07). STUB until M7 lands the two-circle model: queries
-    /// stay omniscient, but the phase slot — and the phase-0 seed call in
-    /// [`Sim::new`] — exist so M7 drops in without reordering the tick.
-    /// Phase-2 queries read the *previous* tick's perception by design.
-    pub(crate) fn run_perception(&mut self) {}
 
     /// Phase 7: XP settlement — every award earned anywhere in the tick
     /// queued, then settled here in arrival order (phases queue in stable
@@ -1038,23 +1111,139 @@ impl Sim {
     /// is a plain sum. Awards for bots that died in phase 6 are dropped
     /// with them.
     pub(crate) fn settle_xp(&mut self) {
-        let events = std::mem::take(&mut self.world.pending_xp);
-        for (id, track, amount) in events {
+        use std::collections::BTreeMap;
+        let mut awards = std::mem::take(&mut self.world.pending_xp);
+        // Age drips for every live bot (docs/02: its XP is literally time
+        // — 1 deci per tick), through the same multiplier path as
+        // everything else.
+        for (id, bot) in &self.world.bots {
+            if !bot.data.dying {
+                awards.push((*id, XpTrack::Age, self.xp.age_deci_per_tick));
+            }
+        }
+        let cap = self.xp.track_cap_deci();
+        // The multiplier is the START-OF-SETTLE percent (Learning level +
+        // quirk XP%), memoized per bot so this tick's own awards can't
+        // compound into themselves.
+        let mut pct_memo: BTreeMap<BotId, u64> = BTreeMap::new();
+        // Learning feeds on every OTHER track's post-multiplier XP —
+        // capped tracks included — and is never re-multiplied (docs/02).
+        let mut feeds: BTreeMap<BotId, u64> = BTreeMap::new();
+        for (id, track, deci) in awards {
+            let Some(bot) = self.world.bots.get(&id) else { continue }; // died in phase 6
+            if bot.data.dying {
+                continue;
+            }
+            let pct = *pct_memo.entry(id).or_insert_with(|| self.ctx().xp_gain_pct(&bot.data));
+            let post = deci * pct / 100; // floor — pessimistic (docs/02)
+            if post == 0 {
+                continue;
+            }
+            if track != XpTrack::Learning {
+                *feeds.entry(id).or_insert(0) += post;
+            }
+            let bot = self.world.bots.get_mut(&id).expect("checked above");
+            let entry = bot.data.xp.entry(track).or_insert(0);
+            *entry = (*entry + post).min(cap);
+        }
+        for (id, feed) in feeds {
             let Some(bot) = self.world.bots.get_mut(&id) else { continue };
-            match track {
-                XpTrack::Mining => bot.data.xp_mining += amount,
-                XpTrack::Hauling => bot.data.xp_hauling += amount,
-                XpTrack::Combat => bot.data.xp_combat += amount,
-                XpTrack::Building => bot.data.xp_building += amount,
+            // Fractional carry (hundredths of a deci): 10% of a slow drip
+            // accrues instead of flooring to zero every settlement.
+            let carry = bot.data.learning_carry + feed * self.xp.learning_feed_pct;
+            let gain = carry / 100;
+            bot.data.learning_carry = carry % 100;
+            if gain > 0 {
+                let entry = bot.data.xp.entry(XpTrack::Learning).or_insert(0);
+                *entry = (*entry + gain).min(cap);
+            }
+        }
+        self.settle_milestones();
+    }
+
+    /// Phase 7b: total-XP milestones — module slots (+1 at each xp.ron
+    /// threshold, capped) and quirk manifestation (docs/09: the nth latent
+    /// roll comes alive when total XP crosses the nth threshold —
+    /// deterministic check, no RNG).
+    fn settle_milestones(&mut self) {
+        let ids: Vec<BotId> = self.world.bots.keys().copied().collect();
+        for id in ids {
+            let (total, slots, latent, manifested) = {
+                let d = &self.world.bots[&id].data;
+                (d.xp_total(), d.module_slots, d.latent_quirks.len(), d.quirks.len())
+            };
+            let owed_slots = (1 + self
+                .xp
+                .slot_milestones
+                .iter()
+                .filter(|&&m| total >= m * 10)
+                .count() as u32)
+                .min(self.xp.slot_cap);
+            if owed_slots > slots {
+                self.world.bots.get_mut(&id).expect("collected").data.module_slots = owed_slots;
+            }
+            let owed_quirks = self
+                .quirks
+                .manifest_at
+                .iter()
+                .filter(|&&t| total >= t * 10)
+                .count()
+                .min(latent + manifested);
+            for _ in manifested..owed_quirks {
+                self.manifest_next_quirk(id);
             }
         }
     }
 
-    /// Per-bot VM config: the shared template with the hardware layer
-    /// applied (Stack extensions raise the call-depth cap).
+    /// Bring a bot's next latent quirk alive: move it to the manifested
+    /// list and apply the one-time effects (max HP, log cap, live-VM stack
+    /// depth). Pipeline effects need no action — they read the list.
+    fn manifest_next_quirk(&mut self, id: BotId) {
+        let Some(bot) = self.world.bots.get_mut(&id) else { return };
+        if bot.data.latent_quirks.is_empty() {
+            return;
+        }
+        let quirk = bot.data.latent_quirks.remove(0);
+        bot.data.quirks.push(quirk);
+        let Some(spec) = self.quirks.quirks.get(quirk as usize) else { return };
+        for effect in &spec.effects {
+            match effect {
+                crate::quirks::QuirkEffect::MaxHpPct(p) => {
+                    let bot = self.world.bots.get_mut(&id).expect("checked");
+                    let delta = bot.data.max_hp * *p as i64 / 100;
+                    bot.data.max_hp = (bot.data.max_hp + delta).max(1);
+                    bot.data.hp = bot.data.hp.min(bot.data.max_hp);
+                }
+                crate::quirks::QuirkEffect::LogCapPct(p) => {
+                    let bot = self.world.bots.get_mut(&id).expect("checked");
+                    let delta = bot.data.log_cap as i64 * *p as i64 / 100;
+                    bot.data.log_cap = (bot.data.log_cap as i64 + delta).max(1) as u32;
+                }
+                crate::quirks::QuirkEffect::StackDepth(_) => {
+                    let depth = self.ctx().stack_depth_for(&self.world.bots[&id].data);
+                    let bot = self.world.bots.get_mut(&id).expect("checked");
+                    if let Some(vm) = bot.vm.as_mut() {
+                        vm.set_stack_depth(depth);
+                    }
+                }
+                _ => {} // pipeline- or read-side effects
+            }
+        }
+    }
+
+    /// The stat pipeline's read context (floor statline + XP magnitudes +
+    /// quirk catalog). All shared borrows of disjoint Sim fields, so it
+    /// composes with `world` reads.
+    pub fn ctx(&self) -> crate::stats::StatCtx<'_> {
+        crate::stats::StatCtx { stats: &self.stats, xp: &self.xp, quirks: &self.quirks }
+    }
+
+    /// Per-bot VM config: the shared template with the hardware and quirk
+    /// layers applied (Stack extensions / Memory Leak move the call-depth
+    /// cap).
     pub(crate) fn vm_config_for(&self, data: &BotData) -> VmConfig {
         let mut config = self.vm_config.clone();
-        config.stack_depth = self.stats.stack_depth_for(data);
+        config.stack_depth = self.ctx().stack_depth_for(data);
         config
     }
 
@@ -1142,6 +1331,17 @@ impl Sim {
         for (faction, delivered) in &w.delivered {
             h.write_u8(*faction);
             h.write_u64(*delivered);
+        }
+        // Permanent map knowledge is real state (docs/05 Q70); the live
+        // perception union is derived every tick and deliberately unhashed.
+        for (faction, known) in &w.known_nodes {
+            h.write_u8(*faction);
+            h.write_u32(known.len() as u32);
+            for (id, node) in known {
+                h.write_u64(id.0);
+                h.write_u8(node.kind.as_u8());
+                h.write_u8(node.exhausted as u8);
+            }
         }
         for (faction, paid) in &w.milestones_paid {
             h.write_u8(*faction);
@@ -1234,20 +1434,38 @@ impl Sim {
                 hash_order(&mut h, order);
             }
             h.write_u8(bot.data.pad_sit as u8);
+            h.write_u8(bot.data.survey_after_move as u8);
             h.write_u32(bot.data.withdrawn_aboard);
             h.write_u8(bot.data.faction);
             h.write_u8(bot.data.color.0);
             h.write_i64(bot.data.hp);
             h.write_u8(bot.data.hurt_fired as u8);
-            h.write_u64(bot.data.xp_combat);
-            h.write_u64(bot.data.xp_building);
+            h.write_u32(bot.data.xp.len() as u32);
+            for (track, deci) in &bot.data.xp {
+                h.write_u8(track.as_u8());
+                h.write_u64(*deci);
+            }
+            h.write_u64(bot.data.haul_accum);
+            h.write_u64(bot.data.learning_carry);
+            h.write_u64(bot.data.moved_tick);
+            h.write_u32(bot.data.episodes.len() as u32);
+            for (faction, counter) in &bot.data.episodes {
+                h.write_u8(*faction);
+                h.write_u32(*counter);
+            }
+            h.write_u32(bot.data.latent_quirks.len() as u32);
+            for q in &bot.data.latent_quirks {
+                h.write_u8(*q);
+            }
+            h.write_u32(bot.data.quirks.len() as u32);
+            for q in &bot.data.quirks {
+                h.write_u8(*q);
+            }
             h.write_u8(bot.data.dying as u8);
             h.write_u32(bot.data.booting.unwrap_or(0));
             h.write_u32(bot.data.bump_frozen);
             h.write_u8(bot.data.recall.is_some() as u8);
             h.write_u64(bot.data.rng_program);
-            h.write_u64(bot.data.xp_mining);
-            h.write_u64(bot.data.xp_hauling);
             for (level, entry) in &bot.data.log_buf {
                 h.write_u8(*level);
                 h.write_str(entry);

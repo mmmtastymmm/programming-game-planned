@@ -38,6 +38,8 @@ Tuning(
         (GeothermalTap, [(Steel, 12)]),
         (UpgradeStation, [(Steel, 10), (Chips, 5), (Wire, 3)]),
     ],
+    // Melee damage per hit (per-weapon hardware later).
+    attack_damage: 10,
     capacity: 10000,
     // The rammer's TOTAL at-fault stun: the bump factory window waits
     // (this - handler_init_ticks) on top of the forced flinch. The
@@ -55,4 +57,20 @@ Tuning(
     // The Damaged line (% of max hp): hurt fires below it, re-arms above
     // it. Becomes the per-bot `hurt_line` env default when M3 lands.
     hurt_line_pct: 50,
+    // --- perception (M7, docs/05) — first-pass figures ---
+    // Hearing radius = seeing × this percent (docs: ~150%).
+    sense_factor_pct: 150,
+    // Structures see too (Sentry/Lantern land later; printers, depots,
+    // and generic structures share this base — NEEDS DISCUSSION).
+    structure_sensors: 4,
+    // A detection episode re-arms after this many ticks fully unobserved.
+    episode_rearm_ticks: 50,
+    // The scouting stance's seeing ring expands one tile per this many.
+    search_ring_ticks: 10,
+    // explore(): random fogged tile within this radius (docs: ~15).
+    explore_radius: 15,
+    // wander(): random walk leg length, tiles.
+    wander_leg: 4,
+    // Ford wading quiets the mover: subtracted from heard-at distance.
+    ford_quiet: 2,
 )

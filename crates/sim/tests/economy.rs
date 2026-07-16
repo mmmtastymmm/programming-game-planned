@@ -223,9 +223,14 @@ fn withdraw_deposit_cycling_mints_no_data() {
     for _ in 0..300 {
         sim.step();
     }
-    assert!(
-        sim.world.bots[&bot].data.xp_hauling > 0,
-        "the cycle really ran (hauling XP accrued)"
+    // The cycle really ran: the seeded iron is split between stock and
+    // the bot's hold mid-cycle, and nothing was created or destroyed
+    // (starting_stock seeds in units — 4000 units = 40000 deci).
+    let aboard = sim.world.bots[&bot].data.cargo_total() as u64;
+    assert_eq!(
+        sim.world.stock_get(0, Resource::Iron) + aboard,
+        40_000,
+        "conservation across withdraw/deposit cycling"
     );
     assert_eq!(
         sim.world.delivered.get(&0).copied().unwrap_or(0),
@@ -263,7 +268,7 @@ fn seeded_stock_withdrawals_do_not_suppress_milestones() {
         sim.step();
     }
     assert!(
-        sim.world.bots[&builder].data.xp_hauling == 0,
+        sim.world.bots[&builder].data.xp(sim::world::XpTrack::Hauling) == 0,
         "sanity: the builder never delivered"
     );
     assert!(

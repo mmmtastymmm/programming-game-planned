@@ -68,7 +68,7 @@ fn cpu_upgrade_full_cycle() {
     assert_ne!(data.pos, STATION_POS, "stepped off the pad");
     assert_eq!(data.upgrades.len(), 1, "upgrade recorded on the chassis");
     assert_eq!(
-        sim::stats::cpu_centi(&sim.stats, data, false, false),
+        sim::stats::cpu_centi(sim.ctx(), data, false, false),
         200,
         "CPU Mk2: 2 cycles/tick"
     );
@@ -165,7 +165,7 @@ fn module_slots_fill_and_swaps_destroy_the_old_part() {
     }
     assert_eq!(sim.world.bots[&bot].data.modules, vec![optics_idx]);
     assert_eq!(
-        sim.stats.sensors_for(&sim.world.bots[&bot].data),
+        sim.ctx().sensors_for(&sim.world.bots[&bot].data),
         sim.stats.sensors + sim.stats.optics_sensors,
         "Optics: +2 sensor range"
     );
@@ -241,7 +241,7 @@ fn lower_cpu_tier_after_higher_is_dropped_unpaid() {
     for _ in 0..100 {
         sim.step();
     }
-    assert_eq!(sim::stats::cpu_centi(&sim.stats, &sim.world.bots[&bot].data, false, false), 400);
+    assert_eq!(sim::stats::cpu_centi(sim.ctx(), &sim.world.bots[&bot].data, false, false), 400);
     let chips_after_mk3 = sim.world.stock_get(0, Resource::Chips);
     sim.apply(&Command::QueueUpgrade { bot, order: "cpu_mk2".into(), replace: None }).unwrap();
     for _ in 0..100 {
@@ -249,7 +249,7 @@ fn lower_cpu_tier_after_higher_is_dropped_unpaid() {
     }
     let data = &sim.world.bots[&bot].data;
     assert_eq!(
-        sim::stats::cpu_centi(&sim.stats, data, false, false),
+        sim::stats::cpu_centi(sim.ctx(), data, false, false),
         400,
         "the grant never downgrades"
     );

@@ -15,9 +15,16 @@ impl Sim {
     }
 
     /// Queue a hit for the phase-6 settle (docs/07: damage is a phase, not
-    /// an inline side effect of whichever system landed the blow).
-    pub(crate) fn queue_damage(&mut self, id: BotId, amount: i64, attacker_faction: Option<u8>) {
-        self.world.pending_damage.push((id, amount, attacker_faction));
+    /// an inline side effect of whichever system landed the blow). The
+    /// attacker tag (bot, faction) drives kill XP, first-kill Data, and
+    /// the hostile-source filter on the Flinch track.
+    pub(crate) fn queue_damage(
+        &mut self,
+        id: BotId,
+        amount: i64,
+        attacker: Option<(BotId, u8)>,
+    ) {
+        self.world.pending_damage.push((id, amount, attacker));
     }
 
     /// Phase 6a: drain the damage queue in arrival order (phases queue in
@@ -26,7 +33,7 @@ impl Sim {
     /// dispatch resolves co-arrivals by severity (Q81).
     pub(crate) fn settle_damage(&mut self) {
         let events = std::mem::take(&mut self.world.pending_damage);
-        for (id, amount, attacker_faction) in events {
+        for (id, amount, attacker) in events {
             let Some(bot) = self.world.bots.get_mut(&id) else { continue };
             if bot.data.dying {
                 continue; // effectively a wreck already
@@ -34,34 +41,39 @@ impl Sim {
             bot.data.hp = (bot.data.hp - amount).max(0);
             let hp = bot.data.hp;
             let max_hp = bot.data.max_hp;
+            let source = attacker.map(|(_, f)| f);
             if hp == 0 {
                 // HP 0 = abort (docs/01): the highest severity — it wins
                 // any co-arrival, and raising it on a mid-template bot is
                 // exactly the double-handle outcome anyway.
-                self.world.pending_signals.push((id, Signal::Abort));
-                // First-kill Data (docs/03: earned by doing) — once per
-                // faction, hostile kills only.
+                self.world.pending_signals.push((id, Signal::Abort, source));
                 let victim_faction = self.world.bots[&id].data.faction;
-                if let Some(attacker) = attacker_faction
-                    && attacker != victim_faction
-                    && self.world.first_kill_done.insert(attacker)
+                if let Some((attacker_bot, attacker_faction)) = attacker
+                    && attacker_faction != victim_faction
                 {
-                    *self.world.data.entry(attacker).or_insert(0) +=
-                        self.tuning.first_kill_data;
+                    // First-kill Data (docs/03) — once per faction.
+                    if self.world.first_kill_done.insert(attacker_faction) {
+                        *self.world.data.entry(attacker_faction).or_insert(0) +=
+                            self.tuning.first_kill_data;
+                    }
+                    // Combat kill income (docs/02: +25/kill) — settles
+                    // phase 7; drops if the attacker died this tick too.
+                    self.world.pending_xp.push((
+                        attacker_bot,
+                        crate::world::XpTrack::Combat,
+                        self.xp.combat_kill_xp * 10,
+                    ));
                 }
                 continue;
             }
             // Edge-triggered at the bot's own hurt_line env (default: the
-            // tuning value); the latch re-arms when regen climbs back over
-            // the same line (phase 8).
-            let line = crate::world::env_read(
-                &bot.data.env,
-                "hurt_line",
-                &self.tuning,
-            );
+            // tuning value; quirk temperaments/compulsions apply); the
+            // latch re-arms when regen climbs back over the same line.
+            let bot = &self.world.bots[&id];
+            let line = crate::world::env_read(&bot.data, "hurt_line", &self.tuning, &self.quirks);
             if !bot.data.hurt_fired && hp * 100 < max_hp * line {
-                bot.data.hurt_fired = true;
-                self.world.pending_signals.push((id, Signal::Hurt));
+                self.world.bots.get_mut(&id).expect("checked").data.hurt_fired = true;
+                self.world.pending_signals.push((id, Signal::Hurt, source));
             }
         }
     }
@@ -82,32 +94,47 @@ impl Sim {
     pub(crate) fn dispatch_signals(&mut self) {
         use std::collections::BTreeMap;
         let pending = std::mem::take(&mut self.world.pending_signals);
-        let mut per_bot: BTreeMap<BotId, Vec<Signal>> = BTreeMap::new();
-        for (id, signal) in pending {
+        let mut per_bot: BTreeMap<BotId, Vec<(Signal, Option<u8>)>> = BTreeMap::new();
+        for (id, signal, source) in pending {
             // Recall carries a destination no queue entry can express: it
             // dispatches through begin_recall_walk, never through here
             // (player-fired triggers arrive with M9's rule edits).
             debug_assert!(signal != Signal::Recall, "queued Recall has no destination");
-            per_bot.entry(id).or_default().push(signal);
+            per_bot.entry(id).or_default().push((signal, source));
         }
         for (id, signals) in per_bot {
             let Some(bot) = self.world.bots.get(&id) else { continue };
             if bot.data.dying {
                 continue;
             }
+            let faction = bot.data.faction;
             // Ties can only be duplicates (severity is injective per kind),
             // so max_by_key's last-wins tie-break picks an equal value.
-            let winner =
-                *signals.iter().max_by_key(|s| s.severity()).expect("group is non-empty");
-            self.raise_signal(id, winner);
+            let (winner, winner_source) =
+                *signals.iter().max_by_key(|(s, _)| s.severity()).expect("group is non-empty");
+            let outcome = self.raise_signal(id, winner);
+            // Flinch income (docs/02): every flinch endured FROM A HOSTILE
+            // SOURCE — entering the template is the flinch; self-inflicted
+            // signals (own driving, own faults) grant nothing.
+            if outcome == RaiseOutcome::Handled
+                && winner_source.is_some_and(|f| f != faction)
+            {
+                self.world.pending_xp.push((
+                    id,
+                    crate::world::XpTrack::Flinch,
+                    self.xp.flinch_xp * 10,
+                ));
+            }
             // Dropped extras keep their physical stun. The values mirror
             // the template timings they stand in for: a dropped Bump = the
             // full at-fault stun (flinch + factory wait); a dropped Bumped
             // = the flinch-length stagger. Applied on top of the winner's
             // template via bump_frozen, never downgrading.
             let mut stun = 0u32;
-            for signal in signals {
-                if signal == winner {
+            let mut winner_seen = false;
+            for (signal, _) in signals {
+                if signal == winner && !winner_seen {
+                    winner_seen = true;
                     continue;
                 }
                 stun = stun.max(match signal {
@@ -131,7 +158,7 @@ impl Sim {
         let Some(bot) = self.world.bots.get_mut(&id) else { return RaiseOutcome::Ignored };
         let mut vm = bot.vm.take().expect("vm present between phases");
         let outcome = {
-            let mut host = BotHost { world: &mut self.world, bot: id, tuning: &self.tuning };
+            let mut host = BotHost { world: &mut self.world, bot: id, tuning: &self.tuning, ctx: crate::stats::StatCtx { stats: &self.stats, xp: &self.xp, quirks: &self.quirks } };
             vm.raise(signal, &mut host, &self.costs)
         };
         match outcome {

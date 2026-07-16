@@ -146,18 +146,8 @@ impl Stats {
         self.modules.iter().enumerate().find(|(_, m)| m.name == name).map(|(i, m)| (i as u8, m))
     }
 
-    /// Per-bot stack depth: base + extensions (hardware layer; nothing
-    /// else touches it).
-    pub fn stack_depth_for(&self, data: &BotData) -> usize {
-        let exts = data
-            .upgrades.iter()
-            .filter(|&&u| matches!(self.upgrades.get(u as usize).map(|s| s.effect),
-                Some(UpgradeEffect::StackExt)))
-            .count() as u32;
-        (self.stack_depth + exts * self.stack_ext_depth) as usize
-    }
-
-    /// Per-bot log-buffer cap: base + memory banks.
+    /// Per-bot log-buffer cap from hardware alone: base + memory banks
+    /// (quirk LogCapPct applies one-time at manifestation, on `log_cap`).
     pub fn log_cap_for(&self, data: &BotData) -> usize {
         let banks = data
             .upgrades.iter()
@@ -166,15 +156,186 @@ impl Stats {
             .count() as u32;
         (self.log_buffer + banks * self.memory_bank_log) as usize
     }
+}
 
-    /// Per-bot sensor range: base + Optics (consumed by M7 perception).
+/// The pipeline's read-side context: the floor statline, XP magnitudes,
+/// and the quirk catalog — everything a stat lookup needs beside the bot.
+#[derive(Clone, Copy)]
+pub struct StatCtx<'a> {
+    pub stats: &'a Stats,
+    pub xp: &'a crate::xp::XpConfig,
+    pub quirks: &'a crate::quirks::QuirkCatalog,
+}
+
+impl StatCtx<'_> {
+    fn level(&self, data: &BotData, track: crate::world::XpTrack) -> u32 {
+        self.xp.level(data.xp(track))
+    }
+
+    /// Per-bot stack depth: base → hardware (Stack extensions) → quirks
+    /// (Memory Leak / Borrow Checker Approved), never below 1.
+    pub fn stack_depth_for(&self, data: &BotData) -> usize {
+        let exts = data
+            .upgrades
+            .iter()
+            .filter(|&&u| {
+                matches!(
+                    self.stats.upgrades.get(u as usize).map(|s| s.effect),
+                    Some(UpgradeEffect::StackExt)
+                )
+            })
+            .count() as u32;
+        let mut depth = (self.stats.stack_depth + exts * self.stats.stack_ext_depth) as i64;
+        for effect in self.quirks.effects_of(data) {
+            if let crate::quirks::QuirkEffect::StackDepth(d) = effect {
+                depth += d as i64;
+            }
+        }
+        depth.max(1) as usize
+    }
+
+    /// Per-bot sensor range: base → hardware (Optics) → XP (Scouting
+    /// +1/level) → quirks (Retina Display / Deprecated Drivers), floor 1.
     pub fn sensors_for(&self, data: &BotData) -> u32 {
         let optics = data
-            .modules.iter()
-            .filter(|&&m| matches!(self.modules.get(m as usize).map(|s| s.effect),
-                Some(ModuleEffect::Optics)))
+            .modules
+            .iter()
+            .filter(|&&m| {
+                matches!(
+                    self.stats.modules.get(m as usize).map(|s| s.effect),
+                    Some(ModuleEffect::Optics)
+                )
+            })
             .count() as u32;
-        data.sensors + optics * self.optics_sensors
+        let mut v = (data.sensors + optics * self.stats.optics_sensors) as i64
+            + (self.level(data, crate::world::XpTrack::Scouting)
+                * self.xp.scouting_sensors_per_level) as i64;
+        for effect in self.quirks.effects_of(data) {
+            if let crate::quirks::QuirkEffect::Sensors(d) = effect {
+                v += d as i64;
+            }
+        }
+        v.max(1) as u32
+    }
+
+    /// Effective cargo capacity in deci-units: base → XP (Hauling
+    /// +10%/level) → quirks (CargoPct), pessimistic floor on gains.
+    pub fn cargo_cap_for(&self, data: &BotData) -> u32 {
+        let mut pct = 100i64
+            + (self.level(data, crate::world::XpTrack::Hauling) * self.xp.hauling_cargo_pct)
+                as i64;
+        for effect in self.quirks.effects_of(data) {
+            if let crate::quirks::QuirkEffect::CargoPct(p) = effect {
+                pct += p as i64;
+            }
+        }
+        ((data.cargo_cap as i64 * pct.max(1)) / 100).max(1) as u32
+    }
+
+    /// Effective mine yield for one swing, deci-units before node/hold
+    /// clamps: Mining +10%/level (gains floor).
+    pub fn mine_yield_for(&self, data: &BotData, base_deci: u32) -> u32 {
+        let pct =
+            100 + self.level(data, crate::world::XpTrack::Mining) * self.xp.mining_yield_pct;
+        ((base_deci as u64 * pct as u64) / 100) as u32
+    }
+
+    /// Mine swing duration: Mining L3+ takes −25% (the reduction floors —
+    /// pessimistic), never below 1 tick.
+    pub fn mine_swing_for(&self, data: &BotData, base_ticks: u32) -> u32 {
+        let mut ticks = base_ticks as i64;
+        if self.level(data, crate::world::XpTrack::Mining) >= 3 {
+            ticks -= (base_ticks as i64 * self.xp.mining_l3_time_pct as i64) / 100;
+        }
+        ticks.max(1) as u32
+    }
+
+    /// Attack damage: base (tuning) → XP (Combat +5%/level) → quirks
+    /// (DamagePct), gains floor.
+    pub fn attack_damage_for(&self, data: &BotData, base: i64) -> i64 {
+        let mut pct = 100i64
+            + (self.level(data, crate::world::XpTrack::Combat) * self.xp.combat_damage_pct)
+                as i64;
+        for effect in self.quirks.effects_of(data) {
+            if let crate::quirks::QuirkEffect::DamagePct(p) = effect {
+                pct += p as i64;
+            }
+        }
+        (base * pct.max(1)) / 100
+    }
+
+    /// Build rate in deci-progress per tick: Building +10%/level.
+    pub fn build_rate_for(&self, data: &BotData) -> u32 {
+        let pct = 100
+            + self.level(data, crate::world::XpTrack::Building) * self.xp.building_speed_pct;
+        ((crate::resources::DECI as u64 * pct as u64) / 100).max(1) as u32
+    }
+
+    /// Flinch (handler_init) duration: base → quirks (Rubber Ducky / Race
+    /// Condition, flat ticks) → XP (Flinch −10%/level, reduction floors).
+    pub fn flinch_ticks_for(&self, data: &BotData, base: u32) -> u32 {
+        let mut ticks = base as i64;
+        for effect in self.quirks.effects_of(data) {
+            if let crate::quirks::QuirkEffect::FlinchTicks(d) = effect {
+                ticks += d as i64;
+            }
+        }
+        let level = self.level(data, crate::world::XpTrack::Flinch) as i64;
+        ticks -= (ticks * level * self.xp.flinch_time_pct as i64) / 100;
+        ticks.max(0) as u32
+    }
+
+    /// Boot ritual duration: base → quirks (Hot Reload / Windows Update,
+    /// percent) → XP (Boot −10%/level), never below 1.
+    pub fn boot_ticks_for(&self, data: &BotData, base: u32) -> u32 {
+        let mut ticks = base as i64;
+        for effect in self.quirks.effects_of(data) {
+            if let crate::quirks::QuirkEffect::BootPct(p) = effect {
+                ticks += (base as i64 * p as i64) / 100;
+            }
+        }
+        let level = self.level(data, crate::world::XpTrack::Boot) as i64;
+        ticks -= (ticks * level * self.xp.boot_time_pct as i64) / 100;
+        ticks.max(1) as u32
+    }
+
+    /// Unhandled-fault chip damage: base → quirks (Statically Typed /
+    /// `unsafe` Block).
+    pub fn fault_damage_for(&self, data: &BotData, base: i64) -> i64 {
+        let mut pct = 100i64;
+        for effect in self.quirks.effects_of(data) {
+            if let crate::quirks::QuirkEffect::FaultChipPct(p) = effect {
+                pct += p as i64;
+            }
+        }
+        ((base * pct.max(0)) / 100).max(0)
+    }
+
+    /// Self-repair per regen tick: base → XP (Age mends).
+    pub fn regen_for(&self, data: &BotData, base: i64) -> i64 {
+        base + self.level(data, crate::world::XpTrack::Age) as i64
+            * self.xp.age_repair_per_level
+    }
+
+    /// Movement-noise signature (M7, docs/05 Q54): 0 base; Hiding levels
+    /// quiet it (−1/level); loud/quiet quirks join when their catalog
+    /// entries land. Negative = must be approached to be heard.
+    pub fn signature_for(&self, data: &BotData) -> i64 {
+        -(self.level(data, crate::world::XpTrack::Hiding) as i64)
+    }
+
+    /// The combined XP-gain percent for this bot (Learning +5%/level +
+    /// quirk XpPct — 10x Developer / Tech Debt), floor 0.
+    pub fn xp_gain_pct(&self, data: &BotData) -> u64 {
+        let mut pct = 100i64
+            + (self.level(data, crate::world::XpTrack::Learning)
+                * self.xp.learning_gain_pct_per_level as u32) as i64;
+        for effect in self.quirks.effects_of(data) {
+            if let crate::quirks::QuirkEffect::XpPct(p) = effect {
+                pct += p as i64;
+            }
+        }
+        pct.max(0) as u64
     }
 }
 
@@ -192,7 +353,7 @@ pub fn is_damaged(data: &BotData) -> bool {
 /// Effective centicycles granted to this bot this tick, through the full
 /// pipeline. `brownout_exempt` is the Fabricator-trickle pick.
 pub fn cpu_centi(
-    stats: &Stats,
+    ctx: StatCtx<'_>,
     data: &BotData,
     brownout: bool,
     brownout_exempt: bool,
@@ -203,18 +364,28 @@ pub fn cpu_centi(
     // cycles per tick" are absolutes, not additions).
     for &u in &data.upgrades {
         if let Some(UpgradeEffect::CpuCenti(c)) =
-            stats.upgrades.get(u as usize).map(|s| s.effect)
+            ctx.stats.upgrades.get(u as usize).map(|s| s.effect)
         {
             v = c as i64;
         }
     }
-    // XP perks, quirks: identity until M6.
+    // XP: no track grows raw cycles (compute is bought, docs/02).
+    // quirks: flat centicycle deltas (Overclocked, `unsafe` Block…), and
+    // Energy Star softens the brownout percent below.
+    let mut brownout_pct = ctx.stats.brownout_penalty_pct;
+    for effect in ctx.quirks.effects_of(data) {
+        match effect {
+            crate::quirks::QuirkEffect::CpuCenti(d) => v += d,
+            crate::quirks::QuirkEffect::BrownoutPenaltyPct(p) => brownout_pct = p,
+            _ => {}
+        }
+    }
     // state: Damaged then brownout, each a percent of the running subtotal.
     if is_damaged(data) {
-        v -= ceil_pct(v, stats.damaged_penalty_pct);
+        v -= ceil_pct(v, ctx.stats.damaged_penalty_pct);
     }
     if brownout && !brownout_exempt {
-        v -= ceil_pct(v, stats.brownout_penalty_pct);
+        v -= ceil_pct(v, brownout_pct);
     }
     // clamp: never below 1 stored unit (1 centicycle).
     v.max(1) as u64
@@ -225,18 +396,32 @@ pub fn cpu_centi(
 /// impassable. (A* keeps terrain-relative costs — a bot-constant factor
 /// never changes the argmin path.)
 pub fn step_ticks(
-    stats: &Stats,
+    ctx: StatCtx<'_>,
     grid: &Grid,
     data: &BotData,
     tile: TilePos,
 ) -> Option<u32> {
     let mult = grid.get(tile)?.move_ticks()? as i64;
     let mut rate = data.move_rate_deci as i64;
-    // hardware/XP/quirks: nothing modifies move rate until M6 (Mileage).
+    // XP: Mileage wears the bearings in (−% per level, reduction floors);
+    // Hauling L3 moves +10% faster WHILE LOADED.
+    let mileage = ctx.xp.level(data.xp(crate::world::XpTrack::Mileage)) as i64;
+    rate -= (rate * mileage * ctx.xp.mileage_move_pct as i64) / 100;
+    if data.cargo_total() > 0
+        && ctx.xp.level(data.xp(crate::world::XpTrack::Hauling)) >= 3
+    {
+        rate -= (rate * ctx.xp.hauling_l3_loaded_speed_pct as i64) / 100;
+    }
+    // quirks: MovePct (Minified, Monorepo-while-loaded is modeled flat).
+    for effect in ctx.quirks.effects_of(data) {
+        if let crate::quirks::QuirkEffect::MovePct(p) = effect {
+            rate += (rate * p as i64) / 100;
+        }
+    }
     // state: Damaged slows by the penalty percent (a move-rate increase —
     // rate is ticks-per-tile, so worse = bigger; pessimistic ceil).
     if is_damaged(data) {
-        rate += ceil_pct(rate, stats.damaged_penalty_pct);
+        rate += ceil_pct(rate, ctx.stats.damaged_penalty_pct);
     }
     let rate = rate.max(1); // never below 1 stored unit
     Some((((rate * mult) as u64).div_ceil(10)).max(1) as u32)

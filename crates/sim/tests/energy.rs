@@ -103,8 +103,8 @@ fn brownout_halves_grants_but_the_printer_trickle_powers_one_bot() {
     );
     let d_first = &sim.world.bots[&first].data;
     let d_second = &sim.world.bots[&second].data;
-    assert_eq!(sim::stats::cpu_centi(&sim.stats, d_first, true, true), 100);
-    assert_eq!(sim::stats::cpu_centi(&sim.stats, d_second, true, false), 50);
+    assert_eq!(sim::stats::cpu_centi(sim.ctx(), d_first, true, true), 100);
+    assert_eq!(sim::stats::cpu_centi(sim.ctx(), d_second, true, false), 50);
 }
 
 #[test]

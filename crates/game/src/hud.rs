@@ -94,6 +94,9 @@ pub(crate) fn inspector_ui(
                     format!("waiting ({ticks_left} ticks)")
                 }
                 Some(sim::world::Action::Build { .. }) => "building".into(),
+                Some(sim::world::Action::Search { reach, current, .. }) => {
+                    format!("searching (ring {current}/{reach})")
+                }
                 None => "blocked".into(),
             }
         } else {
@@ -109,10 +112,33 @@ pub(crate) fn inspector_ui(
             data.pos.x,
             data.pos.y
         ));
-        ui.monospace(format!(
-            "xp  mine {}  haul {}  fight {}  build {}",
-            data.xp_mining, data.xp_hauling, data.xp_combat, data.xp_building
-        ));
+        // XP: every non-empty track with its level (deci-XP stored; the
+        // UI shows human whole-XP units — docs/02).
+        let xp_line: Vec<String> = sim::world::XpTrack::ALL
+            .iter()
+            .filter_map(|&track| {
+                let deci = data.xp(track);
+                (deci > 0).then(|| {
+                    format!("{} {}(L{})", track.name(), deci / 10, game.0.xp.level(deci))
+                })
+            })
+            .collect();
+        ui.monospace(if xp_line.is_empty() {
+            "xp  (rookie — identical by design)".to_string()
+        } else {
+            format!("xp  {}", xp_line.join("  "))
+        });
+        // Quirks are enemy-visible for free (docs/09) — latent rolls do
+        // not exist to the world and never render.
+        if !data.quirks.is_empty() {
+            let names: Vec<&str> = data
+                .quirks
+                .iter()
+                .filter_map(|&q| game.0.quirks.quirks.get(q as usize))
+                .map(|spec| spec.name.as_str())
+                .collect();
+            ui.monospace(format!("quirks  {}", names.join(", ")));
+        }
         ui.separator();
 
         // Hardware + the Upgrade Station catalog (M5): queue an order

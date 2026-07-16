@@ -18,6 +18,12 @@ pub const KINDS: &[&str] = &[
     "crystal", "steel", "bronze", "wire", "chips", "glass", "lens", "gold_chip",
 ];
 
+/// The host-domain fault id for reads through a contact the colony can't
+/// actually see (M7, docs/05): heard-only handles are position-only, and
+/// stale handles fault rather than answer from thin air. Bound as a VM
+/// constant so `last_error() == err_unknown_contact` reads naturally.
+pub const UNKNOWN_CONTACT: &str = "err_unknown_contact";
+
 /// Editor-facing doc lookup, backed by the function registry
 /// (`pyrite/data/builtins.ron`): signature, summary, and cost note all come
 /// from the same data the VM prices calls with, so hover docs can't go
@@ -30,6 +36,9 @@ pub struct BotHost<'a> {
     pub world: &'a mut World,
     pub bot: BotId,
     pub tuning: &'a crate::sim::Tuning,
+    /// The stat pipeline's read context (M6): per-bot effective stats —
+    /// flinch/cargo/sensor reads and quirk introspection go through it.
+    pub ctx: crate::stats::StatCtx<'a>,
 }
 
 impl BotHost<'_> {
@@ -39,31 +48,101 @@ impl BotHost<'_> {
         HostCall::Block
     }
 
-    /// Nearest entity of `kind` to this bot, or None if none exist.
+    /// This bot's faction perception (LAST tick's compute — docs/05:
+    /// everyone's queries read last tick's perception).
+    fn perception(&self) -> Option<&crate::world::Perception> {
+        self.world.perception.get(&self.world.bots[&self.bot].data.faction)
+    }
+
+    /// Is this entity available to the colony's queries: our own, fully
+    /// seen, or a heard-only blip?
+    fn perceived(&self, entity: EntityId) -> bool {
+        let faction = self.world.bots[&self.bot].data.faction;
+        if let Some(id) = self.world.bot_entities.get(&entity)
+            && self.world.bots.get(id).is_some_and(|b| b.data.faction == faction)
+        {
+            return true;
+        }
+        if self.world.printers.get(&entity).is_some_and(|p| p.faction == faction) {
+            return true;
+        }
+        if self.world.structures.get(&entity).is_some_and(|s| s.faction == faction) {
+            return true;
+        }
+        self.perception()
+            .is_some_and(|p| p.seen.contains(&entity) || p.heard.contains_key(&entity))
+    }
+
+    /// Nearest entity of `kind` to this bot, or None — PERCEPTION-SCOPED
+    /// (M7): own things always; enemy things only if seen (structures) or
+    /// seen-or-heard (bots); resource nodes from permanent map knowledge
+    /// (a known vein is a fact, not a perception — docs/05), skipping
+    /// nodes the colony has OBSERVED exhausted.
     fn find_kind(&self, kind: &str) -> Option<EntityId> {
         use crate::resources::Resource;
         let bot = &self.world.bots[&self.bot].data;
+        let faction = bot.faction;
+        let known = self.world.known_nodes.get(&faction);
+        let node_query = |filter: &dyn Fn(Resource) -> bool| -> Option<EntityId> {
+            known?
+                .iter()
+                .filter(|(_, n)| !n.exhausted && filter(n.kind))
+                .map(|(id, n)| (bot.pos.manhattan(n.pos), *id))
+                .min()
+                .map(|(_, id)| id)
+        };
         if let Some(res) = Resource::from_name(kind) {
-            return self.world.nearest_node_of(bot.pos, res);
+            return node_query(&|k| k == res);
         }
         match kind {
+            "ore" => node_query(&|k| k.is_ore_family()),
+            // Own-colony infrastructure is cloud knowledge, always.
             "blueprint" => self.world.nearest_blueprint(bot.pos),
             "depot" => self.world.nearest_depot(bot.pos),
-            "enemy" => self.world.nearest_enemy(bot.pos, bot.faction),
-            "ore" => self.world.nearest_ore(bot.pos),
             "printer" => self
                 .world
                 .printers
                 .iter()
+                .filter(|(id, p)| {
+                    p.faction == faction
+                        || self.perception().is_some_and(|per| per.seen.contains(id))
+                })
                 .map(|(id, p)| (bot.pos.manhattan(p.pos), *id))
                 .min()
                 .map(|(_, id)| id),
+            "enemy" => {
+                let per = self.perception()?;
+                let mut best: Option<(u32, EntityId)> = None;
+                for (id, b) in &self.world.bots {
+                    if b.data.faction == faction || b.data.dying {
+                        continue;
+                    }
+                    let entity = b.data.entity;
+                    let pos = if per.seen.contains(&entity) {
+                        b.data.pos
+                    } else if let Some(blip) = per.heard.get(&entity) {
+                        *blip
+                    } else {
+                        continue;
+                    };
+                    let _ = id;
+                    let candidate = (bot.pos.manhattan(pos), entity);
+                    if best.is_none_or(|b| candidate < b) {
+                        best = Some(candidate);
+                    }
+                }
+                best.map(|(_, id)| id)
+            }
             "wreck" => None, // wrecks are BotId-keyed; targeting lands M10
             "smelter" | "foundry" | "archive" => self
                 .world
                 .structures
                 .iter()
-                .filter(|(_, st)| st.kind.name() == kind)
+                .filter(|(id, st)| {
+                    st.kind.name() == kind
+                        && (st.faction == faction
+                            || self.perception().is_some_and(|per| per.seen.contains(id)))
+                })
                 .map(|(id, st)| (bot.pos.manhattan(st.pos), *id))
                 .min()
                 .map(|(_, id)| id),
@@ -128,16 +207,46 @@ impl pyrite::Host for BotHost<'_> {
             },
             "cargo_full" => {
                 let data = &self.world.bots[&bot_id].data;
-                HostCall::Ready(Value::Bool(data.cargo_total() >= data.cargo_cap))
+                HostCall::Ready(Value::Bool(
+                    data.cargo_total() >= self.ctx.cargo_cap_for(data),
+                ))
             }
             "health_low" => {
                 // "Low" = below the bot's own hurt_line env (read live at
                 // each evaluation — moving it mid-flight is legal).
                 let data = &self.world.bots[&bot_id].data;
-                let line =
-                    crate::world::env_read(&data.env, "hurt_line", self.tuning);
+                let line = crate::world::env_read(data, "hurt_line", self.tuning, self.ctx.quirks);
                 HostCall::Ready(Value::Bool(data.hp * 100 < data.max_hp * line))
             }
+            // Quirk introspection (docs/09: free whenever quirks are on —
+            // per-bot adaptation is the system's payoff). Latent quirks
+            // are invisible, introspection included.
+            "my_quirks" => {
+                let data = &self.world.bots[&bot_id].data;
+                HostCall::Ready(Value::List(
+                    data.quirks
+                        .iter()
+                        .filter_map(|&q| self.ctx.quirks.quirks.get(q as usize))
+                        .map(|spec| Value::Str(spec.name.clone()))
+                        .collect(),
+                ))
+            }
+            "has_quirk" => match args {
+                [Value::Str(name)] => {
+                    let data = &self.world.bots[&bot_id].data;
+                    let has = self
+                        .ctx
+                        .quirks
+                        .by_name(name)
+                        .is_some_and(|idx| data.quirks.contains(&idx));
+                    HostCall::Ready(Value::Bool(has))
+                }
+                [other] => HostCall::Fault(Fault::new(
+                    faults::TYPE,
+                    format!("has_quirk requires a quirk name, got {}", other.type_name()),
+                )),
+                _ => HostCall::Fault(Fault::new(faults::ARITY, "has_quirk takes 1 argument")),
+            },
             "last_error" => {
                 // The fault's identity constant (err_type, err_action, ...)
                 // — ==-comparable against the pre-bound err_* names (Q80).
@@ -146,7 +255,27 @@ impl pyrite::Host for BotHost<'_> {
 
             // --- blocking actions ---
             "move_to" => match args {
-                [Value::Entity(target)] => self.request(ActionRequest::MoveTo(EntityId(*target))),
+                // Stale handles fault (M7): a target neither ours, nor
+                // perceived, nor in map knowledge doesn't exist to us.
+                [Value::Entity(target)] => {
+                    let entity = EntityId(*target);
+                    let faction = self.world.bots[&bot_id].data.faction;
+                    let known_node = self
+                        .world
+                        .known_nodes
+                        .get(&faction)
+                        .is_some_and(|k| k.contains_key(&entity));
+                    if !self.perceived(entity) && !known_node
+                        && !self.world.depots.contains_key(&entity)
+                        && !self.world.blueprints.contains_key(&entity)
+                    {
+                        return HostCall::Fault(Fault::new(
+                            UNKNOWN_CONTACT,
+                            "move_to: stale or unknown contact",
+                        ));
+                    }
+                    self.request(ActionRequest::MoveTo(entity))
+                }
                 [other] => HostCall::Fault(Fault::new(
                     faults::TYPE,
                     format!("move_to requires an entity, got {}", other.type_name()),
@@ -154,10 +283,17 @@ impl pyrite::Host for BotHost<'_> {
                 _ => HostCall::Fault(Fault::new(faults::ARITY, "move_to takes 1 argument")),
             },
             "mine" => self.request(ActionRequest::Mine),
+            // --- the exploration stances (M7) ---
+            "search" => self.request(ActionRequest::Search),
+            "wander" => self.request(ActionRequest::Wander),
+            "explore" => self.request(ActionRequest::Explore),
             // The forced handler-entry ritual: an engine wait the VM
-            // injects at every unified-handler entry (the flinch).
+            // injects at every unified-handler entry (the flinch). The
+            // duration runs the pipeline: quirks (Rubber Ducky / Race
+            // Condition) and the Flinch body track shorten or stretch it.
             "handler_init" => {
-                let ticks = self.tuning.handler_init_ticks;
+                let data = &self.world.bots[&bot_id].data;
+                let ticks = self.ctx.flinch_ticks_for(data, self.tuning.handler_init_ticks);
                 if ticks == 0 {
                     HostCall::Ready(Value::Unit)
                 } else {
@@ -217,7 +353,10 @@ impl pyrite::Host for BotHost<'_> {
                 };
                 let (faction, space) = {
                     let data = &self.world.bots[&bot_id].data;
-                    (data.faction, data.cargo_cap.saturating_sub(data.cargo_total()))
+                    (
+                        data.faction,
+                        self.ctx.cargo_cap_for(data).saturating_sub(data.cargo_total()),
+                    )
                 };
                 let mut got = 0u32;
                 if space > 0 {
@@ -269,7 +408,7 @@ impl pyrite::Host for BotHost<'_> {
                 }
                 if got > 0 {
                     let bot = self.world.bots.get_mut(&bot_id).expect("bot exists");
-                    let loaded = bot.data.cargo_add(kind, got);
+                    let loaded = bot.data.cargo_add(kind, got, u32::MAX);
                     debug_assert_eq!(loaded, got, "space was pre-checked");
                 }
                 if name == "try_withdraw" {
@@ -297,28 +436,107 @@ impl pyrite::Host for BotHost<'_> {
                 HostCall::Ready(Value::Int((deci / crate::resources::DECI) as i64))
             }
             "scan_resources" => {
-                // Every live node, (distance, id) sorted — omniscient until
-                // M7 scopes queries to perception.
+                // Perception-scoped (M7): the colony's PERMANENT node
+                // knowledge, observed-exhausted skipped, (distance, id)
+                // sorted — a known vein is a fact, not a perception.
+                let faction = self.world.bots[&bot_id].data.faction;
                 let mut nodes: Vec<(u32, u64)> = self
                     .world
-                    .nodes
-                    .iter()
-                    .filter(|(_, n)| n.amount > 0)
-                    .map(|(id, n)| (bot_pos.manhattan(n.pos), id.0))
-                    .collect();
+                    .known_nodes
+                    .get(&faction)
+                    .map(|known| {
+                        known
+                            .iter()
+                            .filter(|(_, n)| !n.exhausted)
+                            .map(|(id, n)| (bot_pos.manhattan(n.pos), id.0))
+                            .collect()
+                    })
+                    .unwrap_or_default();
                 nodes.sort();
                 HostCall::Ready(Value::List(
                     nodes.into_iter().map(|(_, id)| Value::Entity(id)).collect(),
                 ))
+            }
+            "scan_enemies" => {
+                // Seen ∪ heard enemy bots (docs/05: full returns within
+                // seeing, movers within hearing), (distance, id) sorted.
+                let faction = self.world.bots[&bot_id].data.faction;
+                let mut found: Vec<(u32, u64)> = Vec::new();
+                if let Some(per) = self.world.perception.get(&faction) {
+                    for b in self.world.bots.values() {
+                        if b.data.faction == faction || b.data.dying {
+                            continue;
+                        }
+                        let entity = b.data.entity;
+                        let pos = if per.seen.contains(&entity) {
+                            b.data.pos
+                        } else if let Some(blip) = per.heard.get(&entity) {
+                            *blip
+                        } else {
+                            continue;
+                        };
+                        found.push((bot_pos.manhattan(pos), entity.0));
+                    }
+                }
+                found.sort();
+                HostCall::Ready(Value::List(
+                    found.into_iter().map(|(_, id)| Value::Entity(id)).collect(),
+                ))
+            }
+            "is_seen" => match args {
+                // Seen = full dossier; heard-only = position, nothing
+                // else; NEITHER = a stale handle, and stale handles fault
+                // (docs/05 M7).
+                [Value::Entity(e)] => {
+                    let entity = EntityId(*e);
+                    let Some(per) = self.perception() else {
+                        return HostCall::Fault(Fault::new(
+                            UNKNOWN_CONTACT,
+                            "is_seen: no perception".to_string(),
+                        ));
+                    };
+                    if per.seen.contains(&entity) {
+                        HostCall::Ready(Value::Bool(true))
+                    } else if per.heard.contains_key(&entity) {
+                        HostCall::Ready(Value::Bool(false))
+                    } else if self.perceived(entity) {
+                        // Our own unit/structure: trivially seen.
+                        HostCall::Ready(Value::Bool(true))
+                    } else {
+                        HostCall::Fault(Fault::new(
+                            UNKNOWN_CONTACT,
+                            "is_seen: stale or unknown contact",
+                        ))
+                    }
+                }
+                [other] => HostCall::Fault(Fault::new(
+                    faults::TYPE,
+                    format!("is_seen requires an entity, got {}", other.type_name()),
+                )),
+                _ => HostCall::Fault(Fault::new(faults::ARITY, "is_seen takes 1 argument")),
+            },
+            "path_blocked" => {
+                // The Tier-2 corridor sensor: is the current move path's
+                // next tile occupied by a bot?
+                let data = &self.world.bots[&bot_id].data;
+                let blocked = match &data.action {
+                    Some(crate::world::Action::Move { path, .. }) => path
+                        .first()
+                        .is_some_and(|next| self.world.tile_occupied(*next, bot_id)),
+                    _ => false,
+                };
+                HostCall::Ready(Value::Bool(blocked))
             }
             "drop_cargo" => {
                 // Spill the manifest onto the bot's own tile as nodes —
                 // mine() recovers it (deterministic: no scatter for the
                 // deliberate drop; death spills keep their RNG scatter).
                 let data = &mut self.world.bots.get_mut(&bot_id).expect("bot exists").data;
-                // The dropped cargo takes its stock provenance with it
-                // (mining it back is real work — that re-earns credit).
+                // The dropped cargo takes its stock provenance AND its
+                // undelivered hauling distance with it (docs/02: income is
+                // cargo-distance DELIVERED; mining it back re-earns).
                 data.withdrawn_aboard = 0;
+                data.haul_accum = 0;
                 let manifest = std::mem::take(&mut data.cargo);
                 for (kind, amount) in manifest {
                     if amount == 0 {
@@ -351,7 +569,16 @@ impl pyrite::Host for BotHost<'_> {
                 HostCall::Ready(Value::Unit)
             }
             "attack" => match args {
-                [Value::Entity(target)] => self.request(ActionRequest::Attack(EntityId(*target))),
+                [Value::Entity(target)] => {
+                    let entity = EntityId(*target);
+                    if !self.perceived(entity) {
+                        return HostCall::Fault(Fault::new(
+                            UNKNOWN_CONTACT,
+                            "attack: stale or unknown contact",
+                        ));
+                    }
+                    self.request(ActionRequest::Attack(entity))
+                }
                 [other] => HostCall::Fault(Fault::new(
                     faults::TYPE,
                     format!("attack requires an entity, got {}", other.type_name()),
@@ -377,9 +604,10 @@ impl pyrite::Host for BotHost<'_> {
                     }
                 };
                 let min_level = crate::world::env_read(
-                    &self.world.bots[&bot_id].data.env,
+                    &self.world.bots[&bot_id].data,
                     "log_min_level",
                     self.tuning,
+                    self.ctx.quirks,
                 );
                 if (level as i64) >= min_level {
                     let data = &mut self.world.bots.get_mut(&bot_id).expect("bot exists").data;
@@ -450,10 +678,14 @@ impl pyrite::Host for BotHost<'_> {
                             format!("getenv: unknown env key {key:?}"),
                         ));
                     }
+                    // Reads land inside any quirk compulsion clamp — this
+                    // is how getenv "reports where the value actually
+                    // landed" (docs/09 Q60).
                     let value = crate::world::env_read(
-                        &self.world.bots[&bot_id].data.env,
+                        &self.world.bots[&bot_id].data,
                         key,
                         self.tuning,
+                        self.ctx.quirks,
                     );
                     HostCall::Ready(Value::Int(value))
                 }

@@ -13,6 +13,8 @@ Upkeep(
     base_draw: 10,
     draw_per_upgrade: 2,
     draw_per_module: 2,
+    // Veterans cost more to run (docs/02): per XP-track level.
+    draw_per_track_level: 1,
     // Refineries with a recipe set draw too ("needs energy", docs/03).
     draw_per_refinery: 20,
     // Generator output per settlement, by fuel burned (Coal >> Wood).

@@ -16,11 +16,14 @@ mod movement;
 mod printers;
 pub mod host;
 pub mod map;
+pub mod perception;
+pub mod quirks;
 pub mod replay;
 pub mod resources;
 pub mod sim;
 pub mod stats;
 pub mod world;
+pub mod xp;
 
 pub use map::{MapSpec, TileKind, TilePos};
 pub use replay::{Replay, TimedCommand};

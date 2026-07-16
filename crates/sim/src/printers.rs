@@ -50,10 +50,14 @@ impl Sim {
         // Hardware travels with the chassis: the fresh VM keeps the bot's
         // bought stack depth (re-coloring swaps the program, not the body).
         let config = self.vm_config_for(&self.world.bots[&id].data);
+        // Boot ritual through the pipeline (Hot Reload / Windows Update /
+        // the Boot track).
+        let boot = crate::stats::StatCtx { stats: &self.stats, xp: &self.xp, quirks: &self.quirks }
+            .boot_ticks_for(&self.world.bots[&id].data, self.tuning.boot_ticks);
         let bot = self.world.bots.get_mut(&id).expect("bot exists");
         bot.data.color = color;
         bot.data.recall = None;
-        bot.data.booting = Some(self.tuning.boot_ticks);
+        bot.data.booting = Some(boot);
         let mut vm = Vm::new(program, config);
         vm.set_engine_ctx(Some(pyrite::EngineCtx::Boot));
         bot.vm = Some(vm);
@@ -230,7 +234,7 @@ impl Sim {
                     && !b.data.pad_sit
                     && b.vm.as_ref().is_none_or(|vm| vm.phase() == pyrite::Phase::Main)
             })
-            .map(|b| (b.data.xp_mining + b.data.xp_hauling + b.data.xp_combat, b.data.id))
+            .map(|b| (b.data.xp(crate::world::XpTrack::Mining) + b.data.xp(crate::world::XpTrack::Hauling) + b.data.xp(crate::world::XpTrack::Combat), b.data.id))
             .min();
         if let Some((_, victim)) = victim {
             let home = self.nearest_faction_printer(victim);
@@ -434,7 +438,7 @@ impl Sim {
                     bot.data.log_cap += self.stats.memory_bank_log;
                 }
                 // A bought Stack extension reaches the LIVE VM.
-                let depth = self.stats.stack_depth_for(&bot.data);
+                let depth = crate::stats::StatCtx { stats: &self.stats, xp: &self.xp, quirks: &self.quirks }.stack_depth_for(&bot.data);
                 if let Some(vm) = bot.vm.as_mut() {
                     vm.set_stack_depth(depth);
                 }
@@ -478,7 +482,7 @@ impl Sim {
                     && !b.data.pad_sit
                     && b.vm.as_ref().is_none_or(|vm| vm.phase() == pyrite::Phase::Main)
             })
-            .map(|b| (b.data.xp_mining + b.data.xp_hauling + b.data.xp_combat, b.data.id))
+            .map(|b| (b.data.xp(crate::world::XpTrack::Mining) + b.data.xp(crate::world::XpTrack::Hauling) + b.data.xp(crate::world::XpTrack::Combat), b.data.id))
             .min();
         if let Some((_, victim)) = victim {
             self.begin_recall_walk(victim, home, purpose);
@@ -528,7 +532,7 @@ impl Sim {
         let ticks_left = path
             .first()
             .map(|p| {
-                crate::stats::step_ticks(&self.stats, &self.world.grid, &self.world.bots[&id].data, *p)
+                crate::stats::step_ticks(crate::stats::StatCtx { stats: &self.stats, xp: &self.xp, quirks: &self.quirks }, &self.world.grid, &self.world.bots[&id].data, *p)
                     .unwrap_or(1)
             })
             .unwrap_or(0);

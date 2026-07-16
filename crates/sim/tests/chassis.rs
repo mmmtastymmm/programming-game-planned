@@ -52,9 +52,9 @@ fn damaged_bots_think_and_move_slower() {
         .unwrap()
         .unwrap();
     let healthy_step =
-        stats::step_ticks(&sim.stats, &sim.world.grid, &sim.world.bots[&id].data, TilePos::new(3, 2))
+        stats::step_ticks(sim.ctx(), &sim.world.grid, &sim.world.bots[&id].data, TilePos::new(3, 2))
             .unwrap();
-    let healthy_cpu = stats::cpu_centi(&sim.stats, &sim.world.bots[&id].data, false, false);
+    let healthy_cpu = stats::cpu_centi(sim.ctx(), &sim.world.bots[&id].data, false, false);
     assert_eq!(healthy_step, 14, "140 deci-ticks on a 1x tile");
     assert_eq!(healthy_cpu, 100);
 
@@ -64,11 +64,11 @@ fn damaged_bots_think_and_move_slower() {
     let d = &sim.world.bots[&id].data;
     assert!(stats::is_damaged(d));
     assert_eq!(
-        stats::step_ticks(&sim.stats, &sim.world.grid, d, TilePos::new(3, 2)).unwrap(),
+        stats::step_ticks(sim.ctx(), &sim.world.grid, d, TilePos::new(3, 2)).unwrap(),
         18,
         "140 + ceil(25%) = 175 deci -> 18 ticks"
     );
-    assert_eq!(stats::cpu_centi(&sim.stats, d, false, false), 75);
+    assert_eq!(stats::cpu_centi(sim.ctx(), d, false, false), 75);
 }
 
 #[test]
@@ -88,14 +88,14 @@ fn brownout_halves_cycles_but_the_trickle_exempts() {
         .unwrap()
         .unwrap();
     let d = &sim.world.bots[&id].data;
-    assert_eq!(stats::cpu_centi(&sim.stats, d, true, false), 50, "brownout: -50%");
-    assert_eq!(stats::cpu_centi(&sim.stats, d, true, true), 100, "the Fabricator trickle pick");
+    assert_eq!(stats::cpu_centi(sim.ctx(), d, true, false), 50, "brownout: -50%");
+    assert_eq!(stats::cpu_centi(sim.ctx(), d, true, true), 100, "the Fabricator trickle pick");
     // Damaged then brownout, each off the running subtotal, both ceils:
     // 100 - 25 = 75; 75 - ceil(37.5) = 37.
     let data = &mut sim.world.bots.get_mut(&id).unwrap().data;
     data.hp = 40;
     let d = &sim.world.bots[&id].data;
-    assert_eq!(stats::cpu_centi(&sim.stats, d, true, false), 37);
+    assert_eq!(stats::cpu_centi(sim.ctx(), d, true, false), 37);
 }
 
 /// Lockstep commands never panic the sim: absurd dev-spawn numbers clamp

@@ -270,6 +270,15 @@ pub struct MapSpec {
     /// before the player acts).
     #[serde(default)]
     pub structures: Vec<(TilePos, crate::world::StructureKind)>,
+    /// Expected quirks per bot in PER-MILLE (docs/09 match setting:
+    /// 500 = 0.5 quirks/bot; 0 = quirks off; up to 2000 = both latent
+    /// slots certain). Integer so the sim stays float-free.
+    #[serde(default = "default_quirk_permille")]
+    pub quirk_permille: u32,
+}
+
+fn default_quirk_permille() -> u32 {
+    500
 }
 
 fn default_true() -> bool {
@@ -318,6 +327,7 @@ impl MapSpec {
             dev_all_unlocks: true,
             dev_free_power: true,
             structures: Vec::new(),
+            quirk_permille: default_quirk_permille(),
         }
     }
 }

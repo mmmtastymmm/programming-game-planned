@@ -1,0 +1,38 @@
+// XP v2 tuning (M6, docs/02 + Q83 first-pass incomes). Whole-XP figures
+// unless a field name says deci. Body-perk MAGNITUDES (age_*, mileage_*,
+// flinch_*, boot_*) are first-pass inventions — docs name the growth,
+// not the numbers; flagged NEEDS DISCUSSION in TASKS.md.
+XpConfig(
+    curve_base: 100,       // level n costs 100×n more: 100/300/600/1000/1500
+    level_cap: 5,
+
+    combat_kill_xp: 25,
+    flinch_xp: 10,
+    age_deci_per_tick: 1,      // 1 XP per 10 ticks
+    mileage_deci_per_tile: 10, // 1 XP per tile
+    learning_feed_pct: 10,
+    learning_gain_pct_per_level: 5,
+
+    mining_yield_pct: 10,
+    mining_l3_time_pct: 25,
+    hauling_cargo_pct: 10,
+    hauling_l3_loaded_speed_pct: 10,
+    combat_damage_pct: 5,
+    building_speed_pct: 10,
+    scouting_sensors_per_level: 1,
+
+    age_hp_per_level: 5,
+    age_repair_per_level: 1,
+    mileage_move_pct: 4,
+    flinch_time_pct: 10,
+    boot_time_pct: 10,
+
+    // M7 incomes (Q83): being caught teaches hiding; discovery and
+    // surveys teach scouting.
+    hiding_episode_xp: 25,
+    scouting_node_xp: 5,
+    scouting_survey_xp: 10,
+
+    slot_milestones: [1000, 3000],
+    slot_cap: 3,
+)

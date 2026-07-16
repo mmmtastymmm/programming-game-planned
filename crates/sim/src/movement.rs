@@ -27,7 +27,9 @@ impl Sim {
             self.world.occupancy.get(&tile).into_iter().flatten().copied().find(|b| *b != mover);
 
         if raise_on_mover {
-            self.world.pending_signals.push((mover, Signal::Bump));
+            // The rammer's own driving: never a hostile source (docs/02 —
+            // a two-bot mosh pit in your base earns no Flinch XP).
+            self.world.pending_signals.push((mover, Signal::Bump, None));
         } else if let Some(bot) = self.world.bots.get_mut(&mover) {
             // Engine walks raise nothing on the mover — but the long
             // at-fault stun still applies (never downgrades).
@@ -35,7 +37,10 @@ impl Sim {
         }
 
         if let Some(blocker) = blocker {
-            self.world.pending_signals.push((blocker, Signal::Bumped));
+            // The victim was rammed: the mover's faction is the source —
+            // enemy rams train the Flinch track, friendly ones don't.
+            let mover_faction = self.world.bots.get(&mover).map(|b| b.data.faction);
+            self.world.pending_signals.push((blocker, Signal::Bumped, mover_faction));
         }
 
         let damage = self.tuning.bump_damage;
@@ -83,10 +88,10 @@ impl Sim {
                 astar_avoiding(&self.world.grid, &self.world.overlays, start, &goals, &structures)
             });
         match path {
-            Some(path) if path.is_empty() => self.finish_action(id, Ok(Value::Unit)),
+            Some(path) if path.is_empty() => self.complete_move(id),
             Some(path) => {
                 let first_cost = crate::stats::step_ticks(
-                    &self.stats,
+                    crate::stats::StatCtx { stats: &self.stats, xp: &self.xp, quirks: &self.quirks },
                     &self.world.grid,
                     &self.world.bots[&id].data,
                     path[0],
@@ -114,11 +119,11 @@ impl Sim {
             match astar_avoiding(&self.world.grid, &self.world.overlays, start, &goals, &occupied) {
                 Some(path) if path.is_empty() => {
                     // Already standing at a goal: the move is done.
-                    self.finish_action(id, Ok(Value::Unit));
+                    self.complete_move(id);
                 }
                 Some(path) => {
                     let first_cost = crate::stats::step_ticks(
-                        &self.stats,
+                        crate::stats::StatCtx { stats: &self.stats, xp: &self.xp, quirks: &self.quirks },
                         &self.world.grid,
                         &self.world.bots[&id].data,
                         path[0],
@@ -156,7 +161,7 @@ impl Sim {
                     .first()
                     .map(|p| {
                         crate::stats::step_ticks(
-                            &self.stats,
+                            crate::stats::StatCtx { stats: &self.stats, xp: &self.xp, quirks: &self.quirks },
                             &self.world.grid,
                             &self.world.bots[&id].data,
                             *p,

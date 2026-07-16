@@ -286,19 +286,47 @@ full charges + centicycles + wrap-surviving variables move every replay hash at 
       in-game alongside M4's still-open structure rendering (Smelter/Foundry/Archive/
       Generator/Tap/Station have no sprites yet).* [game] (M)
 
-## M6 — XP v2 & quirks
+## M6 — XP v2 & quirks ✅ CORE COMPLETE (2026-07-16) — discussion items below
 
-- [ ] **Five task tracks** (add Scouting) with spec incomes: hauling 1 per unit-per-10-tiles,
-      combat 1 per 10 damage + 25/kill, building 1 per 10 progress; deci-XP storage; levels,
-      perk milestones, slot milestones. [sim] (M) ⚠HASH
-- [ ] **Six body tracks**: Age (1/10 ticks → max HP + self-repair), Mileage (1/tile → move
-      rate), Hiding (25/detection-episode — needs M7), Flinch (10/hostile flinch), Boot
-      (100/hostile-caused rescue boot; source filters against farming), Learning (10% of other
-      post-multiplier XP, +5%/level, settled at phase 7). [sim] (M) ⚠HASH
-- [ ] **Quirks** (09): match-setting probability (default 0.5/bot), latent roll at print
-      (`rng.quirk_roll`), manifestation at 300/900 total XP, no removal, enemy-visible free;
-      `my_quirks()`/`has_quirk()` + quirk-name constants; per-quirk effects via the stat/cost
-      pipeline; quirk scratch state. [pyrite][sim][game] (L) ⚠HASH
+- [x] **Five task tracks + deci-XP** (`data/xp.ron`, `sim::xp`): `BotData.xp` is a
+      `BTreeMap<XpTrack, u64>` in deci-XP (all 11 tracks exist — storage never migrates
+      again); quadratic curve (100×n, cap L5); incomes per Q83 — mining 1/unit, hauling 1 per
+      unit-per-10-tiles ACCRUED per loaded tile and PAID AT DELIVERY (`haul_accum`; drops/
+      spills forfeit it), combat 1 per 10 damage + 25/kill (`pending_damage` now carries the
+      attacker BOT so the kill credits in settle), building 1 per 10 progress (blueprint
+      progress converted to deci-units), Scouting exists with zero income until M7. Task
+      perks live: mine yield +10%/L (L3 swing −25%), cargo +10%/L (L3 loaded speed), damage
+      +5%/L (`attack_damage` moved to tuning.ron), build rate +10%/L, sensors +1/L. Slot
+      milestones +1 at 1000/3000 total XP (cap 3). [sim] (M) ⚠HASH *(golden regenerated)*
+- [x] **Six body tracks**: Age (1 deci/tick, added at settle → self-repair +1/L; max-HP
+      growth NOT yet wired — see discussion), Mileage (10 deci per tile actually walked,
+      engine walks included → move rate −4%/L), Flinch (100 deci per HOSTILE-source flinch —
+      `pending_signals` carries a source faction: hurt=attacker, bumped=rammer, bump/error
+      =self), Hiding/Boot exist with zero income until M7/M10, Learning (10% of other
+      post-multiplier XP via a per-bot fractional carry so slow drips don't floor away;
+      +5% gain/level; capped tracks still feed it; never re-multiplied; multiplier memoized
+      at start-of-settle). Upkeep gains `draw_per_track_level`. *NEEDS DISCUSSION: every
+      body-perk MAGNITUDE (age_hp/repair, mileage −4%, flinch/boot −10%/L) is a first-pass
+      invention — docs name the growth, not the numbers. Age's max-HP growth is deferred
+      until its magnitude is ratified (mutating max_hp interacts with the Damaged line).*
+      [sim] (M) ⚠HASH
+- [x] **Quirks** (`data/quirks.ron`, `sim::quirks`): MapSpec `quirk_permille` match dial
+      (500 = 0.5/bot default, 0 = off, slot n's chance = dial − n×1000); latent rolls at
+      print from `rng.quirk_roll` (rarity-weighted); manifestation at 300/900 total XP in
+      phase 7 (one-time effects: MaxHpPct, LogCapPct, live-VM StackDepth); pipeline effects
+      (cpu/sensors/cargo/move/flinch/boot/fault-chip/damage/XP%/brownout-softening); POLICY
+      quirks ride the env registry (docs/09 Q60: temperament shifts the default, compulsion
+      clamps on READ so `getenv` reports the landing and stored values clip quietly);
+      `my_quirks()`/`has_quirk()` host arms + quirk names as pre-bound constants; latent
+      rolls invisible to everything including introspection; inspector lists manifested
+      quirks (enemy-visible free). *NEEDS DISCUSSION: (1) the v1 catalog is the ~26-entry
+      subset whose hooks exist — COST-OVERLAY quirks (Tail-Call Optimized, Kernel Bypass,
+      Dial-Up, Telemetry Enabled, Eventual Consistency…) wait for M8's per-bot cost
+      overlays, and Lazy Evaluation / Graceful Shutdown / Kernel Panic / countdown quirks
+      wait for their systems; (2) weights are invented first-pass rarities; (3) "expected
+      quirks per bot" is implemented as independent per-slot per-mille draws — ratify the
+      dial's shape; (4) `quirk_permille` lives on MapSpec until M13's match-settings
+      struct.* [pyrite][sim][game] (L) ⚠HASH
 
 ## M7 — Perception: the seeing/hearing model (biggest behavioral shift for programs)
 
@@ -419,7 +447,7 @@ full charges + centicycles + wrap-surviving variables move every replay hash at 
 | `cargo_count` | M4 | | `hijack`/`recover_black_box` | M10 |
 | `study` | M4 | | `guard`/`escort` | M10 |
 | `scan_resources` | M4 | | `send`/`receive`/`broadcast` + `try_*` | M11 |
-| `my_quirks`/`has_quirk` | M6 | | `scan_enemies` | M7 |
+| `my_quirks`/`has_quirk` ✅ | M6 | | `scan_enemies` | M7 |
 
 Existing and staying: `closest`, `exists`, `move_to`, `mine`, `build`, `attack`, `wait`,
 `rng`, `log`, `upload_log`, `upload_crash_dump`, `cargo_full`, `health_low`, `last_error`,

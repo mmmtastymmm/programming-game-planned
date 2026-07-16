@@ -118,7 +118,7 @@ fn recall_recolors_the_lowest_xp_bot_keeping_xp() {
         })
         .unwrap()
         .unwrap();
-    sim.world.bots.get_mut(&veteran).unwrap().data.xp_mining = 500;
+    sim.world.bots.get_mut(&veteran).unwrap().data.xp.insert(sim::world::XpTrack::Mining, 500);
 
     // Green over quota (2 > 1), Red has headroom (0 < 1): recall fires.
     sim.apply(&Command::SetDesiredMax { printer: green, value: 1 }).unwrap();
@@ -131,7 +131,7 @@ fn recall_recolors_the_lowest_xp_bot_keeping_xp() {
     let veteran_bot = &sim.world.bots[&veteran];
     assert_eq!(rookie_bot.data.color, Color::RED, "lowest-XP bot re-colors");
     assert_eq!(veteran_bot.data.color, Color::GREEN, "veteran keeps its color");
-    assert_eq!(veteran_bot.data.xp_mining, 500);
+    assert_eq!(veteran_bot.data.xp(sim::world::XpTrack::Mining), 500);
     assert_eq!(sim.world.bots.len(), 2, "rebalancing loses nobody");
 }
 
@@ -245,7 +245,7 @@ fn over_capacity_scraps_lowest_xp_for_refund() {
         color: Color::GREEN,
     })
     .unwrap();
-    sim.world.bots.get_mut(&veteran).unwrap().data.xp_combat = 900;
+    sim.world.bots.get_mut(&veteran).unwrap().data.xp.insert(sim::world::XpTrack::Combat, 900);
 
     let ore_before = sim.world.stock_get(0, sim::resources::Resource::Iron);
     for _ in 0..60 {
@@ -296,7 +296,7 @@ fn scrap_walk_ends_beside_the_printer_for_a_visible_tick() {
         })
         .unwrap()
         .unwrap();
-    sim.world.bots.get_mut(&veteran).unwrap().data.xp_combat = 900;
+    sim.world.bots.get_mut(&veteran).unwrap().data.xp.insert(sim::world::XpTrack::Combat, 900);
 
     let printer_pos = TilePos::new(2, 2);
     let mut last_seen = TilePos::new(10, 6);

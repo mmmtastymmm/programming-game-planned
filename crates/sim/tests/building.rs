@@ -65,7 +65,7 @@ fn builder_bot_bridges_the_wall() {
     assert_eq!(sim.world.grid.get(site), Some(TileKind::Bridge), "bridge must be built");
     assert!(sim.world.blueprints.is_empty(), "blueprint consumed");
     assert!(
-        sim.world.bots[&builder].data.xp_building >= sim.tuning.bridge_build_ticks as u64,
+        sim.world.bots[&builder].data.xp(sim::world::XpTrack::Building) >= sim.tuning.bridge_build_ticks as u64,
         "building earns Building XP"
     );
 }
@@ -166,7 +166,7 @@ fn one_way_bridge_only_crosses_with_the_arrow() {
         sim.step();
     }
     let miner_bot = &sim.world.bots[&miner];
-    assert!(miner_bot.data.xp_mining > 0, "the miner must cross east and mine");
+    assert!(miner_bot.data.xp(sim::world::XpTrack::Mining) > 0, "the miner must cross east and mine");
     assert!(miner_bot.data.pos.x > 4, "and be stranded east of the wall");
     assert_eq!(
         sim.world.stock_get(0, sim::resources::Resource::Iron),

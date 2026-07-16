@@ -240,6 +240,13 @@ pub enum ActionRequest {
     Wait(u32),
     /// Work on a designated blueprint.
     Build(EntityId),
+    /// The scouting stance (M7): root, seeing expands to the hearing
+    /// radius, resolves at full reach.
+    Search,
+    /// A seeded random walk leg (rng.wander) — the dumb explorer.
+    Wander,
+    /// Pick a random fogged tile within ~15, walk there, survey it.
+    Explore,
 }
 
 /// An in-flight world action.
@@ -258,6 +265,10 @@ pub enum Action {
     Wait { ticks_left: u32 },
     /// Contributes 1 progress per tick while adjacent to the blueprint.
     Build { blueprint: EntityId },
+    /// The scouting stance (M7): rooted; `current` is the survey ring
+    /// reached so far, expanding one tile per interval out to `reach`
+    /// (the hearing radius at stance start). Resolves at full reach.
+    Search { reach: u32, current: u32, ticks_left: u32 },
 }
 
 // (The old LOG_BUFFER_CAP const died with M5 — the cap is the per-bot
@@ -308,6 +319,9 @@ pub struct BotData {
     /// Sitting an Upgrade Station pad (an engine interrupt context —
     /// inert, double-handle exposed).
     pub pad_sit: bool,
+    /// explore() chains a survey onto its walk (M7): set at the walk's
+    /// start, consumed when the move completes.
+    pub survey_after_move: bool,
     pub color: Color,
     pub requested: Option<ActionRequest>,
     pub action: Option<Action>,
@@ -326,15 +340,51 @@ pub struct BotData {
     /// ([`ENV_KEYS`]). Survives restarts/faults/redeploys; dies with the
     /// bot. Unset means the key's default.
     pub env: BTreeMap<String, i64>,
-    pub xp_mining: u64,
-    pub xp_hauling: u64,
-    pub xp_combat: u64,
-    pub xp_building: u64,
+    /// DECI-XP per track (M6, round 4: awards and multipliers compute in
+    /// tenths so Learning's 10% of a 1-XP drip is real). Absent = 0.
+    /// Tables in docs read whole XP — the human unit; divide by 10.
+    pub xp: BTreeMap<XpTrack, u64>,
+    /// Hauling income accumulator (deci-XP): cargo-distance carried since
+    /// the last delivery — credited at deposit, forfeited by drops/spills
+    /// (docs/02: "cargo-distance DELIVERED").
+    pub haul_accum: u64,
+    /// Learning-feed fractional carry (hundredths of a deci-XP): 10% of a
+    /// 1-deci Age drip is real over time instead of flooring to zero
+    /// every settlement (docs/02's deci-XP intent, one unit finer).
+    pub learning_carry: u64,
+    /// The tick this bot last entered a tile (M7: ONLY MOVING THINGS MAKE
+    /// NOISE — hearing checks it against the current tick).
+    pub moved_tick: u64,
+    /// Open detection episodes (M7, docs/05): enemy faction → ticks since
+    /// last seen-or-heard by that faction; the episode re-arms (closes)
+    /// after the re-arm window fully unobserved. Opening one pays Hiding
+    /// XP — the machine gets good at what keeps happening to it.
+    pub episodes: BTreeMap<u8, u32>,
+    /// Latent quirk rolls, print order (indices into quirks.ron). No
+    /// effect, not visible, not introspectable — until total XP crosses a
+    /// manifestation threshold (docs/09).
+    pub latent_quirks: Vec<u8>,
+    /// Manifested quirks, manifestation order — live effects, enemy-
+    /// visible, introspectable via my_quirks()/has_quirk().
+    pub quirks: Vec<u8>,
     /// Last VM crash_count charged for (fault-damage bookkeeping).
     pub crash_seen: u64,
     /// This bot's `rng.program` stream state (docs/07): seeded from
     /// (match seed, entity ID) so identical programs desync deterministically.
     pub rng_program: u64,
+}
+
+impl BotData {
+    /// This track's deci-XP.
+    pub fn xp(&self, track: XpTrack) -> u64 {
+        self.xp.get(&track).copied().unwrap_or(0)
+    }
+
+    /// Total deci-XP across every track — the milestone scale (quirk
+    /// manifestation, module slots).
+    pub fn xp_total(&self) -> u64 {
+        self.xp.values().sum()
+    }
 }
 
 #[derive(Debug)]
@@ -351,10 +401,11 @@ impl BotData {
         self.cargo.values().sum()
     }
 
-    /// Add up to `deci` of `kind`, clamped to capacity; returns the amount
-    /// actually loaded.
-    pub fn cargo_add(&mut self, kind: crate::resources::Resource, deci: u32) -> u32 {
-        let space = self.cargo_cap.saturating_sub(self.cargo_total());
+    /// Add up to `deci` of `kind`, clamped to `cap` (the EFFECTIVE
+    /// capacity — the caller runs the pipeline: Hauling levels and cargo
+    /// quirks move it); returns the amount actually loaded.
+    pub fn cargo_add(&mut self, kind: crate::resources::Resource, deci: u32, cap: u32) -> u32 {
+        let space = cap.saturating_sub(self.cargo_total());
         let take = deci.min(space);
         if take > 0 {
             *self.cargo.entry(kind).or_insert(0) += take;
@@ -482,18 +533,69 @@ pub fn faction_unlocks(world: &World, faction: u8) -> pyrite::UnlockSet {
     }
 }
 
-/// Read an env key with defaulting (docs/01: `getenv` never faults on an
-/// unset key — unset means default; defaults resolve against tuning where
-/// they live there).
-pub fn env_read(env: &BTreeMap<String, i64>, key: &str, tuning: &crate::sim::Tuning) -> i64 {
-    if let Some(v) = env.get(key) {
-        return *v;
+/// Read an env key with defaulting and quirk policy (docs/01 + docs/09):
+/// unset means the default — a TEMPERAMENT quirk shifts that default —
+/// and the value always lands inside any COMPULSION clamp (a `setenv`
+/// past the clamp clips quietly; `getenv` reports where it landed).
+/// Latent quirks do not exist yet, so only `data.quirks` applies.
+pub fn env_read(
+    data: &BotData,
+    key: &str,
+    tuning: &crate::sim::Tuning,
+    quirks: &crate::quirks::QuirkCatalog,
+) -> i64 {
+    let mut value = match data.env.get(key) {
+        Some(v) => Some(*v),
+        None => {
+            // Temperament: the quirk's shifted default (first manifested
+            // quirk naming this key wins — manifestation order).
+            quirks.effects_of(data).find_map(|e| match e {
+                crate::quirks::QuirkEffect::EnvDefault { key: k, value }
+                    if k.as_str() == key =>
+                {
+                    Some(value)
+                }
+                _ => None,
+            })
+        }
     }
-    match ENV_KEYS.iter().find(|k| k.name == key).map(|k| &k.default) {
+    .unwrap_or_else(|| match ENV_KEYS.iter().find(|k| k.name == key).map(|k| &k.default) {
         Some(EnvDefault::Fixed(v)) => *v,
         Some(EnvDefault::HurtLine) => tuning.hurt_line_pct,
         None => 0,
+    });
+    // Compulsion: the hardware refuses, deterministically.
+    for effect in quirks.effects_of(data) {
+        if let crate::quirks::QuirkEffect::EnvClamp { key: k, min, max } = effect
+            && k.as_str() == key
+        {
+            value = value.clamp(min, max);
+        }
     }
+    value
+}
+
+/// One faction's live perception (M7, docs/05: vision is the live union
+/// of every friendly bot's and structure's sensor range — the colony
+/// cloud pools eyes, so queries are faction-scoped).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Perception {
+    /// Entities fully SEEN: total information — fog lifted, properties
+    /// readable, geology known.
+    pub seen: BTreeSet<EntityId>,
+    /// Heard-only MOVING bots: position-only handles (docs/05 — a
+    /// contact, not a picture); property reads fault err_unknown_contact.
+    pub heard: BTreeMap<EntityId, TilePos>,
+}
+
+/// A permanently-discovered resource node (docs/05 Q70): existence and
+/// kind persist; `exhausted` updates only when OBSERVED empty — you learn
+/// your vein ran dry when you look.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct KnownNode {
+    pub kind: crate::resources::Resource,
+    pub pos: TilePos,
+    pub exhausted: bool,
 }
 
 /// A player-designated terraform site (docs/05): the player places it
@@ -597,6 +699,15 @@ pub struct World {
     pub milestones_paid: BTreeMap<u8, u64>,
     /// Factions that already earned their first-kill Data.
     pub first_kill_done: BTreeSet<u8>,
+    /// Per-faction perception (M7, docs/05): recomputed every phase 5 from
+    /// post-move positions — a pure function of hashed state, so it is
+    /// deliberately NOT hashed itself. Queries read LAST tick's compute
+    /// (the phase-0 seed gives tick 1 something to read).
+    pub perception: BTreeMap<u8, Perception>,
+    /// Per-faction PERMANENT map knowledge (docs/05: discovered nodes are
+    /// the deliberate exception to "no persistent intel"; amounts stay
+    /// live-only — only existence and observed exhaustion persist). Hashed.
+    pub known_nodes: BTreeMap<u8, BTreeMap<EntityId, KnownNode>>,
     /// Factions currently browning out (energy draw > generation, set by
     /// the phase-8 upkeep settlement; read by next tick's grant pipeline).
     pub brownout: BTreeSet<u8>,
@@ -615,19 +726,25 @@ pub struct World {
     pub dev_all_unlocks: bool,
     /// Dev flag (from MapSpec): skip energy/Steel upkeep entirely.
     pub dev_free_power: bool,
+    /// Expected quirks per bot, per-mille (docs/09 match setting; 0 = off).
+    pub quirk_permille: u32,
     pub archive: Vec<ArchiveEntry>,
     /// The match seed (kept for seeding per-bot streams at spawn).
     pub seed: u64,
     /// Damage queued during phases 2–4, applied in phase 6 (docs/07: damage
-    /// is a phase, not an inline side effect). Drained every tick.
-    pub pending_damage: Vec<(BotId, i64, Option<u8>)>,
+    /// is a phase, not an inline side effect). The attacker rides along as
+    /// (bot, faction) — kill XP credits the bot, first-kill Data and
+    /// hostile-source filters read the faction. Drained every tick.
+    pub pending_damage: Vec<(BotId, i64, Option<(BotId, u8)>)>,
     /// XP earned this tick, settled in phase 7 under the start-of-tick
     /// Learning multiplier (identity until M6). Drained every tick.
     pub pending_xp: Vec<(BotId, XpTrack, u64)>,
     /// Signals raised this tick, dispatched once per bot at the phase-6 op
     /// boundary: highest severity wins, extras dropped (Q81 — co-arrival is
-    /// not a double-handle). Drained every tick.
-    pub pending_signals: Vec<(BotId, pyrite::Signal)>,
+    /// not a double-handle). The source faction rides along for the Flinch
+    /// body track's hostile-source filter (docs/02: self-inflicted signals
+    /// grant nothing). Drained every tick.
+    pub pending_signals: Vec<(BotId, pyrite::Signal, Option<u8>)>,
     /// BLOCKING bots per tile — the spatial index (occupancy checks were
     /// O(bots) scans; perception multiplies query volume). Holds exactly
     /// the live, non-dying bots by construction: kept in sync by
@@ -648,14 +765,62 @@ pub struct World {
     next_bot: u32,
 }
 
-/// One XP track (the 4 task tracks; Scouting and the body tracks land
-/// with their systems — M6/M7).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// One XP track (M6, docs/02): five task tracks earned by what the
+/// program chooses to do, six body tracks earned by what happens to the
+/// machine. Scouting/Hiding income lands with M7 perception, Boot income
+/// with M10 rescues — the tracks exist now so storage never migrates
+/// again. Ordered for deterministic iteration/hashing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum XpTrack {
+    // --- task tracks ---
     Mining,
     Hauling,
     Combat,
     Building,
+    Scouting,
+    // --- body tracks (use-based; source-filtered against farming) ---
+    Age,
+    Mileage,
+    Hiding,
+    Flinch,
+    Boot,
+    Learning,
+}
+
+impl XpTrack {
+    pub const ALL: [XpTrack; 11] = [
+        XpTrack::Mining,
+        XpTrack::Hauling,
+        XpTrack::Combat,
+        XpTrack::Building,
+        XpTrack::Scouting,
+        XpTrack::Age,
+        XpTrack::Mileage,
+        XpTrack::Hiding,
+        XpTrack::Flinch,
+        XpTrack::Boot,
+        XpTrack::Learning,
+    ];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            XpTrack::Mining => "mining",
+            XpTrack::Hauling => "hauling",
+            XpTrack::Combat => "combat",
+            XpTrack::Building => "building",
+            XpTrack::Scouting => "scouting",
+            XpTrack::Age => "age",
+            XpTrack::Mileage => "mileage",
+            XpTrack::Hiding => "hiding",
+            XpTrack::Flinch => "flinch",
+            XpTrack::Boot => "boot",
+            XpTrack::Learning => "learning",
+        }
+    }
+
+    pub fn as_u8(self) -> u8 {
+        Self::ALL.iter().position(|t| *t == self).expect("in ALL") as u8
+    }
 }
 
 /// The named RNG streams from docs/07's inventory. One consumer domain per
@@ -753,12 +918,15 @@ impl World {
             delivered: BTreeMap::new(),
             milestones_paid: BTreeMap::new(),
             first_kill_done: BTreeSet::new(),
+            perception: BTreeMap::new(),
+            known_nodes: BTreeMap::new(),
             brownout: BTreeSet::new(),
             powered_bot: BTreeMap::new(),
             rusting: BTreeSet::new(),
             unlocks: BTreeMap::new(),
             dev_all_unlocks: spec.dev_all_unlocks,
             dev_free_power: spec.dev_free_power,
+            quirk_permille: spec.quirk_permille,
             archive: Vec::new(),
             seed: spec.seed,
             pending_damage: Vec::new(),
@@ -987,9 +1155,12 @@ impl World {
     /// Move a bot to a new tile, keeping the occupancy index in sync.
     /// EVERY `data.pos` write goes through here.
     pub(crate) fn move_bot(&mut self, id: BotId, to: TilePos) {
+        let tick = self.tick;
         let Some(bot) = self.bots.get_mut(&id) else { return };
         let from = bot.data.pos;
         bot.data.pos = to;
+        // Only moving things make noise (M7): hearing checks this stamp.
+        bot.data.moved_tick = tick;
         self.unindex_bot(id, from);
         self.index_bot(id, to);
     }

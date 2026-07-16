@@ -42,7 +42,13 @@ fn attacker_kills_defenseless_bot_into_wreck() {
     assert!(!sim.world.bots.contains_key(&victim), "victim must die");
     assert!(sim.world.wrecks.contains_key(&victim), "no death handler → clean wreck");
     let attacker_bot = &sim.world.bots[&attacker];
-    assert_eq!(attacker_bot.data.xp_combat, 30, "combat XP = damage dealt");
+    // M6 incomes (deci-XP): 1 per 10 damage (3 hits × 10 dmg = 30 deci)
+    // + 25 XP per kill (250 deci) = 280 deci = 28 XP.
+    assert_eq!(
+        attacker_bot.data.xp(sim::world::XpTrack::Combat),
+        280,
+        "combat XP = damage dealt + the kill bonus"
+    );
 }
 
 #[test]

@@ -1,0 +1,46 @@
+// The v1 quirk catalog (M6, docs/09 — "a tunable catalog, not
+// commitments"). Only effects whose hooks exist in the sim are shipped;
+// cost-overlay quirks (Tail-Call Optimized, Kernel Bypass, Dial-Up,
+// Telemetry Enabled, …) land with M8's per-bot cost overlays. Weights
+// are first-pass rarities: common 10, uncommon 6, rare 3.
+QuirkCatalog(
+    manifest_at: [300, 900],
+    quirks: [
+        // --- positive ---
+        (name: "overclocked", weight: 3, effects: [CpuCenti(100)]),
+        (name: "borrow_checker_approved", weight: 6, effects: [StackDepth(1)]),
+        (name: "retina_display", weight: 6, effects: [Sensors(1)]),
+        (name: "huffman_coded", weight: 6, effects: [CargoPct(10)]),
+        (name: "production_hardened", weight: 6, effects: [MaxHpPct(10)]),
+        (name: "ten_x_developer", weight: 3, effects: [XpPct(15)]),
+        (name: "rubber_ducky", weight: 6, effects: [FlinchTicks(-5)]),
+        (name: "hot_reload", weight: 6, effects: [BootPct(-50)]),
+        (name: "energy_star", weight: 6, effects: [BrownoutPenaltyPct(25)]),
+        (name: "verbose_logging", weight: 6, effects: [LogCapPct(100)]),
+        (name: "statically_typed", weight: 6, effects: [FaultChipPct(-50)]),
+        // --- negative ---
+        (name: "memory_leak", weight: 6, effects: [StackDepth(-1)]),
+        (name: "deprecated_drivers", weight: 6, effects: [Sensors(-1)]),
+        (name: "bloatware", weight: 6, effects: [CargoPct(-10)]),
+        (name: "shipped_on_a_friday", weight: 6, effects: [MaxHpPct(-10)]),
+        (name: "tech_debt", weight: 3, effects: [XpPct(-15)]),
+        (name: "race_condition", weight: 6, effects: [FlinchTicks(5)]),
+        (name: "windows_update", weight: 6, effects: [BootPct(100)]),
+        (name: "logs_to_dev_null", weight: 6, effects: [LogCapPct(-50)]),
+        // --- double-edged ---
+        (name: "unsafe_block", weight: 3, effects: [CpuCenti(200), FaultChipPct(100)]),
+        (name: "written_in_c", weight: 3, effects: [CpuCenti(100), StackDepth(-1)]),
+        (name: "minified", weight: 3, effects: [MovePct(-10), MaxHpPct(-20)]),
+        (name: "monorepo", weight: 3, effects: [CargoPct(25), MovePct(5)]),
+        // --- policy quirks (docs/09: they ride the env registry) ---
+        (name: "move_fast_and_break_things", weight: 3, effects: [
+            DamagePct(10),
+            EnvDefault(key: HurtLine, value: 40),
+            EnvClamp(key: HurtLine, min: 1, max: 45),
+        ]),
+        (name: "defensive_programming", weight: 3, effects: [
+            EnvDefault(key: HurtLine, value: 60),
+            EnvClamp(key: HurtLine, min: 55, max: 99),
+        ]),
+    ],
+)

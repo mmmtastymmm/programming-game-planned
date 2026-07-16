@@ -3,7 +3,7 @@
 
 use crate::host::BotHost;
 use crate::map::{astar_avoiding, TileKind, TilePos};
-use crate::sim::{Sim, ATTACK_DAMAGE};
+use crate::sim::Sim;
 use crate::world::{
     Action, ActionRequest, BlueprintKind, BotId, RecallPurpose, XpTrack,
 };
@@ -68,7 +68,7 @@ impl Sim {
                             // Ticks per step come from the move-rate stat
                             // through the pipeline; terrain multiplies (M5).
                             let first_cost = crate::stats::step_ticks(
-                                &self.stats,
+                                crate::stats::StatCtx { stats: &self.stats, xp: &self.xp, quirks: &self.quirks },
                                 &self.world.grid,
                                 &self.world.bots[&id].data,
                                 path[0],
@@ -93,7 +93,11 @@ impl Sim {
                         .next();
                     match node {
                         Some(node) => {
-                            let ticks_left = self.tuning.mine_swing_ticks;
+                            // Mining L3 swings −25% (the pipeline).
+                            let ticks_left = self.ctx().mine_swing_for(
+                                &self.world.bots[&id].data,
+                                self.tuning.mine_swing_ticks,
+                            );
                             let bot = self.world.bots.get_mut(&id).expect("bot exists");
                             bot.data.action = Some(Action::Mine { node, ticks_left });
                         }
@@ -113,6 +117,71 @@ impl Sim {
                 }
                 ActionRequest::Build(blueprint) => {
                     bot.data.action = Some(Action::Build { blueprint });
+                }
+                ActionRequest::Search => self.start_search(id),
+                ActionRequest::Wander => {
+                    // A seeded random walk leg: a random passable free
+                    // tile within the leg length; unreachable picks are a
+                    // completed (empty) leg, not a fault.
+                    let leg = self.tuning.wander_leg as i32;
+                    let mut candidates: Vec<TilePos> = Vec::new();
+                    for dy in -leg..=leg {
+                        for dx in -leg..=leg {
+                            let t = TilePos::new(pos.x + dx, pos.y + dy);
+                            if t != pos
+                                && self
+                                    .world
+                                    .grid
+                                    .get(t)
+                                    .is_some_and(|k| k.move_ticks().is_some())
+                                && !self.world.structure_at(t)
+                                && !self.world.tile_occupied(t, id)
+                            {
+                                candidates.push(t);
+                            }
+                        }
+                    }
+                    if candidates.is_empty() {
+                        self.finish_action(id, Ok(Value::Unit));
+                        return;
+                    }
+                    let pick = (crate::world::next_rand(&mut self.world.rng.wander)
+                        % candidates.len() as u64) as usize;
+                    self.walk_to_tile(id, candidates[pick], false);
+                }
+                ActionRequest::Explore => {
+                    // The smart explorer (Q79): a random CURRENTLY-FOGGED
+                    // passable tile within the radius; walk there, then
+                    // drop into the scouting stance (survey_after_move).
+                    let radius = self.tuning.explore_radius as i32;
+                    let faction = self.world.bots[&id].data.faction;
+                    let mut candidates: Vec<TilePos> = Vec::new();
+                    for dy in -radius..=radius {
+                        for dx in -radius..=radius {
+                            let t = TilePos::new(pos.x + dx, pos.y + dy);
+                            if t != pos
+                                && self
+                                    .world
+                                    .grid
+                                    .get(t)
+                                    .is_some_and(|k| k.move_ticks().is_some())
+                                && !self.world.structure_at(t)
+                                && !self.world.tile_occupied(t, id)
+                                && !self.tile_visible(faction, t)
+                            {
+                                candidates.push(t);
+                            }
+                        }
+                    }
+                    if candidates.is_empty() {
+                        // Nothing fogged in reach: explore degrades to a
+                        // completed no-op (the map is known here).
+                        self.finish_action(id, Ok(Value::Unit));
+                        return;
+                    }
+                    let pick = (crate::world::next_rand(&mut self.world.rng.explore)
+                        % candidates.len() as u64) as usize;
+                    self.walk_to_tile(id, candidates[pick], true);
                 }
                 ActionRequest::Deposit { fault_on_fail } => {
                     // Generalized acceptor (docs/03): an adjacent depot
@@ -201,7 +270,7 @@ impl Sim {
                             % dodges.len() as u64) as usize;
                         let step = dodges[pick];
                         let cost = crate::stats::step_ticks(
-                            &self.stats,
+                            crate::stats::StatCtx { stats: &self.stats, xp: &self.xp, quirks: &self.quirks },
                             &self.world.grid,
                             &self.world.bots[&id].data,
                             step,
@@ -217,9 +286,10 @@ impl Sim {
                 }
                 path.remove(0);
                 self.world.move_bot(id, entered);
+                self.credit_travel(id);
                 if path.is_empty() {
                     if goals.contains(&entered) {
-                        self.finish_action(id, Ok(Value::Unit));
+                        self.complete_move(id);
                     } else {
                         // A dodge landed us off-route: plan a fresh path,
                         // preferring one that threads around current bots.
@@ -227,7 +297,7 @@ impl Sim {
                     }
                 } else {
                     let next_cost = crate::stats::step_ticks(
-                        &self.stats,
+                        crate::stats::StatCtx { stats: &self.stats, xp: &self.xp, quirks: &self.quirks },
                         &self.world.grid,
                         &self.world.bots[&id].data,
                         path[0],
@@ -243,7 +313,15 @@ impl Sim {
                     bot.data.action = Some(Action::Mine { node, ticks_left });
                     return;
                 }
-                if bot.data.cargo_total() >= bot.data.cargo_cap {
+                // Field-precise ctx literal: `bot` still borrows the world
+                // mutably here, and `Sim::ctx()` would borrow all of self.
+                let ctx = crate::stats::StatCtx {
+                    stats: &self.stats,
+                    xp: &self.xp,
+                    quirks: &self.quirks,
+                };
+                let cap = ctx.cargo_cap_for(&bot.data);
+                if bot.data.cargo_total() >= cap {
                     self.finish_action(id, Err("mine: cargo full".into()));
                     return;
                 }
@@ -256,17 +334,17 @@ impl Sim {
                     return;
                 }
                 // Typed yield (docs/03): the node's kind, mine_yield_deci
-                // per swing, clamped by what the node and the hold allow.
+                // per swing through the Mining perk (+10%/level), clamped
+                // by what the node and the hold allow.
                 let kind = node_ref.kind;
-                let swing = self.tuning.mine_yield_deci.min(node_ref.amount);
+                let base = ctx
+                    .mine_yield_for(&self.world.bots[&id].data, self.tuning.mine_yield_deci);
+                let swing = base.min(self.world.nodes[&node].amount);
                 let bot = self.world.bots.get_mut(&id).expect("bot exists");
-                let loaded = bot.data.cargo_add(kind, swing);
+                let loaded = bot.data.cargo_add(kind, swing, cap);
                 self.world.nodes.get_mut(&node).expect("checked above").amount -= loaded;
-                self.world.pending_xp.push((
-                    id,
-                    XpTrack::Mining,
-                    (loaded / crate::resources::DECI) as u64,
-                ));
+                // Mining income: 1 XP/unit = 1 deci-XP per deci-unit.
+                self.world.pending_xp.push((id, XpTrack::Mining, loaded as u64));
                 self.finish_action(id, Ok(Value::Unit));
             }
             Action::Attack { target, ticks_left } => {
@@ -279,17 +357,24 @@ impl Sim {
                 // Structures are attackable (docs/03, M4): direct chassis
                 // damage, no signals — a destroyed structure just falls
                 // (its buffered contents are lost with it for now).
+                let damage = crate::stats::StatCtx {
+                    stats: &self.stats,
+                    xp: &self.xp,
+                    quirks: &self.quirks,
+                }
+                .attack_damage_for(&self.world.bots[&id].data, self.tuning.attack_damage);
                 if let Some(st) = self.world.structures.get_mut(&target) {
                     if pos.chebyshev(st.pos) > 1 {
                         self.finish_action(id, Err("attack: target out of range".into()));
                         return;
                     }
-                    st.hp = (st.hp - ATTACK_DAMAGE).max(0);
+                    st.hp = (st.hp - damage).max(0);
                     let felled = st.hp == 0;
                     if felled {
                         self.world.structures.remove(&target);
                     }
-                    self.world.pending_xp.push((id, XpTrack::Combat, ATTACK_DAMAGE as u64));
+                    // Combat income: 1 XP per 10 damage = 1 deci per point.
+                    self.world.pending_xp.push((id, XpTrack::Combat, damage.max(0) as u64));
                     self.finish_action(id, Ok(Value::Unit));
                     return;
                 }
@@ -305,13 +390,23 @@ impl Sim {
                     self.finish_action(id, Err("attack: target out of range".into()));
                     return;
                 }
-                self.world.pending_xp.push((id, XpTrack::Combat, ATTACK_DAMAGE as u64));
+                // Combat income: 1 XP per 10 damage = 1 deci per point;
+                // the +25/kill lands in settle_damage via the attacker tag.
+                self.world.pending_xp.push((id, XpTrack::Combat, damage.max(0) as u64));
                 self.finish_action(id, Ok(Value::Unit));
                 let attacker_faction = self.world.bots[&id].data.faction;
-                self.queue_damage(target_bot, ATTACK_DAMAGE, Some(attacker_faction));
+                self.queue_damage(target_bot, damage, Some((id, attacker_faction)));
             }
             Action::Build { blueprint } => {
                 let pos = bot.data.pos;
+                // Build rate through the pipeline (Building +10%/level),
+                // in deci-progress per tick (Q56 fine-grained units).
+                let rate = crate::stats::StatCtx {
+                    stats: &self.stats,
+                    xp: &self.xp,
+                    quirks: &self.quirks,
+                }
+                .build_rate_for(&bot.data);
                 let Some(bp) = self.world.blueprints.get_mut(&blueprint) else {
                     // Someone else finished it: that's success.
                     self.finish_action(id, Ok(Value::Unit));
@@ -321,10 +416,11 @@ impl Sim {
                     self.finish_action(id, Err("build: blueprint out of range".into()));
                     return;
                 }
-                bp.progress += 1;
+                bp.progress += rate;
                 let done = bp.progress >= bp.needed;
                 let (site, kind) = (bp.pos, bp.kind);
-                self.world.pending_xp.push((id, XpTrack::Building, 1));
+                // Building income: 1 XP per 10 progress units = deci/10.
+                self.world.pending_xp.push((id, XpTrack::Building, (rate / 10).max(1) as u64));
                 if done {
                     self.world.blueprints.remove(&blueprint);
                     match kind {
@@ -342,6 +438,67 @@ impl Sim {
                     bot.data.action = Some(Action::Wait { ticks_left });
                 } else {
                     self.finish_action(id, Ok(Value::Unit));
+                }
+            }
+            Action::Search { reach, current, ticks_left } => {
+                let ticks_left = ticks_left - 1;
+                if ticks_left > 0 {
+                    bot.data.action = Some(Action::Search { reach, current, ticks_left });
+                    return;
+                }
+                // One ring further out: full sight at range — new nodes
+                // become permanent map knowledge and pay Scouting XP.
+                let current = current + 1;
+                let (pos, faction, elevated) = (
+                    bot.data.pos,
+                    bot.data.faction,
+                    self.world.grid.get(bot.data.pos) == Some(TileKind::HighGround),
+                );
+                let discovered: Vec<(crate::world::EntityId, crate::world::KnownNode)> = self
+                    .world
+                    .nodes
+                    .iter()
+                    .filter(|(nid, n)| {
+                        pos.chebyshev(n.pos) <= current
+                            && crate::perception::los_clear(&self.world.grid, pos, n.pos, elevated)
+                            && !self
+                                .world
+                                .known_nodes
+                                .get(&faction)
+                                .is_some_and(|k| k.contains_key(nid))
+                    })
+                    .map(|(nid, n)| {
+                        (
+                            *nid,
+                            crate::world::KnownNode {
+                                kind: n.kind,
+                                pos: n.pos,
+                                exhausted: n.amount == 0,
+                            },
+                        )
+                    })
+                    .collect();
+                for (nid, known) in discovered {
+                    self.world.known_nodes.entry(faction).or_default().insert(nid, known);
+                    self.world.pending_xp.push((
+                        id,
+                        XpTrack::Scouting,
+                        self.xp.scouting_node_xp * 10,
+                    ));
+                }
+                if current >= reach {
+                    // Full reach: the survey resolves (docs/01).
+                    self.world.pending_xp.push((
+                        id,
+                        XpTrack::Scouting,
+                        self.xp.scouting_survey_xp * 10,
+                    ));
+                    self.finish_action(id, Ok(Value::Unit));
+                } else {
+                    let interval = self.tuning.search_ring_ticks.max(1);
+                    let bot = self.world.bots.get_mut(&id).expect("bot exists");
+                    bot.data.action =
+                        Some(Action::Search { reach, current, ticks_left: interval });
                 }
             }
             Action::Deposit { depot, ticks_left, fault_on_fail } => {
@@ -406,13 +563,113 @@ impl Sim {
                     self.finish_action(id, outcome);
                     return;
                 }
-                self.world.pending_xp.push((
-                    id,
-                    XpTrack::Hauling,
-                    (total / crate::resources::DECI) as u64,
-                ));
+                // Hauling income is CARGO-DISTANCE DELIVERED (docs/02):
+                // the accumulator filled per loaded tile pays out here.
+                if total > 0 {
+                    let bot = self.world.bots.get_mut(&id).expect("bot exists");
+                    let earned = std::mem::take(&mut bot.data.haul_accum);
+                    if earned > 0 {
+                        self.world.pending_xp.push((id, XpTrack::Hauling, earned));
+                    }
+                }
                 self.finish_action(id, Ok(Value::Unit));
             }
+        }
+    }
+
+    /// Is this tile inside any friendly perceiver's SEEING circle right
+    /// now? (Tile-level visibility for explore()'s fogged-tile pick and
+    /// the fog renderer; entities go through `world.perception`.)
+    pub fn tile_visible(&self, faction: u8, tile: TilePos) -> bool {
+        let ctx = crate::stats::StatCtx {
+            stats: &self.stats,
+            xp: &self.xp,
+            quirks: &self.quirks,
+        };
+        for bot in self.world.bots.values() {
+            if bot.data.faction != faction || bot.data.dying {
+                continue;
+            }
+            let seeing = ctx.sensors_for(&bot.data);
+            if bot.data.pos.chebyshev(tile) <= seeing
+                && crate::perception::los_clear(
+                    &self.world.grid,
+                    bot.data.pos,
+                    tile,
+                    self.world.grid.get(bot.data.pos)
+                        == Some(crate::map::TileKind::HighGround),
+                )
+            {
+                return true;
+            }
+        }
+        let s = self.tuning.structure_sensors;
+        let sees = |pos: TilePos| {
+            pos.chebyshev(tile) <= s
+                && crate::perception::los_clear(&self.world.grid, pos, tile, false)
+        };
+        self.world.printers.values().any(|p| p.faction == faction && sees(p.pos))
+            || self.world.structures.values().any(|st| st.faction == faction && sees(st.pos))
+            || (faction == 0 && self.world.depots.values().any(|d| sees(d.pos)))
+    }
+
+    /// Start a walk to a specific tile (the stances' mover): A* around
+    /// structures; `survey` chains the scouting stance onto arrival.
+    fn walk_to_tile(&mut self, id: BotId, tile: TilePos, survey: bool) {
+        let mut goals = BTreeSet::new();
+        goals.insert(tile);
+        if survey {
+            self.world.bots.get_mut(&id).expect("bot exists").data.survey_after_move = true;
+        }
+        self.replan_move(id, goals);
+    }
+
+    /// Enter the scouting stance (M7, docs/05): root in place; the seeing
+    /// circle expands one ring per interval out to the HEARING radius.
+    pub(crate) fn start_search(&mut self, id: BotId) {
+        let ctx = crate::stats::StatCtx {
+            stats: &self.stats,
+            xp: &self.xp,
+            quirks: &self.quirks,
+        };
+        let data = &self.world.bots[&id].data;
+        let seeing = ctx.sensors_for(data);
+        let reach = seeing * self.tuning.sense_factor_pct / 100;
+        if seeing >= reach {
+            // Nothing to expand into: the survey completes immediately.
+            self.world.pending_xp.push((id, XpTrack::Scouting, self.xp.scouting_survey_xp * 10));
+            self.finish_action(id, Ok(Value::Unit));
+            return;
+        }
+        let interval = self.tuning.search_ring_ticks;
+        let bot = self.world.bots.get_mut(&id).expect("bot exists");
+        bot.data.action =
+            Some(Action::Search { reach, current: seeing, ticks_left: interval.max(1) });
+    }
+
+    /// A move just reached its goal: explore() chains into the survey,
+    /// everyone else simply resolves.
+    pub(crate) fn complete_move(&mut self, id: BotId) {
+        let chained = {
+            let bot = self.world.bots.get_mut(&id).expect("bot exists");
+            std::mem::take(&mut bot.data.survey_after_move)
+        };
+        if chained {
+            self.start_search(id);
+        } else {
+            self.finish_action(id, Ok(Value::Unit));
+        }
+    }
+
+    /// Per-tile travel income (M6): Mileage for every tile actually
+    /// walked, Hauling accrual while loaded (1 XP per unit per 10 tiles
+    /// = one deci-XP per unit-tile) — paid out at delivery.
+    pub(crate) fn credit_travel(&mut self, id: BotId) {
+        self.world.pending_xp.push((id, XpTrack::Mileage, self.xp.mileage_deci_per_tile));
+        let bot = self.world.bots.get_mut(&id).expect("bot exists");
+        let load_units = (bot.data.cargo_total() / crate::resources::DECI) as u64;
+        if load_units > 0 {
+            bot.data.haul_accum += load_units;
         }
     }
 
@@ -421,9 +678,12 @@ impl Sim {
     pub(crate) fn finish_action(&mut self, id: BotId, result: Result<Value, String>) {
         let Some(bot) = self.world.bots.get_mut(&id) else { return };
         bot.data.action = None;
+        // A finished (or failed) action never leaves a pending survey
+        // chain behind — complete_move consumed it already if it applied.
+        bot.data.survey_after_move = false;
         let mut vm = bot.vm.take().expect("vm present between phases");
         {
-            let mut host = BotHost { world: &mut self.world, bot: id, tuning: &self.tuning };
+            let mut host = BotHost { world: &mut self.world, bot: id, tuning: &self.tuning, ctx: crate::stats::StatCtx { stats: &self.stats, xp: &self.xp, quirks: &self.quirks } };
             vm.resolve_action(result, &mut host, &self.costs);
         }
         if let Some(bot) = self.world.bots.get_mut(&id) {
@@ -545,9 +805,10 @@ impl Sim {
             }
             recall.path.remove(0);
             self.world.move_bot(id, entered);
+            self.credit_travel(id); // Mileage counts engine walks too
             if let Some(next) = recall.path.first() {
                 recall.ticks_left = crate::stats::step_ticks(
-                    &self.stats,
+                    crate::stats::StatCtx { stats: &self.stats, xp: &self.xp, quirks: &self.quirks },
                     &self.world.grid,
                     &self.world.bots[&id].data,
                     *next,
