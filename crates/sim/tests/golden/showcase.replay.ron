@@ -60,6 +60,7 @@
         starting_stock: [
             (0, Stone, 50),
         ],
+        blight_cores: [],
         dev_all_unlocks: true,
         dev_free_power: true,
         structures: [],

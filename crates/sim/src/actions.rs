@@ -406,6 +406,22 @@ impl Sim {
                     self.finish_action(id, Ok(Value::Unit));
                     return;
                 }
+                // Blight Cores are attackable like structures (M8-C):
+                // direct damage, no signals. Killing one stops the spread;
+                // the creep it made stays until cleansed.
+                if let Some(core) = self.world.blight_cores.get_mut(&target) {
+                    if pos.chebyshev(core.pos) > 1 {
+                        self.finish_action(id, Err("attack: target out of range".into()));
+                        return;
+                    }
+                    core.hp = (core.hp - damage).max(0);
+                    if core.hp == 0 {
+                        self.world.blight_cores.remove(&target);
+                    }
+                    self.world.pending_xp.push((id, XpTrack::Combat, damage.max(0) as u64));
+                    self.finish_action(id, Ok(Value::Unit));
+                    return;
+                }
                 let Some(target_bot) = self.world.bot_entities.get(&target).copied() else {
                     self.finish_action(id, Err("attack: target destroyed".into()));
                     return;

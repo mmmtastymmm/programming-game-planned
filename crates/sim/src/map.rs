@@ -332,6 +332,11 @@ pub struct MapSpec {
     /// is 30 Steel + 10 Iron + 5 Coal.
     #[serde(default)]
     pub starting_stock: Vec<(u8, crate::resources::Resource, u64)>,
+    /// Blight Cores (M8-C, docs/05): (pos, spread radius, hp). The core's
+    /// own tile is painted Corruption at build. Serde-defaulted so stored
+    /// replays keep parsing.
+    #[serde(default)]
+    pub blight_cores: Vec<(TilePos, u32, i64)>,
     /// Parse deploys with every construct unlocked (dev/test sandboxes and
     /// every existing map — real matches set this false and Research
     /// buys the tree). Serde default TRUE keeps stored replays working.
@@ -388,6 +393,7 @@ impl MapSpec {
             ore_nodes: Vec::new(),
             depots: Vec::new(),
             printers: Vec::new(),
+            blight_cores: Vec::new(),
             starting_ore: 0,
             seed: 0x5EED_0001,
             bridges: Vec::new(),

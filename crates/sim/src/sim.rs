@@ -963,6 +963,9 @@ impl Sim {
         self.run_printers();
         self.run_pads();
         self.settle_terrain();
+        if self.world.tick.is_multiple_of(self.tuning.corruption_spread_ticks) {
+            self.spread_corruption();
+        }
 
         // --- phase 9: snapshot hash for desync detection ---
         self.last_hash = self.state_hash();
@@ -1198,6 +1201,41 @@ impl Sim {
         }
     }
 
+    /// Corruption dynamics (M8-C, docs/05): each living Blight Core (id
+    /// order) corrupts the nearest non-Corruption passable tile within
+    /// its radius — nearest by (chebyshev, y, x), so the creep front is
+    /// deterministic. Cleansed ground inside the radius is simply the
+    /// nearest clean tile again: re-corruption falls out for free while
+    /// the source lives. Bridges are spared — creep over a river would
+    /// delete the crossing outright (cleanse yields Plains; flagged).
+    pub(crate) fn spread_corruption(&mut self) {
+        let cores: Vec<(crate::map::TilePos, u32)> =
+            self.world.blight_cores.values().map(|c| (c.pos, c.radius)).collect();
+        for (pos, radius) in cores {
+            let r = radius as i32;
+            let mut best: Option<(u32, i32, i32)> = None;
+            for dy in -r..=r {
+                for dx in -r..=r {
+                    let t = crate::map::TilePos::new(pos.x + dx, pos.y + dy);
+                    let Some(kind) = self.world.grid.get(t) else { continue };
+                    if kind == crate::map::TileKind::Corruption
+                        || kind == crate::map::TileKind::Bridge
+                        || !kind.passable()
+                    {
+                        continue;
+                    }
+                    let cand = (pos.chebyshev(t), t.y, t.x);
+                    if best.is_none_or(|b| cand < b) {
+                        best = Some(cand);
+                    }
+                }
+            }
+            if let Some((_, y, x)) = best {
+                self.world.set_tile(crate::map::TilePos::new(x, y), crate::map::TileKind::Corruption);
+            }
+        }
+    }
+
     pub(crate) fn settle_xp(&mut self) {
         use std::collections::BTreeMap;
         let mut awards = std::mem::take(&mut self.world.pending_xp);
@@ -1384,6 +1422,14 @@ impl Sim {
         h.write_u64(w.terrain_hash);
         // Scree wear is real divergent state (M8, Q40): two peers with a
         // half-worn tile must agree before the collapse, not just after.
+        h.write_u32(w.blight_cores.len() as u32);
+        for (id, core) in &w.blight_cores {
+            h.write_u64(id.0);
+            h.write_i32(core.pos.x);
+            h.write_i32(core.pos.y);
+            h.write_u32(core.radius);
+            h.write_i64(core.hp);
+        }
         h.write_u32(w.scree_wear.len() as u32);
         for (pos, n) in &w.scree_wear {
             h.write_i32(pos.x);

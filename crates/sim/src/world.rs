@@ -763,6 +763,10 @@ pub struct World {
     /// readers never need to re-filter. Derived state: excluded from the
     /// state hash.
     pub occupancy: BTreeMap<TilePos, std::collections::BTreeSet<BotId>>,
+    /// Blight Cores (M8-C, docs/05): the living sources of Corruption.
+    /// Attackable world entities; while one lives it re-corrupts cleansed
+    /// ground in its radius every spread interval. Hashed.
+    pub blight_cores: BTreeMap<EntityId, BlightCore>,
     /// Scree crossing counters (M8, Q40): entries per Scree tile, bumped
     /// by [`World::move_bot`]; the end-of-tick terrain settle collapses a
     /// tile to Rubble at the tuning threshold and drops its counter.
@@ -778,6 +782,19 @@ pub struct World {
     pub terrain_hash: u64,
     next_entity: u64,
     next_bot: u32,
+}
+
+/// A Blight Core (M8-C, docs/05): the living source of Corruption. It
+/// spreads creep to the nearest clean passable tile in its radius every
+/// spread interval, re-corrupting cleansed ground while it lives. Solid,
+/// attackable; killing it stops the spread — the creep it made stays
+/// until cleansed (M8-D).
+#[derive(Debug, Clone)]
+pub struct BlightCore {
+    pub pos: TilePos,
+    /// Spread reach in tiles (chebyshev — the game's circle).
+    pub radius: u32,
+    pub hp: i64,
 }
 
 /// One XP track (M6, docs/02): five task tracks earned by what the
@@ -947,6 +964,7 @@ impl World {
             pending_damage: Vec::new(),
             pending_xp: Vec::new(),
             pending_signals: Vec::new(),
+            blight_cores: BTreeMap::new(),
             scree_wear: BTreeMap::new(),
             occupancy: BTreeMap::new(),
             rng: RngStreams::from_seed(spec.seed),
@@ -992,6 +1010,17 @@ impl World {
                     job: None,
                 },
             );
+        }
+        // Blight Cores (M8-C) — allocated AFTER printers so every entity
+        // id in existing fixtures stays put. The core squats on corrupted
+        // ground from tick 0.
+        for &(pos, radius, hp) in &spec.blight_cores {
+            let id = world.alloc_entity();
+            world.grid.set(pos, TileKind::Corruption);
+            world.blight_cores.insert(id, BlightCore { pos, radius, hp });
+        }
+        if !spec.blight_cores.is_empty() {
+            world.terrain_hash = world.compute_terrain_hash();
         }
         // Typed per-faction colony stock. The legacy `starting_ore` seeds
         // Iron for faction 0 (tests); real matches use `starting_stock`.
@@ -1108,6 +1137,7 @@ impl World {
             .or_else(|| self.printers.get(&id).map(|p| p.pos))
             .or_else(|| self.structures.get(&id).map(|s| s.pos))
             .or_else(|| self.blueprints.get(&id).map(|b| b.pos))
+            .or_else(|| self.blight_cores.get(&id).map(|c| c.pos))
             .or_else(|| {
                 self.bot_entities
                     .get(&id)
@@ -1197,6 +1227,7 @@ impl World {
         self.printers.values().any(|p| p.pos == pos)
             || self.depots.values().any(|d| d.pos == pos)
             || self.structures.values().any(|s| s.pos == pos)
+            || self.blight_cores.values().any(|c| c.pos == pos)
     }
 
     /// All structure tiles, for feeding A*'s blocked set.
@@ -1206,6 +1237,7 @@ impl World {
             .map(|p| p.pos)
             .chain(self.depots.values().map(|d| d.pos))
             .chain(self.structures.values().map(|s| s.pos))
+            .chain(self.blight_cores.values().map(|c| c.pos))
             .collect()
     }
 
