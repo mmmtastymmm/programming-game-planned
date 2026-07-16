@@ -20,6 +20,7 @@ use sim::sim::Sim;
 
 mod camera;
 mod editor;
+mod fog;
 mod hud;
 mod palette;
 mod scene;
@@ -53,7 +54,9 @@ fn main() {
         .insert_resource(view::ViewIndex::default())
         .insert_resource(EditorState::default())
         .insert_resource(camera::LmbGesture::default())
-        .add_systems(Startup, (setup_sim, scene::setup_scene).chain())
+        .insert_resource(fog::FogState::default())
+        .init_resource::<fog::FogAssets>()
+        .add_systems(Startup, (setup_sim, scene::setup_scene, fog::setup_fog).chain())
         .add_systems(FixedUpdate, (step_sim, view::update_poses).chain())
         .add_systems(
             Update,
@@ -79,6 +82,12 @@ fn main() {
                 view::animate_terrain,
             )
                 .chain(),
+        )
+        .add_systems(
+            Update,
+            (fog::recompute_fog, fog::apply_fog, fog::pulse_blips)
+                .chain()
+                .after(view::animate_terrain),
         )
         .run();
 }

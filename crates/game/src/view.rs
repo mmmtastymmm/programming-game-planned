@@ -460,9 +460,20 @@ pub(crate) fn sync_view(
             }
             continue;
         }
+        // Fog of war (M7, docs/05): a node exists to the viewer only once
+        // faction 0 has DISCOVERED it — the greyed snapshot then keeps it.
+        let discovered =
+            world.known_nodes.get(&0).is_some_and(|known| known.contains_key(id));
+        if !discovered {
+            if let Some(&entity) = index.ore.get(&id.0) {
+                commands.entity(entity).insert(Visibility::Hidden);
+            }
+            continue;
+        }
         let scale = Vec3::splat(0.6 + 0.8 * (node.amount as f32 / 60.0).min(1.0));
         match index.ore.get(&id.0) {
             Some(&entity) => {
+                commands.entity(entity).insert(Visibility::Inherited);
                 if let Ok(mut transform) = transforms.get_mut(entity) {
                     transform.scale = scale;
                 }
@@ -492,7 +503,19 @@ pub(crate) fn sync_view(
         } else {
             index.bot_recalling.remove(&id.0);
         }
+        // Fog of war (M7): enemy bots render only while faction 0 SEES
+        // them — heard-only contacts get a blip (fog.rs), not a picture.
+        let viewer_sees = bot.data.faction == 0
+            || world
+                .perception
+                .get(&0)
+                .is_some_and(|p| p.seen.contains(&bot.data.entity));
         if let Some(&entity) = index.bots.get(&id.0) {
+            commands.entity(entity).insert(if viewer_sees {
+                Visibility::Inherited
+            } else {
+                Visibility::Hidden
+            });
             // Carry indicators track cargo.
             if let Ok(kids) = children.get(entity) {
                 for kid in kids {

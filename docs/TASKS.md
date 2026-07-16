@@ -341,23 +341,33 @@ hash: statline, XP map, quirk rolls, upkeep settlements).* ✅ CORE COMPLETE (20
       dial's shape; (4) `quirk_permille` lives on MapSpec until M13's match-settings
       struct.* [pyrite][sim][game] (L) ⚠HASH
 
-## M7 — Perception: the seeing/hearing model (biggest behavioral shift for programs)
+## M7 — Perception: the seeing/hearing model ✅ COMPLETE (2026-07-16) — notes below
 
-- [ ] **Two-circle model** (Q74): sensor stat → seeing radius (total info, fog lifted) and
-      hearing radius (× `sense_factor` ~150%, movers only); LoS blocks both; signature offsets
-      heard-at distance; snow mutes movement, fords quiet, creeping verb. [sim] (L) ⚠HASH
-- [ ] **Queries become perception-scoped**: `closest`/`exists`/`scan_enemies` filter to
-      seen ∪ heard ∪ map knowledge; heard-only contacts are position-only handles whose
-      property reads fault `err_unknown_contact`; **stale handles fault**; `is_seen()`;
-      deterministic order preserved (distance, id). [pyrite][sim] (L) ⚠HASH
-- [ ] **Detection episodes** per (bot, enemy faction) → Hiding XP; per-faction map knowledge
-      (discovered nodes/geology, exhausted states); prospecting. [sim] (M) ⚠HASH
-- [ ] **`search()` scouting stance** (rooted, seeing expands to hearing radius, resolves at
-      full reach → Scouting XP), `wander()`, `explore()` (~15 tiles fogged-tile pick,
-      `rng.explore` / `rng.wander`), `path_blocked()`. [pyrite][sim] (M)
-- [ ] **Game: fog of war** — per-faction visibility, greyed last-known snapshot with frozen
-      animations, heard-contact pulsing blips, search-stance survey ring, `Hiding`/signature
-      tells. First rendering feature with real sim coupling. [game] (L)
+- [x] **Two-circle model** (Q74): chebyshev seeing (sensors stat, Optics/Scouting/quirks
+      through the pipeline) + hearing (× `sense_factor_pct` tuning), movers-only hearing,
+      supercover LoS (High Ground blocks unless the perceiver is elevated), signature offsets
+      heard-at distance, Snow mutes movement. *NEEDS DISCUSSION: `creep` — docs/05 calls
+      creeping EMERGENT (move, freeze, move), but the verb index lists `creep (stealth
+      move)`; no registry verb was invented. Ford quieting waits for M8's Ford tile.*
+      [sim] (L) ⚠HASH
+- [x] **Queries perception-scoped**: seen ∪ heard ∪ map knowledge; heard-only contacts are
+      position-only handles (property reads fault `err_unknown_contact`); stale handles
+      fault; `is_seen()`; (distance, id) order everywhere. [pyrite][sim] (L) ⚠HASH
+- [x] **Detection episodes** per (bot, enemy faction) with `episode_rearm_ticks` re-arm →
+      Hiding XP; per-faction permanent `known_nodes` (existence forever, exhaustion only
+      when observed); node discovery + completed surveys mint Data (docs/03 round-4
+      manifest). *Integration note: the phase-0 perception seed also runs after `SpawnBot`
+      — a spawned starter program's first tick must not be blind.* [sim] (M) ⚠HASH
+- [x] **`search()`** (rooted ring-by-ring expansion to the hearing radius, Scouting XP per
+      new node + per completed survey, signals end it), **`wander()`/`explore()`**
+      (`rng.wander`/`rng.explore` streams), **`path_blocked()`**. [pyrite][sim] (M)
+- [x] **Game: fog of war** (`fog.rs`) — pure view layer mirroring faction 0's two circles:
+      dark unknown / greyed known / clear seen tile overlay, undiscovered nodes and unseen
+      enemy bots hidden, heard-only contacts as pulsing blips, search-stance survey rings
+      scaled to the live reach. *Partial: fogged ambient animations are covered by the
+      overlay rather than frozen per-tile (shared frame-swap materials — per-tile freezing
+      needs per-tile material instances); signature tells ride the inspector, not the
+      world view. Both flagged for the rendering pass.* [game] (L)
 
 ## M8 — Terrain v2 & terraforming
 
