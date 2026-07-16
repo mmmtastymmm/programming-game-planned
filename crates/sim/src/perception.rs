@@ -33,12 +33,19 @@ pub fn los_clear(grid: &Grid, from: TilePos, to: TilePos, perceiver_elevated: bo
     };
     // Supercover: sample the segment at 2× resolution — every tile the
     // line passes through appears; endpoints excluded (you always
-    // perceive out of and into open positions).
-    let (dx, dy) = ((to.x - from.x) as i64, (to.y - from.y) as i64);
+    // perceive out of and into open positions). The walk always runs from
+    // the lexicographically smaller endpoint: truncating division samples
+    // DIFFERENT tiles for negative deltas, so a direction-dependent walk
+    // made sight asymmetric (A sees B, B blind to A across a corner).
+    // Canonicalizing the endpoints makes the sampled set identical both
+    // ways by construction; the elevation exemption rides the blocks()
+    // closure, not the walk direction.
+    let (a, b) = if (from.x, from.y) <= (to.x, to.y) { (from, to) } else { (to, from) };
+    let (dx, dy) = ((b.x - a.x) as i64, (b.y - a.y) as i64);
     let steps = dx.abs().max(dy.abs()) * 2;
     for i in 1..steps {
-        let x = from.x as i64 * 2 + (dx * 2 * i) / steps;
-        let y = from.y as i64 * 2 + (dy * 2 * i) / steps;
+        let x = a.x as i64 * 2 + (dx * 2 * i) / steps;
+        let y = a.y as i64 * 2 + (dy * 2 * i) / steps;
         let tile = TilePos::new((x / 2) as i32, (y / 2) as i32);
         if tile != from && tile != to && blocks(tile) {
             return false;
@@ -60,9 +67,16 @@ impl Sim {
             if bot.data.dying {
                 continue;
             }
-            let seeing = ctx.sensors_for(&bot.data)
+            let base_seeing = ctx.sensors_for(&bot.data)
                 + high_ground_bonus(&self.world.grid, bot.data.pos);
-            let hearing = seeing * self.tuning.sense_factor_pct / 100;
+            // Hearing derives from the BASE circle; the search stance then
+            // widens actual seeing out to its current ring (docs/05 — the
+            // survey ring is real sight, not just node discovery).
+            let hearing = base_seeing * self.tuning.sense_factor_pct / 100;
+            let seeing = match &bot.data.action {
+                Some(crate::world::Action::Search { current, .. }) => base_seeing.max(*current),
+                _ => base_seeing,
+            };
             perceivers.entry(bot.data.faction).or_default().push((
                 bot.data.pos,
                 seeing,
@@ -178,39 +192,58 @@ impl Sim {
         }
 
         self.world.perception = new_perception;
+    }
 
-        // Detection episodes → Hiding XP (docs/05: per (bot, enemy
-        // faction); re-arm only after fully unobserved for the window).
+    /// Phase 5b: detection episodes → Hiding XP (docs/05: per (bot,
+    /// enemy faction); re-arm only after fully unobserved for the
+    /// window). SEPARATE from the perception recompute so the phase-0 /
+    /// SpawnBot seeds never advance re-arm counters — episode time is
+    /// TICKS, not perception passes. Counters advance for every open
+    /// episode, including against factions with no perceivers left (a
+    /// wiped-out faction stops observing you; the episode still cools).
+    pub(crate) fn settle_episodes(&mut self) {
         let bot_ids: Vec<BotId> = self.world.bots.keys().copied().collect();
         for id in bot_ids {
             let (entity, own_faction) = {
                 let d = &self.world.bots[&id].data;
                 (d.entity, d.faction)
             };
-            for &faction in &factions {
-                if faction == own_faction {
-                    continue;
-                }
-                let detected = {
-                    let p = &self.world.perception[&faction];
-                    p.seen.contains(&entity) || p.heard.contains_key(&entity)
-                };
+            // Factions observing this bot THIS tick.
+            let detecting: Vec<u8> = self
+                .world
+                .perception
+                .iter()
+                .filter(|(f, p)| {
+                    **f != own_faction
+                        && (p.seen.contains(&entity) || p.heard.contains_key(&entity))
+                })
+                .map(|(f, _)| *f)
+                .collect();
+            let mut fresh = 0u32;
+            {
                 let bot = self.world.bots.get_mut(&id).expect("collected");
-                if detected {
+                for &faction in &detecting {
                     if bot.data.episodes.insert(faction, 0).is_none() {
-                        // A fresh episode: being caught teaches.
-                        self.world.pending_xp.push((
-                            id,
-                            XpTrack::Hiding,
-                            self.xp.hiding_episode_xp * 10,
-                        ));
+                        fresh += 1; // a fresh episode: being caught teaches
                     }
-                } else if let Some(counter) = bot.data.episodes.get_mut(&faction) {
+                }
+                let open: Vec<u8> = bot
+                    .data
+                    .episodes
+                    .keys()
+                    .copied()
+                    .filter(|f| !detecting.contains(f))
+                    .collect();
+                for faction in open {
+                    let counter = bot.data.episodes.get_mut(&faction).expect("just listed");
                     *counter += 1;
                     if *counter >= self.tuning.episode_rearm_ticks {
                         bot.data.episodes.remove(&faction);
                     }
                 }
+            }
+            for _ in 0..fresh {
+                self.world.pending_xp.push((id, XpTrack::Hiding, self.xp.hiding_episode_xp * 10));
             }
         }
     }
@@ -219,10 +252,10 @@ impl Sim {
 /// Standing on High Ground grants bonus sensor range (docs/05: +2; the
 /// figure rides tuning with M8's full table — hardcoded ramp rules wait
 /// there too, flagged).
-fn high_ground_bonus(grid: &Grid, pos: TilePos) -> u32 {
+pub fn high_ground_bonus(grid: &Grid, pos: TilePos) -> u32 {
     if on_high_ground(grid, pos) { 2 } else { 0 }
 }
 
-fn on_high_ground(grid: &Grid, pos: TilePos) -> bool {
+pub fn on_high_ground(grid: &Grid, pos: TilePos) -> bool {
     grid.get(pos) == Some(TileKind::HighGround)
 }

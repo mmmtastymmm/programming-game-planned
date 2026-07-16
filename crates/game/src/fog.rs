@@ -91,19 +91,44 @@ pub(crate) fn recompute_fog(game: NonSend<GameSim>, mut fog: ResMut<FogState>) {
     let world = &simulation.world;
     let ctx = simulation.ctx();
     fog.visible.clear();
+    // Mirror the sim's FULL perceiver set (bots + printers + structures +
+    // the factionless depots), or tiles the sim treats as seen render
+    // under fog and explore()'s picks disagree with the screen.
+    let mut eyes: Vec<(TilePos, i32, bool)> = Vec::new();
     for bot in world.bots.values() {
         if bot.data.faction != VIEWER || bot.data.dying {
             continue;
         }
-        let seeing = ctx.sensors_for(&bot.data) as i32;
-        let pos = bot.data.pos;
+        let mut seeing = ctx.sensors_for(&bot.data)
+            + sim::perception::high_ground_bonus(&world.grid, bot.data.pos);
+        // The search stance widens real sight to its current ring.
+        if let Some(sim::world::Action::Search { current, .. }) = &bot.data.action {
+            seeing = seeing.max(*current);
+        }
+        eyes.push((
+            bot.data.pos,
+            seeing as i32,
+            sim::perception::on_high_ground(&world.grid, bot.data.pos),
+        ));
+    }
+    let s = simulation.tuning.structure_sensors as i32;
+    for p in world.printers.values().filter(|p| p.faction == VIEWER) {
+        eyes.push((p.pos, s, false));
+    }
+    for st in world.structures.values().filter(|st| st.faction == VIEWER) {
+        eyes.push((st.pos, s, false));
+    }
+    for d in world.depots.values() {
+        eyes.push((d.pos, s, false)); // factionless: viewer's eyes (see sim note)
+    }
+    for (pos, seeing, elevated) in eyes {
         for dy in -seeing..=seeing {
             for dx in -seeing..=seeing {
                 let t = TilePos::new(pos.x + dx, pos.y + dy);
                 if !world.grid.in_bounds(t) {
                     continue;
                 }
-                if los_clear(&world.grid, pos, t, false) {
+                if los_clear(&world.grid, pos, t, elevated) {
                     fog.visible.insert((t.x, t.y));
                 }
             }

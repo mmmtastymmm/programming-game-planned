@@ -108,7 +108,9 @@ pub(crate) fn inspector_ui(
             data.hp,
             data.max_hp,
             data.cargo_total() as f32 / 10.0,
-            data.cargo_cap as f32 / 10.0,
+            // The EFFECTIVE cap (Hauling perk, cargo quirks) — the number
+            // the sim actually clamps against, not the raw chassis field.
+            game.0.ctx().cargo_cap_for(data) as f32 / 10.0,
             data.pos.x,
             data.pos.y
         ));

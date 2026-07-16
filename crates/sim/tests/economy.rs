@@ -220,9 +220,15 @@ fn withdraw_deposit_cycling_mints_no_data() {
     // old gross accounting would mint on the very first cycle.
     sim.tuning.delivery_milestone_deci = 40;
     let bot = spawn(&mut sim, TilePos::new(1, 1), "try_withdraw(iron)\ndeposit()\n");
+    let mut cycled = false;
     for _ in 0..300 {
         sim.step();
+        // Liveness: the guarded behavior must actually EXECUTE — cargo
+        // aboard at some point proves withdraw ran (a crash-looping bot
+        // would leave every assertion below vacuously green).
+        cycled |= sim.world.bots[&bot].data.cargo_total() > 0;
     }
+    assert!(cycled, "the withdraw/deposit cycle must really run");
     // The cycle really ran: the seeded iron is split between stock and
     // the bot's hold mid-cycle, and nothing was created or destroyed
     // (starting_stock seeds in units — 4000 units = 40000 deci).

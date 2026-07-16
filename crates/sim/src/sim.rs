@@ -726,6 +726,8 @@ impl Sim {
                     xp: std::collections::BTreeMap::new(),
                     haul_accum: 0,
                     learning_carry: 0,
+                    gain_carry: std::collections::BTreeMap::new(),
+                    age_hp_levels: 0,
                     moved_tick: 0,
                     episodes: std::collections::BTreeMap::new(),
                     latent_quirks,
@@ -810,8 +812,10 @@ impl Sim {
             self.advance_engine(id);
         }
 
-        // --- phase 5: perception (stub until M7) ---
+        // --- phase 5: perception recompute, then episode settlement
+        // (split so seed passes never advance re-arm counters) ---
         self.run_perception();
+        self.settle_episodes();
 
         // --- phase 6: damage, faults, deaths (countdowns and blasts join
         // in M10). Fault chip first: every unhandled crash this tick (from
@@ -1141,14 +1145,23 @@ impl Sim {
                 continue;
             }
             let pct = *pct_memo.entry(id).or_insert_with(|| self.ctx().xp_gain_pct(&bot.data));
-            let post = deci * pct / 100; // floor — pessimistic (docs/02)
+            // Fractional carry per (bot, track), hundredths of a deci: a
+            // sub-100% multiplier must REDUCE a 1-deci drip, not floor it
+            // to zero forever (tech_debt froze the Age track outright).
+            let bot = self.world.bots.get_mut(&id).expect("checked above");
+            let carried =
+                bot.data.gain_carry.remove(&track).unwrap_or(0) + deci * pct;
+            let post = carried / 100;
+            let rem = carried % 100;
+            if rem > 0 {
+                bot.data.gain_carry.insert(track, rem);
+            }
             if post == 0 {
                 continue;
             }
             if track != XpTrack::Learning {
                 *feeds.entry(id).or_insert(0) += post;
             }
-            let bot = self.world.bots.get_mut(&id).expect("checked above");
             let entry = bot.data.xp.entry(track).or_insert(0);
             *entry = (*entry + post).min(cap);
         }
@@ -1187,6 +1200,23 @@ impl Sim {
                 .min(self.xp.slot_cap);
             if owed_slots > slots {
                 self.world.bots.get_mut(&id).expect("collected").data.module_slots = owed_slots;
+            }
+            // Age body perk (xp.ron `age_hp_per_level`): each Age level
+            // grows the hull — max HP and current HP both rise by the
+            // delta (growing tougher never makes a bot instantly Damaged).
+            let age_level = {
+                let d = &self.world.bots[&id].data;
+                self.xp.level(d.xp(XpTrack::Age))
+            };
+            {
+                let d = &mut self.world.bots.get_mut(&id).expect("collected").data;
+                if age_level > d.age_hp_levels {
+                    let delta =
+                        ((age_level - d.age_hp_levels) as i64) * self.xp.age_hp_per_level;
+                    d.max_hp += delta;
+                    d.hp += delta;
+                    d.age_hp_levels = age_level;
+                }
             }
             let owed_quirks = self
                 .quirks
@@ -1453,6 +1483,11 @@ impl Sim {
             }
             h.write_u64(bot.data.haul_accum);
             h.write_u64(bot.data.learning_carry);
+            h.write_u32(bot.data.age_hp_levels);
+            for (track, rem) in &bot.data.gain_carry {
+                h.write_u8(track.as_u8());
+                h.write_u64(*rem);
+            }
             h.write_u64(bot.data.moved_tick);
             h.write_u32(bot.data.episodes.len() as u32);
             for (faction, counter) in &bot.data.episodes {

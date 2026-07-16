@@ -352,6 +352,12 @@ pub struct BotData {
     /// 1-deci Age drip is real over time instead of flooring to zero
     /// every settlement (docs/02's deci-XP intent, one unit finer).
     pub learning_carry: u64,
+    /// Age levels whose max-HP perk has been granted (idempotent
+    /// level-up application; xp.ron `age_hp_per_level`).
+    pub age_hp_levels: u32,
+    /// Fractional XP-gain carry per track (hundredths of a deci): keeps
+    /// sub-100% multipliers reducing slow drips instead of zeroing them.
+    pub gain_carry: BTreeMap<XpTrack, u64>,
     /// The tick this bot last entered a tile (M7: ONLY MOVING THINGS MAKE
     /// NOISE — hearing checks it against the current tick).
     pub moved_tick: u64,

@@ -125,16 +125,18 @@ impl Sim {
                     self.xp.flinch_xp * 10,
                 ));
             }
-            // Dropped extras keep their physical stun. The values mirror
-            // the template timings they stand in for: a dropped Bump = the
-            // full at-fault stun (flinch + factory wait); a dropped Bumped
-            // = the flinch-length stagger. Applied on top of the winner's
-            // template via bump_frozen, never downgrading.
+            // Dropped extras of a DIFFERENT kind keep their physical stun.
+            // The values mirror the template timings they stand in for: a
+            // dropped Bump = the full at-fault stun (flinch + factory
+            // wait); a dropped Bumped = the flinch-length stagger. Applied
+            // on top of the winner's template via bump_frozen, never
+            // downgrading. Duplicates of the WINNING kind are fully
+            // absorbed into the one handled template (Q81: co-arrival is
+            // one event to the program — two simultaneous rams read as one
+            // bumped, with no extra stun stacked on the handler).
             let mut stun = 0u32;
-            let mut winner_seen = false;
             for (signal, _) in signals {
-                if signal == winner && !winner_seen {
-                    winner_seen = true;
+                if signal == winner {
                     continue;
                 }
                 stun = stun.max(match signal {
