@@ -332,6 +332,13 @@ pub struct Vm {
     /// A redeployed program, installed at the next loop boundary
     /// (docs/01: "redeploy takes effect at each bot's next loop boundary").
     pending_program: Option<Rc<Program>>,
+    /// Flat per-op surcharge in CENTICYCLES, set by the sim every tick
+    /// from world state (M8: Corruption's compute tax). Applies to every
+    /// op the table charges for — zero-cost bookkeeping stays free — and
+    /// the charged figure never drops below one full cycle (the floor
+    /// guards a future negative overlay, not the tax). Derived state:
+    /// re-set before every grant, so replays never need it persisted.
+    cost_overlay_centi: i64,
 }
 
 impl Vm {
@@ -358,6 +365,7 @@ impl Vm {
             fault_count: 0,
             crash_count: 0,
             pending_program: None,
+            cost_overlay_centi: 0,
         }
     }
 
@@ -497,10 +505,33 @@ impl Vm {
             return;
         }
         self.budget = self.budget.saturating_add(centi.min(i64::MAX as u64) as i64);
-        let cap = (costs.bank_cap as i64).saturating_mul(CENT).max(centi.min(i64::MAX as u64) as i64);
+        // The cap is "the priciest effective op" (Q75) — a flat overlay
+        // raises every op by the same margin, so the cap rises with it:
+        // saving up for the big op must stay possible ON the tax tile.
+        let cap = (costs.bank_cap as i64)
+            .saturating_mul(CENT)
+            .saturating_add(self.cost_overlay_centi.max(0))
+            .max(centi.min(i64::MAX as u64) as i64);
         if self.budget > cap {
             self.budget = cap;
         }
+    }
+
+    /// Set this tick's flat per-op surcharge (centicycles). The sim owns
+    /// the figure — tile kind under the chassis, M8 — and re-sets it
+    /// before every grant; the VM only applies it.
+    pub fn set_cost_overlay_centi(&mut self, centi: i64) {
+        self.cost_overlay_centi = centi;
+    }
+
+    /// A charged op's effective price: base + overlay, floored at one
+    /// full cycle. Free work (base 0) stays free — the overlay taxes
+    /// OPS, not the VM's internal bookkeeping.
+    fn charged(&self, base_centi: i64) -> i64 {
+        if base_centi == 0 {
+            return 0;
+        }
+        (base_centi.saturating_add(self.cost_overlay_centi)).max(CENT)
     }
 
     /// Mark the start/end of an engine interrupt context (Boot, the recall
@@ -718,7 +749,7 @@ impl Vm {
                         // statement (no free spinning). Variables SURVIVE
                         // the wrap (Q80) — only fault/handler restarts
                         // clear them.
-                        let cost = costs.statement as i64 * CENT;
+                        let cost = self.charged(costs.statement as i64 * CENT);
                         if self.budget < cost {
                             return Outcome::Paused;
                         }
@@ -738,7 +769,7 @@ impl Vm {
                 }
             };
 
-            let cost = self.cost_of(top, costs, &*host) as i64 * CENT;
+            let cost = self.charged(self.cost_of(top, costs, &*host) as i64 * CENT);
             if self.budget < cost {
                 return Outcome::Paused;
             }

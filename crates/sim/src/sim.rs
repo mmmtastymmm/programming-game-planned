@@ -819,6 +819,18 @@ impl Sim {
                 bot.vm = Some(vm);
                 continue;
             }
+            // Corruption's compute tax (M8, docs/05): every charged op
+            // costs extra while the chassis stands on corrupted ground.
+            // Set fresh before EVERY grant — the overlay is derived from
+            // where the bot is now, never persisted. (Flat only; the
+            // per-op-key generalization is flagged in TASKS.md.)
+            let on_corruption =
+                self.world.grid.get(bot.data.pos) == Some(crate::map::TileKind::Corruption);
+            vm.set_cost_overlay_centi(if on_corruption {
+                self.tuning.corruption_op_tax as i64
+            } else {
+                0
+            });
             // The grant itself enforces the VM rules: no banking while
             // Blocked (waiting burns the tick) and the bank_cap clamp.
             vm.grant_centi(centi, &self.costs);
