@@ -57,6 +57,7 @@ impl Sim {
                     match astar_avoiding(
                         &self.world.grid,
                         &self.world.overlays,
+                        &self.tuning.tile_costs,
                         pos,
                         &goals,
                         &structures,
@@ -68,7 +69,7 @@ impl Sim {
                             // Ticks per step come from the move-rate stat
                             // through the pipeline; terrain multiplies (M5).
                             let first_cost = crate::stats::step_ticks(
-                                crate::stats::StatCtx { stats: &self.stats, xp: &self.xp, quirks: &self.quirks },
+                                crate::stats::StatCtx { stats: &self.stats, xp: &self.xp, quirks: &self.quirks, tuning: &self.tuning },
                                 &self.world.grid,
                                 &self.world.bots[&id].data,
                                 path[0],
@@ -270,7 +271,7 @@ impl Sim {
                             % dodges.len() as u64) as usize;
                         let step = dodges[pick];
                         let cost = crate::stats::step_ticks(
-                            crate::stats::StatCtx { stats: &self.stats, xp: &self.xp, quirks: &self.quirks },
+                            crate::stats::StatCtx { stats: &self.stats, xp: &self.xp, quirks: &self.quirks, tuning: &self.tuning },
                             &self.world.grid,
                             &self.world.bots[&id].data,
                             step,
@@ -285,8 +286,33 @@ impl Sim {
                     return;
                 }
                 path.remove(0);
+                let from = self.world.bots[&id].data.pos;
                 self.world.move_bot(id, entered);
                 self.credit_travel(id);
+                // Ice slides (M8, Q37): momentum carries the mover one
+                // more tile — chaining across ice — until solid ground or
+                // a blocked edge. Sliding into an occupant is a collision
+                // WITH THE SLIDER AT FAULT; the crunch spends the
+                // momentum and the plan resumes.
+                if let Some(target) = self.slide_target(entered, from) {
+                    if self.world.tile_occupied(target, id) {
+                        self.bump_both(id, target, true);
+                    } else {
+                        let cost = crate::stats::step_ticks(
+                            crate::stats::StatCtx { stats: &self.stats, xp: &self.xp, quirks: &self.quirks, tuning: &self.tuning },
+                            &self.world.grid,
+                            &self.world.bots[&id].data,
+                            target,
+                        )
+                        .expect("slide targets are passable");
+                        let bot = self.world.bots.get_mut(&id).expect("bot exists");
+                        // Single-step override; landing off-route triggers
+                        // the same re-plan as a dodge (empty-path branch).
+                        bot.data.action =
+                            Some(Action::Move { path: vec![target], ticks_left: cost, goals });
+                        return;
+                    }
+                }
                 if path.is_empty() {
                     if goals.contains(&entered) {
                         self.complete_move(id);
@@ -297,7 +323,7 @@ impl Sim {
                     }
                 } else {
                     let next_cost = crate::stats::step_ticks(
-                        crate::stats::StatCtx { stats: &self.stats, xp: &self.xp, quirks: &self.quirks },
+                        crate::stats::StatCtx { stats: &self.stats, xp: &self.xp, quirks: &self.quirks, tuning: &self.tuning },
                         &self.world.grid,
                         &self.world.bots[&id].data,
                         path[0],
@@ -319,6 +345,7 @@ impl Sim {
                     stats: &self.stats,
                     xp: &self.xp,
                     quirks: &self.quirks,
+                    tuning: &self.tuning,
                 };
                 let cap = ctx.cargo_cap_for(&bot.data);
                 if bot.data.cargo_total() >= cap {
@@ -361,6 +388,7 @@ impl Sim {
                     stats: &self.stats,
                     xp: &self.xp,
                     quirks: &self.quirks,
+                    tuning: &self.tuning,
                 }
                 .attack_damage_for(&self.world.bots[&id].data, self.tuning.attack_damage);
                 if let Some(st) = self.world.structures.get_mut(&target) {
@@ -405,6 +433,7 @@ impl Sim {
                     stats: &self.stats,
                     xp: &self.xp,
                     quirks: &self.quirks,
+                    tuning: &self.tuning,
                 }
                 .build_rate_for(&bot.data);
                 let Some(bp) = self.world.blueprints.get_mut(&blueprint) else {
@@ -582,10 +611,11 @@ impl Sim {
     /// the fog renderer; entities go through `world.perception`.)
     pub fn tile_visible(&self, faction: u8, tile: TilePos) -> bool {
         let ctx = crate::stats::StatCtx {
-            stats: &self.stats,
-            xp: &self.xp,
-            quirks: &self.quirks,
-        };
+                    stats: &self.stats,
+                    xp: &self.xp,
+                    quirks: &self.quirks,
+                    tuning: &self.tuning,
+                };
         for bot in self.world.bots.values() {
             if bot.data.faction != faction || bot.data.dying {
                 continue;
@@ -628,10 +658,11 @@ impl Sim {
     /// circle expands one ring per interval out to the HEARING radius.
     pub(crate) fn start_search(&mut self, id: BotId) {
         let ctx = crate::stats::StatCtx {
-            stats: &self.stats,
-            xp: &self.xp,
-            quirks: &self.quirks,
-        };
+                    stats: &self.stats,
+                    xp: &self.xp,
+                    quirks: &self.quirks,
+                    tuning: &self.tuning,
+                };
         let data = &self.world.bots[&id].data;
         let seeing = ctx.sensors_for(data);
         let reach = seeing * self.tuning.sense_factor_pct / 100;
@@ -683,7 +714,7 @@ impl Sim {
         bot.data.survey_after_move = false;
         let mut vm = bot.vm.take().expect("vm present between phases");
         {
-            let mut host = BotHost { world: &mut self.world, bot: id, tuning: &self.tuning, ctx: crate::stats::StatCtx { stats: &self.stats, xp: &self.xp, quirks: &self.quirks } };
+            let mut host = BotHost { world: &mut self.world, bot: id, tuning: &self.tuning, ctx: crate::stats::StatCtx { stats: &self.stats, xp: &self.xp, quirks: &self.quirks, tuning: &self.tuning } };
             vm.resolve_action(result, &mut host, &self.costs);
         }
         if let Some(bot) = self.world.bots.get_mut(&id) {
@@ -804,11 +835,33 @@ impl Sim {
                 return;
             }
             recall.path.remove(0);
+            let from = self.world.bots[&id].data.pos;
             self.world.move_bot(id, entered);
             self.credit_travel(id); // Mileage counts engine walks too
+            // Ice slides carry engine walks too (M8, Q37) — but the
+            // engine's own driving raises no bump on the mover. The slide
+            // preempts the plan; the arrival guard below replans when the
+            // ice lets go somewhere off the doorstep.
+            if let Some(target) = self.slide_target(entered, from) {
+                if self.world.tile_occupied(target, id) {
+                    self.bump_both(id, target, false);
+                } else {
+                    recall.ticks_left = crate::stats::step_ticks(
+                        crate::stats::StatCtx { stats: &self.stats, xp: &self.xp, quirks: &self.quirks, tuning: &self.tuning },
+                        &self.world.grid,
+                        &self.world.bots[&id].data,
+                        target,
+                    )
+                    .expect("slide targets are passable");
+                    recall.path = vec![target];
+                    self.world.bots.get_mut(&id).expect("bot exists").data.recall =
+                        Some(recall);
+                    return;
+                }
+            }
             if let Some(next) = recall.path.first() {
                 recall.ticks_left = crate::stats::step_ticks(
-                    crate::stats::StatCtx { stats: &self.stats, xp: &self.xp, quirks: &self.quirks },
+                    crate::stats::StatCtx { stats: &self.stats, xp: &self.xp, quirks: &self.quirks, tuning: &self.tuning },
                     &self.world.grid,
                     &self.world.bots[&id].data,
                     *next,
@@ -821,7 +874,20 @@ impl Sim {
             self.world.bots.get_mut(&id).expect("bot exists").data.recall = Some(recall);
             return;
         }
-        // Arrived at the home printer.
+        // Arrived at the home printer — unless an ice slide carried the
+        // walk past the doorstep (M8): scrap/recolor must happen AT home,
+        // so an off-doorstep arrival replans instead of settling here.
+        let pos = self.world.bots[&id].data.pos;
+        let at_doorstep = self
+            .world
+            .printers
+            .get(&recall.home)
+            .is_none_or(|p| (p.pos.x - pos.x).abs() + (p.pos.y - pos.y).abs() == 1);
+        if !at_doorstep {
+            self.world.bots.get_mut(&id).expect("bot exists").data.recall = Some(recall);
+            self.replan_after_bump(id);
+            return;
+        }
         match recall.purpose {
             RecallPurpose::Recolor { dest } => {
                 if !self.recolor_bot(id, dest) {

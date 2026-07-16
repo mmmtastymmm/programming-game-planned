@@ -160,7 +160,7 @@ impl Sim {
         let Some(bot) = self.world.bots.get_mut(&id) else { return RaiseOutcome::Ignored };
         let mut vm = bot.vm.take().expect("vm present between phases");
         let outcome = {
-            let mut host = BotHost { world: &mut self.world, bot: id, tuning: &self.tuning, ctx: crate::stats::StatCtx { stats: &self.stats, xp: &self.xp, quirks: &self.quirks } };
+            let mut host = BotHost { world: &mut self.world, bot: id, tuning: &self.tuning, ctx: crate::stats::StatCtx { stats: &self.stats, xp: &self.xp, quirks: &self.quirks, tuning: &self.tuning } };
             vm.raise(signal, &mut host, &self.costs)
         };
         match outcome {

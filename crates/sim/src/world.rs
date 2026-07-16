@@ -378,6 +378,10 @@ pub struct BotData {
     /// This bot's `rng.program` stream state (docs/07): seeded from
     /// (match seed, entity ID) so identical programs desync deterministically.
     pub rng_program: u64,
+    /// Ticks spent standing on Dunes since the last move (M8, Q35): the
+    /// idle-sink counter — full sink intervals surcharge the next step.
+    /// Reset by every move; zero everywhere else.
+    pub dune_idle: u32,
 }
 
 impl BotData {
@@ -759,6 +763,11 @@ pub struct World {
     /// readers never need to re-filter. Derived state: excluded from the
     /// state hash.
     pub occupancy: BTreeMap<TilePos, std::collections::BTreeSet<BotId>>,
+    /// Scree crossing counters (M8, Q40): entries per Scree tile, bumped
+    /// by [`World::move_bot`]; the end-of-tick terrain settle collapses a
+    /// tile to Rubble at the tuning threshold and drops its counter.
+    /// Hashed — mid-wear tiles are real divergent state.
+    pub scree_wear: BTreeMap<TilePos, u32>,
     /// Named seeded RNG streams — the sim's only randomness (CLAUDE.md;
     /// inventory in docs/07). Advanced only by sim systems, in tick order.
     pub rng: RngStreams,
@@ -938,6 +947,7 @@ impl World {
             pending_damage: Vec::new(),
             pending_xp: Vec::new(),
             pending_signals: Vec::new(),
+            scree_wear: BTreeMap::new(),
             occupancy: BTreeMap::new(),
             rng: RngStreams::from_seed(spec.seed),
             terrain_hash: 0,
@@ -1145,6 +1155,9 @@ impl World {
     /// snapshot hashes `terrain_hash`, not the grid).
     pub(crate) fn set_tile(&mut self, pos: TilePos, kind: TileKind) {
         self.grid.set(pos, kind);
+        // A rewritten tile starts fresh: wear belongs to the Scree that
+        // was, not whatever stands there now (M8, Q40).
+        self.scree_wear.remove(&pos);
         self.terrain_hash = self.compute_terrain_hash();
     }
 
@@ -1167,6 +1180,13 @@ impl World {
         bot.data.pos = to;
         // Only moving things make noise (M7): hearing checks this stamp.
         bot.data.moved_tick = tick;
+        // Moving shakes the sand off (M8, Q35).
+        bot.data.dune_idle = 0;
+        // Scree wear (M8, Q40): every entry counts a crossing; the
+        // end-of-tick terrain settle collapses worn tiles to Rubble.
+        if self.grid.get(to) == Some(crate::map::TileKind::Scree) {
+            *self.scree_wear.entry(to).or_insert(0) += 1;
+        }
         self.unindex_bot(id, from);
         self.index_bot(id, to);
     }

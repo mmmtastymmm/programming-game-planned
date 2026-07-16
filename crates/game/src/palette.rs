@@ -229,9 +229,12 @@ pub(crate) const MOUNTAIN_TOP: f32 = 0.25;
 /// Top surface of the tile at `pos` in render space.
 pub(crate) fn terrain_top(world: &sim::World, pos: TilePos) -> f32 {
     match world.grid.get(pos) {
-        Some(TileKind::Rubble | TileKind::HighGround) => MOUNTAIN_TOP,
+        // Mountain took the full block from Rubble in M8 (Rubble is low
+        // debris now); Barricades are wall-height built mass.
+        Some(TileKind::Mountain | TileKind::HighGround | TileKind::Barricade) => MOUNTAIN_TOP,
         Some(TileKind::Water) => -0.05,
-        Some(TileKind::Mud) => -0.02,
+        Some(TileKind::Ford) => -0.03,
+        Some(TileKind::Mud | TileKind::Scree) => -0.02,
         _ => 0.0,
     }
 }

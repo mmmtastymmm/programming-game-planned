@@ -27,7 +27,12 @@ use std::collections::{BTreeMap, BTreeSet};
 pub fn los_clear(grid: &Grid, from: TilePos, to: TilePos, perceiver_elevated: bool) -> bool {
     let blocks = |tile: TilePos| -> bool {
         match grid.get(tile) {
-            Some(TileKind::HighGround) => !perceiver_elevated,
+            // Mountains are High Ground's soft-slope sibling (M8):
+            // elevation sees over both; ground level sees neither.
+            Some(TileKind::HighGround) | Some(TileKind::Mountain) => !perceiver_elevated,
+            // A terraformed wall blocks vision for EVERYONE (docs/05) —
+            // it is built mass, not elevation.
+            Some(TileKind::Barricade) => true,
             _ => false,
         }
     };
@@ -62,7 +67,7 @@ impl Sim {
         let tick = self.world.tick;
         // Perceivers per faction: (pos, seeing, hearing, elevated).
         let mut perceivers: BTreeMap<u8, Vec<(TilePos, u32, u32, bool)>> = BTreeMap::new();
-        let ctx = crate::stats::StatCtx { stats: &self.stats, xp: &self.xp, quirks: &self.quirks };
+        let ctx = crate::stats::StatCtx { stats: &self.stats, xp: &self.xp, quirks: &self.quirks, tuning: &self.tuning };
         for bot in self.world.bots.values() {
             if bot.data.dying {
                 continue;
@@ -119,9 +124,12 @@ impl Sim {
                 let own = target.data.faction == faction;
                 let moving = target.data.moved_tick == tick && tick > 0;
                 let muted = self.world.grid.get(tpos) == Some(TileKind::Snow);
-                // (Ford wading quiets the signature when M8 adds the
-                // Ford tile; ford_quiet already rides tuning.)
-                let signature = ctx.signature_for(&target.data);
+                // Ford wading quiets the mover (M8, Q38): the water
+                // swallows the tread noise — subtracted from heard-at.
+                let mut signature = ctx.signature_for(&target.data);
+                if self.world.grid.get(tpos) == Some(TileKind::Ford) {
+                    signature -= self.tuning.ford_quiet;
+                }
                 for &(pos, seeing, hearing, elevated) in eyes {
                     if own {
                         // Own units are always known to the colony cloud.
@@ -256,6 +264,8 @@ pub fn high_ground_bonus(grid: &Grid, pos: TilePos) -> u32 {
     if on_high_ground(grid, pos) { 2 } else { 0 }
 }
 
+/// Mountain summits share the plateau's privileges (M8, docs/05): the
+/// elevated-perceiver LoS exemption and the sensor bonus.
 pub fn on_high_ground(grid: &Grid, pos: TilePos) -> bool {
-    grid.get(pos) == Some(TileKind::HighGround)
+    matches!(grid.get(pos), Some(TileKind::HighGround) | Some(TileKind::Mountain))
 }

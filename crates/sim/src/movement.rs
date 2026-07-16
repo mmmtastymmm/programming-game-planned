@@ -1,12 +1,12 @@
 //! Collision handling and path replanning: bumps, sidesteps, and the
 //! post-bump replan.
 
-use crate::map::{astar_avoiding, edge_allowed, TilePos};
+use crate::map::{astar_avoiding, edge_allowed, OverlayKind, TileKind, TilePos};
 use crate::sim::Sim;
 use crate::world::{
     Action, BotId,
 };
-use pyrite::{Signal, Value};
+use pyrite::Signal;
 use std::collections::BTreeSet;
 
 impl Sim {
@@ -50,6 +50,32 @@ impl Sim {
         }
     }
 
+    /// Ice slides (M8, Q37): where momentum carries a bot that just
+    /// stepped onto `entered` (moving from `from`) — an arrow painted on
+    /// the ice redirects the slide, and a blocked or impassable edge lets
+    /// the bot stop (`None`). Occupancy is the CALLER's problem: a slide
+    /// into an occupant is a collision, and whether the mover eats a
+    /// `bump` depends on who is driving (programs do, engine walks don't).
+    pub(crate) fn slide_target(&self, entered: TilePos, from: TilePos) -> Option<TilePos> {
+        if self.world.grid.get(entered) != Some(TileKind::Ice) {
+            return None;
+        }
+        let delta = match self.world.overlays.get(&entered) {
+            Some(OverlayKind::Arrow(d)) => d.delta(),
+            None => (entered.x - from.x, entered.y - from.y),
+        };
+        if delta == (0, 0) {
+            return None; // spawned/placed on ice: no momentum
+        }
+        let target = TilePos::new(entered.x + delta.0, entered.y + delta.1);
+        if !edge_allowed(&self.world.grid, &self.world.overlays, entered, target)
+            || self.world.structure_at(target)
+        {
+            return None;
+        }
+        Some(target)
+    }
+
     /// Free, passable neighbor tiles of `from` (excluding the blocked
     /// `avoid` tile) that are no farther from `goals` than `from` is —
     /// dodges may not lose ground, so corridors still queue and freeze.
@@ -83,15 +109,15 @@ impl Sim {
         let structures = self.world.structure_tiles();
         let mut occupied: BTreeSet<TilePos> = self.world.occupied_tiles(id);
         occupied.extend(structures.iter().copied());
-        let path = astar_avoiding(&self.world.grid, &self.world.overlays, start, &goals, &occupied)
+        let path = astar_avoiding(&self.world.grid, &self.world.overlays, &self.tuning.tile_costs, start, &goals, &occupied)
             .or_else(|| {
-                astar_avoiding(&self.world.grid, &self.world.overlays, start, &goals, &structures)
+                astar_avoiding(&self.world.grid, &self.world.overlays, &self.tuning.tile_costs, start, &goals, &structures)
             });
         match path {
             Some(path) if path.is_empty() => self.complete_move(id),
             Some(path) => {
                 let first_cost = crate::stats::step_ticks(
-                    crate::stats::StatCtx { stats: &self.stats, xp: &self.xp, quirks: &self.quirks },
+                    crate::stats::StatCtx { stats: &self.stats, xp: &self.xp, quirks: &self.quirks, tuning: &self.tuning },
                     &self.world.grid,
                     &self.world.bots[&id].data,
                     path[0],
@@ -116,14 +142,14 @@ impl Sim {
         // Program move.
         if let Some(Action::Move { goals, .. }) = &bot.data.action {
             let goals = goals.clone();
-            match astar_avoiding(&self.world.grid, &self.world.overlays, start, &goals, &occupied) {
+            match astar_avoiding(&self.world.grid, &self.world.overlays, &self.tuning.tile_costs, start, &goals, &occupied) {
                 Some(path) if path.is_empty() => {
                     // Already standing at a goal: the move is done.
                     self.complete_move(id);
                 }
                 Some(path) => {
                     let first_cost = crate::stats::step_ticks(
-                        crate::stats::StatCtx { stats: &self.stats, xp: &self.xp, quirks: &self.quirks },
+                        crate::stats::StatCtx { stats: &self.stats, xp: &self.xp, quirks: &self.quirks, tuning: &self.tuning },
                         &self.world.grid,
                         &self.world.bots[&id].data,
                         path[0],
@@ -155,13 +181,13 @@ impl Sim {
                 }
             }
             if let Some(path) =
-                astar_avoiding(&self.world.grid, &self.world.overlays, start, &goals, &occupied)
+                astar_avoiding(&self.world.grid, &self.world.overlays, &self.tuning.tile_costs, start, &goals, &occupied)
             {
                 let ticks_left = path
                     .first()
                     .map(|p| {
                         crate::stats::step_ticks(
-                            crate::stats::StatCtx { stats: &self.stats, xp: &self.xp, quirks: &self.quirks },
+                            crate::stats::StatCtx { stats: &self.stats, xp: &self.xp, quirks: &self.quirks, tuning: &self.tuning },
                             &self.world.grid,
                             &self.world.bots[&id].data,
                             *p,

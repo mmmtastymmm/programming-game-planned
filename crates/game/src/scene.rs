@@ -669,12 +669,62 @@ pub(crate) fn setup_scene(
                 // Mountains rise a full block: crossing costs double, and
                 // the silhouette should say so. The summit grows a cliff
                 // rim wherever the range ends.
-                TileKind::Rubble => {
-                    let mask = mask_of(|t| matches!(t, TileKind::Rubble));
+                // M8 moved the full block from Rubble to Mountain; Rubble
+                // is LOW DEBRIS now — flat broken rock you drive over
+                // (and what worn Scree collapses into).
+                TileKind::Mountain => {
+                    let mask = mask_of(|t| matches!(t, TileKind::Mountain));
                     (
                         palette.mountain_block.clone(),
                         palette.mountain_tex_mats[mask].clone(),
                         MOUNTAIN_TOP - 0.10,
+                    )
+                }
+                TileKind::Rubble => {
+                    (palette.tex_slab.clone(), palette.mountain_tex_mats[15].clone(), 0.0)
+                }
+                // Scree sits slightly sunken; the stone-strewn overlay
+                // below distinguishes it from settled Rubble.
+                TileKind::Scree => {
+                    (palette.tex_slab.clone(), palette.mountain_tex_mats[15].clone(), -0.02)
+                }
+                // The mesa doorstep: tan plateau art at ground level reads
+                // as the cut in the cliff (a true sloped mesh can come
+                // with real art passes).
+                TileKind::Ramp => {
+                    (palette.tex_slab.clone(), palette.highground_tex_mats[15].clone(), 0.0)
+                }
+                // A frozen sheet: open-water art, flat and grounded —
+                // distinct from the sunken, banked river.
+                TileKind::Ice => {
+                    (palette.tex_slab.clone(), palette.water_tex_mats[15].clone(), 0.0)
+                }
+                // Shallows: water art raised toward the banks.
+                TileKind::Ford => {
+                    let mask = mask_of(|t| {
+                        matches!(t, TileKind::Water | TileKind::Bridge | TileKind::Ford)
+                    });
+                    (palette.tex_slab.clone(), palette.water_tex_mats[mask].clone(), -0.03)
+                }
+                // Terraformed artery: the circuit "tech" tile IS the road.
+                TileKind::Road => {
+                    (palette.tex_slab.clone(), palette.ground_tex_mat.clone(), 0.0)
+                }
+                // Built mass at wall height, teched-over.
+                TileKind::Barricade => {
+                    (
+                        palette.mountain_block.clone(),
+                        palette.ground_tex_mat.clone(),
+                        MOUNTAIN_TOP - 0.10,
+                    )
+                }
+                // Dunes wear Sand's art (autotiling against both).
+                TileKind::Dunes => {
+                    let mask = mask_of(|t| matches!(t, TileKind::Dunes | TileKind::Sand));
+                    (
+                        palette.tex_slab.clone(),
+                        palette.resource_tex_mats[&TileKind::Sand.as_u8()][mask].clone(),
+                        0.0,
                     )
                 }
                 // Banks on the sides that border land. Bridges count as
@@ -790,7 +840,10 @@ pub(crate) fn setup_scene(
                     // shadow + stones on the looming sides, plus corner
                     // clusters.
                     let not_cliff = |t: TileKind| {
-                        !matches!(t, TileKind::Rubble | TileKind::HighGround)
+                        !matches!(
+                            t,
+                            TileKind::Mountain | TileKind::HighGround | TileKind::Barricade
+                        )
                     };
                     overlay(&mut commands, &palette.scree_mats, mask_of(not_cliff), 0.012);
                     overlay(
@@ -812,12 +865,15 @@ pub(crate) fn setup_scene(
                     corner_mask_of(|t| matches!(t, TileKind::Water | TileKind::Bridge)),
                     0.012,
                 ),
-                TileKind::Rubble => overlay(
+                TileKind::Mountain => overlay(
                     &mut commands,
                     &palette.mountain_corner_mats,
-                    corner_mask_of(|t| matches!(t, TileKind::Rubble)),
+                    corner_mask_of(|t| matches!(t, TileKind::Mountain)),
                     0.012,
                 ),
+                // Scree reads as stone-strewn ground: the cliff-base
+                // stones drawn unconditionally (mask 0 = all sides).
+                TileKind::Scree => overlay(&mut commands, &palette.scree_mats, 0, 0.012),
                 TileKind::Mud => overlay(
                     &mut commands,
                     &palette.mud_corner_mats,
@@ -868,7 +924,15 @@ pub(crate) fn setup_scene(
                     corner_mask_of(same_resource.expect("resource kind has predicate")),
                     0.012,
                 ),
-                TileKind::Bridge | TileKind::Vent => {}
+                TileKind::Bridge
+                | TileKind::Vent
+                | TileKind::Rubble
+                | TileKind::Ramp
+                | TileKind::Dunes
+                | TileKind::Ice
+                | TileKind::Ford
+                | TileKind::Road
+                | TileKind::Barricade => {}
             }
         }
     }

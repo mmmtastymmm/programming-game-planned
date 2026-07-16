@@ -73,4 +73,34 @@ Tuning(
     wander_leg: 4,
     // Ford wading quiets the mover: subtracted from heard-at distance.
     ford_quiet: 2,
+    // --- terrain v2 (M8, docs/05 Q35–Q40) ---
+    // Move costs on the ×2 scale (Plains = 2) so Road's ½× stays integer.
+    // Kinds absent from the table are impassable (Water, Barricade).
+    tile_costs: (
+        x2: [
+            (Plains, 2), (Rubble, 4), (Bridge, 2), (Mud, 6), (Corruption, 2),
+            (OreVein, 2), (CrystalField, 2), (HighGround, 2), (Vent, 2),
+            (Snow, 2), (Sand, 2), (StoneOutcrop, 2), (Grove, 2),
+            (CoalSeam, 2), (IronVein, 2), (CopperVein, 2), (TinVein, 2),
+            (SilverVein, 2), (GoldVein, 2),
+            // Mountain's table entry is the RIDGE (summit-to-summit) cost;
+            // climb/descend edges override it below.
+            (Mountain, 2),
+            (Ramp, 2), (Dunes, 4), (Ice, 2), (Ford, 8), (Road, 1), (Scree, 4),
+        ],
+        mountain_climb_x2: 6,
+        mountain_descend_x2: 4,
+        mud_loaded_x2: 8,
+    ),
+    // Dunes (Q35): each full interval spent idle on sand adds one step's
+    // surcharge to the NEXT move, up to the cap (buried, never trapped).
+    dune_sink_ticks: 20,
+    dune_sink_step_x2: 2,
+    dune_sink_cap_x2: 12,
+    // Scree (Q40): collapses to Rubble after this many bot entries.
+    scree_crossings: 6,
+    // Corruption (docs/05): extra centicycles per op while standing on it.
+    corruption_op_tax: 100,
+    // Blight Cores corrupt one nearby tile per this many ticks.
+    corruption_spread_ticks: 200,
 )

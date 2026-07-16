@@ -111,6 +111,26 @@ pub enum TileKind {
     TinVein,
     SilverVein,
     GoldVein,
+    // --- terrain v2 (M8, docs/05) ---
+    /// Edge-costed range: climbing on is dear, descending moderate,
+    /// ridge-running cheap; summits carry the High Ground sensor state.
+    Mountain,
+    /// The only doorway onto High Ground (docs/05: "enter only via Ramp").
+    Ramp,
+    /// Idling sinks (Q35): stand still and the exit cost escalates.
+    Dunes,
+    /// Deterministic slides (Q37): entering continues the move in the
+    /// same direction until non-ice; arrows redirect; bumps end it.
+    Ice,
+    /// Mapgen shallow crossing (Q38): slow, and wading quiets signature.
+    Ford,
+    /// Terraformed artery (Q39): HALF plains cost — the ×2 scale exists
+    /// for this tile.
+    Road,
+    /// Collapses to Rubble after N crossings (Q40 per-tile wear).
+    Scree,
+    /// Terraformed wall: blocks movement AND vision (docs/05).
+    Barricade,
 }
 
 /// A traffic rule painted onto any tile — independent of terrain.
@@ -141,9 +161,17 @@ impl TileKind {
             TileKind::Corruption => Some(1),
             TileKind::OreVein => Some(1),
             TileKind::CrystalField => Some(1),
-            TileKind::HighGround => None,
+            TileKind::HighGround => Some(1), // Ramp-gated (edge_allowed)
             TileKind::Vent => Some(1),
             TileKind::Snow => Some(1),
+            TileKind::Mountain => Some(1), // edge-costed (tuning table)
+            TileKind::Ramp => Some(1),
+            TileKind::Dunes => Some(2),
+            TileKind::Ice => Some(1),
+            TileKind::Ford => Some(4),
+            TileKind::Road => Some(1),
+            TileKind::Scree => Some(2),
+            TileKind::Barricade => None,
             // Resource ground is cost-neutral until Q69 decides otherwise.
             TileKind::Sand
             | TileKind::StoneOutcrop
@@ -179,7 +207,56 @@ impl TileKind {
             TileKind::TinVein => 17,
             TileKind::SilverVein => 18,
             TileKind::GoldVein => 19,
+            TileKind::Mountain => 20,
+            TileKind::Ramp => 21,
+            TileKind::Dunes => 22,
+            TileKind::Ice => 23,
+            TileKind::Ford => 24,
+            TileKind::Road => 25,
+            TileKind::Scree => 26,
+            TileKind::Barricade => 27,
         }
+    }
+
+    /// Can ground bots ever stand here? (Costs live in tuning's ×2 table;
+    /// High Ground is passable but Ramp-gated — see `edge_allowed`.)
+    pub fn passable(self) -> bool {
+        !matches!(self, TileKind::Water | TileKind::Barricade)
+    }
+}
+
+/// The ×2-scale move-cost table (Q39: Plains 2 so Road's ½× exists) plus
+/// the edge parameters — resolved once from tuning at Sim construction.
+/// PLANNING costs (A*) are bot-independent; per-bot state (loaded Mud,
+/// Dune sink) rides `stats::step_ticks` on top.
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct TileCostTable {
+    /// (kind, entry cost ×2). Kinds absent here are impassable.
+    pub x2: Vec<(TileKind, u32)>,
+    /// Entering a Mountain from non-mountain (the climb).
+    pub mountain_climb_x2: u32,
+    /// Leaving a Mountain onto ordinary ground (the descent).
+    pub mountain_descend_x2: u32,
+    /// Mud while carrying anything (docs/05: 3×, loaded 4×).
+    pub mud_loaded_x2: u32,
+}
+
+impl TileCostTable {
+    pub fn cost_x2(&self, kind: TileKind) -> Option<u32> {
+        self.x2.iter().find(|(k, _)| *k == kind).map(|(_, c)| *c)
+    }
+
+    /// The bot-independent cost (×2) of entering `to` from `from` —
+    /// Mountain edges replace the flat entry cost (docs/05 Q36).
+    pub fn edge_cost_x2(&self, grid: &Grid, from: TilePos, to: TilePos) -> Option<u32> {
+        let to_kind = grid.get(to)?;
+        let from_kind = grid.get(from)?;
+        Some(match (from_kind, to_kind) {
+            (TileKind::Mountain, TileKind::Mountain) => self.cost_x2(TileKind::Mountain)?,
+            (_, TileKind::Mountain) => self.mountain_climb_x2,
+            (TileKind::Mountain, _) => self.mountain_descend_x2.max(self.cost_x2(to_kind)?),
+            _ => self.cost_x2(to_kind)?,
+        })
     }
 }
 
@@ -345,6 +422,26 @@ pub fn edge_allowed(
     if to_kind.move_ticks().is_none() {
         return false;
     }
+    let from_kind = grid.get(from);
+    // High Ground is entered and left ONLY via Ramp (or along the
+    // plateau); Mountain summits are the soft-slope sibling — climbable
+    // from anywhere at edge cost (docs/05).
+    if to_kind == TileKind::HighGround
+        && !matches!(
+            from_kind,
+            Some(TileKind::Ramp) | Some(TileKind::HighGround) | Some(TileKind::Mountain)
+        )
+    {
+        return false;
+    }
+    if from_kind == Some(TileKind::HighGround)
+        && !matches!(
+            to_kind,
+            TileKind::Ramp | TileKind::HighGround | TileKind::Mountain
+        )
+    {
+        return false;
+    }
     let delta = (to.x - from.x, to.y - from.y);
     if let Some(OverlayKind::Arrow(d)) = overlays.get(&to)
         && delta != d.delta()
@@ -365,10 +462,11 @@ pub fn edge_allowed(
 pub fn astar(
     grid: &Grid,
     overlays: &BTreeMap<TilePos, OverlayKind>,
+    costs: &TileCostTable,
     start: TilePos,
     goals: &BTreeSet<TilePos>,
 ) -> Option<Vec<TilePos>> {
-    astar_avoiding(grid, overlays, start, goals, &BTreeSet::new())
+    astar_avoiding(grid, overlays, costs, start, goals, &BTreeSet::new())
 }
 
 /// A* that additionally refuses to enter `blocked` tiles (used for bump
@@ -376,6 +474,7 @@ pub fn astar(
 pub fn astar_avoiding(
     grid: &Grid,
     overlays: &BTreeMap<TilePos, OverlayKind>,
+    costs: &TileCostTable,
     start: TilePos,
     goals: &BTreeSet<TilePos>,
     blocked: &BTreeSet<TilePos>,
@@ -383,6 +482,8 @@ pub fn astar_avoiding(
     if goals.contains(&start) {
         return Some(Vec::new());
     }
+    // Admissible under the ×2 table: the cheapest edge anywhere is
+    // Road's 1, so plain manhattan (×1) never overestimates.
     let h = |p: TilePos| goals.iter().map(|g| p.manhattan(*g)).min().unwrap_or(u32::MAX);
 
     // Reverse ordering on (f, g, y, x): BinaryHeap is a max-heap, so wrap in
@@ -423,7 +524,7 @@ pub fn astar_avoiding(
             if !edge_allowed(grid, overlays, pos, next) {
                 continue;
             }
-            let step_cost = grid.get(next).and_then(|k| k.move_ticks()).expect("edge checked");
+            let Some(step_cost) = costs.edge_cost_x2(grid, pos, next) else { continue };
             let ng = g + step_cost;
             if ng < *g_score.get(&next).unwrap_or(&u32::MAX) {
                 g_score.insert(next, ng);

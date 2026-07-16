@@ -165,6 +165,8 @@ pub struct StatCtx<'a> {
     pub stats: &'a Stats,
     pub xp: &'a crate::xp::XpConfig,
     pub quirks: &'a crate::quirks::QuirkCatalog,
+    /// Terrain costs live in tuning (M8) — step_ticks reads the table.
+    pub tuning: &'a crate::sim::Tuning,
 }
 
 impl StatCtx<'_> {
@@ -391,17 +393,33 @@ pub fn cpu_centi(
     v.max(1) as u64
 }
 
-/// Ticks for this bot to ENTER `tile`: the move-rate stat through the
-/// pipeline, multiplied by terrain, pessimistically rounded up. `None` =
-/// impassable. (A* keeps terrain-relative costs — a bot-constant factor
-/// never changes the argmin path.)
+/// Ticks for this bot to ENTER `tile` from where it stands: the
+/// move-rate stat through the pipeline, times the ×2-scale edge cost
+/// (M8 — the from-tile matters: Mountain climbs, Dune sink), rounded
+/// pessimistically up. `None` = impassable. (A* keeps terrain-relative
+/// costs — a bot-constant factor never changes the argmin path; the
+/// per-bot Mud/Dune surcharges below are deliberate plan drift.)
 pub fn step_ticks(
     ctx: StatCtx<'_>,
     grid: &Grid,
     data: &BotData,
     tile: TilePos,
 ) -> Option<u32> {
-    let mult = grid.get(tile)?.move_ticks()? as i64;
+    let costs = &ctx.tuning.tile_costs;
+    let mut cost_x2 = costs.edge_cost_x2(grid, data.pos, tile)? as i64;
+    // Mud is heavier under load (docs/05: 3×, 4× loaded). Per-bot state,
+    // so it rides here rather than in the bot-independent A* table.
+    if grid.get(tile) == Some(crate::map::TileKind::Mud) && data.cargo_total() > 0 {
+        cost_x2 = cost_x2.max(costs.mud_loaded_x2 as i64);
+    }
+    // Dunes swallow idlers (Q35): each full sink interval spent standing
+    // on sand surcharges the NEXT step, up to the cap — buried, never
+    // trapped.
+    if grid.get(data.pos) == Some(crate::map::TileKind::Dunes) {
+        let steps = (data.dune_idle / ctx.tuning.dune_sink_ticks) as i64;
+        cost_x2 += (steps * ctx.tuning.dune_sink_step_x2 as i64)
+            .min(ctx.tuning.dune_sink_cap_x2 as i64);
+    }
     let mut rate = data.move_rate_deci as i64;
     // XP: Mileage wears the bearings in (−% per level, reduction floors);
     // Hauling L3 moves +10% faster WHILE LOADED.
@@ -424,5 +442,6 @@ pub fn step_ticks(
         rate += ceil_pct(rate, ctx.stats.damaged_penalty_pct);
     }
     let rate = rate.max(1); // never below 1 stored unit
-    Some((((rate * mult) as u64).div_ceil(10)).max(1) as u32)
+    // deci-rate × (×2 cost) → ticks: the divisor folds both scales.
+    Some((((rate * cost_x2) as u64).div_ceil(20)).max(1) as u32)
 }

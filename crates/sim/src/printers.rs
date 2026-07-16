@@ -52,7 +52,7 @@ impl Sim {
         let config = self.vm_config_for(&self.world.bots[&id].data);
         // Boot ritual through the pipeline (Hot Reload / Windows Update /
         // the Boot track).
-        let boot = crate::stats::StatCtx { stats: &self.stats, xp: &self.xp, quirks: &self.quirks }
+        let boot = crate::stats::StatCtx { stats: &self.stats, xp: &self.xp, quirks: &self.quirks, tuning: &self.tuning }
             .boot_ticks_for(&self.world.bots[&id].data, self.tuning.boot_ticks);
         let bot = self.world.bots.get_mut(&id).expect("bot exists");
         bot.data.color = color;
@@ -438,7 +438,7 @@ impl Sim {
                     bot.data.log_cap += self.stats.memory_bank_log;
                 }
                 // A bought Stack extension reaches the LIVE VM.
-                let depth = crate::stats::StatCtx { stats: &self.stats, xp: &self.xp, quirks: &self.quirks }.stack_depth_for(&bot.data);
+                let depth = crate::stats::StatCtx { stats: &self.stats, xp: &self.xp, quirks: &self.quirks, tuning: &self.tuning }.stack_depth_for(&bot.data);
                 if let Some(vm) = bot.vm.as_mut() {
                     vm.set_stack_depth(depth);
                 }
@@ -525,14 +525,14 @@ impl Sim {
         // place across the map (or teleport a recolor). The caller's next
         // check re-selects; the bot stays put until a route exists.
         let Some(path) =
-            astar_avoiding(&self.world.grid, &self.world.overlays, start, &goals, &structures)
+            astar_avoiding(&self.world.grid, &self.world.overlays, &self.tuning.tile_costs, start, &goals, &structures)
         else {
             return;
         };
         let ticks_left = path
             .first()
             .map(|p| {
-                crate::stats::step_ticks(crate::stats::StatCtx { stats: &self.stats, xp: &self.xp, quirks: &self.quirks }, &self.world.grid, &self.world.bots[&id].data, *p)
+                crate::stats::step_ticks(crate::stats::StatCtx { stats: &self.stats, xp: &self.xp, quirks: &self.quirks, tuning: &self.tuning }, &self.world.grid, &self.world.bots[&id].data, *p)
                     .unwrap_or(1)
             })
             .unwrap_or(0);

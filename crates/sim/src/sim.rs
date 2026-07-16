@@ -108,6 +108,19 @@ pub struct Tuning {
     pub explore_radius: u32,
     pub wander_leg: u32,
     pub ford_quiet: i64,
+    // --- terrain v2 (M8, docs/05 Q35–Q40) ---
+    /// The ×2-scale move-cost table + Mountain/Mud edge parameters.
+    pub tile_costs: crate::map::TileCostTable,
+    /// Dunes idle-sink interval / per-interval surcharge / total ceiling.
+    pub dune_sink_ticks: u32,
+    pub dune_sink_step_x2: u32,
+    pub dune_sink_cap_x2: u32,
+    /// Scree collapses to Rubble after this many bot entries (Q40).
+    pub scree_crossings: u32,
+    /// Corruption's per-op cycle tax, in CENTICYCLES (docs/05; M8-B).
+    pub corruption_op_tax: u64,
+    /// Blight Cores corrupt one nearby tile per this many ticks (M8-C).
+    pub corruption_spread_ticks: u64,
 }
 
 impl Default for Tuning {
@@ -141,6 +154,26 @@ impl Tuning {
         assert!(
             (1..=100).contains(&self.hurt_line_pct),
             "tuning: hurt_line_pct must be a percentage in 1..=100"
+        );
+        // Terrain v2: A*'s heuristic is manhattan × 1, admissible only
+        // while every edge costs at least 1; and Water/Barricade are the
+        // impassable kinds, so the table must not price them.
+        for &(kind, cost) in &self.tile_costs.x2 {
+            assert!(cost >= 1, "tuning: tile_costs.x2 must be >= 1 ({kind:?})");
+            assert!(kind.passable(), "tuning: tile_costs.x2 prices impassable {kind:?}");
+        }
+        for cost in [
+            self.tile_costs.mountain_climb_x2,
+            self.tile_costs.mountain_descend_x2,
+            self.tile_costs.mud_loaded_x2,
+        ] {
+            assert!(cost >= 1, "tuning: mountain/mud edge costs must be >= 1");
+        }
+        assert!(self.dune_sink_ticks > 0, "tuning: dune_sink_ticks must be > 0");
+        assert!(self.scree_crossings > 0, "tuning: scree_crossings must be > 0");
+        assert!(
+            self.corruption_spread_ticks > 0,
+            "tuning: corruption_spread_ticks must be > 0"
         );
     }
 }
@@ -734,6 +767,7 @@ impl Sim {
                     quirks: Vec::new(),
                     crash_seen: 0,
                     env: std::collections::BTreeMap::new(),
+                    dune_idle: 0,
                     rng_program: crate::world::stream_seed(
                         self.world.seed ^ entity.0,
                         "program",
@@ -793,7 +827,7 @@ impl Sim {
                 continue;
             }
             let outcome = {
-                let mut host = BotHost { world: &mut self.world, bot: id, tuning: &self.tuning, ctx: crate::stats::StatCtx { stats: &self.stats, xp: &self.xp, quirks: &self.quirks } };
+                let mut host = BotHost { world: &mut self.world, bot: id, tuning: &self.tuning, ctx: crate::stats::StatCtx { stats: &self.stats, xp: &self.xp, quirks: &self.quirks, tuning: &self.tuning } };
                 vm.run(&mut host, &self.costs)
             };
             self.after_vm(id, vm, outcome);
@@ -837,6 +871,7 @@ impl Sim {
                     stats: &self.stats,
                     xp: &self.xp,
                     quirks: &self.quirks,
+                    tuning: &self.tuning,
                 }
                 .fault_damage_for(&bot.data, self.tuning.fault_damage);
                 self.queue_damage(id, delta as i64 * chip, None);
@@ -899,6 +934,7 @@ impl Sim {
                     stats: &self.stats,
                     xp: &self.xp,
                     quirks: &self.quirks,
+                    tuning: &self.tuning,
                 }
                 .regen_for(&bot.data, self.tuning.regen_amount);
                 bot.data.hp = (bot.data.hp + amount).min(bot.data.max_hp);
@@ -914,6 +950,7 @@ impl Sim {
         self.run_refineries();
         self.run_printers();
         self.run_pads();
+        self.settle_terrain();
 
         // --- phase 9: snapshot hash for desync detection ---
         self.last_hash = self.state_hash();
@@ -1120,6 +1157,35 @@ impl Sim {
     /// level; it is IDENTITY until M6 lands the body tracks, so today this
     /// is a plain sum. Awards for bots that died in phase 6 are dropped
     /// with them.
+    /// Phase 8 terrain settle (M8): Dune idle counters advance for every
+    /// bot that stood still on sand this tick (Q35 — the counter feeds
+    /// step_ticks' exit surcharge), and Scree worn past the crossing
+    /// threshold collapses to Rubble (Q40). End-of-tick, so the Nth
+    /// crosser finishes its own step on solid ground.
+    pub(crate) fn settle_terrain(&mut self) {
+        let tick = self.world.tick;
+        for bot in self.world.bots.values_mut() {
+            if bot.data.dying {
+                continue;
+            }
+            if self.world.grid.get(bot.data.pos) == Some(crate::map::TileKind::Dunes)
+                && bot.data.moved_tick != tick
+            {
+                bot.data.dune_idle = bot.data.dune_idle.saturating_add(1);
+            }
+        }
+        let worn: Vec<crate::map::TilePos> = self
+            .world
+            .scree_wear
+            .iter()
+            .filter(|(_, n)| **n >= self.tuning.scree_crossings)
+            .map(|(p, _)| *p)
+            .collect();
+        for p in worn {
+            self.world.set_tile(p, crate::map::TileKind::Rubble);
+        }
+    }
+
     pub(crate) fn settle_xp(&mut self) {
         use std::collections::BTreeMap;
         let mut awards = std::mem::take(&mut self.world.pending_xp);
@@ -1271,7 +1337,7 @@ impl Sim {
     /// quirk catalog). All shared borrows of disjoint Sim fields, so it
     /// composes with `world` reads.
     pub fn ctx(&self) -> crate::stats::StatCtx<'_> {
-        crate::stats::StatCtx { stats: &self.stats, xp: &self.xp, quirks: &self.quirks }
+        crate::stats::StatCtx { stats: &self.stats, xp: &self.xp, quirks: &self.quirks, tuning: &self.tuning }
     }
 
     /// Per-bot VM config: the shared template with the hardware and quirk
@@ -1304,6 +1370,14 @@ impl Sim {
         // Cached: re-walking the map every tick made phase 9 O(map). Kept
         // fresh by World::set_tile on the rare terrain mutation.
         h.write_u64(w.terrain_hash);
+        // Scree wear is real divergent state (M8, Q40): two peers with a
+        // half-worn tile must agree before the collapse, not just after.
+        h.write_u32(w.scree_wear.len() as u32);
+        for (pos, n) in &w.scree_wear {
+            h.write_i32(pos.x);
+            h.write_i32(pos.y);
+            h.write_u32(*n);
+        }
         for (id, node) in &w.nodes {
             h.write_u64(id.0);
             h.write_u8(node.kind.as_u8());
@@ -1489,6 +1563,7 @@ impl Sim {
                 h.write_u64(*rem);
             }
             h.write_u64(bot.data.moved_tick);
+            h.write_u32(bot.data.dune_idle);
             h.write_u32(bot.data.episodes.len() as u32);
             for (faction, counter) in &bot.data.episodes {
                 h.write_u8(*faction);
