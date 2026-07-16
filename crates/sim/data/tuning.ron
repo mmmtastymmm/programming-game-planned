@@ -103,4 +103,17 @@ Tuning(
     corruption_op_tax: 100,
     // Blight Cores corrupt one nearby tile per this many ticks.
     corruption_spread_ticks: 200,
+    // --- terraform blueprints (M8-D, docs/05). Stone prices in deci ---
+    // (Stone owns civil works, like bridges/overlays above); ticks are
+    // builder-ticks at the unleveled rate.
+    clear_ticks: 10,
+    // Clearing rubble YIELDS stone (deci) to the builder's faction.
+    clear_yield_stone: 10,
+    barricade_cost_stone: 20,
+    barricade_build_ticks: 15,
+    demolish_ticks: 10,
+    // Cleansing creep is slow, deliberate work.
+    cleanse_ticks: 40,
+    road_cost_stone: 10,
+    road_build_ticks: 10,
 )

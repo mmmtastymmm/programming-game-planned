@@ -470,6 +470,45 @@ impl Sim {
                     self.world.blueprints.remove(&blueprint);
                     match kind {
                         BlueprintKind::Bridge => self.world.set_tile(site, TileKind::Bridge),
+                        // Cleared rubble yields Stone to the BUILDER's
+                        // faction (the blueprint records none) — salvage
+                        // pays whoever swings the shovel.
+                        BlueprintKind::Clear => {
+                            self.world.set_tile(site, TileKind::Plains);
+                            let faction = self.world.bots[&id].data.faction;
+                            self.world.stock_add(
+                                faction,
+                                crate::resources::Resource::Stone,
+                                self.tuning.clear_yield_stone,
+                            );
+                        }
+                        // A bot standing on the site is NOT trapped: only
+                        // entering a Barricade is blocked, leaving isn't.
+                        BlueprintKind::Barricade => {
+                            self.world.set_tile(site, TileKind::Barricade)
+                        }
+                        // Un-build to what the works stood on: planks over
+                        // water, a wall over plains. (Site rules pin the
+                        // tile at placement; re-check for the demolished
+                        // kind, not the placement snapshot — terrain may
+                        // have changed under a slow build.)
+                        BlueprintKind::Demolish => {
+                            match self.world.grid.get(site) {
+                                Some(TileKind::Bridge) => {
+                                    self.world.set_tile(site, TileKind::Water)
+                                }
+                                Some(TileKind::Barricade) => {
+                                    self.world.set_tile(site, TileKind::Plains)
+                                }
+                                _ => {} // demolished out from under us
+                            }
+                        }
+                        // Cleanse yields PLAINS — the pre-creep kind is
+                        // not preserved (flagged in TASKS.md).
+                        BlueprintKind::Cleanse => {
+                            self.world.set_tile(site, TileKind::Plains)
+                        }
+                        BlueprintKind::Road => self.world.set_tile(site, TileKind::Road),
                     }
                     self.finish_action(id, Ok(Value::Unit));
                 } else {

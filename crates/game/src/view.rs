@@ -92,7 +92,7 @@ pub(crate) struct ViewIndex {
     pub(crate) black_boxes: usize,
     pub(crate) printers: HashMap<u64, (Entity, PrinterState)>,
     pub(crate) blueprints: HashMap<u64, Entity>,
-    pub(crate) bridges: HashSet<(i32, i32)>,
+    pub(crate) bridges: HashMap<(i32, i32), Entity>,
     pub(crate) overlays: HashMap<(i32, i32), (Entity, OverlayKind)>,
     /// Blueprint id -> its progress-bar fill entity.
     pub(crate) blueprint_fills: HashMap<u64, Entity>,
@@ -710,21 +710,33 @@ pub(crate) fn sync_view(
         .retain(|id, _| world.blueprints.contains_key(&sim::EntityId(*id)));
 
     // Finished bridges: baked plank tiles over the water. (Direction
-    // arrows are an overlay layer now — see below.)
+    // arrows are an overlay layer now — see below.) Demolish (M8) can
+    // return a bridge to water, so planks are tracked and despawned.
+    index.bridges.retain(|&(x, y), entity| {
+        if world.grid.get(TilePos::new(x, y)) == Some(sim::TileKind::Bridge) {
+            true
+        } else {
+            commands.entity(*entity).despawn();
+            false
+        }
+    });
     for y in 0..world.grid.height {
         for x in 0..world.grid.width {
             let pos = TilePos::new(x, y);
             if world.grid.get(pos) != Some(sim::TileKind::Bridge) {
                 continue;
             }
-            if !index.bridges.insert((x, y)) {
+            if index.bridges.contains_key(&(x, y)) {
                 continue;
             }
-            commands.spawn((
-                Mesh3d(palette.tex_slab.clone()),
-                MeshMaterial3d(palette.bridge_tex_mat.clone()),
-                Transform::from_translation(tile_xyz(world, pos, 0.0)),
-            ));
+            let entity = commands
+                .spawn((
+                    Mesh3d(palette.tex_slab.clone()),
+                    MeshMaterial3d(palette.bridge_tex_mat.clone()),
+                    Transform::from_translation(tile_xyz(world, pos, 0.0)),
+                ))
+                .id();
+            index.bridges.insert((x, y), entity);
         }
     }
 

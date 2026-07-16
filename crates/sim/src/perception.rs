@@ -178,6 +178,11 @@ impl Sim {
             for (id, n) in &self.world.nodes {
                 see_static(*id, n.pos, false);
             }
+            // Blight Cores (M8-C): nobody's own — seen like any other
+            // stationary mass (attack's perception gate then just works).
+            for (id, c) in &self.world.blight_cores {
+                see_static(*id, c.pos, false);
+            }
             // seen ∩ heard: sight is absolute — drop the blip.
             let heard: BTreeMap<EntityId, TilePos> =
                 heard.into_iter().filter(|(e, _)| !seen.contains(e)).collect();

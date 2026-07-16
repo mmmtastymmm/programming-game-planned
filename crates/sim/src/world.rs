@@ -621,6 +621,18 @@ pub struct Blueprint {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum BlueprintKind {
     Bridge,
+    // --- terraform set (M8-D, docs/05) ---
+    /// Rubble → Plains; completing yields Stone to the BUILDER's faction.
+    Clear,
+    /// Plains → Barricade (Stone): solid built mass, blocks LoS too.
+    Barricade,
+    /// Un-build civil works: Bridge → Water, Barricade → Plains.
+    Demolish,
+    /// Corruption → Plains — slow, and a living Blight Core in range
+    /// will re-corrupt it (kill the source first).
+    Cleanse,
+    /// Plains/Rubble → Road (Stone): the half-cost artery.
+    Road,
 }
 
 /// A disabled bot awaiting rescue/salvage (countdown comes later). The

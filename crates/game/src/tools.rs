@@ -48,6 +48,16 @@ pub(crate) const BUILD_CATEGORIES: &[(&str, &[BuildItem])] = &[
         &[BuildItem { name: "Bridge", kind: ToolKind::Building(BlueprintKind::Bridge) }],
     ),
     (
+        "Terraform",
+        &[
+            BuildItem { name: "Clear", kind: ToolKind::Building(BlueprintKind::Clear) },
+            BuildItem { name: "Barricade", kind: ToolKind::Building(BlueprintKind::Barricade) },
+            BuildItem { name: "Demolish", kind: ToolKind::Building(BlueprintKind::Demolish) },
+            BuildItem { name: "Cleanse", kind: ToolKind::Building(BlueprintKind::Cleanse) },
+            BuildItem { name: "Road", kind: ToolKind::Building(BlueprintKind::Road) },
+        ],
+    ),
+    (
         "Overlay",
         &[
             BuildItem {
@@ -71,6 +81,53 @@ pub(crate) const BUILD_CATEGORIES: &[(&str, &[BuildItem])] = &[
         ],
     ),
 ];
+
+/// Stone price of a blueprint kind — one place, so the bar, the ghost,
+/// and the hover text can't drift from the sim's charge.
+pub(crate) fn blueprint_cost(tuning: &sim::sim::Tuning, kind: BlueprintKind) -> u64 {
+    match kind {
+        BlueprintKind::Bridge => tuning.bridge_cost_stone,
+        BlueprintKind::Barricade => tuning.barricade_cost_stone,
+        BlueprintKind::Road => tuning.road_cost_stone,
+        BlueprintKind::Clear | BlueprintKind::Demolish | BlueprintKind::Cleanse => 0,
+    }
+}
+
+/// Mirror of the sim's PlaceBlueprint site rule (the ghost previews what
+/// the command will accept).
+pub(crate) fn blueprint_site_ok(
+    world: &sim::World,
+    kind: BlueprintKind,
+    pos: sim::TilePos,
+) -> bool {
+    use sim::TileKind;
+    let tile = world.grid.get(pos);
+    let ok = match kind {
+        BlueprintKind::Bridge => tile == Some(TileKind::Water),
+        BlueprintKind::Clear => tile == Some(TileKind::Rubble),
+        BlueprintKind::Barricade => tile == Some(TileKind::Plains),
+        BlueprintKind::Demolish => {
+            matches!(tile, Some(TileKind::Bridge) | Some(TileKind::Barricade))
+        }
+        BlueprintKind::Cleanse => tile == Some(TileKind::Corruption),
+        BlueprintKind::Road => {
+            matches!(tile, Some(TileKind::Plains) | Some(TileKind::Rubble))
+        }
+    };
+    ok && (kind == BlueprintKind::Bridge || !world.structure_at(pos))
+}
+
+/// The build-bar hint line for a blueprint tool.
+pub(crate) fn blueprint_hint(kind: BlueprintKind) -> &'static str {
+    match kind {
+        BlueprintKind::Bridge => "Click a water tile to place — Esc/RMB cancels",
+        BlueprintKind::Clear => "Click a rubble tile to clear (yields Stone) — Esc/RMB cancels",
+        BlueprintKind::Barricade => "Click a plains tile to wall off — Esc/RMB cancels",
+        BlueprintKind::Demolish => "Click a bridge or barricade to un-build — Esc/RMB cancels",
+        BlueprintKind::Cleanse => "Click a corruption tile to cleanse (slow) — Esc/RMB cancels",
+        BlueprintKind::Road => "Click plains or rubble to pave — Esc/RMB cancels",
+    }
+}
 
 /// Same catalog item, ignoring per-placement state (arrow rotation).
 pub(crate) fn same_item(a: ToolKind, b: ToolKind) -> bool {
@@ -109,6 +166,84 @@ pub(crate) fn build_icon(name: &str) -> egui::ColorImage {
         for y in 35..44 {
             for x in [6usize, 7, 23, 24, 40, 41] {
                 img[(x, y)] = rail;
+            }
+        }
+    }
+    if name == "Clear" {
+        // Rubble field, half swept to grass: the before-and-after split.
+        let rubble = egui::Color32::from_rgb(96, 92, 88);
+        let stone = egui::Color32::from_rgb(70, 66, 62);
+        let grass = egui::Color32::from_rgb(74, 110, 60);
+        for x in 0..s {
+            for y in 0..s {
+                img[(x, y)] = if x + y < s { grass } else { rubble };
+            }
+        }
+        for (cx, cy) in [(30, 26), (38, 30), (28, 38), (40, 42), (36, 20)] {
+            for dx in 0..5usize {
+                for dy in 0..4usize {
+                    img[(cx + dx, cy + dy)] = stone;
+                }
+            }
+        }
+    }
+    if name == "Barricade" {
+        // Coursed stone blocks with mortar lines.
+        let block = egui::Color32::from_rgb(120, 116, 108);
+        let mortar = egui::Color32::from_rgb(62, 58, 52);
+        for x in 0..s {
+            for y in 0..s {
+                let course = y / 8;
+                let shift = if course % 2 == 0 { 0 } else { 6 };
+                let mortar_line = y % 8 == 0 || (x + shift) % 12 == 0;
+                img[(x, y)] = if mortar_line { mortar } else { block };
+            }
+        }
+    }
+    if name == "Demolish" {
+        // The same wall, cracked through: a red X of ruin.
+        let block = egui::Color32::from_rgb(120, 116, 108);
+        let mortar = egui::Color32::from_rgb(62, 58, 52);
+        let crack = egui::Color32::from_rgb(180, 52, 40);
+        for x in 0..s {
+            for y in 0..s {
+                let mortar_line = y % 8 == 0 || x % 12 == 0;
+                img[(x, y)] = if mortar_line { mortar } else { block };
+            }
+        }
+        for i in 4..44usize {
+            for w in 0..3usize {
+                img[(i, (i + w).min(s - 1))] = crack;
+                img[(i, (s - 1 - i).saturating_add(w).min(s - 1))] = crack;
+            }
+        }
+    }
+    if name == "Cleanse" {
+        // Creep purple scrubbed back to green from the center out.
+        let creep = egui::Color32::from_rgb(96, 48, 118);
+        let clean = egui::Color32::from_rgb(74, 110, 60);
+        for x in 0..s {
+            for y in 0..s {
+                let dx = x as i32 - 24;
+                let dy = y as i32 - 24;
+                img[(x, y)] = if dx * dx + dy * dy < 15 * 15 { clean } else { creep };
+            }
+        }
+    }
+    if name == "Road" {
+        // Dark paving with a dashed center line.
+        let paving = egui::Color32::from_rgb(58, 58, 62);
+        let line = egui::Color32::from_rgb(212, 196, 120);
+        for x in 0..s {
+            for y in 0..s {
+                img[(x, y)] = paving;
+            }
+        }
+        for y in (2..46usize).step_by(10) {
+            for dy in 0..6usize {
+                for x in 22..26usize {
+                    img[(x, y + dy)] = line;
+                }
             }
         }
     }
@@ -310,9 +445,9 @@ pub(crate) fn build_preview(
     }
 
     let (valid, paint_ghost) = match kind {
-        ToolKind::Building(BlueprintKind::Bridge) => {
-            let cost = game.0.tuning.bridge_cost_stone;
-            let ok = world.grid.get(pos) == Some(sim::TileKind::Water)
+        ToolKind::Building(kind) => {
+            let cost = blueprint_cost(&game.0.tuning, kind);
+            let ok = blueprint_site_ok(world, kind, pos)
                 && !world.blueprints.values().any(|b| b.pos == pos)
                 && world.stock_get(0, sim::resources::Resource::Stone) >= cost;
             (ok, None)

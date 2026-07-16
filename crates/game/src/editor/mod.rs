@@ -12,7 +12,7 @@ mod window;
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
 use sim::sim::Command;
-use sim::world::{BlueprintKind, Color as BotColor, PrinterState};
+use sim::world::{Color as BotColor, PrinterState};
 use sim::map::OverlayKind;
 use sim::TilePos;
 use std::collections::{BTreeMap, HashMap};
@@ -781,7 +781,7 @@ pub(crate) fn editor_ui(
             let (_, items) = BUILD_CATEGORIES[editor.build_category.min(BUILD_CATEGORIES.len() - 1)];
             for item in items {
                 let cost = match item.kind {
-                    ToolKind::Building(BlueprintKind::Bridge) => game.0.tuning.bridge_cost_stone,
+                    ToolKind::Building(kind) => crate::tools::blueprint_cost(&game.0.tuning, kind),
                     ToolKind::Overlay(Some(_)) => game.0.tuning.overlay_cost_stone,
                     ToolKind::Overlay(None) | ToolKind::Paint(_) | ToolKind::Kill => 0,
                 };
@@ -822,8 +822,8 @@ pub(crate) fn editor_ui(
             ui.vertical(|ui| {
                 if let Some(kind) = editor.selected_build {
                     match kind {
-                        ToolKind::Building(BlueprintKind::Bridge) => {
-                            ui.label("Click a water tile to place — Esc/RMB cancels");
+                        ToolKind::Building(kind) => {
+                            ui.label(crate::tools::blueprint_hint(kind));
                         }
                         ToolKind::Overlay(Some(OverlayKind::Arrow(d))) => {
                             ui.label(format!(

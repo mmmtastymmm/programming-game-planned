@@ -85,7 +85,7 @@ fn main() {
         )
         .add_systems(
             Update,
-            (fog::recompute_fog, fog::apply_fog, fog::pulse_blips)
+            (scene::resync_terrain, fog::recompute_fog, fog::apply_fog, fog::pulse_blips)
                 .chain()
                 .after(view::animate_terrain),
         )

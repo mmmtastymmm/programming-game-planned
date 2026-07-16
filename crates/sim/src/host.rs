@@ -11,6 +11,8 @@ use pyrite::{faults, Fault, HostCall, Value};
 /// every bot VM (see `Sim::new`), so programs write `closest(ore)` bare.
 pub const KINDS: &[&str] = &[
     "blueprint", "depot", "enemy", "ore", "printer", "wreck", "smelter", "foundry", "archive",
+    // the creep's heart (M8-C) — attackable, so it must be findable
+    "blight",
     // every resource kind is also a queryable kind: raw names find nodes,
     // refined names exist for cargo_count/withdraw (closest() on a refined
     // kind finds nothing until stock queries land)
@@ -98,6 +100,15 @@ impl BotHost<'_> {
             "ore" => node_query(&|k| k.is_ore_family()),
             // Own-colony infrastructure is cloud knowledge, always.
             "blueprint" => self.world.nearest_blueprint(bot.pos),
+            // The creep front is visible terrain, so its source is
+            // queryable un-gated (perception gating: see TASKS.md).
+            "blight" => self
+                .world
+                .blight_cores
+                .iter()
+                .map(|(id, c)| (bot.pos.manhattan(c.pos), *id))
+                .min()
+                .map(|(_, id)| id),
             "depot" => self.world.nearest_depot(bot.pos),
             "printer" => self
                 .world

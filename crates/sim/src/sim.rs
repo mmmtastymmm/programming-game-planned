@@ -121,6 +121,16 @@ pub struct Tuning {
     pub corruption_op_tax: u64,
     /// Blight Cores corrupt one nearby tile per this many ticks (M8-C).
     pub corruption_spread_ticks: u64,
+    // --- terraform blueprints (M8-D, docs/05): Stone prices in deci ---
+    pub clear_ticks: u32,
+    /// Clearing rubble YIELDS Stone (deci) to the builder's faction.
+    pub clear_yield_stone: u64,
+    pub barricade_cost_stone: u64,
+    pub barricade_build_ticks: u32,
+    pub demolish_ticks: u32,
+    pub cleanse_ticks: u32,
+    pub road_cost_stone: u64,
+    pub road_build_ticks: u32,
 }
 
 impl Default for Tuning {
@@ -170,6 +180,15 @@ impl Tuning {
             assert!(cost >= 1, "tuning: mountain/mud edge costs must be >= 1");
         }
         assert!(self.dune_sink_ticks > 0, "tuning: dune_sink_ticks must be > 0");
+        for (ticks, name) in [
+            (self.clear_ticks, "clear_ticks"),
+            (self.barricade_build_ticks, "barricade_build_ticks"),
+            (self.demolish_ticks, "demolish_ticks"),
+            (self.cleanse_ticks, "cleanse_ticks"),
+            (self.road_build_ticks, "road_build_ticks"),
+        ] {
+            assert!(ticks > 0, "tuning: {name} must be > 0");
+        }
         assert!(self.scree_crossings > 0, "tuning: scree_crossings must be > 0");
         assert!(
             self.corruption_spread_ticks > 0,
@@ -517,13 +536,33 @@ impl Sim {
                 Ok(None)
             }
             Command::PlaceBlueprint { pos, kind, faction } => {
+                let tile = self.world.grid.get(*pos);
+                // Site rules (M8-D): each terraform kind names the ground
+                // it works. The terraform kinds also refuse structure
+                // tiles (walling under a depot bricks it) — Bridge keeps
+                // its water-only rule untouched.
                 let valid_site = match kind {
-                    BlueprintKind::Bridge => self.world.grid.get(*pos) == Some(TileKind::Water),
-                };
+                    BlueprintKind::Bridge => tile == Some(TileKind::Water),
+                    BlueprintKind::Clear => tile == Some(TileKind::Rubble),
+                    BlueprintKind::Barricade => tile == Some(TileKind::Plains),
+                    BlueprintKind::Demolish => {
+                        matches!(tile, Some(TileKind::Bridge) | Some(TileKind::Barricade))
+                    }
+                    BlueprintKind::Cleanse => tile == Some(TileKind::Corruption),
+                    BlueprintKind::Road => {
+                        matches!(tile, Some(TileKind::Plains) | Some(TileKind::Rubble))
+                    }
+                } && (*kind == BlueprintKind::Bridge || !self.world.structure_at(*pos));
                 let occupied_by_blueprint =
                     self.world.blueprints.values().any(|b| b.pos == *pos);
                 let cost = match kind {
                     BlueprintKind::Bridge => self.tuning.bridge_cost_stone,
+                    BlueprintKind::Barricade => self.tuning.barricade_cost_stone,
+                    BlueprintKind::Road => self.tuning.road_cost_stone,
+                    // Labor-only: demolition and cleansing price in ticks.
+                    BlueprintKind::Clear
+                    | BlueprintKind::Demolish
+                    | BlueprintKind::Cleanse => 0,
                 };
                 if valid_site
                     && !occupied_by_blueprint
@@ -534,6 +573,11 @@ impl Sim {
                     // figure for an unleveled builder.
                     let needed = match kind {
                         BlueprintKind::Bridge => self.tuning.bridge_build_ticks,
+                        BlueprintKind::Clear => self.tuning.clear_ticks,
+                        BlueprintKind::Barricade => self.tuning.barricade_build_ticks,
+                        BlueprintKind::Demolish => self.tuning.demolish_ticks,
+                        BlueprintKind::Cleanse => self.tuning.cleanse_ticks,
+                        BlueprintKind::Road => self.tuning.road_build_ticks,
                     } * crate::resources::DECI;
                     let id = self.world.alloc_entity();
                     self.world

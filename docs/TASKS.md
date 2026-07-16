@@ -371,18 +371,68 @@ hash: statline, XP map, quirk rolls, upkeep settlements).* ✅ CORE COMPLETE (20
 
 ## M8 — Terrain v2 & terraforming
 
-- [ ] **×2 move-cost scale** + full tile table: Road ½× (=1), Mountain as its own kind with
-      **edge costs** (A* signature change), Ice slides, Dune idle-sink counters, Ford
-      (signature bonus), Scree collapse counters, Snow effects, HighGround ramps (+2 sensors
-      at edge), loaded-cargo multiplier. Split Mountain from Rubble (game renders Rubble as a
-      mountain block today — becomes 2× debris). [sim][game] (L) ⚠HASH
-- [ ] **Cost overlays**: base + per-biome/per-tile overlay layering resolved at step time,
-      floored at 1, load-validated; Corruption cycle tax; feeds real `bank_cap`. [pyrite][sim]
-      (M) ⚠HASH
-- [ ] **Corruption dynamics**: spread counters, Blight Cores, Cleanse, channel jamming (cloud
-      telemetry exempt). [sim] (M) ⚠HASH
-- [ ] **Terraform set**: Clear, Barricade, Demolish, Cleanse, Road blueprints (+ structure
-      placement via blueprint); build bar categories. [sim][game] (M)
+- [x] **×2 move-cost scale** + full tile table: `tuning.tile_costs` (×2 scale — Plains 2 so
+      Road ½× = 1); eight new TileKinds (Mountain, Ramp, Dunes, Ice, Ford, Road, Scree,
+      Barricade; as_u8 20–27 appended, existing hashes stable). Costs are per EDGE
+      (`TileCostTable::edge_cost_x2`; A* signature gained the table): Mountain climb 6 /
+      descend 4 / ridge 2; Mud 8 while loaded (per-bot state rides `stats::step_ticks` —
+      from-tile = `data.pos`, signature unchanged). Ice slides (momentum chains across ice
+      until solid ground; arrows redirect; slide-into-occupant = collision with the SLIDER at
+      fault; engine walks slide but raise no bump; recall arrival guard replans an overshot
+      doorstep). Dunes idle-sink (`BotData.dune_idle`, hashed: +1/tick standing on sand, each
+      full `dune_sink_ticks` interval adds `dune_sink_step_x2` to the next step, capped at
+      `dune_sink_cap_x2` — buried, never trapped; every move resets). Ford quiets the wader
+      (`ford_quiet` off heard-at) and costs 4×. Scree wear (`world.scree_wear`, hashed;
+      collapses to Rubble at `scree_crossings` entries in the end-of-tick terrain settle;
+      `set_tile` drops the counter). HighGround entry Ramp-gated (or via Mountain); Mountain
+      summits join `on_high_ground` (sensor bonus + LoS exemption) and block ground-level LoS.
+      Game: Mountain takes the full block + cliff art from Rubble (now flat debris);
+      placeholder art reuse for the other kinds; the slab layer rebuilds on terrain-hash
+      change (`resync_terrain` — terrain mutates now); demolished bridge planks despawn.
+      *NEEDS DISCUSSION: (1) Snow stays 1× and mute-only (Q67 open — no cost/tracks effects
+      invented); (2) HighGround's +2 bonus and the Chebyshev spread metric are still
+      hardcoded first-pass; (3) slide steps cost normal step ticks (no momentum speed-up);
+      (4) a Barricade completing under a standing bot leaves it free to step off (entry-only
+      blocking).* [sim][game] (L) ⚠HASH *(golden regenerated: hash format only — dune_idle,
+      scree_wear, blight_cores joined the snapshot; legacy behavior bit-identical, the ×2
+      scale doubles both cost and divisor)*
+- [x] **Cost overlays**: FLAT per-op overlay only — `Vm.cost_overlay_centi`, re-set by the
+      sim before every grant from the tile under the chassis (derived state, never hashed);
+      charged ops pay base + overlay floored at one full cycle (zero-cost bookkeeping stays
+      free); `grant_centi`'s bank cap grows by the overlay margin (the cap stays "the
+      priciest effective op", Q75). Corruption tax = `tuning.corruption_op_tax` (100 centi =
+      +1cy/op). *NEEDS DISCUSSION: (1) per-op-KEY / per-biome overlay LAYERING was not built
+      — the flat surcharge covers Corruption; a real layering design should say how overlays
+      compose and which op classes they touch; (2) forced charges (trap cost, crash dump,
+      abort upload) stay untaxed — punishments keep fixed figures.* [pyrite][sim] (M) ⚠HASH
+- [x] **Corruption dynamics**: `BlightCore { pos, radius, hp }` in `world.blight_cores`
+      (hashed; `MapSpec.blight_cores`, serde-defaulted; allocated after printers so fixture
+      entity ids stay put; its tile painted Corruption at build). Spread every
+      `corruption_spread_ticks`: each living core corrupts the nearest non-Corruption
+      passable tile in radius, (chebyshev, y, x) order — cleansed ground re-corrupts for free
+      while the source lives. Cores are solid, perceivable (seen-only, like structures),
+      queryable (`closest(blight)`), and attackable like structures; killing one stops the
+      spread, the creep stays. *NEEDS DISCUSSION: (1) channel jamming waits for M11 channels;
+      (2) Bridges are spared from spread (creep would delete the river crossing); (3)
+      `closest(blight)` is perception-UNGATED (the creep front is visible terrain — but the
+      heart's exact position leaking is a choice); (4) cores render nowhere in the viewer —
+      neither do Smelters/Foundries (the M4 structure-rendering gap).* [sim] (M) ⚠HASH
+- [x] **Terraform set**: BlueprintKinds Clear (Rubble→Plains, labor-only, completion YIELDS
+      `clear_yield_stone` to the builder's faction), Barricade (Plains→Barricade, Stone;
+      solid + blocks LoS for everyone), Demolish (Bridge→Water / Barricade→Plains, labor-
+      only, re-checks the tile at completion), Cleanse (Corruption→Plains, slow), Road
+      (Plains|Rubble→Road, Stone). Site rules at placement; terraform kinds refuse structure
+      tiles (walling a depot in). Build bar: Terraform tab + icons; ghost/costs/hints share
+      one helper with the sim's rule (`tools::blueprint_cost/site_ok/hint`). Tests:
+      `tests/terrain.rs` (16 tests: cost table, mountain edges, ramp gate, A* road detours,
+      ice slide overshoot, dune sink/reset, scree collapse, ford quieting, corruption tax,
+      blight lifecycle, all five blueprints, site validation). *NEEDS DISCUSSION: (1)
+      structure placement via blueprint was NOT migrated — `PlaceStructure` still lands
+      structures instantly, and no build-bar tab places them; (2) Cleanse yields Plains — the
+      pre-creep tile kind is not preserved anywhere; (3) Barricades have no HP and are not
+      attackable — Demolish labor is the only removal; (4) terraform blueprints carry no
+      faction, so any faction's builder can finish them (Clear pays the finisher).*
+      [sim][game] (M)
 
 ## M9 — Printers v2: target shares (replaces the superseded `desired_max` dial)
 
