@@ -65,12 +65,15 @@ impl Sim {
                             self.finish_action(id, Ok(Value::Unit));
                         }
                         Some(path) => {
-                            let first_cost = self
-                                .world
-                                .grid
-                                .get(path[0])
-                                .and_then(|t| t.move_ticks())
-                                .expect("path tiles are passable");
+                            // Ticks per step come from the move-rate stat
+                            // through the pipeline; terrain multiplies (M5).
+                            let first_cost = crate::stats::step_ticks(
+                                &self.stats,
+                                &self.world.grid,
+                                &self.world.bots[&id].data,
+                                path[0],
+                            )
+                            .expect("path tiles are passable");
                             let bot = self.world.bots.get_mut(&id).expect("bot exists");
                             bot.data.action =
                                 Some(Action::Move { path, ticks_left: first_cost, goals });
@@ -90,7 +93,9 @@ impl Sim {
                         .next();
                     match node {
                         Some(node) => {
-                            bot.data.action = Some(Action::Mine { node, ticks_left: 2 });
+                            let ticks_left = self.tuning.mine_swing_ticks;
+                            let bot = self.world.bots.get_mut(&id).expect("bot exists");
+                            bot.data.action = Some(Action::Mine { node, ticks_left });
                         }
                         None => self.finish_action(id, Err("mine: no ore in range".into())),
                     }
@@ -112,9 +117,9 @@ impl Sim {
                 ActionRequest::Deposit { fault_on_fail } => {
                     // Generalized acceptor (docs/03): an adjacent depot
                     // takes everything into colony stock; an adjacent
-                    // refinery takes only its recipe's inputs into its
-                    // physical input buffer. Depots first, then the
-                    // lowest-id accepting structure.
+                    // structure takes only what it FEEDS on — recipe
+                    // inputs, Generator fuel, Station coolant. Depots
+                    // first, then the lowest-id accepting structure.
                     let faction = bot.data.faction;
                     let carrying = bot.data.cargo.clone();
                     let empty = bot.data.cargo_total() == 0;
@@ -132,12 +137,7 @@ impl Sim {
                         .filter(|(_, st)| {
                             st.faction == faction
                                 && pos.chebyshev(st.pos) <= 1
-                                && st.recipe.is_some_and(|idx| {
-                                    crate::resources::RECIPES[idx as usize]
-                                        .inputs
-                                        .iter()
-                                        .any(|(k, _)| carrying.contains_key(k))
-                                })
+                                && st.accepted_feed().iter().any(|k| carrying.contains_key(k))
                         })
                         .map(|(sid, _)| *sid)
                         .next();
@@ -152,8 +152,11 @@ impl Sim {
                             self.finish_action(id, outcome);
                         }
                         Some(target) => {
-                            bot.data.action =
-                                Some(Action::Deposit { depot: target, ticks_left: 1 });
+                            bot.data.action = Some(Action::Deposit {
+                                depot: target,
+                                ticks_left: 1,
+                                fault_on_fail,
+                            });
                         }
                         None => {
                             let outcome = if fault_on_fail {
@@ -183,7 +186,10 @@ impl Sim {
                 // toward the goal; only when boxed in, bump-freeze (and
                 // re-plan on thaw).
                 let entered = path[0];
-                if self.world.tile_occupied(entered, id) {
+                // Structures are solid too: one placed on the route AFTER
+                // this path was planned blocks the step exactly like a bot
+                // (plan-time A* only sees structures that already exist).
+                if self.world.tile_occupied(entered, id) || self.world.structure_at(entered) {
                     let from = self.world.bots[&id].data.pos;
                     let dodges = self.sidestep_candidates(id, from, entered, &goals);
                     if dodges.is_empty() {
@@ -194,12 +200,13 @@ impl Sim {
                         let pick = (crate::world::next_rand(&mut self.world.rng.sidestep)
                             % dodges.len() as u64) as usize;
                         let step = dodges[pick];
-                        let cost = self
-                            .world
-                            .grid
-                            .get(step)
-                            .and_then(|t| t.move_ticks())
-                            .expect("candidates are passable");
+                        let cost = crate::stats::step_ticks(
+                            &self.stats,
+                            &self.world.grid,
+                            &self.world.bots[&id].data,
+                            step,
+                        )
+                        .expect("candidates are passable");
                         let bot = self.world.bots.get_mut(&id).expect("bot exists");
                         // Single-step path; landing off-route triggers a
                         // re-plan (see the empty-path branch below).
@@ -219,12 +226,13 @@ impl Sim {
                         self.replan_move(id, goals);
                     }
                 } else {
-                    let next_cost = self
-                        .world
-                        .grid
-                        .get(path[0])
-                        .and_then(|t| t.move_ticks())
-                        .expect("path tiles are passable");
+                    let next_cost = crate::stats::step_ticks(
+                        &self.stats,
+                        &self.world.grid,
+                        &self.world.bots[&id].data,
+                        path[0],
+                    )
+                    .expect("path tiles are passable");
                     let bot = self.world.bots.get_mut(&id).expect("bot exists");
                     bot.data.action = Some(Action::Move { path, ticks_left: next_cost, goals });
                 }
@@ -336,27 +344,22 @@ impl Sim {
                     self.finish_action(id, Ok(Value::Unit));
                 }
             }
-            Action::Deposit { depot, ticks_left } => {
+            Action::Deposit { depot, ticks_left, fault_on_fail } => {
                 let ticks_left = ticks_left - 1;
                 if ticks_left > 0 {
-                    bot.data.action = Some(Action::Deposit { depot, ticks_left });
+                    bot.data.action =
+                        Some(Action::Deposit { depot, ticks_left, fault_on_fail });
                     return;
                 }
                 let faction = bot.data.faction;
                 let mut total = 0u32;
                 if self.world.structures.contains_key(&depot) {
-                    // Refinery feed: only the set recipe's inputs move.
-                    let st = &self.world.structures[&depot];
-                    let inputs: Vec<crate::resources::Resource> = st
-                        .recipe
-                        .map(|idx| {
-                            crate::resources::RECIPES[idx as usize]
-                                .inputs
-                                .iter()
-                                .map(|(k, _)| *k)
-                                .collect()
-                        })
-                        .unwrap_or_default();
+                    // Structure feed: only what it feeds on moves (recipe
+                    // inputs, Generator fuel, Station coolant). No
+                    // delivery-milestone credit — feeding a station is
+                    // production logistics, not delivery (and counting it
+                    // would double-pay a mine→smelt→deliver chain).
+                    let inputs = self.world.structures[&depot].accepted_feed();
                     let bot = self.world.bots.get_mut(&id).expect("bot exists");
                     let mut moved: Vec<(crate::resources::Resource, u32)> = Vec::new();
                     for kind in inputs {
@@ -370,23 +373,44 @@ impl Sim {
                     for (kind, deci) in moved {
                         *st.input.entry(kind).or_insert(0) += deci;
                     }
-                } else {
+                    // The feed may have carried stock-withdrawn cargo out:
+                    // provenance never exceeds what's still aboard.
+                    let bot = self.world.bots.get_mut(&id).expect("bot exists");
+                    bot.data.withdrawn_aboard =
+                        bot.data.withdrawn_aboard.min(bot.data.cargo_total());
+                } else if self.world.depots.contains_key(&depot) {
                     // Depot: the whole manifest enters colony stock
                     // (docs/03: payments draw from this abstract pool).
+                    // Milestone credit excludes the stock-withdrawn share
+                    // (cargo provenance): recycling stock is zero NET
+                    // delivery, but it can never suppress real income.
                     let bot = self.world.bots.get_mut(&id).expect("bot exists");
                     let manifest = std::mem::take(&mut bot.data.cargo);
                     total = manifest.values().sum();
+                    let recycled = bot.data.withdrawn_aboard.min(total);
+                    bot.data.withdrawn_aboard = 0;
                     for (kind, deci) in manifest {
                         self.world.stock_add(faction, kind, deci as u64);
                     }
-
+                    self.track_delivery_milestone(faction, total - recycled);
+                } else {
+                    // The acceptor picked at request time was destroyed
+                    // before the action completed — the cargo goes nowhere
+                    // (nothing may teleport into abstract stock without a
+                    // live depot adjacent).
+                    let outcome = if fault_on_fail {
+                        Err("deposit: acceptor destroyed".into())
+                    } else {
+                        Ok(Value::Bool(false))
+                    };
+                    self.finish_action(id, outcome);
+                    return;
                 }
                 self.world.pending_xp.push((
                     id,
                     XpTrack::Hauling,
                     (total / crate::resources::DECI) as u64,
                 ));
-                self.track_delivery_milestone(faction, total);
                 self.finish_action(id, Ok(Value::Unit));
             }
         }
@@ -456,18 +480,27 @@ impl Sim {
 
     /// Data income: 20 Data per full `delivery_milestone_deci` delivered
     /// (docs/03: "deliver 500 ore" milestones — activity, not mining).
+    /// The caller already excluded stock-recycled cargo (per-bot
+    /// provenance), so `delivered` is NET by construction; the paid
+    /// high-water mark guards re-crossing regardless.
     pub(crate) fn track_delivery_milestone(&mut self, faction: u8, delivered_deci: u32) {
         let step = self.tuning.delivery_milestone_deci;
-        if step == 0 {
+        if step == 0 || delivered_deci == 0 {
             return;
         }
-        let before = self.world.delivered.get(&faction).copied().unwrap_or(0);
-        let after = before + delivered_deci as u64;
-        self.world.delivered.insert(faction, after);
-        let crossed = (after / step as u64) - (before / step as u64);
-        if crossed > 0 {
+        let net = {
+            let d = self.world.delivered.entry(faction).or_insert(0);
+            *d += delivered_deci as u64;
+            *d
+        };
+        let owed = net / step as u64;
+        // No entry until a milestone actually pays — the paid map is
+        // hashed, and a spurious 0 entry would move every replay hash.
+        let paid = self.world.milestones_paid.get(&faction).copied().unwrap_or(0);
+        if owed > paid {
+            self.world.milestones_paid.insert(faction, owed);
             *self.world.data.entry(faction).or_insert(0) +=
-                crossed * self.tuning.milestone_data;
+                (owed - paid) * self.tuning.milestone_data;
         }
     }
 
@@ -500,7 +533,10 @@ impl Sim {
                 return;
             }
             let entered = recall.path[0];
-            if self.world.tile_occupied(entered, id) {
+            // Same solidity rule as the program walk: a structure placed
+            // mid-route blocks the step (the post-bump replan threads
+            // around it).
+            if self.world.tile_occupied(entered, id) || self.world.structure_at(entered) {
                 let bot = self.world.bots.get_mut(&id).expect("bot exists");
                 recall.ticks_left = 1;
                 bot.data.recall = Some(recall);
@@ -510,12 +546,13 @@ impl Sim {
             recall.path.remove(0);
             self.world.move_bot(id, entered);
             if let Some(next) = recall.path.first() {
-                recall.ticks_left = self
-                    .world
-                    .grid
-                    .get(*next)
-                    .and_then(|t| t.move_ticks())
-                    .expect("recall path tiles are passable");
+                recall.ticks_left = crate::stats::step_ticks(
+                    &self.stats,
+                    &self.world.grid,
+                    &self.world.bots[&id].data,
+                    *next,
+                )
+                .expect("recall path tiles are passable");
             }
             // Stand on the arrival tile for one tick even when the path is
             // done — the walk's last step must be observable (the printer

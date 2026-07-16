@@ -109,14 +109,47 @@ pub enum StructureKind {
     /// The Research Archive: the Data bank (research itself is
     /// structure-free — a Command; the Exchange lands later).
     Archive,
+    /// Burns Wood (weak) or Coal (strong) from its physical intake into
+    /// the faction's energy rate (docs/03; fed by `deposit()`).
+    Generator,
+    /// Free steady energy, placeable only on Vent tiles (docs/03).
+    GeothermalTap,
+    /// The compute shop (M5): bots stand adjacent with a queued order;
+    /// the pad pulls them, they sit inert, they step off upgraded.
+    /// Coolant (Water) is a physical feed into its input buffer.
+    UpgradeStation,
 }
 
 impl StructureKind {
+    pub const ALL: [StructureKind; 6] = [
+        StructureKind::Smelter,
+        StructureKind::Foundry,
+        StructureKind::Archive,
+        StructureKind::Generator,
+        StructureKind::GeothermalTap,
+        StructureKind::UpgradeStation,
+    ];
+
     pub fn name(self) -> &'static str {
         match self {
             StructureKind::Smelter => "smelter",
             StructureKind::Foundry => "foundry",
             StructureKind::Archive => "archive",
+            StructureKind::Generator => "generator",
+            StructureKind::GeothermalTap => "geothermal_tap",
+            StructureKind::UpgradeStation => "upgrade_station",
+        }
+    }
+
+    /// Kinds a `deposit()` may feed into this structure's input buffer —
+    /// the PHYSICAL flows (docs/03 Q84): refinery inputs are recipe-driven
+    /// (handled separately), Generator fuel and Station coolant are fixed.
+    pub fn feed_kinds(self) -> &'static [crate::resources::Resource] {
+        use crate::resources::Resource;
+        match self {
+            StructureKind::Generator => &[Resource::Wood, Resource::Coal],
+            StructureKind::UpgradeStation => &[Resource::Water],
+            _ => &[],
         }
     }
 
@@ -125,6 +158,9 @@ impl StructureKind {
             StructureKind::Smelter => 0,
             StructureKind::Foundry => 1,
             StructureKind::Archive => 2,
+            StructureKind::Generator => 3,
+            StructureKind::GeothermalTap => 4,
+            StructureKind::UpgradeStation => 5,
         }
     }
 }
@@ -147,6 +183,50 @@ pub struct Structure {
     pub recipe: Option<u8>,
     /// Ticks remaining on the in-progress batch.
     pub batch: Option<u32>,
+    /// Upgrade Station only: the bot currently sitting the pad, its order,
+    /// and the sit ticks left (docs/03: one pad, one bot — the queue is
+    /// physical, everyone in it is exposed).
+    pub pad: Option<PadJob>,
+}
+
+/// A mounted Station order (payment already charged — at mount, Q84).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PadJob {
+    pub bot: BotId,
+    pub order: UpgradeOrder,
+    pub ticks_left: u32,
+}
+
+/// A player-queued Station order, resolved against the stats catalog at
+/// `QueueUpgrade` time (docs/03: designation is the player's; the PROGRAM
+/// must bring the bot to a pad).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum UpgradeOrder {
+    /// Index into `stats.upgrades` (compute — coolant applies).
+    Compute(u8),
+    /// Index into `stats.modules`; `replace` names the slot whose module
+    /// the swap DESTROYS (no refund, Q72) — None fills an open slot.
+    Module { idx: u8, replace: Option<u8> },
+}
+
+impl Structure {
+    /// Kinds a `deposit()` may move into this structure's input buffer:
+    /// the set recipe's inputs (refineries) plus the kind's fixed feeds
+    /// (Generator fuel, Station coolant — docs/03: feeds are physical).
+    pub fn accepted_feed(&self) -> Vec<crate::resources::Resource> {
+        let mut kinds: Vec<crate::resources::Resource> = self
+            .recipe
+            .map(|idx| {
+                crate::resources::RECIPES[idx as usize]
+                    .inputs
+                    .iter()
+                    .map(|(k, _)| *k)
+                    .collect()
+            })
+            .unwrap_or_default();
+        kinds.extend_from_slice(self.kind.feed_kinds());
+        kinds
+    }
 }
 
 /// An action a builtin asked for this tick; started in the resolve phase.
@@ -170,14 +250,18 @@ pub enum Action {
     /// the route can be re-planned after a bump.
     Move { path: Vec<TilePos>, ticks_left: u32, goals: BTreeSet<TilePos> },
     Mine { node: EntityId, ticks_left: u32 },
-    Deposit { depot: EntityId, ticks_left: u32 },
+    /// `depot` is the acceptor picked at request time (a depot or a
+    /// refinery); `fault_on_fail` carries the deposit/try_deposit choice
+    /// so an acceptor destroyed mid-action resolves per the caller's verb.
+    Deposit { depot: EntityId, ticks_left: u32, fault_on_fail: bool },
     Attack { target: EntityId, ticks_left: u32 },
     Wait { ticks_left: u32 },
     /// Contributes 1 progress per tick while adjacent to the blueprint.
     Build { blueprint: EntityId },
 }
 
-pub const LOG_BUFFER_CAP: usize = 8;
+// (The old LOG_BUFFER_CAP const died with M5 — the cap is the per-bot
+// `log_cap` stat: stats.ron floor + Memory banks.)
 
 #[derive(Debug)]
 pub struct BotData {
@@ -196,8 +280,34 @@ pub struct BotData {
     pub cargo: BTreeMap<crate::resources::Resource, u32>,
     /// Capacity in deci-units (total across kinds).
     pub cargo_cap: u32,
-    /// Cycles granted per tick (CPU hardware).
-    pub cpu: u64,
+    /// BASE centicycles granted per tick (the stats floor, or a dev-spawn
+    /// override) — the modifier pipeline produces the effective grant.
+    pub cpu_centi: u64,
+    /// BASE move rate, deci-ticks per tile (stats floor; terrain
+    /// multiplies, the pipeline modifies; M6's Mileage grows it).
+    pub move_rate_deci: u32,
+    /// BASE sensor range in tiles (M7 perception consumes; Optics adds).
+    pub sensors: u32,
+    /// Module slots (M6's total-XP milestones grow it, cap 3).
+    pub module_slots: u32,
+    /// Log ring-buffer cap (stats floor; Memory banks grow it).
+    pub log_cap: u32,
+    /// Station-bought compute upgrades, purchase order (indices into
+    /// `stats.upgrades` — the hardware layer of the pipeline).
+    pub upgrades: Vec<u8>,
+    /// Slotted modules, slot order (indices into `stats.modules`).
+    pub modules: Vec<u8>,
+    /// Player-queued Station orders, FIFO (served at pad mount; an
+    /// unaffordable front order is SKIPPED, not dropped — it re-arms).
+    pub upgrade_queue: Vec<UpgradeOrder>,
+    /// Deci-units aboard that were withdrawn FROM COLONY STOCK (cargo
+    /// provenance): re-depositing them at a depot earns no delivery-
+    /// milestone credit — recycling stock is zero net delivery. Clamped
+    /// to the manifest whenever cargo leaves by another path.
+    pub withdrawn_aboard: u32,
+    /// Sitting an Upgrade Station pad (an engine interrupt context —
+    /// inert, double-handle exposed).
+    pub pad_sit: bool,
     pub color: Color,
     pub requested: Option<ActionRequest>,
     pub action: Option<Action>,
@@ -265,15 +375,15 @@ impl BotData {
 }
 
 impl Bot {
-    /// Is the VM currently executing any signal handler (error, hurt,
-    /// death, bump, bumped)? Drives the viewer's frustration cloud.
+    /// Is the VM currently executing any signal template (error, hurt,
+    /// bump, bumped, boot)? Drives the viewer's frustration cloud.
     pub fn in_signal_handler(&self) -> bool {
         self.vm.as_ref().is_some_and(|vm| vm.phase() != pyrite::Phase::Main)
     }
 
     /// Name of the signal currently being handled ("error" / "hurt" /
-    /// "bump" / "bumped" / "death"), if any — the VM tracks which signal
-    /// the unified handler is serving.
+    /// "bump" / "bumped" / "boot"), if any — the VM tracks which signal's
+    /// template is running.
     pub fn handler_name(&self) -> Option<&'static str> {
         self.vm.as_ref()?.active_signal()
     }
@@ -476,16 +586,35 @@ pub struct World {
     pub stock: BTreeMap<(u8, crate::resources::Resource), u64>,
     /// Data currency per faction (docs/03: earned by doing, not mining).
     pub data: BTreeMap<u8, u64>,
-    /// Lifetime deci-units delivered per faction (milestone Data income).
+    /// Lifetime NET deci-units delivered per faction: depot deposits only
+    /// (refinery feeds are production logistics, not delivery), and cargo
+    /// withdrawn from stock is excluded at deposit via the per-bot
+    /// `withdrawn_aboard` provenance — so withdraw/deposit cycling mints
+    /// nothing while seeded-stock withdrawals never suppress real income.
     pub delivered: BTreeMap<u8, u64>,
+    /// Delivery milestones already paid per faction — a high-water mark
+    /// against re-crossing.
+    pub milestones_paid: BTreeMap<u8, u64>,
     /// Factions that already earned their first-kill Data.
     pub first_kill_done: BTreeSet<u8>,
+    /// Factions currently browning out (energy draw > generation, set by
+    /// the phase-8 upkeep settlement; read by next tick's grant pipeline).
+    pub brownout: BTreeSet<u8>,
+    /// Per-faction Fabricator-trickle pick: the ONE bot that stays fully
+    /// powered through a brownout (lowest entity id owning a working
+    /// printer's faction — recomputed every upkeep settlement).
+    pub powered_bot: BTreeMap<u8, BotId>,
+    /// Factions whose Steel maintenance went unpaid last settlement —
+    /// self-repair halts and rust decay applies (docs/03 Q84).
+    pub rusting: BTreeSet<u8>,
     /// Per-faction construct unlocks (docs/06: permanent knowledge),
     /// consumed at parse. Dev sandboxes get UnlockSet::all() via
     /// MapSpec.dev_all_unlocks.
     pub unlocks: BTreeMap<u8, pyrite::UnlockSet>,
     /// Dev flag (from MapSpec): parse with everything unlocked.
     pub dev_all_unlocks: bool,
+    /// Dev flag (from MapSpec): skip energy/Steel upkeep entirely.
+    pub dev_free_power: bool,
     pub archive: Vec<ArchiveEntry>,
     /// The match seed (kept for seeding per-bot streams at spawn).
     pub seed: u64,
@@ -622,9 +751,14 @@ impl World {
             stock: BTreeMap::new(),
             data: BTreeMap::new(),
             delivered: BTreeMap::new(),
+            milestones_paid: BTreeMap::new(),
             first_kill_done: BTreeSet::new(),
+            brownout: BTreeSet::new(),
+            powered_bot: BTreeMap::new(),
+            rusting: BTreeSet::new(),
             unlocks: BTreeMap::new(),
             dev_all_unlocks: spec.dev_all_unlocks,
+            dev_free_power: spec.dev_free_power,
             archive: Vec::new(),
             seed: spec.seed,
             pending_damage: Vec::new(),

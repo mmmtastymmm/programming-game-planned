@@ -1,0 +1,38 @@
+// Upkeep (M5, docs/02-03 Q84): a data-driven resource mix — v1 config is
+// Energy (primary drain) + Steel (chassis maintenance). Every number is a
+// FIRST-PASS value: docs give the shape ("Generator output comfortably
+// above ~10 bots' idle draw, Coal >> Wood per unit") but not figures —
+// flagged NEEDS DISCUSSION in TASKS.md.
+Upkeep(
+    // Settlement cadence: energy/steel accounting runs every N ticks.
+    interval_ticks: 100,
+
+    // --- energy: a rate, not a pile (docs/03) ---
+    // Per-bot draw per settlement: base + increments per acquisition
+    // (station upgrade, slotted module; per-track-level joins with M6).
+    base_draw: 10,
+    draw_per_upgrade: 2,
+    draw_per_module: 2,
+    // Refineries with a recipe set draw too ("needs energy", docs/03).
+    draw_per_refinery: 20,
+    // Generator output per settlement, by fuel burned (Coal >> Wood).
+    generator_output_wood: 60,
+    generator_output_coal: 200,
+    // Fuel burned per settlement, deci-units (1 unit).
+    generator_fuel_deci: 10,
+    // The stoke buffer a map-authored Generator starts with (deci Coal).
+    generator_stoke_deci: 200,
+    // Geothermal Tap: free steady output.
+    geothermal_output: 150,
+
+    // --- steel: chassis maintenance (Q84 "rust", all configurable) ---
+    // Deci-Steel per bot per settlement, drawn from colony stock.
+    steel_per_bot_deci: 1,
+    // Unpaid: self-repair halts and every bot decays this much HP per
+    // settlement (queued through the ordinary damage phase).
+    rust_decay_hp: 1,
+    // Whether SUSTAINED shortfall (two consecutive unpaid settlements)
+    // also fires a scrap recall of the lowest-XP bot (docs/03 mentions it;
+    // off first-pass — NEEDS DISCUSSION).
+    rust_scraps: false,
+)

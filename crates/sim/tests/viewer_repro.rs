@@ -30,6 +30,7 @@ fn viewer_map() -> MapSpec {
 #[test]
 fn viewer_demo_crossing_works() {
     let mut sim = Sim::new(&viewer_map());
+    sim.stats.move_rate_deci = 10; // demo pacing predates the M5 move-rate floor
     sim.tuning.fault_damage = 0; // this suite studies routing, not health
     sim.apply(&Command::DeployProgram { faction: 0, color: Color::GREEN, source: MINER.into() }).unwrap();
     // Builder + return one-way west, outbound one-way east (return first).
@@ -66,6 +67,7 @@ fn bridges_added_long_after_pathfinding_failures_still_work() {
     // of ticks FIRST; only then are blueprints placed and built. Retries
     // must pick up the new tiles — no stale pathfinding state.
     let mut sim = Sim::new(&viewer_map());
+    sim.stats.move_rate_deci = 10; // demo pacing predates the M5 move-rate floor
     sim.tuning.fault_damage = 0; // this suite studies routing, not health
     sim.apply(&Command::DeployProgram { faction: 0, color: Color::GREEN, source: MINER.into() }).unwrap();
     let builder = sim

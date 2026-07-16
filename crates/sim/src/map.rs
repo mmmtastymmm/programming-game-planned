@@ -260,6 +260,16 @@ pub struct MapSpec {
     /// buys the tree). Serde default TRUE keeps stored replays working.
     #[serde(default = "default_true")]
     pub dev_all_unlocks: bool,
+    /// Skip energy/Steel upkeep entirely (dev/test sandboxes and every
+    /// existing map — real maps set this false and run on Generators).
+    /// Default TRUE for the same reason as dev_all_unlocks (M5).
+    #[serde(default = "default_true")]
+    pub dev_free_power: bool,
+    /// Map-authored structures, placed free at world build. Generators
+    /// placed here start STOKED (docs/03: the opening never brownouts
+    /// before the player acts).
+    #[serde(default)]
+    pub structures: Vec<(TilePos, crate::world::StructureKind)>,
 }
 
 fn default_true() -> bool {
@@ -306,6 +316,8 @@ impl MapSpec {
             node_amount: default_node_amount(),
             starting_stock: Vec::new(),
             dev_all_unlocks: true,
+            dev_free_power: true,
+            structures: Vec::new(),
         }
     }
 }

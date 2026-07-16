@@ -274,6 +274,31 @@ pub(crate) fn editor_costs() -> &'static pyrite::CostTable {
     COSTS.get_or_init(pyrite::CostTable::default)
 }
 
+/// Per-line cycle prices for the cost gutter (M5 — docs/01 asks for a
+/// gutter, not hover-only). Assembles exactly like [`live_parse`] so line
+/// numbers map back into the bare buffer; an unparseable buffer simply
+/// has no gutter until it parses again.
+fn gutter_costs(
+    prefix: &str,
+    window: Option<&'static str>,
+    text: &str,
+) -> std::collections::BTreeMap<u32, pyrite::analysis::LineCost> {
+    let (assembled, skip_lines) = match window {
+        Some(signal) => (format!("{prefix}on {signal}:\n{}", indent_lines(text, "    ")), 1u32),
+        None => (format!("{prefix}{text}"), 0),
+    };
+    let Ok(program) = pyrite::parse(&assembled, &pyrite::UnlockSet::all()) else {
+        return Default::default();
+    };
+    let prefix_lines = prefix.lines().count() as u32 + skip_lines;
+    pyrite::analysis::line_costs(&program, editor_costs())
+        .into_iter()
+        .filter_map(|(line, cost)| {
+            line.checked_sub(prefix_lines).filter(|l| *l > 0).map(|l| (l, cost))
+        })
+        .collect()
+}
+
 /// Live-parse a doc as it will deploy. `window` is the signal name when
 /// the doc IS a handler-window file: its text is then wrapped in the same
 /// `on <signal>:` block the assembler emits, so the window rules (loop
@@ -415,14 +440,56 @@ pub(crate) fn code_editor(
     // focus. Restored right after, so buttons keep their outlines.
     let ring = ui.visuals().selection.stroke;
     ui.visuals_mut().selection.stroke = egui::Stroke::NONE;
+    // The left margin reserves the cycle-cost gutter (painted below off
+    // the same widget — no sibling layout, which TextEdit+layouter can't
+    // survive inside).
     let output = egui::TextEdit::multiline(&mut doc.code)
         .id(editor_id)
         .font(egui::TextStyle::Monospace)
         .desired_rows(rows)
         .desired_width(f32::INFINITY)
+        .margin(egui::Margin { left: 40, right: 4, top: 2, bottom: 2 })
         .layouter(&mut layouter)
         .show(ui);
     ui.visuals_mut().selection.stroke = ring;
+
+    // The per-line cycle-cost gutter (M5): each line's price, right-
+    // aligned in the reserved margin; `+` marks payload-/log-sized ops
+    // whose real charge grows with the data. Prices anchor to the galley's
+    // ROW geometry, not `line * row_height` — soft-wrapped lines span
+    // several visual rows, and every price after one would drift.
+    let line_prices = gutter_costs(prefix, window, &doc.code);
+    if !line_prices.is_empty() {
+        // Visual-row y offset of each LOGICAL line start: line 1 is row 0;
+        // line n+1 starts after the row that ends with the nth newline.
+        let mut line_tops: Vec<f32> = Vec::new();
+        let mut next_is_line_start = true;
+        for row in &output.galley.rows {
+            if next_is_line_start {
+                line_tops.push(row.rect.min.y);
+            }
+            next_is_line_start = row.ends_with_newline;
+        }
+        let painter = ui.painter_at(output.response.rect);
+        let x = output.galley_pos.x - 6.0;
+        let color = ui.visuals().weak_text_color();
+        for (line, price) in &line_prices {
+            let Some(top) = line_tops.get(*line as usize - 1) else { continue };
+            let y = output.galley_pos.y + top;
+            let text = if price.variable {
+                format!("{}+", price.cycles)
+            } else {
+                price.cycles.to_string()
+            };
+            painter.text(
+                egui::pos2(x, y),
+                egui::Align2::RIGHT_TOP,
+                text,
+                egui::FontId::monospace(10.0),
+                color,
+            );
+        }
+    }
 
     // Kind-argument completion popup: with the caret in the argument
     // slot of `closest(` / `exists(`, list the kinds — ↑↓ + Enter or a

@@ -25,6 +25,10 @@ pub enum PyriteErrorKind {
     /// The construct exists in Pyrite but this colony hasn't unlocked it.
     LockedConstruct(Construct),
     DuplicateDefinition(String),
+    /// Engine-reserved names (`abort`, `handler_init`, `become_disabled`)
+    /// and the builtin enums (`Option`, `Result`) cannot be redefined —
+    /// a player def/enum would shadow the reserved machinery at resolution.
+    ReservedName(String),
     HandlerNotAtTopLevel,
     EmptyBlock,
     UnknownEnum(String),
@@ -68,6 +72,9 @@ impl fmt::Display for PyriteError {
                 write!(f, "requires unlock: {}", c.display_name())
             }
             PyriteErrorKind::DuplicateDefinition(name) => write!(f, "duplicate definition of {name}"),
+            PyriteErrorKind::ReservedName(name) => {
+                write!(f, "{name} is reserved and cannot be redefined")
+            }
             PyriteErrorKind::HandlerNotAtTopLevel => {
                 write!(f, "handlers, functions, and enums must be at top level")
             }

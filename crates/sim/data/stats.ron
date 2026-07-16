@@ -1,0 +1,45 @@
+// The universal chassis (docs/02): the floor statline every bot prints
+// with — identical prints, identity earned — plus the Upgrade Station
+// catalog (docs/06). Every number is data (CLAUDE.md convention).
+Stats(
+    // --- the floor (roughly the worst of the old class table) ---
+    hp: 40,
+    move_rate_deci: 140,   // 14 ticks/tile (deci-ticks; terrain multiplies)
+    cargo_cap_deci: 40,    // 4 units
+    sensors: 5,            // tiles (M7 perception consumes this)
+    module_slots: 1,
+    cpu_centi: 100,        // 1 cycle/tick (centicycles)
+    program_lines: 32,
+    variable_slots: 8,
+    stack_depth: 4,
+    log_buffer: 8,
+
+    // --- state-layer penalties (integer percents, pessimistic) ---
+    damaged_penalty_pct: 25,
+    brownout_penalty_pct: 50,
+
+    // Station coolant per compute upgrade (docs/03: 1 Water).
+    coolant_water_deci: 10,
+
+    // --- per-purchase magnitudes (docs/06 catalog fine print) ---
+    memory_bank_lines: 32,
+    memory_bank_vars: 4,
+    memory_bank_log: 8,
+    stack_ext_depth: 4,
+    optics_sensors: 2,
+
+    // --- Upgrade Station catalog (docs/06): flat prices, tier ladder is
+    // the whole cost curve (Q68). time_ticks are first-pass numbers —
+    // docs only say "the upgrade time (tuning, per catalog entry)".
+    upgrades: [
+        (name: "cpu_mk2", cost: [(Chips, 5)], time_ticks: 40, effect: CpuCenti(200)),
+        (name: "cpu_mk3", cost: [(Chips, 15)], time_ticks: 60, effect: CpuCenti(400)),
+        (name: "memory_bank", cost: [(Chips, 5)], time_ticks: 40, effect: MemoryBank),
+        (name: "stack_ext", cost: [(Chips, 8)], time_ticks: 40, effect: StackExt),
+        (name: "coprocessor", cost: [(Chips, 10), (GoldChip, 3)], time_ticks: 80, effect: Coprocessor),
+    ],
+    modules: [
+        (name: "backup_core", cost: [(Chips, 12), (GoldChip, 4)], time_ticks: 40, effect: BackupCore),
+        (name: "optics", cost: [(Lens, 2), (Bronze, 1)], time_ticks: 40, effect: Optics),
+    ],
+)

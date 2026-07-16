@@ -28,8 +28,10 @@ fn mining_map() -> MapSpec {
 
 fn run_mining_sim(ticks: u64) -> Sim {
     let mut sim = Sim::new(&mining_map());
+    // Beside the depot, not ON it — depot tiles are solid (bots can
+    // neither stand on nor spawn onto them).
     sim.apply(&Command::SpawnBot {
-        pos: TilePos::new(1, 2),
+        pos: TilePos::new(2, 2),
         source: MINER.into(),
         cpu: 2,
         cargo_cap: 3,
@@ -74,7 +76,7 @@ fn hash_sequences_match_tick_by_tick() {
     let mut a = Sim::new(&mining_map());
     let mut b = Sim::new(&mining_map());
     let cmd = Command::SpawnBot {
-        pos: TilePos::new(1, 2),
+        pos: TilePos::new(2, 2),
         source: MINER.into(),
         cpu: 2,
         cargo_cap: 3,
@@ -125,7 +127,7 @@ fn unreachable_target_faults() {
     let mut sim = Sim::new(&spec);
     sim.tuning.fault_damage = 0; // unreachable-loop routing test, not a health test
     sim.apply(&Command::SpawnBot {
-        pos: TilePos::new(0, 0),
+        pos: TilePos::new(1, 0),
         source: MINER.into(),
         cpu: 4,
         cargo_cap: 2,
@@ -221,7 +223,7 @@ fn rubble_slows_movement() {
         }
         let mut sim = Sim::new(&spec);
         sim.apply(&Command::SpawnBot {
-            pos: TilePos::new(0, 1),
+            pos: TilePos::new(1, 1),
             source: MINER.into(),
             cpu: 4,
             cargo_cap: 1,

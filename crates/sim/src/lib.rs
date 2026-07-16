@@ -19,6 +19,7 @@ pub mod map;
 pub mod replay;
 pub mod resources;
 pub mod sim;
+pub mod stats;
 pub mod world;
 
 pub use map::{MapSpec, TileKind, TilePos};

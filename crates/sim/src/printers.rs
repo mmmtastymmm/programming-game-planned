@@ -47,11 +47,14 @@ impl Sim {
             return false;
         };
         self.world.move_bot(id, landing);
+        // Hardware travels with the chassis: the fresh VM keeps the bot's
+        // bought stack depth (re-coloring swaps the program, not the body).
+        let config = self.vm_config_for(&self.world.bots[&id].data);
         let bot = self.world.bots.get_mut(&id).expect("bot exists");
         bot.data.color = color;
         bot.data.recall = None;
         bot.data.booting = Some(self.tuning.boot_ticks);
-        let mut vm = Vm::new(program, self.vm_config.clone());
+        let mut vm = Vm::new(program, config);
         vm.set_engine_ctx(Some(pyrite::EngineCtx::Boot));
         bot.vm = Some(vm);
         true
@@ -111,8 +114,10 @@ impl Sim {
                             let program = Rc::clone(&cp.program);
                             let mut vm = Vm::new(program, self.vm_config.clone());
                             vm.set_engine_ctx(Some(pyrite::EngineCtx::Boot));
-                            let t = &self.tuning;
-                            let (hp, cpu, cap) = (t.printed_hp, t.printed_cpu, t.printed_cargo_cap);
+                            // The universal floor (docs/02): every print is
+                            // the same machine — the statline is stats.ron.
+                            let s = &self.stats;
+                            let (hp, cpu, cap) = (s.hp, s.cpu_centi, s.cargo_cap_deci);
                             self.insert_bot(spawn_pos, faction, color, hp, cpu, cap, vm, true);
                         }
                         None => {
@@ -199,31 +204,259 @@ impl Sim {
                 .filter(|b| b.data.faction == faction && !b.data.dying && b.data.recall.is_none())
                 .count() as u32;
             if live > self.tuning.capacity {
-                // Lowest-XP bot colony-wide walks home for scrap.
-                let victim = self
-                    .world
-                    .bots
-                    .values()
-                    .filter(|b| {
-                        // Engine-fired recalls stay POLITE (Q85): never at
-                        // dying, recalled, booting, or MID-TEMPLATE bots —
-                        // scrap re-selects the next-lowest instead of
-                        // wrecking its target against the decided intent.
-                        b.data.faction == faction
-                            && !b.data.dying
-                            && b.data.recall.is_none()
-                            && b.data.booting.is_none()
-                            && b.vm.as_ref().is_none_or(|vm| vm.phase() == pyrite::Phase::Main)
-                    })
-                    .map(|b| (b.data.xp_mining + b.data.xp_hauling + b.data.xp_combat, b.data.id))
-                    .min();
-                if let Some((_, victim)) = victim {
-                    let home = self.nearest_faction_printer(victim);
-                    if let Some(home) = home {
-                        self.begin_recall_walk(victim, home, RecallPurpose::Scrap);
+                self.scrap_recall_lowest(faction);
+            }
+        }
+    }
+
+    /// Fire one scrap recall at the faction's lowest-XP eligible bot —
+    /// the over-capacity valve, also reused by sustained-rust scrapping
+    /// (M5, `upkeep.ron` `rust_scraps`).
+    pub(crate) fn scrap_recall_lowest(&mut self, faction: u8) {
+        // Lowest-XP bot colony-wide walks home for scrap.
+        let victim = self
+            .world
+            .bots
+            .values()
+            .filter(|b| {
+                // Engine-fired recalls stay POLITE (Q85): never at
+                // dying, recalled, booting, or MID-TEMPLATE bots —
+                // scrap re-selects the next-lowest instead of
+                // wrecking its target against the decided intent.
+                b.data.faction == faction
+                    && !b.data.dying
+                    && b.data.recall.is_none()
+                    && b.data.booting.is_none()
+                    && !b.data.pad_sit
+                    && b.vm.as_ref().is_none_or(|vm| vm.phase() == pyrite::Phase::Main)
+            })
+            .map(|b| (b.data.xp_mining + b.data.xp_hauling + b.data.xp_combat, b.data.id))
+            .min();
+        if let Some((_, victim)) = victim {
+            let home = self.nearest_faction_printer(victim);
+            if let Some(home) = home {
+                self.begin_recall_walk(victim, home, RecallPurpose::Scrap);
+            }
+        }
+    }
+
+    /// Phase 8 (M5): Upgrade Station pads. Works like a printer (Q68):
+    /// bots never path onto the pad — they stand ADJACENT with a queued
+    /// order and the pad PULLS the next eligible one (lowest entity id,
+    /// skipping mid-template/boot/recall bots so the pull never creates a
+    /// double-handle). Payment charges AT MOUNT (Chips etc. from stock +
+    /// coolant Water from the station's physical buffer); an unaffordable
+    /// order is SKIPPED — the pad moves on and the order re-arms when
+    /// stock covers it. The sit is an engine interrupt context; stepping
+    /// off restarts the program at line 1 (no boot).
+    pub(crate) fn run_pads(&mut self) {
+        use crate::resources::{Resource, DECI};
+        use crate::world::{PadJob, StructureKind, UpgradeOrder};
+        // Release any pad-sitter whose station vanished mid-sit (attacked
+        // down): the sweep keys off the stations, so orphans free here.
+        let sitting: std::collections::BTreeSet<BotId> = self
+            .world
+            .structures
+            .values()
+            .filter_map(|s| s.pad.as_ref().map(|p| p.bot))
+            .collect();
+        let orphans: Vec<BotId> = self
+            .world
+            .bots
+            .iter()
+            .filter(|(id, b)| b.data.pad_sit && !sitting.contains(id))
+            .map(|(id, _)| *id)
+            .collect();
+        for id in orphans {
+            self.release_from_pad(id);
+        }
+
+        let station_ids: Vec<EntityId> = self
+            .world
+            .structures
+            .iter()
+            .filter(|(_, s)| s.kind == StructureKind::UpgradeStation)
+            .map(|(id, _)| *id)
+            .collect();
+        for sid in station_ids {
+            let Some(st) = self.world.structures.get(&sid) else { continue };
+            let (pos, faction) = (st.pos, st.faction);
+
+            // An occupied pad advances (or finishes) before pulling anew.
+            if let Some(job) = st.pad {
+                let live = self.world.bots.get(&job.bot).is_some_and(|b| !b.data.dying);
+                if !live {
+                    // Aborted mid-sit: the wreck fell where it sat.
+                    self.world.structures.get_mut(&sid).expect("exists").pad = None;
+                } else if job.ticks_left > 1 {
+                    self.world.structures.get_mut(&sid).expect("exists").pad =
+                        Some(PadJob { ticks_left: job.ticks_left - 1, ..job });
+                } else {
+                    // Done — but bots are solid: hold the graduate on the
+                    // pad until a tile beside the station frees up.
+                    let Some(step_off) = self.world.free_spawn_tile(pos) else { continue };
+                    self.apply_order(job.bot, job.order);
+                    self.world.move_bot(job.bot, step_off);
+                    self.release_from_pad(job.bot);
+                    self.world.structures.get_mut(&sid).expect("exists").pad = None;
+                }
+                continue;
+            }
+
+            // Empty pad: pull the lowest-entity-id adjacent queued bot
+            // whose front order is valid and affordable.
+            let mut candidates: Vec<(EntityId, BotId)> = self
+                .world
+                .bots
+                .iter()
+                .filter(|(_, b)| {
+                    b.data.faction == faction
+                        && !b.data.dying
+                        && !b.data.pad_sit
+                        && b.data.booting.is_none()
+                        && b.data.recall.is_none()
+                        && !b.data.upgrade_queue.is_empty()
+                        && b.data.pos.chebyshev(pos) <= 1
+                        // The pull itself must never double-handle (07).
+                        && b.vm.as_ref().is_none_or(|vm| vm.phase() == pyrite::Phase::Main)
+                })
+                .map(|(id, b)| (b.data.entity, *id))
+                .collect();
+            candidates.sort();
+            for (_, bot_id) in candidates {
+                let order = self.world.bots[&bot_id].data.upgrade_queue[0];
+                // Validity first: an order that can never mount is DROPPED
+                // (duplicate CPU tier/Coprocessor; module swap without a
+                // legal slot). Skipping would wedge the queue forever.
+                let (valid, cost, coolant): (bool, Vec<(Resource, u32)>, u32) = match order {
+                    UpgradeOrder::Compute(idx) => {
+                        let spec = &self.stats.upgrades[idx as usize];
+                        let data = &self.world.bots[&bot_id].data;
+                        // CPU tiers SET the grant in purchase order, so a
+                        // lower-or-equal tier after a higher one would be
+                        // a PAID DOWNGRADE — invalid, like a duplicate.
+                        let dup = match spec.effect {
+                            crate::stats::UpgradeEffect::CpuCenti(c) => {
+                                data.upgrades.iter().any(|&u| {
+                                    matches!(
+                                        self.stats.upgrades.get(u as usize).map(|s| s.effect),
+                                        Some(crate::stats::UpgradeEffect::CpuCenti(owned))
+                                            if owned >= c
+                                    )
+                                })
+                            }
+                            crate::stats::UpgradeEffect::Coprocessor => {
+                                data.upgrades.contains(&idx)
+                            }
+                            _ => false,
+                        };
+                        (!dup, spec.cost.clone(), self.stats.coolant_water_deci)
+                    }
+                    UpgradeOrder::Module { idx, replace } => {
+                        let data = &self.world.bots[&bot_id].data;
+                        let ok = match replace {
+                            Some(slot) => (slot as usize) < data.modules.len(),
+                            None => data.modules.len() < data.module_slots as usize,
+                        };
+                        (ok, self.stats.modules[idx as usize].cost.clone(), 0)
+                    }
+                };
+                if !valid {
+                    self.world.bots.get_mut(&bot_id).expect("exists").data.upgrade_queue.remove(0);
+                    continue; // try this station's next candidate
+                }
+                // Affordability: typed price from stock (abstract payment)
+                // + coolant from the station's own buffer (physical feed).
+                let affordable = cost
+                    .iter()
+                    .all(|(k, units)| self.world.stock_get(faction, *k) >= (*units * DECI) as u64)
+                    && self.world.structures[&sid]
+                        .input
+                        .get(&Resource::Water)
+                        .copied()
+                        .unwrap_or(0)
+                        >= coolant;
+                if !affordable {
+                    continue; // skip — the order re-arms when stock covers it
+                }
+                for (k, units) in &cost {
+                    let taken = self.world.stock_take(faction, *k, (*units * DECI) as u64);
+                    debug_assert!(taken, "checked affordable above");
+                }
+                if coolant > 0 {
+                    let st = self.world.structures.get_mut(&sid).expect("exists");
+                    match st.input.get_mut(&Resource::Water) {
+                        Some(have) => {
+                            *have -= coolant;
+                            if *have == 0 {
+                                st.input.remove(&Resource::Water);
+                            }
+                        }
+                        None => unreachable!("checked coolant above"),
                     }
                 }
+                // Mount: onto the pad tile, program suspended (the pull
+                // silently cancels the pending action — no signal, Q84),
+                // engine interrupt context set.
+                let time = match order {
+                    UpgradeOrder::Compute(idx) => self.stats.upgrades[idx as usize].time_ticks,
+                    UpgradeOrder::Module { idx, .. } => {
+                        self.stats.modules[idx as usize].time_ticks
+                    }
+                };
+                self.world.move_bot(bot_id, pos);
+                let bot = self.world.bots.get_mut(&bot_id).expect("exists");
+                bot.data.upgrade_queue.remove(0);
+                bot.data.pad_sit = true;
+                bot.data.requested = None;
+                bot.data.action = None;
+                if let Some(vm) = bot.vm.as_mut() {
+                    vm.set_engine_ctx(Some(pyrite::EngineCtx::PadSit));
+                }
+                self.world.structures.get_mut(&sid).expect("exists").pad =
+                    Some(PadJob { bot: bot_id, order, ticks_left: time.max(1) });
+                break;
             }
+        }
+    }
+
+    /// Apply a completed Station order to the chassis (the hardware layer
+    /// of the stat pipeline reads these lists).
+    fn apply_order(&mut self, bot_id: BotId, order: crate::world::UpgradeOrder) {
+        use crate::world::UpgradeOrder;
+        let Some(bot) = self.world.bots.get_mut(&bot_id) else { return };
+        match order {
+            UpgradeOrder::Compute(idx) => {
+                bot.data.upgrades.push(idx);
+                if let Some(crate::stats::UpgradeEffect::MemoryBank) =
+                    self.stats.upgrades.get(idx as usize).map(|s| s.effect)
+                {
+                    bot.data.log_cap += self.stats.memory_bank_log;
+                }
+                // A bought Stack extension reaches the LIVE VM.
+                let depth = self.stats.stack_depth_for(&bot.data);
+                if let Some(vm) = bot.vm.as_mut() {
+                    vm.set_stack_depth(depth);
+                }
+            }
+            UpgradeOrder::Module { idx, replace } => match replace {
+                // The swap destroys the removed part — no refund (Q72);
+                // it also drops off the build receipt (M10 reads
+                // currently-installed hardware).
+                Some(slot) => bot.data.modules[slot as usize] = idx,
+                None => bot.data.modules.push(idx),
+            },
+        }
+    }
+
+    /// End a pad-sit: engine context cleared, program restarted at line 1
+    /// (docs/03: no boot — no re-coloring happened).
+    fn release_from_pad(&mut self, bot_id: BotId) {
+        let Some(bot) = self.world.bots.get_mut(&bot_id) else { return };
+        bot.data.pad_sit = false;
+        if let Some(vm) = bot.vm.as_mut() {
+            vm.reset();
+            vm.set_engine_ctx(None);
         }
     }
 
@@ -242,6 +475,7 @@ impl Sim {
                     && !b.data.dying
                     && b.data.recall.is_none()
                     && b.data.booting.is_none()
+                    && !b.data.pad_sit
                     && b.vm.as_ref().is_none_or(|vm| vm.phase() == pyrite::Phase::Main)
             })
             .map(|b| (b.data.xp_mining + b.data.xp_hauling + b.data.xp_combat, b.data.id))
@@ -281,11 +515,22 @@ impl Sim {
                 goals.insert(g);
             }
         }
-        let path = astar_avoiding(&self.world.grid, &self.world.overlays, start, &goals, &structures)
-            .unwrap_or_default();
+        // `None` (no route) is NOT the same as `Some([])` (already beside
+        // home): an unreachable printer must not start a recall at all —
+        // an empty path reads as "arrived", which would scrap the bot in
+        // place across the map (or teleport a recolor). The caller's next
+        // check re-selects; the bot stays put until a route exists.
+        let Some(path) =
+            astar_avoiding(&self.world.grid, &self.world.overlays, start, &goals, &structures)
+        else {
+            return;
+        };
         let ticks_left = path
             .first()
-            .map(|p| self.world.grid.get(*p).and_then(|t| t.move_ticks()).unwrap_or(1))
+            .map(|p| {
+                crate::stats::step_ticks(&self.stats, &self.world.grid, &self.world.bots[&id].data, *p)
+                    .unwrap_or(1)
+            })
             .unwrap_or(0);
         // Recall dispatches like any other signal (docs/01): through raise,
         // which suspends the VM correctly whether Running OR Blocked (the

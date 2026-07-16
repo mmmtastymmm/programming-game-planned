@@ -82,6 +82,219 @@ pub fn window_usage(
     Some((worst, window_cap(costs, kind)))
 }
 
+/// One line's price in the editor's cost gutter.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct LineCost {
+    /// Cycles the line pays when it executes once (a bare builtin call is
+    /// its full table figure — Q80; other statements sum their ops).
+    pub cycles: u64,
+    /// True when a payload-/log-sized op makes the real charge bigger —
+    /// the gutter renders a trailing `+`.
+    pub variable: bool,
+}
+
+/// The editor's per-line cycle-cost gutter (M5 — docs/01 asks for a
+/// gutter, not hover-only). Deliberately approximate where the truth is
+/// dynamic: branch and loop LINES charge their own dispatch (bodies
+/// charge their own lines), sized ops report their base with the
+/// `variable` flag, and a `match` line charges dispatch + scrutinee.
+pub fn line_costs(program: &Program, costs: &CostTable) -> BTreeMap<u32, LineCost> {
+    let mut out: BTreeMap<u32, LineCost> = BTreeMap::new();
+    let mut blocks: Vec<&[StmtId]> = vec![&program.body];
+    for f in program.functions.values() {
+        blocks.push(&f.body);
+    }
+    for h in program.handlers.values() {
+        blocks.push(&h.body);
+    }
+    for block in blocks {
+        gutter_block(program, costs, block, &mut out);
+    }
+    out
+}
+
+fn gutter_block(
+    program: &Program,
+    costs: &CostTable,
+    block: &[StmtId],
+    out: &mut BTreeMap<u32, LineCost>,
+) {
+    for &sid in block {
+        let stmt = program.stmt(sid);
+        let mut cost = LineCost::default();
+        let mut add_expr = |cost: &mut LineCost, eid: ExprId| {
+            let (c, var) = gutter_expr(program, costs, eid);
+            cost.cycles += c;
+            cost.variable |= var;
+        };
+        match stmt {
+            Stmt::Expr { expr, .. } => {
+                if matches!(program.expr(*expr), Expr::Call { .. }) {
+                    // A bare call IS the statement (Q80: full charge).
+                    add_expr(&mut cost, *expr);
+                } else {
+                    cost.cycles += costs.statement;
+                    add_expr(&mut cost, *expr);
+                }
+            }
+            Stmt::Assign { value, .. } => {
+                cost.cycles += costs.assign;
+                add_expr(&mut cost, *value);
+            }
+            Stmt::IndexAssign { index, value, .. } => {
+                cost.cycles += costs.assign + costs.list_op;
+                add_expr(&mut cost, *index);
+                add_expr(&mut cost, *value);
+            }
+            Stmt::If { arms, else_body, .. } => {
+                cost.cycles += costs.if_eval;
+                if let Some((cond, _)) = arms.first() {
+                    add_expr(&mut cost, *cond);
+                }
+                for (_, body) in arms {
+                    gutter_block(program, costs, body, out);
+                }
+                if let Some(body) = else_body {
+                    gutter_block(program, costs, body, out);
+                }
+            }
+            Stmt::While { cond, body, .. } => {
+                cost.cycles += costs.loop_iter;
+                add_expr(&mut cost, *cond);
+                gutter_block(program, costs, body, out);
+            }
+            Stmt::For { iter, body, .. } => {
+                cost.cycles += costs.loop_iter;
+                add_expr(&mut cost, *iter);
+                gutter_block(program, costs, body, out);
+            }
+            Stmt::Break { .. } | Stmt::Continue { .. } => cost.cycles += costs.statement,
+            Stmt::Return { value, .. } => {
+                cost.cycles += costs.statement;
+                if let Some(v) = value {
+                    add_expr(&mut cost, *v);
+                }
+            }
+            Stmt::Match { scrutinee, cases, .. } => {
+                cost.cycles += costs.match_base;
+                add_expr(&mut cost, *scrutinee);
+                for case in cases {
+                    gutter_block(program, costs, &case.body, out);
+                }
+            }
+        }
+        let entry = out.entry(stmt.line()).or_default();
+        entry.cycles += cost.cycles;
+        entry.variable |= cost.variable;
+    }
+}
+
+/// (cycles, variable?) an expression pays when evaluated once.
+fn gutter_expr(program: &Program, costs: &CostTable, eid: ExprId) -> (u64, bool) {
+    let mut cycles = 0u64;
+    let mut variable = false;
+    let mut add = |c: u64| cycles = cycles.saturating_add(c);
+    match program.expr(eid) {
+        Expr::Int(_) | Expr::Str(_) | Expr::Bool(_) | Expr::Name(_) | Expr::EnumUnit { .. } => {}
+        Expr::List(items) => {
+            add(costs.list_op);
+            for &i in items {
+                let (c, v) = gutter_expr(program, costs, i);
+                add(c);
+                variable |= v;
+            }
+        }
+        Expr::Dict(pairs) => {
+            add(costs.list_op);
+            for &(k, v) in pairs {
+                let (ck, vk) = gutter_expr(program, costs, k);
+                let (cv, vv) = gutter_expr(program, costs, v);
+                add(ck + cv);
+                variable |= vk | vv;
+            }
+        }
+        Expr::Index { base, index } => {
+            add(costs.list_op);
+            for &e in [base, index].iter() {
+                let (c, v) = gutter_expr(program, costs, *e);
+                add(c);
+                variable |= v;
+            }
+        }
+        Expr::Attr { base, .. } => {
+            add(costs.attr);
+            let (c, v) = gutter_expr(program, costs, *base);
+            add(c);
+            variable |= v;
+        }
+        Expr::EnumCtor { args, .. } => {
+            add(costs.enum_ctor);
+            for &a in args {
+                let (c, v) = gutter_expr(program, costs, a);
+                add(c);
+                variable |= v;
+            }
+        }
+        Expr::Unary { operand, .. } => {
+            add(costs.arith);
+            let (c, v) = gutter_expr(program, costs, *operand);
+            add(c);
+            variable |= v;
+        }
+        Expr::Binary { op, lhs, rhs } => {
+            add(if op.is_arith() { costs.arith } else { costs.compare });
+            for &e in [lhs, rhs].iter() {
+                let (c, v) = gutter_expr(program, costs, *e);
+                add(c);
+                variable |= v;
+            }
+        }
+        Expr::MethodCall { name, base, args, .. } => {
+            add(costs.spec(name).map_or(costs.default_builtin, |s| match &s.cost {
+                crate::costs::CostSpec::Fixed(c) => *c,
+                _ => costs.default_builtin,
+            }));
+            let (c, v) = gutter_expr(program, costs, *base);
+            add(c);
+            variable |= v;
+            for &a in args {
+                let (c, v) = gutter_expr(program, costs, a);
+                add(c);
+                variable |= v;
+            }
+        }
+        Expr::Call { name, args, kwargs, .. } => {
+            if program.functions.contains_key(name) {
+                add(costs.user_call);
+            } else {
+                match costs.spec(name).map(|s| &s.cost) {
+                    Some(crate::costs::CostSpec::Fixed(c)) => add(*c),
+                    Some(crate::costs::CostSpec::PlusPayload { base, .. }) => {
+                        add(*base);
+                        variable = true;
+                    }
+                    Some(crate::costs::CostSpec::LogSized { base, .. }) => {
+                        add(*base);
+                        variable = true;
+                    }
+                    None => add(costs.default_builtin),
+                }
+            }
+            for &a in args {
+                let (c, v) = gutter_expr(program, costs, a);
+                add(c);
+                variable |= v;
+            }
+            for (_, a) in kwargs {
+                let (c, v) = gutter_expr(program, costs, *a);
+                add(c);
+                variable |= v;
+            }
+        }
+    }
+    (cycles, variable)
+}
+
 /// Is `name` (a builtin or user def) callable from a window? Used by the
 /// editor to grey out unsafe functions; the same derivation the checker
 /// enforces. Errs on the side of "unsafe" for unknown names.

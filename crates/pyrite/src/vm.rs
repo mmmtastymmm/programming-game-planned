@@ -16,10 +16,10 @@
 //!   (`err_type`, `err_action`, … — see [`crate::error::faults`]) and
 //!   either enters `on error:` (trap cost, variables preserved) or
 //!   force-calls `upload_crash_dump()` — then restarts from line 1.
-//! - Double-handle rule: any signal or fault while a handler (or an
-//!   engine interrupt context: boot/recall) is active destroys the bot.
-//! - `on death:` runs under the hard black-box budget, then the engine
-//!   force-calls `become_disabled()`.
+//! - Double-handle rule: any signal or fault while a template (or an
+//!   engine interrupt context: boot/recall) is active forces abort — the
+//!   reserved scuttle: forced `upload_log()` charged as debt, then the
+//!   engine force-calls `become_disabled()`.
 //!
 //! Determinism: no floats, no hash-ordered iteration (BTreeMap only), no
 //! host time. All randomness must come from the Host.
@@ -477,14 +477,43 @@ impl Vm {
     // --- sim-facing control ---
 
     /// Grant this tick's cycles (stored as centicycles, Q56).
-    pub fn grant(&mut self, cycles: u64) {
-        self.budget = self.budget.saturating_add(cycles as i64 * CENT);
+    pub fn grant(&mut self, cycles: u64, costs: &CostTable) {
+        self.grant_centi(cycles.saturating_mul(CENT as u64), costs);
+    }
+
+    /// Grant this tick's budget directly in centicycles (the stat pipeline
+    /// hands out modified amounts — brownout's −50% on a stock CPU is 50).
+    ///
+    /// Two rules live here, not in the sim (docs/01 M5):
+    /// - **No banking while blocked**: a bot waiting on an action or
+    ///   channel burns its grant — waiting is what its CPU is doing.
+    /// - **Bank cap**: the budget clamps to the table-derived `bank_cap`
+    ///   after every grant — but never below THIS grant, so a CPU faster
+    ///   than the cap still spends its full rate each tick (the cap bounds
+    ///   SAVING, not throughput). Debt (negative budget) is untouched —
+    ///   forced charges are owed, not banked.
+    pub fn grant_centi(&mut self, centi: u64, costs: &CostTable) {
+        if matches!(self.state, State::Blocked) {
+            return;
+        }
+        self.budget = self.budget.saturating_add(centi.min(i64::MAX as u64) as i64);
+        let cap = (costs.bank_cap as i64).saturating_mul(CENT).max(centi.min(i64::MAX as u64) as i64);
+        if self.budget > cap {
+            self.budget = cap;
+        }
     }
 
     /// Mark the start/end of an engine interrupt context (Boot, the recall
     /// walk, a pad-sit). While set, any signal or fault is a double handle.
     pub fn set_engine_ctx(&mut self, ctx: Option<EngineCtx>) {
         self.engine_ctx = ctx;
+    }
+
+    /// Re-derive the call-depth cap after a hardware change (the Upgrade
+    /// Station's Stack extension applies to the LIVE VM — hardware is the
+    /// body, not the program).
+    pub fn set_stack_depth(&mut self, depth: usize) {
+        self.config.stack_depth = depth;
     }
 
     /// Enter a signal's reserved template: forced prologue (the
@@ -1310,7 +1339,17 @@ impl Vm {
                             costs,
                         );
                     }
-                } else if !kwpairs.is_empty() && costs.spec(&name).is_none_or(|s| s.params.is_none()) {
+                } else if !kwpairs.is_empty() && costs.spec(&name).is_none() {
+                    // No registry entry at all: there is nothing to bind
+                    // keywords against, and the registry documents every
+                    // host builtin — the name itself is the error.
+                    self.fault(
+                        faults::UNKNOWN_FUNCTION,
+                        format!("unknown function {name}()"),
+                        host,
+                        costs,
+                    );
+                } else if !kwpairs.is_empty() && costs.spec(&name).is_some_and(|s| s.params.is_none()) {
                     // Keywords need a declared parameter list to bind against.
                     self.fault(
                         faults::ARITY,

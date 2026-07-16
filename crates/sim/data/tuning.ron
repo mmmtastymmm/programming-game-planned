@@ -14,6 +14,8 @@ Tuning(
     scrap_refund_steel: 0,
     // mine() yield per swing, deci-units (docs/03 first-pass: 2 units).
     mine_yield_deci: 20,
+    // Ticks one mine() swing takes.
+    mine_swing_ticks: 2,
     // Grove regeneration: renewable but thin (docs/03) — per regen interval.
     node_regen_deci: 10,
     node_regen_cap_deci: 400,
@@ -25,9 +27,17 @@ Tuning(
     structure_hp: 100,
     recipe_batch_ticks: 30,
     boot_ticks: 2,
-    printed_hp: 30,
-    printed_cpu: 2,
-    printed_cargo_cap: 2,
+    // Typed structure build prices, in units (docs/03): Smelter 10 Steel;
+    // Foundry 25 Steel + 10 Bronze; Archive 10 Steel + 5 Stone; Generator
+    // 8 Steel; Tap 12 Steel; Station 10 Steel + 5 Chips + 3 Wire.
+    structure_costs: [
+        (Smelter, [(Steel, 10)]),
+        (Foundry, [(Steel, 25), (Bronze, 10)]),
+        (Archive, [(Steel, 10), (Stone, 5)]),
+        (Generator, [(Steel, 8)]),
+        (GeothermalTap, [(Steel, 12)]),
+        (UpgradeStation, [(Steel, 10), (Chips, 5), (Wire, 3)]),
+    ],
     capacity: 10000,
     // The rammer's TOTAL at-fault stun: the bump factory window waits
     // (this - handler_init_ticks) on top of the forced flinch. The

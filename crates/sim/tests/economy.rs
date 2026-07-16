@@ -207,3 +207,178 @@ fn delivery_milestones_mint_data() {
         "40 deci delivered crossed the 30-deci milestone once"
     );
 }
+
+/// Withdraw/deposit cycling at a depot is zero NET delivery — the Data
+/// milestone must not be farmable by moving the same stock in a circle.
+#[test]
+fn withdraw_deposit_cycling_mints_no_data() {
+    let mut spec = MapSpec::empty(8, 4);
+    spec.depots.push(TilePos::new(2, 1));
+    spec.starting_stock.push((0, Resource::Iron, 4000));
+    let mut sim = Sim::new(&spec);
+    // Tight milestone: one cargo load (40 deci) = a whole milestone, so the
+    // old gross accounting would mint on the very first cycle.
+    sim.tuning.delivery_milestone_deci = 40;
+    let bot = spawn(&mut sim, TilePos::new(1, 1), "try_withdraw(iron)\ndeposit()\n");
+    for _ in 0..300 {
+        sim.step();
+    }
+    assert!(
+        sim.world.bots[&bot].data.xp_hauling > 0,
+        "the cycle really ran (hauling XP accrued)"
+    );
+    assert_eq!(
+        sim.world.delivered.get(&0).copied().unwrap_or(0),
+        0,
+        "stock-withdrawn cargo re-deposited earns no delivery credit at all"
+    );
+    assert_eq!(
+        sim.world.data.get(&0).copied().unwrap_or(0),
+        0,
+        "cycling withdraw/deposit at a depot mints no milestone Data"
+    );
+}
+
+/// The provenance fix's other half: SPENDING seeded stock must never
+/// suppress genuinely earned milestone Data (the old global net counter
+/// subtracted seeded-stock withdrawals from future real deliveries).
+#[test]
+fn seeded_stock_withdrawals_do_not_suppress_milestones() {
+    let mut spec = MapSpec::empty(10, 4);
+    spec.ore_nodes.push((TilePos::new(6, 1), 100));
+    spec.depots.push(TilePos::new(1, 1));
+    spec.starting_stock.push((0, Resource::Steel, 4000));
+    let mut sim = Sim::new(&spec);
+    sim.tuning.delivery_milestone_deci = 40;
+    // A builder drains seeded Steel from stock (construction logistics —
+    // it never re-deposits, so nothing is recycled OR delivered).
+    let builder = spawn(&mut sim, TilePos::new(2, 1), "try_withdraw(steel)\ndrop_cargo()\n");
+    // A miner genuinely delivers fresh ore.
+    let _miner = spawn(
+        &mut sim,
+        TilePos::new(3, 1),
+        "move_to(closest(ore).expect())\nmine()\nmove_to(closest(depot).expect())\ndeposit()\n",
+    );
+    for _ in 0..400 {
+        sim.step();
+    }
+    assert!(
+        sim.world.bots[&builder].data.xp_hauling == 0,
+        "sanity: the builder never delivered"
+    );
+    assert!(
+        sim.world.data.get(&0).copied().unwrap_or(0) >= sim.tuning.milestone_data,
+        "real deliveries still pay despite seeded-stock spending: delivered {:?}, data {:?}",
+        sim.world.delivered,
+        sim.world.data
+    );
+}
+
+/// The positive twin: mined ore delivered to a depot is net-new stock and
+/// still crosses milestones.
+#[test]
+fn mined_deliveries_still_cross_milestones() {
+    let mut spec = MapSpec::empty(8, 4);
+    spec.ore_nodes.push((TilePos::new(4, 1), 100));
+    spec.depots.push(TilePos::new(1, 1));
+    let mut sim = Sim::new(&spec);
+    sim.tuning.delivery_milestone_deci = 40;
+    let _bot = spawn(
+        &mut sim,
+        TilePos::new(2, 1),
+        "move_to(closest(ore).expect())\nmine()\nmove_to(closest(depot).expect())\ndeposit()\n",
+    );
+    for _ in 0..400 {
+        sim.step();
+    }
+    assert!(
+        sim.world.data.get(&0).copied().unwrap_or(0) >= sim.tuning.milestone_data,
+        "net-new deliveries still pay milestone Data: delivered {:?}, data {:?}",
+        sim.world.delivered,
+        sim.world.data
+    );
+}
+
+/// An acceptor destroyed between the deposit's start and its completion
+/// moves nothing — the cargo must not teleport into colony stock as if a
+/// depot were adjacent (the "phantom depot" path).
+#[test]
+fn acceptor_destroyed_mid_deposit_moves_nothing() {
+    let mut spec = MapSpec::empty(8, 5);
+    spec.starting_stock.push((0, Resource::Steel, 100));
+    let mut sim = Sim::new(&spec);
+    sim.tuning.fault_damage = 0; // the retry loop crash-dumps harmlessly
+    sim.apply(&Command::PlaceStructure {
+        pos: TilePos::new(4, 2),
+        kind: StructureKind::Smelter,
+        faction: 0,
+    })
+    .unwrap();
+    let smelter = *sim.world.structures.keys().next().expect("placed");
+    sim.apply(&Command::SetRecipe { structure: smelter, recipe: Some(0) }).unwrap();
+    let hauler = spawn(&mut sim, TilePos::new(3, 2), "deposit()\nwait(600)\n");
+    sim.world.bots.get_mut(&hauler).unwrap().data.cargo.insert(Resource::Iron, 20);
+    // Step until the 1-tick deposit action is in flight, then fell the
+    // smelter before it completes.
+    let mut armed = false;
+    for _ in 0..20 {
+        sim.step();
+        if matches!(
+            sim.world.bots[&hauler].data.action,
+            Some(sim::world::Action::Deposit { .. })
+        ) {
+            armed = true;
+            break;
+        }
+    }
+    assert!(armed, "the deposit action must start");
+    sim.world.structures.remove(&smelter);
+    for _ in 0..3 {
+        sim.step();
+    }
+    let bot = &sim.world.bots[&hauler];
+    assert_eq!(
+        bot.data.cargo.get(&Resource::Iron).copied().unwrap_or(0),
+        20,
+        "cargo stays aboard when the acceptor died mid-deposit"
+    );
+    assert_eq!(
+        sim.world.stock_get(0, Resource::Iron),
+        0,
+        "no phantom depot: nothing teleports into colony stock"
+    );
+}
+
+/// SetRecipe scraps the in-flight batch and its already-consumed inputs are
+/// LOST — deliberate waste, pinned here so a silent refund never sneaks in.
+#[test]
+fn recipe_change_scraps_the_batch_and_its_inputs() {
+    let mut spec = MapSpec::empty(8, 5);
+    spec.starting_stock.push((0, Resource::Steel, 100));
+    let mut sim = Sim::new(&spec);
+    sim.apply(&Command::PlaceStructure {
+        pos: TilePos::new(4, 2),
+        kind: StructureKind::Smelter,
+        faction: 0,
+    })
+    .unwrap();
+    let smelter = *sim.world.structures.keys().next().expect("placed");
+    sim.apply(&Command::SetRecipe { structure: smelter, recipe: Some(0) }).unwrap();
+    {
+        let st = sim.world.structures.get_mut(&smelter).unwrap();
+        st.input.insert(Resource::Iron, 20);
+        st.input.insert(Resource::Coal, 10);
+    }
+    sim.step(); // phase 8 consumes the feed and starts the batch
+    let st = &sim.world.structures[&smelter];
+    assert!(st.batch.is_some() && st.input.is_empty(), "the batch consumed the feed");
+    // Switch to glass (also a smelter recipe): the steel batch is scrapped.
+    sim.apply(&Command::SetRecipe { structure: smelter, recipe: Some(2) }).unwrap();
+    for _ in 0..200 {
+        sim.step();
+    }
+    let st = &sim.world.structures[&smelter];
+    assert!(st.batch.is_none(), "the scrapped batch never resumes");
+    assert!(st.output.is_empty(), "the scrapped batch emits nothing");
+    assert!(st.input.is_empty(), "the consumed inputs are lost, not refunded");
+}

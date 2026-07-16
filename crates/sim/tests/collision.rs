@@ -422,6 +422,10 @@ wait(3)
     spec.depots.push(TilePos::new(0, 2));
     let mut sim = Sim::new(&spec);
     sim.tuning.bump_damage = 0; // isolate the signal mechanics
+    // Pin the pre-M5 pace: this test stages a second bump INSIDE the
+    // victim's 40-tick window — at the 14-ticks/tile floor both rammers
+    // co-arrive instead (severity dispatch, not a double-handle).
+    sim.stats.move_rate_deci = 10;
     let victim = spawn(&mut sim, TilePos::new(2, 2), victim_src);
     // Two rammers on different arms: the second bump lands mid-handler.
     spawn(&mut sim, TilePos::new(4, 2), "move_to(closest(depot).expect())\n");
@@ -437,4 +441,64 @@ wait(3)
         sim.world.wrecks.contains_key(&victim),
         "double handle = abort = wreck (the rescue race), never vaporization"
     );
+}
+
+/// Bots are solid at spawn time too: SpawnBot onto an occupied (or
+/// structure) tile is rejected instead of stacking two live bots.
+#[test]
+fn spawn_onto_an_occupied_tile_is_rejected() {
+    let spec = MapSpec::empty(6, 4);
+    let mut sim = Sim::new(&spec);
+    let _first = spawn(&mut sim, TilePos::new(2, 2), IDLER);
+    let second = sim
+        .apply(&Command::SpawnBot {
+            pos: TilePos::new(2, 2),
+            source: IDLER.into(),
+            cpu: 4,
+            cargo_cap: 1,
+            faction: 0,
+            hp: 100,
+            color: Color::GREEN,
+        })
+        .unwrap();
+    assert_eq!(second, None, "spawning onto an occupied tile must be rejected");
+    assert_eq!(sim.world.bots.len(), 1, "no stacked bots");
+}
+
+/// A structure placed on the route AFTER the path was planned is still
+/// solid: the walk must bump/replan around it, never stand on it.
+#[test]
+fn structures_placed_mid_route_block_the_walk() {
+    let mut spec = MapSpec::empty(12, 5);
+    spec.depots.push(TilePos::new(10, 2));
+    spec.starting_stock.push((0, sim::resources::Resource::Steel, 100));
+    let mut sim = Sim::new(&spec);
+    let mover = spawn(
+        &mut sim,
+        TilePos::new(1, 2),
+        "move_to(closest(depot).expect())\nwait(600)\n",
+    );
+    // Let the walk begin, then drop a Smelter on the route ahead.
+    for _ in 0..3 {
+        sim.step();
+    }
+    let block = TilePos::new(6, 2);
+    assert_ne!(sim.world.bots[&mover].data.pos, block, "bot still short of the block site");
+    sim.apply(&Command::PlaceStructure {
+        pos: block,
+        kind: sim::world::StructureKind::Smelter,
+        faction: 0,
+    })
+    .unwrap();
+    assert!(sim.world.structure_at(block), "the smelter was placed");
+    for _ in 0..300 {
+        sim.step();
+        assert_ne!(
+            sim.world.bots[&mover].data.pos, block,
+            "bots must never stand on a structure tile"
+        );
+    }
+    // And the mover still arrives, threading around the new obstacle.
+    let at = sim.world.bots[&mover].data.pos;
+    assert!(at.x >= 9, "the mover replans around the structure and reaches the depot, got {at:?}");
 }

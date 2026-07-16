@@ -86,7 +86,9 @@ fn golden_replay() -> Replay {
         },
         TimedCommand { tick: 220, command: Command::KillBot { bot: BotId(1) } },
     ];
-    Replay { spec, commands, ticks: 300 }
+    // 1500 ticks: at M5's 14-ticks/tile floor statline a depot round trip
+    // is ~250 ticks, so the scenario still sees several deliveries.
+    Replay { spec, commands, ticks: 1500 }
 }
 
 fn fixture_dir() -> PathBuf {
@@ -116,7 +118,14 @@ fn golden_scenario_is_alive() {
         sim.step();
     }
     assert!(!sim.world.bots.is_empty(), "printer must have printed bots");
-    assert!(sim.world.stock_get(0, sim::resources::Resource::Iron) > 10, "miners must out-earn the starting 10 ore");
+    // starting_ore 10 seeds 100 deci of Iron — the miners must OUT-EARN
+    // it, not just exist (the old `> 10` compared deci against units and
+    // was trivially true).
+    assert!(
+        sim.world.stock_get(0, sim::resources::Resource::Iron) > 100,
+        "miners must out-earn the seeded stock; got {}",
+        sim.world.stock_get(0, sim::resources::Resource::Iron)
+    );
     assert!(sim.world.wrecks.contains_key(&BotId(1)), "KillBot(1) must leave a wreck");
     assert_eq!(sim.world.program_library.len(), 2, "both deployed versions retained");
     assert!(!sim.world.blueprints.is_empty(), "bridge blueprint placed");

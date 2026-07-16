@@ -57,6 +57,8 @@
             (0, Stone, 50),
         ],
         dev_all_unlocks: true,
+        dev_free_power: true,
+        structures: [],
     ),
     commands: [
         (
@@ -121,5 +123,5 @@
             ),
         ),
     ],
-    ticks: 300,
+    ticks: 1500,
 )

@@ -345,3 +345,45 @@ fn printer_colony_is_deterministic() {
     }
     assert_eq!(a.world.bots.len(), 5);
 }
+
+/// A recall target with NO route to it must not start the walk: an empty
+/// path reads as "arrived", which would scrap the victim in place across
+/// the map (or teleport a recolor). Unreachable home = no recall at all.
+#[test]
+fn unreachable_home_printer_never_scraps_in_place() {
+    let mut spec = MapSpec::empty(10, 5);
+    spec.printers.push(PrinterSpec {
+        pos: TilePos::new(8, 2),
+        faction: 0,
+        color: 0,
+        ruined: false,
+        desired_max: 0,
+    });
+    // Wall the printer's side of the map off with water.
+    for y in 0..5 {
+        spec.water.push(TilePos::new(6, y));
+    }
+    let mut sim = Sim::new(&spec);
+    sim.tuning.capacity = 1; // 2 live bots -> capacity scrap wants a victim
+    for pos in [TilePos::new(1, 1), TilePos::new(1, 3)] {
+        sim.apply(&Command::SpawnBot {
+            pos,
+            source: IDLER.into(),
+            cpu: 4,
+            cargo_cap: 1,
+            faction: 0,
+            hp: 100,
+            color: Color::GREEN,
+        })
+        .unwrap()
+        .unwrap();
+    }
+    for _ in 0..100 {
+        sim.step();
+    }
+    assert_eq!(sim.world.bots.len(), 2, "no bot may be scrapped in place across the water");
+    assert!(
+        sim.world.bots.values().all(|b| b.data.recall.is_none()),
+        "no recall walk may start toward an unreachable printer"
+    );
+}

@@ -141,6 +141,16 @@ impl<'a> Parser<'a> {
         self.require(Construct::Functions)?;
         let def_tok = self.expect(Tok::Def, "def")?;
         let name = self.expect_ident("function name")?;
+        // Fully reserved engine verbs (M3): a player def would shadow the
+        // scuttle / the forced prologue at call resolution, which runs
+        // user functions before the VM intercepts these names.
+        if matches!(name.as_str(), "abort" | "handler_init" | "become_disabled") {
+            return Err(PyriteError {
+                line: def_tok.line,
+                col: def_tok.col,
+                kind: PyriteErrorKind::ReservedName(name),
+            });
+        }
         let key = match module {
             Some(m) => format!("{m}.{name}"),
             None => name.clone(),
@@ -442,6 +452,17 @@ impl<'a> Parser<'a> {
         self.require(Construct::Enums)?;
         let enum_tok = self.expect(Tok::Enum, "enum")?;
         let name = self.expect_ident("enum name")?;
+        // The builtin enums are language furniture (`None` = Option.None,
+        // `.expect()` semantics) — a player redefinition would shadow them
+        // in pattern/constructor resolution, which checks declared enums
+        // before the builtin fallback.
+        if matches!(name.as_str(), "Option" | "Result") {
+            return Err(PyriteError {
+                line: enum_tok.line,
+                col: enum_tok.col,
+                kind: PyriteErrorKind::ReservedName(name),
+            });
+        }
         if self.program.enums.contains_key(&name) {
             return Err(PyriteError {
                 line: enum_tok.line,

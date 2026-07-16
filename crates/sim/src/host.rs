@@ -2,7 +2,7 @@
 //! that bot's VM is stepping. Queries answer instantly; actions record an
 //! `ActionRequest` and return `Block` — the resolve phase starts them.
 
-use crate::world::{ActionRequest, ArchiveEntry, ArchiveKind, BotId, EntityId, World, LOG_BUFFER_CAP};
+use crate::world::{ActionRequest, ArchiveEntry, ArchiveKind, BotId, EntityId, World};
 use pyrite::vm::CallCtx;
 use pyrite::{faults, Fault, HostCall, Value};
 
@@ -251,6 +251,19 @@ impl pyrite::Host for BotHost<'_> {
                         let stocked = self.world.stock_get(faction, kind).min(space as u64);
                         if stocked > 0 && self.world.stock_take(faction, kind, stocked) {
                             got = stocked as u32;
+                            // Provenance: stock-withdrawn cargo earns no
+                            // delivery-milestone credit when re-deposited
+                            // (cycling mints nothing) — tracked on the BOT
+                            // so seeded-stock withdrawals can never
+                            // suppress genuinely earned milestones.
+                            // (Refinery-output withdrawals above don't
+                            // count — that produce was never delivered.)
+                            self.world
+                                .bots
+                                .get_mut(&bot_id)
+                                .expect("bot exists")
+                                .data
+                                .withdrawn_aboard += got;
                         }
                     }
                 }
@@ -302,9 +315,11 @@ impl pyrite::Host for BotHost<'_> {
                 // Spill the manifest onto the bot's own tile as nodes —
                 // mine() recovers it (deterministic: no scatter for the
                 // deliberate drop; death spills keep their RNG scatter).
-                let manifest = std::mem::take(
-                    &mut self.world.bots.get_mut(&bot_id).expect("bot exists").data.cargo,
-                );
+                let data = &mut self.world.bots.get_mut(&bot_id).expect("bot exists").data;
+                // The dropped cargo takes its stock provenance with it
+                // (mining it back is real work — that re-earns credit).
+                data.withdrawn_aboard = 0;
+                let manifest = std::mem::take(&mut data.cargo);
                 for (kind, amount) in manifest {
                     if amount == 0 {
                         continue;
@@ -367,9 +382,12 @@ impl pyrite::Host for BotHost<'_> {
                     self.tuning,
                 );
                 if (level as i64) >= min_level {
-                    let buf =
-                        &mut self.world.bots.get_mut(&bot_id).expect("bot exists").data.log_buf;
-                    if buf.len() >= LOG_BUFFER_CAP {
+                    let data = &mut self.world.bots.get_mut(&bot_id).expect("bot exists").data;
+                    // The ring cap is a hardware stat (stats floor +
+                    // Memory banks), not a global const (M5).
+                    let cap = data.log_cap as usize;
+                    let buf = &mut data.log_buf;
+                    while buf.len() >= cap.max(1) {
                         buf.remove(0);
                     }
                     buf.push((level, text));

@@ -137,10 +137,10 @@ fn tier0_line_costs_match_table() {
     // Table entries are FULL charges (Q80): mine() = 2 cycles total — the
     // call statement's overhead is folded into the figure.
     let (mut vm, mut host, costs) = vm_for("mine()\n");
-    vm.grant(1);
+    vm.grant(1, &costs);
     assert_eq!(vm.run(&mut host, &costs), Outcome::Paused);
     assert!(host.calls.is_empty(), "should not have run yet at 1 cycle");
-    vm.grant(1);
+    vm.grant(1, &costs);
     vm.run(&mut host, &costs);
     assert_eq!(call_names(&host), ["mine"], "2nd cycle completes the call");
 }
@@ -151,11 +151,11 @@ fn cycle_debt_ops_wait_until_affordable() {
     let (mut vm, mut host, costs) = vm_for("scan_enemies()\n");
     // scan_enemies = 4 total (full charge); grant 1/tick — it waits 3 ticks.
     for _ in 0..3 {
-        vm.grant(1);
+        vm.grant(1, &costs);
         assert_eq!(vm.run(&mut host, &costs), Outcome::Paused);
     }
     assert!(host.calls.is_empty());
-    vm.grant(1);
+    vm.grant(1, &costs);
     vm.run(&mut host, &costs);
     assert_eq!(call_names(&host), ["scan_enemies"]);
 }
@@ -166,7 +166,7 @@ fn program_loops_forever_with_a_wrap_charge() {
     // costs one statement, so two passes = 2 + 1 + 2 = 5; a 6th cycle is
     // needed before a third pass could start.
     let (mut vm, mut host, costs) = vm_for("x = 1\nlog(x)\n");
-    vm.grant(5);
+    vm.grant(5, &costs);
     vm.run(&mut host, &costs);
     assert_eq!(call_names(&host), ["log", "log"]);
 }
@@ -182,7 +182,7 @@ fn variables_survive_the_wrap() {
     let mut vm = Vm::new(Rc::new(program), config);
     let mut host = TestHost::default();
     let costs = CostTable::default();
-    vm.grant(100);
+    vm.grant(100, &costs);
     vm.run(&mut host, &costs);
     let logged: Vec<&Value> =
         host.calls.iter().filter(|(n, _)| n == "log").map(|(_, a)| &a[0]).collect();
@@ -197,7 +197,7 @@ fn variables_survive_the_wrap() {
 #[test]
 fn arithmetic_and_comparisons() {
     let (mut vm, mut host, costs) = vm_for("log(2 + 3 * 4)\nlog(7 // 2)\nlog(-7 // 2)\nlog(-7 % 2)\nlog(1 < 2)\nhalt()\n");
-    vm.grant(200);
+    vm.grant(200, &costs);
     vm.run(&mut host, &costs);
     let logged: Vec<&Value> = host
         .calls
@@ -221,7 +221,7 @@ fn arithmetic_and_comparisons() {
 fn short_circuit_and() {
     // Rhs must not be evaluated when lhs is False.
     let (mut vm, mut host, costs) = vm_for("log(False and cargo_full())\nhalt()\n");
-    vm.grant(100);
+    vm.grant(100, &costs);
     vm.run(&mut host, &costs);
     assert_eq!(call_names(&host), ["log", "halt"], "cargo_full must not be called");
 }
@@ -239,7 +239,7 @@ else:
 halt()
 ";
     let (mut vm, mut host, costs) = vm_for(src);
-    vm.grant(100);
+    vm.grant(100, &costs);
     vm.run(&mut host, &costs);
     let logged: Vec<&Value> =
         host.calls.iter().filter(|(n, _)| n == "log").map(|(_, a)| &a[0]).collect();
@@ -257,7 +257,7 @@ done()
 halt()
 ";
     let (mut vm, mut host, costs) = vm_for(src);
-    vm.grant(200);
+    vm.grant(200, &costs);
     vm.run(&mut host, &costs);
     let names = call_names(&host);
     assert_eq!(names.iter().filter(|n| **n == "log").count(), 3);
@@ -277,7 +277,7 @@ after()
 halt()
 ";
     let (mut vm, mut host, costs) = vm_for(src);
-    vm.grant(500);
+    vm.grant(500, &costs);
     vm.run(&mut host, &costs);
     let logged: Vec<&Value> =
         host.calls.iter().filter(|(n, _)| n == "log").map(|(_, a)| &a[0]).collect();
@@ -295,7 +295,7 @@ log(double(21))
 halt()
 ";
     let (mut vm, mut host, costs) = vm_for(src);
-    vm.grant(100);
+    vm.grant(100, &costs);
     vm.run(&mut host, &costs);
     let logged: Vec<&Value> =
         host.calls.iter().filter(|(n, _)| n == "log").map(|(_, a)| &a[0]).collect();
@@ -313,7 +313,7 @@ def down(n):
 down(100)
 ";
     let (mut vm, mut host, costs) = vm_for(src);
-    vm.grant(1000);
+    vm.grant(1000, &costs);
     vm.run(&mut host, &costs);
     assert!(call_names(&host).contains(&"upload_crash_dump"));
     let dump = host.calls.iter().find(|(n, _)| n == "upload_crash_dump").unwrap();
@@ -336,7 +336,7 @@ match o:
 halt()
 ";
     let (mut vm, mut host, costs) = vm_for(src);
-    vm.grant(100);
+    vm.grant(100, &costs);
     vm.run(&mut host, &costs);
     let logged: Vec<&Value> =
         host.calls.iter().filter(|(n, _)| n == "log").map(|(_, a)| &a[0]).collect();
@@ -344,26 +344,28 @@ halt()
 }
 
 #[test]
-fn match_on_builtin_enum_from_host() {
-    // try_receive returns Recv.Got(v) / Recv.Empty without a declaration.
+fn match_on_host_enum_without_declaration() {
+    // Host-domain enums match by name without a player declaration
+    // (the retired Recv enum used to be the example; try_receive now
+    // returns Option — docs/01).
     let src = "\
-match try_receive(\"orders\"):
-    case Recv.Got(v):
+match probe(\"orders\"):
+    case Contact.Seen(v):
         log(v)
-    case Recv.Empty:
+    case Contact.Lost:
         idle()
 halt()
 ";
     let (mut vm, mut host, costs) = vm_for(src);
     host.returns.insert(
-        "try_receive".into(),
+        "probe".into(),
         Value::Enum(pyrite::EnumValue {
-            enum_name: "Recv".into(),
-            variant: "Got".into(),
+            enum_name: "Contact".into(),
+            variant: "Seen".into(),
             fields: vec![Value::Int(99)],
         }),
     );
-    vm.grant(100);
+    vm.grant(100, &costs);
     vm.run(&mut host, &costs);
     let logged: Vec<&Value> =
         host.calls.iter().filter(|(n, _)| n == "log").map(|(_, a)| &a[0]).collect();
@@ -376,7 +378,7 @@ halt()
 fn actions_block_until_resolved() {
     let (mut vm, mut host, costs) = vm_for("move_to(5)\narrived()\n");
     host.blocking.insert("move_to".into());
-    vm.grant(100);
+    vm.grant(100, &costs);
     assert_eq!(vm.run(&mut host, &costs), Outcome::Blocked);
     assert_eq!(call_names(&host), ["move_to"]);
     // Sim resolves the action; the program continues.
@@ -389,7 +391,7 @@ fn actions_block_until_resolved() {
 fn failed_action_faults() {
     let (mut vm, mut host, costs) = vm_for("mine()\n");
     host.faulting.insert("mine".into(), "no ore in range".into());
-    vm.grant(100);
+    vm.grant(100, &costs);
     vm.run(&mut host, &costs);
     let dump = host.calls.iter().find(|(n, _)| n == "upload_crash_dump");
     assert!(matches!(dump, Some((_, args)) if matches!(&args[0], Value::Str(s) if s.contains("no ore"))));
@@ -400,8 +402,12 @@ fn failed_action_faults() {
 #[test]
 fn unhandled_fault_forces_crash_dump_and_restarts() {
     let (mut vm, mut host, costs) = vm_for("log(1)\nboom(1 // 0)\n");
-    vm.grant(50);
-    vm.run(&mut host, &costs);
+    // The bank cap (25) means one giant grant can't fund the dump debt
+    // plus a restart pass — drip grants like the sim does.
+    for _ in 0..5 {
+        vm.grant(50, &costs);
+        vm.run(&mut host, &costs);
+    }
     let names = call_names(&host);
     // log, crash dump, then the restart reaches log again.
     let first_dump = names.iter().position(|n| *n == "upload_crash_dump").unwrap();
@@ -413,7 +419,7 @@ fn unhandled_fault_forces_crash_dump_and_restarts() {
 #[test]
 fn crash_dump_cost_is_charged_as_debt() {
     let (mut vm, mut host, costs) = vm_for("boom(1 // 0)\n");
-    vm.grant(4); // enough to reach the fault, nowhere near dump cost
+    vm.grant(4, &costs); // enough to reach the fault, nowhere near dump cost
     vm.run(&mut host, &costs);
     assert!(call_names(&host).contains(&"upload_crash_dump"));
     assert!(vm.budget() < 0, "crash dump must leave the bot in cycle debt");
@@ -430,7 +436,7 @@ on error:
 boom(1 // 0)
 ";
     let (mut vm, mut host, costs) = vm_for(src);
-    vm.grant(50);
+    vm.grant(50, &costs);
     vm.run(&mut host, &costs);
     let names = call_names(&host);
     assert!(names.contains(&"handled"));
@@ -448,7 +454,7 @@ x = 42
 boom(1 // 0)
 ";
     let (mut vm, mut host, costs) = vm_for(src);
-    vm.grant(14); // x=42 (1), stmt(1)+call(1)+arith(1)=fault, trap(5), window: log(1) + init
+    vm.grant(14, &costs); // x=42 (1), stmt(1)+call(1)+arith(1)=fault, trap(5), window: log(1) + init
     vm.run(&mut host, &costs);
     let logged: Vec<&Value> =
         host.calls.iter().filter(|(n, _)| n == "log").map(|(_, a)| &a[0]).collect();
@@ -464,7 +470,7 @@ on error:
 boom(2 // 0)
 ";
     let (mut vm, mut host, costs) = vm_for(src);
-    vm.grant(100);
+    vm.grant(100, &costs);
     assert_eq!(vm.run(&mut host, &costs), Outcome::Dead, "double-handle aborts, never explodes");
     let names = call_names(&host);
     assert!(names.contains(&"upload_log"), "abort's logs always go home");
@@ -483,12 +489,12 @@ on hurt:
 work()
 ";
     let (mut vm, mut host, costs) = vm_for(src);
-    vm.grant(1); // work() = 1 full charge; no headroom for a wrap
+    vm.grant(1, &costs); // work() = 1 full charge; no headroom for a wrap
     vm.run(&mut host, &costs);
     assert_eq!(call_names(&host), ["work"]);
     assert_eq!(vm.raise(Signal::Hurt, &mut host, &costs), RaiseOutcome::Handled);
     host.calls.clear();
-    vm.grant(20);
+    vm.grant(20, &costs);
     vm.run(&mut host, &costs);
     let names = call_names(&host);
     assert_eq!(names[0], "handler_init", "every template starts with the forced prologue");
@@ -502,7 +508,7 @@ fn hurt_without_window_still_enters_the_template() {
     // the prologue flinch IS the default reaction (docs/01).
     let (mut vm, mut host, costs) = vm_for("work()\n");
     assert_eq!(vm.raise(Signal::Hurt, &mut host, &costs), RaiseOutcome::Handled);
-    vm.grant(20);
+    vm.grant(20, &costs);
     vm.run(&mut host, &costs);
     let names = call_names(&host);
     assert_eq!(names[0], "handler_init", "the flinch runs even with an empty window");
@@ -536,7 +542,7 @@ fn abort_sequence_needs_no_budget_and_absorbs_signals() {
 #[test]
 fn abort_verb_is_the_player_scuttle() {
     let (mut vm, mut host, costs) = vm_for("abort()\nnever()\n");
-    vm.grant(50);
+    vm.grant(50, &costs);
     assert_eq!(vm.run(&mut host, &costs), Outcome::Dead);
     let names = call_names(&host);
     assert_eq!(names, ["upload_log", "become_disabled"], "abort() runs the reserved sequence");
@@ -550,7 +556,7 @@ fn become_disabled_is_engine_only() {
     // registry entry alone can't stop the passthrough dispatch, so the VM
     // blocks the name itself.
     let (mut vm, mut host, costs) = vm_for("become_disabled()\nhalt()\n");
-    vm.grant(50);
+    vm.grant(50, &costs);
     vm.run(&mut host, &costs);
     assert!(
         !call_names(&host).iter().any(|n| *n == "become_disabled"),
@@ -571,7 +577,7 @@ work()
     let (mut vm, mut host, costs) = vm_for(src);
     host.blocking.insert("limp_home".into());
     vm.raise(Signal::Hurt, &mut host, &costs);
-    vm.grant(10);
+    vm.grant(10, &costs);
     assert_eq!(vm.run(&mut host, &costs), Outcome::Blocked);
     // A second event mid-retreat: double handle → abort (wreck, not
     // vaporization) — the retreat is over, the rescue race starts here.
@@ -603,7 +609,7 @@ while n < 5:
     let run = || {
         let (mut vm, mut host, costs) = vm_for(src);
         for _ in 0..30 {
-            vm.grant(3);
+            vm.grant(3, &costs);
             vm.run(&mut host, &costs);
         }
         host.calls
@@ -614,13 +620,13 @@ while n < 5:
 #[test]
 fn queued_program_installs_at_the_loop_boundary() {
     let (mut vm, mut host, costs) = vm_for("log(1)\n");
-    vm.grant(1); // log = 1 full charge; the wrap is unaffordable
+    vm.grant(1, &costs); // log = 1 full charge; the wrap is unaffordable
     vm.run(&mut host, &costs);
     assert_eq!(call_names(&host), ["log"]);
     // Redeploy: takes effect at the wrap, not mid-pass.
     let new_program = parse("log(2)\nhalt()\n", &UnlockSet::all()).unwrap();
     vm.queue_program(Rc::new(new_program));
-    vm.grant(20);
+    vm.grant(20, &costs);
     vm.run(&mut host, &costs);
     let logged: Vec<&Value> =
         host.calls.iter().filter(|(n, _)| n == "log").map(|(_, a)| &a[0]).collect();
@@ -645,7 +651,7 @@ fn vm_with_closest(source: &str, closest: Value) -> (Vm, TestHost, CostTable) {
 fn expect_unwraps_ok() {
     let (mut vm, mut host, costs) =
         vm_with_closest("move_to(closest(ore).expect())\nhalt()\n", Value::result_ok(Value::Entity(7)));
-    vm.grant(100);
+    vm.grant(100, &costs);
     vm.run(&mut host, &costs);
     // The kind constant arrives at the host as its string value.
     assert_eq!(host.calls[0], ("closest".to_string(), vec![Value::Str("ore".into())]));
@@ -658,7 +664,7 @@ fn expect_on_err_faults_with_the_carried_message() {
         "move_to(closest(ore).expect())\n",
         Value::result_err("no ore anywhere"),
     );
-    vm.grant(100);
+    vm.grant(100, &costs);
     vm.run(&mut host, &costs);
     let dump = host
         .calls
@@ -680,7 +686,7 @@ match closest(ore):
 halt()
 ";
     let (mut vm, mut host, costs) = vm_with_closest(src, Value::result_err("no ore anywhere"));
-    vm.grant(100);
+    vm.grant(100, &costs);
     vm.run(&mut host, &costs);
     assert!(call_names(&host).contains(&"log"), "Err arm must run, got {:?}", call_names(&host));
     assert!(!call_names(&host).contains(&"upload_crash_dump"), "no fault on the match path");
@@ -689,7 +695,7 @@ halt()
 #[test]
 fn expect_on_non_result_faults() {
     let (mut vm, mut host, costs) = vm_for("log(5.expect())\n");
-    vm.grant(100);
+    vm.grant(100, &costs);
     vm.run(&mut host, &costs);
     let dump = host.calls.iter().find(|(n, _)| n == "upload_crash_dump").expect("must fault");
     assert_eq!(dump.1, vec![Value::Str("expect() requires a Result or Option, got int".into())]);
@@ -702,7 +708,7 @@ fn kind_constants_are_shadowable_and_faults_restore_them() {
     // constant (living below globals) shows through again.
     let (mut vm, mut host, costs) =
         vm_with_closest("log(ore)\nore = 5\nlog(ore)\n", Value::Unit);
-    vm.grant(5); // pass: log(1) + assign(1) + log(1) = 3, wrap(1), log(1)
+    vm.grant(5, &costs); // pass: log(1) + assign(1) + log(1) = 3, wrap(1), log(1)
     vm.run(&mut host, &costs);
     let logged: Vec<&Value> =
         host.calls.iter().filter(|(n, _)| n == "log").map(|(_, a)| &a[0]).collect();
@@ -710,11 +716,14 @@ fn kind_constants_are_shadowable_and_faults_restore_them() {
     assert_eq!(logged[1], &Value::Int(5), "assignment shadows the constant");
     assert_eq!(logged[2], &Value::Int(5), "the shadow survives the wrap (Q80)");
 
-    // A fault restart clears globals — the constant returns.
+    // A fault restart clears globals — the constant returns. Drip grants:
+    // the bank cap means one grant can't fund dump debt + a fresh pass.
     let (mut vm, mut host, costs) =
         vm_with_closest("log(ore)\nore = 5\nboom(1 // 0)\n", Value::Unit);
-    vm.grant(100);
-    vm.run(&mut host, &costs);
+    for _ in 0..5 {
+        vm.grant(100, &costs);
+        vm.run(&mut host, &costs);
+    }
     let logged: Vec<&Value> =
         host.calls.iter().filter(|(n, _)| n == "log").map(|(_, a)| &a[0]).collect();
     assert_eq!(logged[0], &Value::Str("ore".into()));
@@ -731,11 +740,11 @@ fn signal_interrupts_a_blocked_action_cleanly() {
     // the template, the program restarts from line 1 without underflow.
     let (mut vm, mut host, costs) = vm_for("move_to(5)\nlog(1)\nhalt()\n");
     host.blocking.insert("move_to".into());
-    vm.grant(100);
+    vm.grant(100, &costs);
     assert_eq!(vm.run(&mut host, &costs), Outcome::Blocked);
     assert_eq!(vm.raise(Signal::Hurt, &mut host, &costs), RaiseOutcome::Handled);
     assert!(!vm.is_blocked(), "signals interrupt Blocked bots (docs/01)");
-    vm.grant(100);
+    vm.grant(100, &costs);
     assert_eq!(vm.run(&mut host, &costs), Outcome::Blocked, "restarted into move_to again");
     assert!(call_names(&host).contains(&"handler_init"), "the template ran");
 }
@@ -762,12 +771,12 @@ fn factory_error_window_runs_as_watchable_code() {
     let costs = CostTable::default();
     // Enough to reach the fault, not enough to finish the factory window:
     // the VM sits INSIDE it, visibly (that's the point).
-    vm.grant(5);
+    vm.grant(5, &costs);
     vm.run(&mut host, &costs);
     assert!(vm.handler_is_default(), "should be mid factory window");
     assert_eq!(vm.crash_count(), 1, "factory contents are not armor — still a crash");
     // Finish it: the dump call happens FROM CODE, then restart + refault...
-    vm.grant(60);
+    vm.grant(60, &costs);
     vm.run(&mut host, &costs);
     assert!(call_names(&host).contains(&"upload_crash_dump"));
 }
@@ -782,7 +791,7 @@ fn factory_contents_double_handle_like_player_code() {
     let mut vm = Vm::new(Rc::new(program), config);
     let mut host = TestHost::default();
     let costs = CostTable::default();
-    vm.grant(5);
+    vm.grant(5, &costs);
     vm.run(&mut host, &costs);
     assert!(vm.handler_is_default());
     assert_eq!(vm.raise(Signal::Hurt, &mut host, &costs), RaiseOutcome::Aborted);
@@ -803,12 +812,12 @@ fn factory_bump_window_waits_in_code() {
     let costs = CostTable::default();
     assert_eq!(vm.raise(Signal::Bump, &mut host, &costs), RaiseOutcome::Handled);
     assert!(vm.handler_is_default());
-    vm.grant(20);
+    vm.grant(20, &costs);
     assert_eq!(vm.run(&mut host, &costs), Outcome::Blocked, "waiting inside the factory stun");
     assert!(call_names(&host).contains(&"wait"));
     // Resolve the wait: the template completes, the program restarts.
     vm.resolve_action(Ok(Value::Unit), &mut host, &costs);
-    vm.grant(20);
+    vm.grant(20, &costs);
     vm.run(&mut host, &costs);
     assert!(call_names(&host).contains(&"work"), "program restarts after the template");
 }
@@ -827,12 +836,12 @@ fn handler_init_window_is_observable() {
     assert!(!vm.in_handler_init(), "quiet before the signal");
     vm.raise(Signal::Bump, &mut host, &costs);
     assert!(vm.in_handler_init(), "ritual pending from entry");
-    vm.grant(20);
+    vm.grant(20, &costs);
     assert_eq!(vm.run(&mut host, &costs), Outcome::Blocked, "blocked inside handler_init");
     assert!(vm.in_handler_init(), "still flinching while the init wait runs");
     // The init resolves: ritual over, the window proceeds (to wait(35)).
     vm.resolve_action(Ok(Value::Unit), &mut host, &costs);
-    vm.grant(20);
+    vm.grant(20, &costs);
     vm.run(&mut host, &costs);
     assert!(!vm.in_handler_init(), "ritual complete — now in the window");
     assert!(vm.active_signal().is_some(), "still handling the signal");
@@ -988,7 +997,7 @@ haul_home()
 halt()
 ";
     let (mut vm, mut host, costs) = vm_for(src);
-    vm.grant(100);
+    vm.grant(100, &costs);
     vm.run(&mut host, &costs);
     assert!(call_names(&host).contains(&"deposit"));
 }
@@ -1007,7 +1016,7 @@ hauling.haul_home()
 halt()
 ";
     let (mut vm, mut host, costs) = vm_for(src);
-    vm.grant(100);
+    vm.grant(100, &costs);
     vm.run(&mut host, &costs);
     assert!(call_names(&host).contains(&"deposit"));
 }
@@ -1029,7 +1038,7 @@ haul_home()
 halt()
 ";
     let (mut vm, mut host, costs) = vm_for(src);
-    vm.grant(1000);
+    vm.grant(1000, &costs);
     vm.run(&mut host, &costs);
     let names = call_names(&host);
     assert!(names.contains(&"beep") && names.contains(&"deposit"));
@@ -1156,7 +1165,7 @@ halt()
     assert_eq!(f.body.len(), 1, "docstring must not remain in the runtime body");
 
     let (mut vm, mut host, costs) = vm_for(src);
-    vm.grant(100);
+    vm.grant(100, &costs);
     vm.run(&mut host, &costs);
     assert!(call_names(&host).contains(&"deposit"));
 }
@@ -1188,7 +1197,7 @@ todo()
 halt()
 ";
     let (mut vm, mut host, costs) = vm_for(src);
-    vm.grant(100);
+    vm.grant(100, &costs);
     vm.run(&mut host, &costs);
     assert!(call_names(&host).contains(&"halt"), "empty documented def returns cleanly");
 }
@@ -1203,7 +1212,7 @@ log(x)
 halt()
 ";
     let (mut vm, mut host, costs) = vm_for(src);
-    vm.grant(100);
+    vm.grant(100, &costs);
     vm.run(&mut host, &costs);
     let logged = host.calls.iter().find(|(n, _)| n == "log").unwrap();
     assert_eq!(logged.1[0], Value::Str("big \"quote\" here".into()));
@@ -1233,7 +1242,7 @@ log(xs[2])
 halt()
 ";
     let (mut vm, mut host, costs) = vm_for(src);
-    vm.grant(1000);
+    vm.grant(1000, &costs);
     vm.run(&mut host, &costs);
     let logged: Vec<&Value> =
         host.calls.iter().filter(|(n, _)| n == "log").map(|(_, a)| &a[0]).collect();
@@ -1254,7 +1263,7 @@ log(\"gold\" in d)
 halt()
 ";
     let (mut vm, mut host, costs) = vm_for(src);
-    vm.grant(1000);
+    vm.grant(1000, &costs);
     vm.run(&mut host, &costs);
     let logged: Vec<&Value> =
         host.calls.iter().filter(|(n, _)| n == "log").map(|(_, a)| &a[0]).collect();
@@ -1269,7 +1278,7 @@ halt()
 #[test]
 fn dict_missing_key_faults_and_get_returns_option() {
     let (mut vm, mut host, costs) = vm_for("d = {1: 2}\nlog(d[9])\n");
-    vm.grant(100);
+    vm.grant(100, &costs);
     vm.run(&mut host, &costs);
     let dump = host.calls.iter().find(|(n, _)| n == "upload_crash_dump").expect("must fault");
     assert!(matches!(&dump.1[0], Value::Str(s) if s.contains("key 9 not found")));
@@ -1285,7 +1294,7 @@ match d.get(9):
 halt()
 ";
     let (mut vm, mut host, costs) = vm_for(src);
-    vm.grant(1000);
+    vm.grant(1000, &costs);
     vm.run(&mut host, &costs);
     let logged: Vec<&Value> =
         host.calls.iter().filter(|(n, _)| n == "log").map(|(_, a)| &a[0]).collect();
@@ -1305,7 +1314,7 @@ for v in d.values():
 halt()
 ";
     let (mut vm, mut host, costs) = vm_for(src);
-    vm.grant(1000);
+    vm.grant(1000, &costs);
     vm.run(&mut host, &costs);
     let logged: Vec<&Value> =
         host.calls.iter().filter(|(n, _)| n == "log").map(|(_, a)| &a[0]).collect();
@@ -1343,7 +1352,7 @@ log(xs[0])
 halt()
 ";
     let (mut vm, mut host, costs) = vm_for(src);
-    vm.grant(1000);
+    vm.grant(1000, &costs);
     vm.run(&mut host, &costs);
     let logged: Vec<&Value> =
         host.calls.iter().filter(|(n, _)| n == "log").map(|(_, a)| &a[0]).collect();
@@ -1363,14 +1372,17 @@ log(total)
 halt()
 ";
     let (mut vm, mut host, costs) = vm_for(src);
-    vm.grant(10000);
-    vm.run(&mut host, &costs);
+    // Both loops cost more than one bank_cap of cycles: drip grants.
+    for _ in 0..10 {
+        vm.grant(25, &costs);
+        vm.run(&mut host, &costs);
+    }
     let logged: Vec<&Value> =
         host.calls.iter().filter(|(n, _)| n == "log").map(|(_, a)| &a[0]).collect();
     assert_eq!(logged, [&Value::Int(6 + 33)]);
 
     let (mut vm, mut host, costs) = vm_for("range(100000)\n");
-    vm.grant(1000);
+    vm.grant(1000, &costs);
     vm.run(&mut host, &costs);
     let dump = host.calls.iter().find(|(n, _)| n == "upload_crash_dump").expect("must fault");
     assert!(matches!(&dump.1[0], Value::Str(s) if s.contains("range too large")));
@@ -1381,7 +1393,7 @@ halt()
 #[test]
 fn appending_to_a_temporary_faults() {
     let (mut vm, mut host, costs) = vm_for("[1, 2].append(3)\n");
-    vm.grant(100);
+    vm.grant(100, &costs);
     vm.run(&mut host, &costs);
     let dump = host.calls.iter().find(|(n, _)| n == "upload_crash_dump").expect("must fault");
     assert!(matches!(&dump.1[0], Value::Str(s) if s.contains("needs a list variable")));
@@ -1398,7 +1410,7 @@ log(1 in d)
 halt()
 ";
     let (mut vm, mut host, costs) = vm_for(src);
-    vm.grant(1000);
+    vm.grant(1000, &costs);
     vm.run(&mut host, &costs);
     let logged: Vec<&Value> =
         host.calls.iter().filter(|(n, _)| n == "log").map(|(_, a)| &a[0]).collect();
@@ -1421,7 +1433,7 @@ report(7, repeat=3)
 halt()
 ";
     let (mut vm, mut host, costs) = vm_for(src);
-    vm.grant(1000);
+    vm.grant(1000, &costs);
     vm.run(&mut host, &costs);
     let logged: Vec<&Value> =
         host.calls.iter().filter(|(n, _)| n == "log").map(|(_, a)| &a[0]).collect();
@@ -1445,7 +1457,7 @@ fn builtin_kwargs_canonicalize_against_the_registry() {
     // Levels are the pre-bound int constants (trace=0 … error=4); the
     // sim binds them — tests pass the ints directly.
     let (mut vm, mut host, costs) = vm_for("log(9, level=3)\nlog(8)\nhalt()\n");
-    vm.grant(100);
+    vm.grant(100, &costs);
     vm.run(&mut host, &costs);
     let log_calls: Vec<&Vec<Value>> =
         host.calls.iter().filter(|(n, _)| n == "log").map(|(_, a)| a).collect();
@@ -1461,12 +1473,12 @@ fn builtin_kwargs_canonicalize_against_the_registry() {
 #[test]
 fn bad_kwargs_fault_with_err_arity() {
     let (mut vm, mut host, costs) = vm_for("log(1, volume=11)\n");
-    vm.grant(100);
+    vm.grant(100, &costs);
     vm.run(&mut host, &costs);
     assert_eq!(vm.last_fault_id(), Some(pyrite::faults::ARITY));
 
     let (mut vm, mut host, costs) = vm_for("def f(a, b):\n    return a\n\nf(1)\n");
-    vm.grant(100);
+    vm.grant(100, &costs);
     vm.run(&mut host, &costs);
     assert_eq!(vm.last_fault_id(), Some(pyrite::faults::ARITY));
     assert!(vm.last_fault().unwrap().contains("missing required argument 'b'"));
@@ -1487,7 +1499,7 @@ log(x == None)
 halt()
 ";
     let (mut vm, mut host, costs) = vm_for(src);
-    vm.grant(1000);
+    vm.grant(1000, &costs);
     vm.run(&mut host, &costs);
     let logged: Vec<&Value> =
         host.calls.iter().filter(|(n, _)| n == "log").map(|(_, a)| &a[0]).collect();
@@ -1515,7 +1527,7 @@ match y:
 halt()
 ";
     let (mut vm, mut host, costs) = vm_for(src);
-    vm.grant(1000);
+    vm.grant(1000, &costs);
     vm.run(&mut host, &costs);
     let logged: Vec<&Value> =
         host.calls.iter().filter(|(n, _)| n == "log").map(|(_, a)| &a[0]).collect();
@@ -1540,7 +1552,7 @@ match m:
 halt()
 ";
     let (mut vm, mut host, costs) = vm_for(src);
-    vm.grant(1000);
+    vm.grant(1000, &costs);
     vm.run(&mut host, &costs);
     let logged: Vec<&Value> =
         host.calls.iter().filter(|(n, _)| n == "log").map(|(_, a)| &a[0]).collect();
@@ -1553,13 +1565,13 @@ halt()
 #[test]
 fn fault_ids_are_prebound_constants() {
     let (mut vm, mut host, costs) = vm_for("boom(1 // 0)\n");
-    vm.grant(100);
+    vm.grant(100, &costs);
     vm.run(&mut host, &costs);
     assert_eq!(vm.last_fault_id(), Some(pyrite::faults::DIV_ZERO));
 
     // The constant is readable from source without any host setup.
     let (mut vm, mut host, costs) = vm_for("log(err_div_zero)\nhalt()\n");
-    vm.grant(100);
+    vm.grant(100, &costs);
     vm.run(&mut host, &costs);
     let logged = host.calls.iter().find(|(n, _)| n == "log").unwrap();
     assert_eq!(logged.1[0], Value::Str("err_div_zero".into()));
@@ -1572,7 +1584,7 @@ fn fault_ids_are_prebound_constants() {
 fn oversized_payload_faults() {
     let (mut vm, mut host, costs) =
         vm_for("try_send(\"ch\", \"a very long message indeed\")\n");
-    vm.grant(1000);
+    vm.grant(1000, &costs);
     vm.run(&mut host, &costs);
     assert_eq!(vm.last_fault_id(), Some(pyrite::faults::PAYLOAD));
     assert!(!call_names(&host).contains(&"try_send"), "host must not see the send");
@@ -1583,10 +1595,10 @@ fn oversized_payload_faults() {
 fn payload_units_price_sized_ops() {
     // "abcd" = 4 units → 3 + 4 = 7 cycles total.
     let (mut vm, mut host, costs) = vm_for("try_send(\"c\", \"abcd\")\n");
-    vm.grant(6);
+    vm.grant(6, &costs);
     assert_eq!(vm.run(&mut host, &costs), Outcome::Paused);
     assert!(host.calls.is_empty());
-    vm.grant(1);
+    vm.grant(1, &costs);
     vm.run(&mut host, &costs);
     assert_eq!(call_names(&host), ["try_send"]);
 }
@@ -1596,10 +1608,103 @@ fn payload_units_price_sized_ops() {
 fn upload_log_cost_caps_at_the_dump(){
     let (mut vm, mut host, costs) = vm_for("upload_log()\n");
     host.log_len = 100;
-    vm.grant(24);
+    vm.grant(24, &costs);
     assert_eq!(vm.run(&mut host, &costs), Outcome::Paused);
     assert!(host.calls.is_empty());
-    vm.grant(1);
+    vm.grant(1, &costs);
     vm.run(&mut host, &costs);
     assert_eq!(call_names(&host), ["upload_log"]);
+}
+
+// --- audit regressions: reserved names & kwargs on unknown functions ---
+
+/// The engine verbs are FULLY reserved (M3): a player def would shadow the
+/// scuttle / the forced prologue, because user functions resolve before
+/// the VM's name intercept.
+#[test]
+fn reserved_engine_verbs_cannot_be_defined() {
+    for name in ["abort", "handler_init", "become_disabled"] {
+        let src = format!("def {name}():\n    log(1)\n");
+        let err = parse(&src, &UnlockSet::all()).unwrap_err();
+        assert!(
+            matches!(&err.kind, PyriteErrorKind::ReservedName(n) if n == name),
+            "def {name} must be a reserved-name parse error, got: {err}"
+        );
+    }
+}
+
+/// Option/Result are language furniture (`None` = Option.None, `.expect()`):
+/// a player redeclaration would shadow them in pattern resolution.
+#[test]
+fn builtin_enums_cannot_be_redeclared() {
+    for name in ["Option", "Result"] {
+        let src = format!("enum {name}:\n    Weird\n");
+        let err = parse(&src, &UnlockSet::all()).unwrap_err();
+        assert!(
+            matches!(&err.kind, PyriteErrorKind::ReservedName(n) if n == name),
+            "enum {name} must be a reserved-name parse error, got: {err}"
+        );
+    }
+}
+
+/// handler_init is engine-injected (line 0 only); a player call faults
+/// err_unknown_function, and a fault inside a template is a double-handle
+/// abort — so deploy analysis must reject it in windows, never at runtime.
+#[test]
+fn handler_init_in_a_window_is_rejected_at_deploy() {
+    let src = "\
+on hurt:
+    handler_init()
+";
+    let program = parse(src, &UnlockSet::all()).unwrap();
+    let err = pyrite::check_windows(&program, &CostTable::default()).unwrap_err();
+    assert!(
+        matches!(&err.kind, PyriteErrorKind::WindowUnsafeCall { signal: "hurt", func } if func == "handler_init"),
+        "got: {err}"
+    );
+}
+
+/// Keywords on a name the registry doesn't know at all: the name is the
+/// error (err_unknown_function), not the keyword binding (err_arity).
+#[test]
+fn kwargs_on_an_unknown_function_fault_unknown_function() {
+    let (mut vm, mut host, costs) = vm_for("bogus(x=1)\nhalt()\n");
+    vm.grant(100, &costs);
+    vm.run(&mut host, &costs);
+    assert_eq!(vm.last_fault_id(), Some(pyrite::faults::UNKNOWN_FUNCTION));
+    assert!(!call_names(&host).contains(&"bogus"), "the host must not see the call");
+}
+
+// --- M5: the bank cap + blocked-grant rules ---
+
+/// The budget clamps to the table-derived bank_cap after every grant
+/// (Q75/Q82) — saving up can't overshoot the priciest effective op. The
+/// cap bounds SAVING, not throughput: a single grant bigger than the cap
+/// (a fast CPU's tick) is still fully spendable that tick.
+#[test]
+fn budget_banks_to_the_derived_cap() {
+    let (mut vm, _host, costs) = vm_for("wait(1)\nhalt()\n");
+    vm.grant(1_000_000, &costs);
+    assert_eq!(vm.budget(), 1_000_000 * 100, "one grant is always fully spendable");
+    vm.grant(1, &costs);
+    assert_eq!(
+        vm.budget(),
+        costs.bank_cap as i64 * 100,
+        "unspent surplus can't be BANKED past the cap"
+    );
+    vm.grant(1, &costs);
+    assert_eq!(vm.budget(), costs.bank_cap as i64 * 100, "re-grants never overshoot");
+}
+
+/// No banking while blocked (docs/01): a waiting bot burns its grant —
+/// the rule lives in the VM now, not as a sim special case.
+#[test]
+fn blocked_bots_bank_nothing() {
+    let (mut vm, mut host, costs) = vm_for("halt()\n");
+    vm.grant(5, &costs);
+    vm.run(&mut host, &costs); // parks Blocked on halt()
+    assert!(vm.is_blocked());
+    let banked = vm.budget();
+    vm.grant(10, &costs);
+    assert_eq!(vm.budget(), banked, "waiting is what its CPU is doing");
 }

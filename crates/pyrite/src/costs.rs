@@ -70,6 +70,14 @@ pub struct CostTable {
     #[serde(skip)]
     pub builtins: BTreeMap<String, BuiltinSpec>,
     pub default_builtin: u64,
+
+    /// Max banked cycle budget (docs/01 Q75/Q82): the most expensive
+    /// effective op cost under this table — every cost is bounded (payloads
+    /// by `payload_cap`, `upload_log` by its dump cap), so the cap always
+    /// reaches the priciest op and freeze-forever is impossible by
+    /// construction. Derived at load; per-tile overlays re-derive it (M8).
+    #[serde(skip)]
+    pub bank_cap: u64,
 }
 
 /// How a registry function is priced.
@@ -154,11 +162,38 @@ impl Default for CostTable {
                 assert!(payload_arg < params.len(), "builtins: {name} payload_arg out of range");
             }
         }
+        table.bank_cap = table.derive_bank_cap();
+        assert!(table.bank_cap > 0, "costs: bank_cap must be > 0");
         table
     }
 }
 
 impl CostTable {
+    /// The most expensive effective op cost this table can charge — the
+    /// derived `bank_cap` (Q75/Q82). Worst cases: a Fixed figure itself, a
+    /// payload op at `payload_cap`, `upload_log` at its dump cap, plus the
+    /// forced `crash_dump`. Simple-op costs are dominated by these but
+    /// included for robustness against odd tables.
+    fn derive_bank_cap(&self) -> u64 {
+        let mut cap = self.crash_dump.max(self.trap_cost);
+        for simple in [
+            self.statement, self.assign, self.arith, self.compare, self.if_eval,
+            self.loop_iter, self.user_call, self.list_op, self.attr, self.enum_ctor,
+            self.match_base, self.match_arm, self.default_builtin,
+        ] {
+            cap = cap.max(simple);
+        }
+        for spec in self.builtins.values() {
+            let worst = match &spec.cost {
+                CostSpec::Fixed(c) => *c,
+                CostSpec::PlusPayload { base, .. } => base + self.payload_cap,
+                CostSpec::LogSized { base, cap } => (*cap).max(*base),
+            };
+            cap = cap.max(worst);
+        }
+        cap
+    }
+
     /// Registry entry for a callable, if it has one.
     pub fn spec(&self, name: &str) -> Option<&BuiltinSpec> {
         self.builtins.get(name)

@@ -57,6 +57,8 @@ pub(crate) const BUILD_CATEGORIES: &[(&str, &[BuildItem])] = &[
             BuildItem { name: "Clear Overlay", kind: ToolKind::Overlay(None) },
         ],
     ),
+    // Dev-only escape hatch (M3): abort() is the only PLAYER scuttle;
+    // this drives the dev Command::KillBot.
     ("Command", &[BuildItem { name: "Kill Bot", kind: ToolKind::Kill }]),
     (
         "Paint",

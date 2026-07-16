@@ -118,6 +118,16 @@ full charges + centicycles + wrap-surviving variables move every replay hash at 
       `tile_occupied`, the bump blocker lookup, and both replan obstacle sets read the index
       (`occupied_tiles`). [sim] (S)
 
+*Audit follow-ups (2026-07-15 M1–M4 verification), NEEDS DISCUSSION:*
+- *Phase-4 sub-order*: docs/07 says "resolve actions (move → combat → mine/build)"; the code
+  resolves PER BOT in id order (deterministic, but a lower-id attacker range-checks a
+  higher-id mover pre-move while the reverse pairing sees post-move). Reconcile doc or code.
+- *Structure damage is still inline in phase 4* (`actions.rs` attack arm): only bot damage
+  rides `pending_damage` to phase 6. Deterministic, but contradicts "damage is a phase".
+- *Phase-9 hash is shallow on in-flight state*: `bot.data.requested`, `bot.data.action`
+  (path/ticks/goals) and the recall path aren't hashed — a peer divergence there stays
+  invisible until a position changes. (Shallow VM hashing is already a known TODO.)
+
 ## M3 — Signals v3: the seven-template model ✅ COMPLETE (2026-07-15)
 
 - [x] **Per-signal reserved templates**: `on error/hurt/bump/bumped/boot:` player windows
@@ -200,7 +210,10 @@ full charges + centicycles + wrap-surviving variables move every replay hash at 
       tools exist to price yet) — the tier data (`Resource::tool_tier`) is in place,
       unenforced.* [sim] (M) ⚠HASH
 - [x] **Data currency** per faction: first hostile kill (10), delivery milestones (20 per 500
-      units), printer-repair sink; `Research { faction, construct }` command spends Data on
+      units — depot deposits only, minus each bot's stock-withdrawn cargo via PER-BOT
+      PROVENANCE (`withdrawn_aboard`), paid against a high-water mark: cycling and refinery
+      feeds mint nothing, and spending seeded stock never suppresses real income; review
+      rulings 2026-07-15/16), printer-repair sink; `Research { faction, construct }` command spends Data on
       docs/06's price tree; per-faction UnlockSets consumed at parse (`MapSpec.
       dev_all_unlocks`, default true, keeps sandboxes/tests/replays on the old behavior).
       *NEEDS DISCUSSION: the Research Archive structure exists but the Data EXCHANGE
@@ -222,22 +235,56 @@ full charges + centicycles + wrap-surviving variables move every replay hash at 
 - [ ] **Game**: render Smelter/Foundry/Archive/etc., typed stock in the world bar, structure
       HP bars. [game] (M)
 
-## M5 — Universal chassis: stats, energy, upgrades
+## M5 — Universal chassis: stats, energy, upgrades ✅ CORE COMPLETE (2026-07-15) — discussion items below
 
-- [ ] **Floor statline + stat pipeline**: HP 40, move 14 ticks/tile (a real move-rate stat —
-      today all bots move at tile-cost speed), cargo 4, sensors 5, slots 1; modifier pipeline
-      base → hardware → XP → quirks → state; deci/centi stored units; `stats.ron`. [sim] (L) ⚠HASH
-- [ ] **Energy & upkeep**: Generator + fuel, Geothermal Tap, per-bot draw, brownout
-      cycle-halving, Steel-shortfall rust (configurable), Fabricator backup trickle (one bot
-      always powered, lowest ID). [sim] (L) ⚠HASH
-- [ ] **Upgrade Station**: placeable structure, pad-sit run state, `QueueUpgrade`, hardware
-      catalog (Coprocessor, Backup Core, Optics, …), module slots + swap economics, pad pull
-      skips mid-template bots, skip-not-repull. [sim][game] (L)
-- [ ] **`bank_cap`** derived per-bot-per-tile (needs overlays from M8; until then derive from
-      base costs) + "no banking while blocked" moves from sim special-case into the rule.
-      [pyrite][sim] (S) ⚠HASH
-- [ ] **Game**: inspector budget meter scaled to bank_cap, per-line cycle-cost gutter in the
-      editor (docs ask for gutter, not hover-only), Upgrade Station catalog UI. [game] (M)
+- [x] **Floor statline + stat pipeline**: `stats.ron` (HP 40, move 140 deci-ticks/tile — a real
+      move-rate stat, terrain multiplies it; cargo 40 deci, sensors 5, slots 1, cpu 100 centi,
+      32 lines / 8 vars / stack 4 / log 8); pipeline base → hardware → XP (identity until M6)
+      → quirks (identity until M6) → state (Damaged −25% speed+cycles at the FIXED 50% line,
+      brownout −50% cycles) → clamp ≥1 stored unit, pessimistic rounding; `printed_*` left
+      tuning.ron; per-bot BASES on BotData so dev spawns override and M6 growth mutates.
+      *NEEDS DISCUSSION: the 14-ticks/tile floor is a big pacing change pre-M8 (tile costs
+      still act as multipliers 1–3×; the ×2 scale + Road ½× land M8) — sandbox/demo tests pin
+      `sim.stats.move_rate_deci = 10`. Damaged "speed −25%" was read as +25% ticks/tile.*
+      [sim] (L) ⚠HASH *(golden regenerated: statline + longer scenario, 300→1500 ticks)*
+- [x] **Energy & upkeep**: `upkeep.ron` (all FIRST-PASS numbers — docs give shape, not
+      figures); Generator (8 Steel) burns deposited Wood/Coal from its physical intake (Coal
+      preferred — the strong fuel; map-authored generators start stoked); Geothermal Tap (12
+      Steel, Vent tiles only); per-bot draw = base + per-upgrade + per-module (per-track-level
+      joins M6); refineries draw too and STAND IDLE browned out ("needs energy"); brownout
+      halves grants via the pipeline; Fabricator trickle keeps one bot (lowest id) powered
+      while a working printer exists; Steel shortfall rusts (self-repair halts + decay through
+      the damage phase; `rust_scraps` off by default). *NEEDS DISCUSSION: `MapSpec.
+      dev_free_power` default TRUE (the dev_all_unlocks pattern) keeps sandboxes powered;
+      Steel maintenance is all-or-nothing; fuel burns whole units per settlement regardless of
+      surplus.* [sim] (L) ⚠HASH
+- [x] **Upgrade Station**: StructureKind::UpgradeStation (10 Steel + 5 Chips + 3 Wire);
+      catalog as data in stats.ron (CPU Mk2/Mk3 SET 2/4 cyc, Memory bank +32/+4/+8, Stack ext
+      +4 live-VM depth, Coprocessor; modules Backup Core, Optics +2 sensors); `QueueUpgrade
+      { bot, order, replace }` (names resolve against the catalog; invalid = ignored); pad
+      pulls the lowest-entity-id adjacent queued bot, skipping mid-template/boot/recall (and
+      engine-fired recalls now skip pad-sitters); payment at mount (stock + 1 Water coolant
+      from the station's PHYSICAL buffer; modules draw no coolant); unaffordable = skip &
+      re-arm, invalid (duplicate CPU tier, no legal slot) = drop; sit = EngineCtx::PadSit
+      (double-handle applies; wreck-in-place clears the pad; a destroyed station frees its
+      sitter); step-off restarts at line 1. *NEEDS DISCUSSION: (1) Coprocessor and Backup Core
+      are PURCHASABLE BUT INERT — think-while-blocked needs a VM concurrency design, XP
+      preservation needs M6/M10 death rework; (2) no Water SOURCE exists — the Pump structure
+      (docs/03) is in no milestone, so coolant only flows from starting_stock/dev feeds; (3)
+      catalog time_ticks are invented first-pass numbers.* [sim][game] (L)
+- [x] **`bank_cap`** derived at load from the base cost table (max effective op cost = 25:
+      crash dump / upload_log cap; payload ops at payload_cap) as `CostTable.bank_cap`;
+      budget clamps after every grant to max(bank_cap, THIS grant) — the cap bounds SAVING,
+      never a fast CPU's per-tick throughput (review ruling 2026-07-16); debt untouched;
+      "no banking while blocked" now lives in `Vm::grant_centi` (the sim's skip is just a
+      shortcut). Per-tile re-derivation waits on M8 overlays. [pyrite][sim] (S) ⚠HASH
+- [x] **Game**: inspector budget meter is a bar scaled to bank_cap; per-line cycle-cost
+      gutter in the editor (painted in the TextEdit margin off `pyrite::analysis::
+      line_costs` — deliberately approximate: sized ops render base+`+`, branch lines charge
+      dispatch only); hardware & catalog section in the bot inspector queues `QueueUpgrade`
+      (module swap defaults to slot 1 when full). *Note: UI exercised by build only — verify
+      in-game alongside M4's still-open structure rendering (Smelter/Foundry/Archive/
+      Generator/Tap/Station have no sprites yet).* [game] (M)
 
 ## M6 — XP v2 & quirks
 

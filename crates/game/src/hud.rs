@@ -12,10 +12,13 @@ use crate::GameSim;
 pub(crate) fn inspector_ui(
     mut contexts: EguiContexts,
     mut editor: ResMut<EditorState>,
-    game: NonSend<GameSim>,
+    mut game: NonSendMut<GameSim>,
 ) {
     let Some(bot_id) = editor.selected_bot else { return };
     let Some(ctx) = contexts.try_ctx_mut() else { return };
+    // Station orders queued from the catalog UI, applied after the panel
+    // borrow ends (commands are the only mutation path).
+    let mut queued: Vec<sim::sim::Command> = Vec::new();
     let world = &game.0.world;
     let mut open = true;
 
@@ -112,14 +115,118 @@ pub(crate) fn inspector_ui(
         ));
         ui.separator();
 
+        // Hardware + the Upgrade Station catalog (M5): queue an order
+        // here; the PROGRAM must bring the bot to a pad (docs/03).
+        let stats = &game.0.stats;
+        egui::CollapsingHeader::new("hardware & upgrades").show(ui, |ui| {
+            if data.pad_sit {
+                ui.colored_label(
+                    egui::Color32::from_rgb(120, 200, 240),
+                    "on the pad — sitting an upgrade",
+                );
+            }
+            let installed: Vec<String> = data
+                .upgrades
+                .iter()
+                .filter_map(|&u| stats.upgrades.get(u as usize).map(|s| s.name.clone()))
+                .collect();
+            let slotted: Vec<String> = data
+                .modules
+                .iter()
+                .filter_map(|&m| stats.modules.get(m as usize).map(|s| s.name.clone()))
+                .collect();
+            ui.monospace(format!(
+                "compute: {}",
+                if installed.is_empty() { "stock".into() } else { installed.join(", ") }
+            ));
+            ui.monospace(format!(
+                "slots {}/{}: {}",
+                slotted.len(),
+                data.module_slots,
+                if slotted.is_empty() { "empty".into() } else { slotted.join(", ") }
+            ));
+            if !data.upgrade_queue.is_empty() {
+                let names: Vec<&str> = data
+                    .upgrade_queue
+                    .iter()
+                    .map(|o| match o {
+                        sim::world::UpgradeOrder::Compute(idx) => {
+                            stats.upgrades[*idx as usize].name.as_str()
+                        }
+                        sim::world::UpgradeOrder::Module { idx, .. } => {
+                            stats.modules[*idx as usize].name.as_str()
+                        }
+                    })
+                    .collect();
+                ui.monospace(format!("queued: {}", names.join(", ")));
+            }
+            ui.separator();
+            let price = |cost: &[(sim::resources::Resource, u32)]| -> String {
+                cost.iter()
+                    .map(|(k, units)| format!("{units} {}", k.name()))
+                    .collect::<Vec<_>>()
+                    .join(" + ")
+            };
+            // The coolant figure comes from stats.ron — the UI must never
+            // misprice what the sim charges.
+            ui.small(format!(
+                "compute (coolant: {} Water at the pad)",
+                stats.coolant_water_deci as f32 / 10.0
+            ));
+            for spec in &stats.upgrades {
+                ui.horizontal(|ui| {
+                    if ui.small_button(&spec.name).clicked() {
+                        queued.push(sim::sim::Command::QueueUpgrade {
+                            bot: sim::world::BotId(bot_id),
+                            order: spec.name.clone(),
+                            replace: None,
+                        });
+                    }
+                    ui.small(price(&spec.cost));
+                });
+            }
+            ui.small("modules (a swap destroys the old part — no refund)");
+            let slots_full = data.modules.len() >= data.module_slots as usize;
+            for spec in &stats.modules {
+                ui.horizontal(|ui| {
+                    let label = if slots_full {
+                        format!("{} (swap slot 1)", spec.name)
+                    } else {
+                        spec.name.clone()
+                    };
+                    if ui.small_button(label).clicked() {
+                        queued.push(sim::sim::Command::QueueUpgrade {
+                            bot: sim::world::BotId(bot_id),
+                            order: spec.name.clone(),
+                            replace: slots_full.then_some(0),
+                        });
+                    }
+                    ui.small(price(&spec.cost));
+                });
+            }
+        });
+        ui.separator();
+
         // VM state.
         if let Some(vm) = &bot.vm {
-            // Budget is stored in centicycles (Q56) — display whole cycles.
+            // The budget meter scales to the DERIVED bank_cap (M5, Q75/Q82)
+            // — the most expensive effective op this bot could pay here.
+            // Budget is stored in centicycles (Q56); display whole cycles.
+            let bank_cap_centi = game.0.costs.bank_cap as f32 * 100.0;
+            let fraction = (vm.budget().max(0) as f32 / bank_cap_centi).min(1.0);
+            ui.add(
+                egui::ProgressBar::new(fraction)
+                    .text(format!(
+                        "budget {}.{:02} / bank cap {}",
+                        vm.budget() / 100,
+                        (vm.budget() % 100).abs(),
+                        game.0.costs.bank_cap
+                    ))
+                    .desired_height(14.0),
+            );
             ui.monospace(format!(
-                "line {}   budget {}.{:02}   faults {} ({} crashes)",
+                "line {}   faults {} ({} crashes)",
                 vm.current_line(),
-                vm.budget() / 100,
-                (vm.budget() % 100).abs(),
                 vm.fault_count(),
                 vm.crash_count()
             ));
@@ -264,6 +371,11 @@ pub(crate) fn inspector_ui(
             ui.monospace(leveled_line(*level, line));
         }
     });
+
+    // Catalog clicks become ordinary lockstep commands.
+    for command in queued {
+        let _ = game.0.apply(&command);
+    }
 
     if !open {
         editor.selected_bot = None;

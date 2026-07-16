@@ -85,12 +85,13 @@ impl Sim {
         match path {
             Some(path) if path.is_empty() => self.finish_action(id, Ok(Value::Unit)),
             Some(path) => {
-                let first_cost = self
-                    .world
-                    .grid
-                    .get(path[0])
-                    .and_then(|t| t.move_ticks())
-                    .expect("path tiles are passable");
+                let first_cost = crate::stats::step_ticks(
+                    &self.stats,
+                    &self.world.grid,
+                    &self.world.bots[&id].data,
+                    path[0],
+                )
+                .expect("path tiles are passable");
                 let bot = self.world.bots.get_mut(&id).expect("bot exists");
                 bot.data.action = Some(Action::Move { path, ticks_left: first_cost, goals });
             }
@@ -116,12 +117,13 @@ impl Sim {
                     self.finish_action(id, Ok(Value::Unit));
                 }
                 Some(path) => {
-                    let first_cost = self
-                        .world
-                        .grid
-                        .get(path[0])
-                        .and_then(|t| t.move_ticks())
-                        .expect("path tiles are passable");
+                    let first_cost = crate::stats::step_ticks(
+                        &self.stats,
+                        &self.world.grid,
+                        &self.world.bots[&id].data,
+                        path[0],
+                    )
+                    .expect("path tiles are passable");
                     let bot = self.world.bots.get_mut(&id).expect("bot exists");
                     bot.data.action =
                         Some(Action::Move { path, ticks_left: first_cost, goals });
@@ -152,7 +154,15 @@ impl Sim {
             {
                 let ticks_left = path
                     .first()
-                    .map(|p| self.world.grid.get(*p).and_then(|t| t.move_ticks()).unwrap_or(1))
+                    .map(|p| {
+                        crate::stats::step_ticks(
+                            &self.stats,
+                            &self.world.grid,
+                            &self.world.bots[&id].data,
+                            *p,
+                        )
+                        .unwrap_or(1)
+                    })
                     .unwrap_or(0);
                 let bot = self.world.bots.get_mut(&id).expect("bot exists");
                 if let Some(recall) = bot.data.recall.as_mut() {

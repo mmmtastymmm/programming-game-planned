@@ -255,10 +255,14 @@
     // NOTE: become_disabled has NO entry — it is engine-only (Q76). The
     // abort sequence force-calls it directly; a player call faults
     // err_unknown_function like any unregistered name.
-    "handler_init": (cost: Fixed(0), signal_safe: true,
+    // signal_safe is FALSE despite being the template prologue: the engine
+    // injects the call itself (line 0); a PLAYER call faults
+    // err_unknown_function, so deploy analysis must reject it in windows
+    // (a fault inside a template is a double-handle -> abort).
+    "handler_init": (cost: Fixed(0), signal_safe: false,
         params: Some([]),
         signature: "handler_init()",
-        summary: "The forced handler-entry ritual — the visible flinch. Engine-injected; its price is time, not cycles.",
+        summary: "The forced handler-entry ritual — the visible flinch. Engine-injected; not player-callable.",
         cost_note: " + flinch ticks"),
 
     // --- core-language methods & container builtins (priced here for one
