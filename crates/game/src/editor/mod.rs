@@ -12,7 +12,7 @@ mod window;
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
 use sim::sim::Command;
-use sim::world::{Color as BotColor, PrinterState};
+use sim::world::{Color as BotColor, PrintTarget, PrinterState, SelectKey};
 use sim::map::OverlayKind;
 use sim::TilePos;
 use std::collections::{BTreeMap, HashMap};
@@ -115,6 +115,8 @@ pub(crate) struct EditorState {
     pub(crate) build_category: usize,
     /// Procedurally-drawn item icons, keyed by item name.
     pub(crate) icons: HashMap<&'static str, egui::TextureHandle>,
+    /// Telemetry viewer's minimum log level (M9; 0 = trace shows all).
+    pub(crate) telemetry_min: u8,
 }
 
 impl Default for EditorState {
@@ -134,24 +136,28 @@ impl Default for EditorState {
             speed: 1.0,
             build_category: 0,
             icons: HashMap::new(),
+            telemetry_min: 0,
         }
     }
 }
 
 fn color_name(color: u8) -> String {
-    match BotColor(color) {
-        BotColor::GREEN => "Green".into(),
-        BotColor::RED => "Red".into(),
-        _ => format!("Color {color}"),
-    }
+    BotColor(color).name() // the sim owns the named palette (docs/01)
 }
 
 /// The egui tint for a program color — window titles, phantom loop lines,
 /// and file-viewer entries all agree (docs/01: the bot is visibly tinted).
 fn color_tint(color: u8) -> egui::Color32 {
-    match BotColor(color) {
-        BotColor::GREEN => egui::Color32::from_rgb(120, 220, 120),
-        BotColor::RED => egui::Color32::from_rgb(240, 120, 100),
+    match color {
+        0 => egui::Color32::from_rgb(120, 220, 120),  // Green
+        1 => egui::Color32::from_rgb(240, 120, 100),  // Red
+        2 => egui::Color32::from_rgb(110, 170, 240),  // Blue
+        3 => egui::Color32::from_rgb(238, 205, 90),   // Yellow
+        4 => egui::Color32::from_rgb(90, 215, 215),   // Cyan
+        5 => egui::Color32::from_rgb(228, 110, 200),  // Magenta
+        6 => egui::Color32::from_rgb(240, 155, 75),   // Orange
+        7 => egui::Color32::from_rgb(165, 110, 240),  // Purple
+        8 => egui::Color32::from_rgb(230, 230, 238),  // White
         _ => egui::Color32::from_rgb(180, 180, 200),
     }
 }
@@ -675,6 +681,38 @@ fn doc_window(
                 // artifacts (body + colony handlers); a handler window
                 // pushes every color at once — the handler is shared.
                 ui.separator();
+                // Q52 deploy warning: the artifact's hardware bar vs the
+                // color's CURRENT members — the editor warns and proceeds
+                // (over-bar members drop to the remainder as lame ducks).
+                let unlocks = sim::world::faction_unlocks(&game.0.world, 0);
+                for (color, source) in &deploy {
+                    let Ok(program) = pyrite::parse(source, &unlocks) else { continue };
+                    let (lines, names) =
+                        pyrite::analysis::artifact_requirements(source, &program);
+                    let ctx = game.0.ctx();
+                    let over = game
+                        .0
+                        .world
+                        .bots
+                        .values()
+                        .filter(|b| {
+                            b.data.faction == 0
+                                && b.data.color.0 == *color
+                                && (ctx.program_lines_for(&b.data) < lines
+                                    || ctx.variable_slots_for(&b.data) < names)
+                        })
+                        .count();
+                    if over > 0 {
+                        ui.colored_label(
+                            egui::Color32::from_rgb(240, 200, 90),
+                            format!(
+                                "⚠ exceeds {over} {} member{}' memory ({lines} lines / {names} names) — deploying drops them to the remainder",
+                                color_name(*color),
+                                if over == 1 { "" } else { "s" },
+                            ),
+                        );
+                    }
+                }
                 let button_label = if let [(color, _)] = deploy.as_slice() {
                     format!("Deploy {}", color_name(*color))
                 } else {
@@ -863,18 +901,36 @@ pub(crate) fn editor_ui(
         ui.separator();
 
         ui.heading("Printers");
+        // The fleet cap is printer-derived (M9): +N per working printer.
+        let fleet = game.0.world.fleet_size(0);
+        let cap = game.0.fleet_cap(0);
+        let queued = game.0.world.reprint_queue.get(&0).copied().unwrap_or(0);
+        ui.horizontal(|ui| {
+            ui.label(format!("Fleet {fleet} / cap {cap}"));
+            let label =
+                if queued > 0 { format!("Reprint ({queued} queued)") } else { "Reprint".into() };
+            if ui.button(label).on_hover_text(
+                "Queue one replacement stock print — its color comes from the allocation",
+            ).clicked() {
+                let _ = game.0.apply(&Command::QueuePrint { faction: 0 });
+            }
+        });
         let printer_ids: Vec<_> = game.0.world.printers.keys().copied().collect();
         let repair_cost = game.0.tuning.repair_cost_data;
+        let remainder = game.0.world.remainder_printer(0);
         for pid in printer_ids {
-            let (color, state, mut desired) = {
+            let (color, state, rules) = {
                 let p = &game.0.world.printers[&pid];
-                (p.color, p.state, p.desired_max)
+                (p.color, p.state, p.rules)
             };
             let name = color_name(color.0);
             ui.horizontal(|ui| {
                 ui.label(egui::RichText::new(name).color(color_tint(color.0)));
                 match state {
                     PrinterState::Ruined => {
+                        // Dormant: cap contribution withdrawn, no prints,
+                        // its color's bots are ghost machines (Q65).
+                        ui.small("dormant — its bots are ghosts");
                         let affordable = game.0.world.data.get(&0).copied().unwrap_or(0) >= repair_cost;
                         if ui
                             .add_enabled(
@@ -886,27 +942,147 @@ pub(crate) fn editor_ui(
                             let _ = game.0.apply(&Command::RepairPrinter { printer: pid });
                         }
                     }
+                    PrinterState::Working if remainder == Some(pid) => {
+                        ui.small("remainder — takes what nobody claims");
+                    }
                     PrinterState::Working => {
+                        let mut rules = rules.unwrap_or_default();
+                        let mut changed = false;
+                        // Target: an absolute count, or a floored % of cap.
+                        let mut pct = matches!(rules.target, PrintTarget::CapPct(_));
+                        let mut value = match rules.target {
+                            PrintTarget::Count(n) => n,
+                            PrintTarget::CapPct(p) => p,
+                        };
+                        changed |= ui
+                            .add(egui::DragValue::new(&mut value).range(0..=999))
+                            .changed();
                         if ui
-                            .add(egui::Slider::new(&mut desired, 0..=8).text("bots"))
+                            .selectable_label(pct, "%cap")
+                            .on_hover_text("Target reads as a floored % of the fleet cap")
+                            .clicked()
+                        {
+                            pct = !pct;
+                            changed = true;
+                        }
+                        rules.target = if pct {
+                            PrintTarget::CapPct(value.min(100))
+                        } else {
+                            PrintTarget::Count(value)
+                        };
+                        // Selection key + direction.
+                        let keys: [(SelectKey, &str); 8] = [
+                            (SelectKey::TotalXp, "total XP"),
+                            (SelectKey::Xp(sim::world::XpTrack::Combat), "Combat XP"),
+                            (SelectKey::Xp(sim::world::XpTrack::Mining), "Mining XP"),
+                            (SelectKey::Xp(sim::world::XpTrack::Hauling), "Hauling XP"),
+                            (SelectKey::Hp, "HP"),
+                            (SelectKey::Sensors, "sensors"),
+                            (SelectKey::CargoCap, "cargo"),
+                            (SelectKey::MoveRate, "speed"),
+                        ];
+                        let current = keys
+                            .iter()
+                            .find(|(k, _)| *k == rules.key)
+                            .map(|(_, n)| *n)
+                            .unwrap_or("total XP");
+                        egui::ComboBox::from_id_salt(("key", pid.0))
+                            .selected_text(current)
+                            .width(90.0)
+                            .show_ui(ui, |ui| {
+                                for (key, label) in keys {
+                                    if ui
+                                        .selectable_label(rules.key == key, label)
+                                        .clicked()
+                                    {
+                                        rules.key = key;
+                                        changed = true;
+                                    }
+                                }
+                            });
+                        if ui
+                            .selectable_label(rules.best_first, "best")
+                            .on_hover_text(
+                                "Claim best-first by the key's improvement direction; off = worst-first",
+                            )
+                            .clicked()
+                        {
+                            rules.best_first = !rules.best_first;
+                            changed = true;
+                        }
+                        let mut priority = rules.priority.min(99);
+                        if ui
+                            .add(egui::DragValue::new(&mut priority).range(0..=99).prefix("#"))
+                            .on_hover_text("Claim order across printers (lower first)")
                             .changed()
                         {
-                            let _ = game
-                                .0
-                                .apply(&Command::SetDesiredMax { printer: pid, value: desired });
+                            rules.priority = priority;
+                            changed = true;
                         }
-                        // Print progress lives on the world-space bar
-                        // above the printer now — no duplicate here.
+                        if changed {
+                            // A rule edit dispatches like a signal (M9):
+                            // mid-template bots can wreck — the docs mean
+                            // it: turn the dials when your bots are safe.
+                            let _ = game.0.apply(&Command::EditPrinterRules {
+                                printer: pid,
+                                target: rules.target,
+                                key: rules.key,
+                                best_first: rules.best_first,
+                                priority: rules.priority,
+                                check_interval: None,
+                            });
+                        }
                     }
                 }
             });
         }
         ui.separator();
 
-        ui.heading("Cloud");
+        // Per-printer telemetry with level filtering (M9) — replaces the
+        // flat "Cloud" stream.
+        ui.heading("Telemetry");
+        ui.horizontal(|ui| {
+            ui.small("min level");
+            for (level, name) in sim::world::LEVEL_NAMES.iter().enumerate() {
+                if ui
+                    .selectable_label(editor.telemetry_min == level as u8, *name)
+                    .clicked()
+                {
+                    editor.telemetry_min = level as u8;
+                }
+            }
+        });
+        let colors = program_colors(&game);
         let archive = &game.0.world.archive;
-        for entry in archive.iter().rev().take(8).rev() {
-            ui.small(format!("[{}] bot{}: {}", entry.tick, entry.bot.0, entry.text));
+        for c in colors {
+            let entries: Vec<String> = archive
+                .iter()
+                .rev()
+                .filter(|e| {
+                    e.level >= editor.telemetry_min
+                        && game
+                            .0
+                            .world
+                            .bots
+                            .get(&e.bot)
+                            .is_some_and(|b| b.data.color.0 == c)
+                })
+                .take(6)
+                .map(|e| format!("[{}] bot{}: {}", e.tick, e.bot.0, e.text))
+                .collect();
+            egui::CollapsingHeader::new(
+                egui::RichText::new(color_name(c)).color(color_tint(c)),
+            )
+            .id_salt(("telemetry", c))
+            .default_open(true)
+            .show(ui, |ui| {
+                for line in entries.iter().rev() {
+                    ui.small(line);
+                }
+                if entries.is_empty() {
+                    ui.small("—");
+                }
+            });
         }
         ui.separator();
         ui.small("LMB / MMB drag: pan · RMB drag: orbit · scroll: zoom");

@@ -13,7 +13,7 @@
 
 use sim::map::{MapSpec, PrinterSpec};
 use sim::sim::Command;
-use sim::world::{BlueprintKind, BotId, Color, EntityId};
+use sim::world::{BlueprintKind, BotId, Color, EntityId, PrintTarget, SelectKey};
 use sim::map::{Direction, OverlayKind};
 use sim::{Replay, TilePos, TimedCommand};
 use std::path::PathBuf;
@@ -53,22 +53,32 @@ fn golden_replay() -> Replay {
     spec.printers.push(PrinterSpec {
         pos: TilePos::new(2, 5),
         faction: 0,
-        color: 0,
+        color: 0, // Green: first-born, the remainder bucket
         ruined: false,
-        desired_max: 0,
     });
+    // A second, dialed printer (M9): the scenario exercises
+    // EditPrinterRules and a mid-run re-color recall.
+    spec.printers.push(PrinterSpec {
+        pos: TilePos::new(2, 7),
+        faction: 0,
+        color: 1,
+        ruined: false,
+    });
+    // The remainder prints to the fleet cap now (M9) — pin the scenario's
+    // population where the old dial held it.
+    spec.fleet_cap_override = Some(1); // cap 2 across the two printers
     // A water inlet with a bridge-able gap (blueprint placed mid-run).
     for y in 0..3 {
         spec.water.push(TilePos::new(7, y));
     }
-    // Entity IDs from from_spec order: ore nodes = 1,2, depot = 3, printer = 4.
-    let printer = EntityId(4);
+    // Entity IDs from from_spec order: ore nodes = 1,2, depot = 3,
+    // printers = 4 (Green, remainder) and 5 (Red, dialed).
+    let red_printer = EntityId(5);
     let commands = vec![
         TimedCommand {
             tick: 0,
             command: Command::DeployProgram { faction: 0, color: Color::GREEN, source: MINER.into() },
         },
-        TimedCommand { tick: 0, command: Command::SetDesiredMax { printer, value: 2 } },
         TimedCommand {
             tick: 40,
             command: Command::PlaceOverlay {
@@ -90,6 +100,21 @@ fn golden_replay() -> Replay {
             command: Command::PlaceBlueprint { pos: TilePos::new(7, 1), kind: BlueprintKind::Bridge, faction: 0 },
         },
         TimedCommand { tick: 220, command: Command::KillBot { bot: BotId(1) } },
+        TimedCommand {
+            // Mid-run rule edit (M9): Red claims one bot best-first on
+            // total XP — a signal-like recall, re-color, and boot land in
+            // the hash stream.
+            tick: 300,
+            command: Command::EditPrinterRules {
+                printer: red_printer,
+                target: PrintTarget::Count(1),
+                key: SelectKey::TotalXp,
+                best_first: true,
+                priority: 0,
+                check_interval: None,
+            },
+        },
+        TimedCommand { tick: 320, command: Command::QueuePrint { faction: 0 } },
     ];
     // 1500 ticks: at M5's 14-ticks/tile floor statline a depot round trip
     // is ~250 ticks, so the scenario still sees several deliveries.
@@ -132,7 +157,11 @@ fn golden_scenario_is_alive() {
         sim.world.stock_get(0, sim::resources::Resource::Iron)
     );
     assert!(sim.world.wrecks.contains_key(&BotId(1)), "KillBot(1) must leave a wreck");
-    assert_eq!(sim.world.program_library.len(), 2, "both deployed versions retained");
+    assert_eq!(
+        sim.world.program_library.len(),
+        3,
+        "both deployed versions retained, plus the shared empty birth file (M9 Q85)"
+    );
     assert!(!sim.world.blueprints.is_empty(), "bridge blueprint placed");
 }
 

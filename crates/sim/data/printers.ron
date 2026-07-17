@@ -1,0 +1,10 @@
+// Printer fleet tuning (M9, docs/01 "Program Colors" — every number is
+// data, not code). The +15 figure is the Q84 first-pass manifest.
+PrinterConfig(
+    // Each WORKING printer adds this to the colony's fleet cap — the only
+    // hard ceiling on fleet size (docs/02).
+    fleet_cap_per_printer: 15,
+    // Default re-allocation clock: every X ticks the printers recompute
+    // which bots they own (player-set per faction via EditPrinterRules).
+    check_interval_ticks: 1000,
+)

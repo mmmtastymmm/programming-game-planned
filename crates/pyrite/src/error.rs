@@ -53,6 +53,9 @@ pub enum PyriteErrorKind {
     WindowLoop { signal: &'static str },
     /// Recursion makes a window's worst case unbounded.
     WindowRecursion { signal: &'static str, func: String },
+    /// M9 (Q52): the remainder color's artifact must fit STOCK hardware —
+    /// it has to be receivable by ANY bot in the colony.
+    RemainderOverBar { lines: u32, names: u32, cap_lines: u32, cap_names: u32 },
 }
 
 impl fmt::Display for PyriteError {
@@ -125,6 +128,13 @@ impl fmt::Display for PyriteError {
                     f,
                     "'{func}' recurses — recursion is unbounded, so it cannot be called \
                      from the 'on {signal}:' window"
+                )
+            }
+            PyriteErrorKind::RemainderOverBar { lines, names, cap_lines, cap_names } => {
+                write!(
+                    f,
+                    "the remainder program must fit stock hardware \
+({cap_lines} lines / {cap_names} names — this artifact needs {lines}/{names})"
                 )
             }
         }

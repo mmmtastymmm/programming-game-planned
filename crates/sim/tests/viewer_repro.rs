@@ -21,7 +21,9 @@ fn viewer_map() -> MapSpec {
     spec.ore_nodes.push((TilePos::new(20, 3), 60));
     spec.ore_nodes.push((TilePos::new(19, 11), 40));
     spec.depots.push(TilePos::new(3, 7));
-    spec.printers.push(PrinterSpec { pos: TilePos::new(2, 5), faction: 0, color: 0, ruined: false, desired_max: 4 });
+    spec.printers.push(PrinterSpec { pos: TilePos::new(2, 5), faction: 0, color: 0, ruined: false });
+    // M9: the remainder printer prints to the fleet cap — pin it.
+    spec.fleet_cap_override = Some(4);
     spec.starting_ore = 30;
     spec.starting_stock.push((0, sim::resources::Resource::Stone, 50));
     spec

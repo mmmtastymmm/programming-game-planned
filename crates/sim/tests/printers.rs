@@ -1,31 +1,30 @@
-//! Printers, colors, boot, and the recall interrupt
-//! (docs/01 "Program Colors" + "The recall interrupt", docs/03).
+//! Printers v2 (M9): target shares, the allocation, recall dispatch,
+//! ghosts, hardware bars, and scrap
+//! (docs/01 "Program Colors" + "Target shares" + "The recall interrupt").
 
 use sim::map::{MapSpec, PrinterSpec};
 use sim::sim::{Command, Sim};
-use sim::world::{Color, PrinterState};
+use sim::world::{Color, PrintTarget, PrinterState, SelectKey};
 use sim::{EntityId, TilePos};
 
 const IDLER: &str = "log(1)\n";
 const BRAWLER: &str = "attack(closest(enemy).expect())\n";
 
-/// Base map: a working Green printer and a ruined Red one (the doc's
-/// starting state), plus seed ore.
+/// Base map: a working Green printer (the remainder bucket — first-born)
+/// and a ruined Red one (the doc's starting state), plus seed ore.
 fn colony_map() -> MapSpec {
     let mut spec = MapSpec::empty(12, 8);
     spec.printers.push(PrinterSpec {
         pos: TilePos::new(2, 2),
         faction: 0,
-        color: 0, // Green
+        color: 0, // Green — first-born: the remainder bucket
         ruined: false,
-        desired_max: 0,
     });
     spec.printers.push(PrinterSpec {
         pos: TilePos::new(4, 2),
         faction: 0,
         color: 1, // Red
         ruined: true,
-        desired_max: 0,
     });
     spec.starting_ore = 100;
     spec
@@ -35,17 +34,45 @@ fn printer_ids(sim: &Sim) -> Vec<EntityId> {
     sim.world.printers.keys().copied().collect()
 }
 
+fn spawn_green(sim: &mut Sim, pos: TilePos) -> sim::BotId {
+    sim.apply(&Command::SpawnBot {
+        pos,
+        source: IDLER.into(),
+        cpu: 2,
+        cargo_cap: 1,
+        faction: 0,
+        hp: 100,
+        color: Color::GREEN,
+    })
+    .unwrap()
+    .unwrap()
+}
+
+/// Dial a printer: target + key, defaults elsewhere.
+fn dial(sim: &mut Sim, printer: EntityId, target: u32, key: SelectKey, best_first: bool) {
+    sim.apply(&Command::EditPrinterRules {
+        printer,
+        target: PrintTarget::Count(target),
+        key,
+        best_first,
+        priority: 0,
+        check_interval: None,
+    })
+    .unwrap();
+}
+
 #[test]
-fn printer_prints_to_its_dial() {
-    let mut sim = Sim::new(&colony_map());
-    let green = printer_ids(&sim)[0];
+fn remainder_prints_to_the_fleet_cap() {
+    let mut spec = colony_map();
+    spec.fleet_cap_override = Some(3);
+    let mut sim = Sim::new(&spec);
     sim.apply(&Command::DeployProgram { faction: 0, color: Color::GREEN, source: IDLER.into() })
         .unwrap();
-    sim.apply(&Command::SetDesiredMax { printer: green, value: 3 }).unwrap();
     for _ in 0..100 {
         sim.step();
     }
-    assert_eq!(sim.world.bots.len(), 3, "population reaches the dial and stops");
+    // Cap = 3 × 1 working printer (the ruined Red contributes nothing).
+    assert_eq!(sim.world.bots.len(), 3, "the remainder prints to the cap and stops");
     assert!(sim.world.bots.values().all(|b| b.data.color == Color::GREEN));
     assert_eq!(
         sim.world.stock_get(0, sim::resources::Resource::Iron),
@@ -57,93 +84,131 @@ fn printer_prints_to_its_dial() {
 }
 
 #[test]
-fn ruined_printer_prints_only_after_repair() {
-    let mut sim = Sim::new(&colony_map());
+fn dialed_printer_prints_its_own_color_after_repair() {
+    let mut spec = colony_map();
+    spec.fleet_cap_override = Some(1);
+    let mut sim = Sim::new(&spec);
     let red = printer_ids(&sim)[1];
     sim.apply(&Command::DeployProgram { faction: 0, color: Color::RED, source: IDLER.into() })
         .unwrap();
-    sim.apply(&Command::SetDesiredMax { printer: red, value: 1 }).unwrap();
+    dial(&mut sim, red, 1, SelectKey::TotalXp, true);
     for _ in 0..50 {
         sim.step();
     }
-    assert_eq!(sim.world.bots.len(), 0, "ruined printers print nothing");
+    assert!(
+        sim.world.bots.values().all(|b| b.data.color != Color::RED),
+        "ruined printers print nothing"
+    );
 
-    // Repair prices in DATA now (docs/03): without Data it stays ruined.
+    // Repair prices in DATA (docs/03): without Data it stays ruined.
     sim.apply(&Command::RepairPrinter { printer: red }).unwrap();
     assert_eq!(sim.world.printers[&red].state, PrinterState::Ruined, "no Data, no repair");
     sim.world.data.insert(0, sim.tuning.repair_cost_data);
     sim.apply(&Command::RepairPrinter { printer: red }).unwrap();
     assert_eq!(sim.world.printers[&red].state, PrinterState::Working);
     assert_eq!(sim.world.data.get(&0).copied().unwrap_or(0), 0, "repair drained the Data");
-    for _ in 0..50 {
-        sim.step();
-    }
-    assert_eq!(sim.world.bots.len(), 1);
-    assert_eq!(sim.world.bots.values().next().unwrap().data.color, Color::RED);
-}
-
-#[test]
-fn recall_recolors_the_lowest_xp_bot_keeping_xp() {
-    let mut sim = Sim::new(&colony_map());
-    let [green, red] = printer_ids(&sim)[..] else { panic!() };
-    sim.apply(&Command::DeployProgram { faction: 0, color: Color::GREEN, source: IDLER.into() })
-        .unwrap();
-    sim.apply(&Command::DeployProgram { faction: 0, color: Color::RED, source: IDLER.into() })
-        .unwrap();
-    sim.world.data.insert(0, sim.tuning.repair_cost_data);
-    sim.apply(&Command::RepairPrinter { printer: red }).unwrap();
-
-    // Two green bots; give one of them XP by hand-spawning a veteran.
-    let veteran = sim
-        .apply(&Command::SpawnBot {
-            pos: TilePos::new(2, 3),
-            source: IDLER.into(),
-            cpu: 2,
-            cargo_cap: 1,
-            faction: 0,
-            hp: 100,
-            color: Color::GREEN,
-        })
-        .unwrap()
-        .unwrap();
-    let rookie = sim
-        .apply(&Command::SpawnBot {
-            pos: TilePos::new(3, 3),
-            source: IDLER.into(),
-            cpu: 2,
-            cargo_cap: 1,
-            faction: 0,
-            hp: 100,
-            color: Color::GREEN,
-        })
-        .unwrap()
-        .unwrap();
-    sim.world.bots.get_mut(&veteran).unwrap().data.xp.insert(sim::world::XpTrack::Mining, 500);
-
-    // Green over quota (2 > 1), Red has headroom (0 < 1): recall fires.
-    sim.apply(&Command::SetDesiredMax { printer: green, value: 1 }).unwrap();
-    sim.apply(&Command::SetDesiredMax { printer: red, value: 1 }).unwrap();
     for _ in 0..60 {
         sim.step();
     }
+    // Cap grew to 2; the dialed printer prints FIRST (priority before the
+    // remainder), so exactly one Red exists.
+    assert_eq!(
+        sim.world.bots.values().filter(|b| b.data.color == Color::RED).count(),
+        1,
+        "the dialed printer prints its own color when short of its target"
+    );
+}
 
+#[test]
+fn rule_edit_recolors_by_key_keeping_xp() {
+    let mut spec = colony_map();
+    spec.fleet_cap_override = Some(1); // cap 2 once red works: no prints
+    let mut sim = Sim::new(&spec);
+    let red = printer_ids(&sim)[1];
+    sim.world.data.insert(0, sim.tuning.repair_cost_data);
+    sim.apply(&Command::RepairPrinter { printer: red }).unwrap();
+
+    let veteran = spawn_green(&mut sim, TilePos::new(2, 3));
+    let rookie = spawn_green(&mut sim, TilePos::new(3, 3));
+    sim.world.bots.get_mut(&veteran).unwrap().data.xp.insert(sim::world::XpTrack::Mining, 500);
+
+    // Red claims ONE bot, worst-first on total XP: the rookie.
+    dial(&mut sim, red, 1, SelectKey::TotalXp, false);
+    for _ in 0..80 {
+        sim.step();
+    }
     let rookie_bot = &sim.world.bots[&rookie];
     let veteran_bot = &sim.world.bots[&veteran];
-    assert_eq!(rookie_bot.data.color, Color::RED, "lowest-XP bot re-colors");
-    assert_eq!(veteran_bot.data.color, Color::GREEN, "veteran keeps its color");
-    assert_eq!(veteran_bot.data.xp(sim::world::XpTrack::Mining), 500);
+    assert_eq!(rookie_bot.data.color, Color::RED, "worst-first claim takes the rookie");
+    assert_eq!(veteran_bot.data.color, Color::GREEN, "the veteran stays remainder");
+    assert_eq!(veteran_bot.data.xp(sim::world::XpTrack::Mining), 500, "XP rides the bot");
     assert_eq!(sim.world.bots.len(), 2, "rebalancing loses nobody");
 }
 
 #[test]
-fn no_recall_without_headroom() {
-    // Over-quota green, but red is ruined: no destination → no recall,
-    // surplus bots keep working (docs/01 dormant/ghost-fleet rule).
-    let mut sim = Sim::new(&colony_map());
-    let green = printer_ids(&sim)[0];
-    sim.apply(&Command::DeployProgram { faction: 0, color: Color::GREEN, source: IDLER.into() })
+fn best_first_claim_takes_the_veteran() {
+    let mut spec = colony_map();
+    spec.fleet_cap_override = Some(1);
+    let mut sim = Sim::new(&spec);
+    let red = printer_ids(&sim)[1];
+    sim.world.data.insert(0, sim.tuning.repair_cost_data);
+    sim.apply(&Command::RepairPrinter { printer: red }).unwrap();
+    let veteran = spawn_green(&mut sim, TilePos::new(2, 3));
+    let _rookie = spawn_green(&mut sim, TilePos::new(3, 3));
+    sim.world.bots.get_mut(&veteran).unwrap().data.xp.insert(sim::world::XpTrack::Combat, 700);
+
+    dial(&mut sim, red, 1, SelectKey::Xp(sim::world::XpTrack::Combat), true);
+    // The walk may bump the parked rookie (50-tick freeze) and detour.
+    for _ in 0..400 {
+        sim.step();
+    }
+    assert_eq!(
+        sim.world.bots[&veteran].data.color,
+        Color::RED,
+        "best-first on Combat XP keeps the fighters Red"
+    );
+}
+
+#[test]
+fn cap_pct_targets_read_the_cap_not_the_fleet() {
+    let mut spec = colony_map();
+    spec.fleet_cap_override = Some(4); // cap = 4 (green) + 4 (red once repaired)
+    let mut sim = Sim::new(&spec);
+    let red = printer_ids(&sim)[1];
+    sim.world.data.insert(0, sim.tuning.repair_cost_data);
+    sim.apply(&Command::RepairPrinter { printer: red }).unwrap();
+    sim.apply(&Command::DeployProgram { faction: 0, color: Color::RED, source: IDLER.into() })
         .unwrap();
-    for pos in [TilePos::new(2, 3), TilePos::new(3, 3)] {
+    // 25% of the 8-bot cap = 2, floored — regardless of live fleet size.
+    sim.apply(&Command::EditPrinterRules {
+        printer: red,
+        target: PrintTarget::CapPct(25),
+        key: SelectKey::TotalXp,
+        best_first: true,
+        priority: 0,
+        check_interval: None,
+    })
+    .unwrap();
+    for _ in 0..300 {
+        sim.step();
+    }
+    assert_eq!(
+        sim.world.bots.values().filter(|b| b.data.color == Color::RED).count(),
+        2,
+        "CapPct(25) of an 8 cap = 2 Reds, floored"
+    );
+    assert_eq!(sim.world.bots.len(), 8, "the remainder fills the rest of the cap");
+}
+
+#[test]
+fn ghost_machines_orphan_and_rejoin_on_repair() {
+    let mut spec = colony_map();
+    spec.fleet_cap_override = Some(2);
+    let mut sim = Sim::new(&spec);
+    let red = printer_ids(&sim)[1];
+    // Two RED bots while the Red printer is ruined: ghosts — no working
+    // printer owns their color.
+    for pos in [TilePos::new(6, 5), TilePos::new(7, 5)] {
         sim.apply(&Command::SpawnBot {
             pos,
             source: IDLER.into(),
@@ -151,33 +216,127 @@ fn no_recall_without_headroom() {
             cargo_cap: 1,
             faction: 0,
             hp: 100,
-            color: Color::GREEN,
+            color: Color::RED,
         })
+        .unwrap()
         .unwrap();
     }
-    sim.apply(&Command::SetDesiredMax { printer: green, value: 1 }).unwrap();
+    let ghosts: Vec<_> = sim.world.bots.keys().copied().collect();
+    assert!(sim.world.bots.values().all(|b| sim.world.is_ghost(&b.data)));
     for _ in 0..50 {
         sim.step();
     }
-    assert_eq!(sim.world.bots.len(), 2, "no destination with headroom → no recall");
-    assert!(sim.world.bots.values().all(|b| b.data.recall.is_none()));
+    // Ghosts are outside the allocation and exempt from scrap: nobody was
+    // recalled, nobody re-colored, nobody scrapped (fleet size is ZERO —
+    // ghosts aren't fleet — while prints filled the cap alongside them).
+    for id in &ghosts {
+        let bot = &sim.world.bots[id];
+        assert_eq!(bot.data.color, Color::RED, "ghosts keep their frozen color");
+        assert!(bot.data.recall.is_none(), "nobody force-marches ghosts home");
+    }
+    // Retake (repair) the printer: the ghosts are uploaded again — the
+    // allocation claims them like any member (Red has no target, so the
+    // remainder Green absorbs them via recalls).
+    sim.world.data.insert(0, sim.tuning.repair_cost_data);
+    sim.apply(&Command::RepairPrinter { printer: red }).unwrap();
+    assert!(
+        sim.world.bots.values().filter(|b| ghosts.contains(&b.data.id)).all(
+            |b| !sim.world.is_ghost(&b.data)
+        ),
+        "a working printer re-uploads its survivors"
+    );
+}
+
+#[test]
+fn hardware_bar_gates_claims_and_the_remainder_deploy() {
+    let mut spec = colony_map();
+    spec.fleet_cap_override = Some(1);
+    let mut sim = Sim::new(&spec);
+    let red = printer_ids(&sim)[1];
+    sim.world.data.insert(0, sim.tuning.repair_cost_data);
+    sim.apply(&Command::RepairPrinter { printer: red }).unwrap();
+    let bot = spawn_green(&mut sim, TilePos::new(2, 3));
+
+    // A 33-line artifact exceeds the stock 32-line memory: the REMAINDER
+    // (Green) must refuse it outright — it has to fit any bot.
+    let long_program = "log(1)\n".repeat(33);
+    let refused = sim.apply(&Command::DeployProgram {
+        faction: 0,
+        color: Color::GREEN,
+        source: long_program.clone(),
+    });
+    assert!(refused.is_err(), "the remainder program must fit stock hardware");
+
+    // Deployed to RED (a dialed color) it's legal — but Red then claims
+    // only bots whose bought hardware fits, which stock bots don't.
+    sim.apply(&Command::DeployProgram { faction: 0, color: Color::RED, source: long_program })
+        .unwrap();
+    dial(&mut sim, red, 1, SelectKey::TotalXp, true);
+    for _ in 0..60 {
+        sim.step();
+    }
+    assert_eq!(
+        sim.world.bots[&bot].data.color,
+        Color::GREEN,
+        "an over-bar color claims no stock bots (Q52: the bar filters before the key)"
+    );
+    // And it never prints either: fresh prints are stock machines.
+    assert!(
+        sim.world.bots.values().all(|b| b.data.color != Color::RED),
+        "above-stock-bar printers don't print"
+    );
+}
+
+#[test]
+fn deploy_drops_land_politely_as_lame_ducks() {
+    let mut spec = colony_map();
+    spec.fleet_cap_override = Some(1);
+    let mut sim = Sim::new(&spec);
+    let red = printer_ids(&sim)[1];
+    sim.world.data.insert(0, sim.tuning.repair_cost_data);
+    sim.apply(&Command::RepairPrinter { printer: red }).unwrap();
+    let bot = spawn_green(&mut sim, TilePos::new(2, 3));
+    dial(&mut sim, red, 1, SelectKey::TotalXp, true);
+    for _ in 0..80 {
+        sim.step();
+    }
+    assert_eq!(sim.world.bots[&bot].data.color, Color::RED, "claimed by the dial");
+
+    // A fatter RED deploy raises the bar over the bot's stock hardware:
+    // the drop is assignment-at-once but the recall lands POLITELY — via
+    // the pending queue, never a signal.
+    sim.apply(&Command::DeployProgram {
+        faction: 0,
+        color: Color::RED,
+        source: "log(1)\n".repeat(33),
+    })
+    .unwrap();
+    assert!(
+        sim.world.pending_recalls.contains_key(&bot),
+        "the dropped member queues politely (the lame-duck rule)"
+    );
+    // The walk home may bump idle prints parked at the doorstep (50-tick
+    // freeze each) and replan around them.
+    for _ in 0..400 {
+        sim.step();
+    }
+    assert_eq!(
+        sim.world.bots[&bot].data.color,
+        Color::GREEN,
+        "the lame duck lands at the remainder"
+    );
 }
 
 #[test]
 fn damage_during_recall_walk_is_double_handle() {
-    let mut sim = Sim::new(&colony_map());
-    let [green, red] = printer_ids(&sim)[..] else { panic!() };
-    sim.apply(&Command::DeployProgram { faction: 0, color: Color::GREEN, source: IDLER.into() })
-        .unwrap();
-    sim.apply(&Command::DeployProgram { faction: 0, color: Color::RED, source: IDLER.into() })
-        .unwrap();
+    let mut spec = colony_map();
+    spec.fleet_cap_override = Some(1);
+    let mut sim = Sim::new(&spec);
+    let red = printer_ids(&sim)[1];
     sim.world.data.insert(0, sim.tuning.repair_cost_data);
     sim.apply(&Command::RepairPrinter { printer: red }).unwrap();
 
     // Victim far from home so the walk takes a while; brawler adjacent.
-    // One hit kills: the blow lands in the resolve phase right after the
-    // recall begins (the walk starts a phase later), so death arrives
-    // mid-recall — an engine interrupt context.
     let victim = sim
         .apply(&Command::SpawnBot {
             pos: TilePos::new(10, 6),
@@ -201,9 +360,8 @@ fn damage_during_recall_walk_is_double_handle() {
     })
     .unwrap();
 
-    // Force the recall: green over quota (1 > 0), red has headroom.
-    sim.apply(&Command::SetDesiredMax { printer: green, value: 0 }).unwrap();
-    sim.apply(&Command::SetDesiredMax { printer: red, value: 1 }).unwrap();
+    // Claim the victim Red: the rule edit fires a signal-like recall.
+    dial(&mut sim, red, 1, SelectKey::TotalXp, true);
     for _ in 0..100 {
         sim.step();
         if !sim.world.bots.contains_key(&victim) {
@@ -218,41 +376,21 @@ fn damage_during_recall_walk_is_double_handle() {
 }
 
 #[test]
-fn over_capacity_scraps_lowest_xp_for_refund() {
-    let mut sim = Sim::new(&colony_map());
-    sim.tuning.capacity = 1;
-    sim.apply(&Command::DeployProgram { faction: 0, color: Color::GREEN, source: IDLER.into() })
-        .unwrap();
-    let veteran = sim
-        .apply(&Command::SpawnBot {
-            pos: TilePos::new(2, 3),
-            source: IDLER.into(),
-            cpu: 2,
-            cargo_cap: 1,
-            faction: 0,
-            hp: 100,
-            color: Color::GREEN,
-        })
-        .unwrap()
-        .unwrap();
-    sim.apply(&Command::SpawnBot {
-        pos: TilePos::new(3, 3),
-        source: IDLER.into(),
-        cpu: 2,
-        cargo_cap: 1,
-        faction: 0,
-        hp: 100,
-        color: Color::GREEN,
-    })
-    .unwrap();
-    sim.world.bots.get_mut(&veteran).unwrap().data.xp.insert(sim::world::XpTrack::Combat, 900);
+fn over_capacity_scraps_lowest_total_xp_for_refund() {
+    let mut spec = colony_map();
+    spec.fleet_cap_override = Some(1); // cap 1, two live bots → scrap one
+    let mut sim = Sim::new(&spec);
+    let veteran = spawn_green(&mut sim, TilePos::new(2, 3));
+    spawn_green(&mut sim, TilePos::new(3, 3));
+    // TOTAL XP decides (M9: every track counts — Building included).
+    sim.world.bots.get_mut(&veteran).unwrap().data.xp.insert(sim::world::XpTrack::Building, 900);
 
     let ore_before = sim.world.stock_get(0, sim::resources::Resource::Iron);
     for _ in 0..60 {
         sim.step();
     }
     assert_eq!(sim.world.bots.len(), 1, "over-capacity colony scraps down");
-    assert!(sim.world.bots.contains_key(&veteran), "the veteran survives");
+    assert!(sim.world.bots.contains_key(&veteran), "the veteran survives (Building XP counts)");
     assert_eq!(
         sim.world.stock_get(0, sim::resources::Resource::Iron),
         ore_before + sim.tuning.scrap_refund_steel,
@@ -267,35 +405,12 @@ fn scrap_walk_ends_beside_the_printer_for_a_visible_tick() {
     // viewer plays the disassembly wherever it last saw the bot, so being
     // consumed in the same tick as the final step reads as a bot scrapped
     // mid-stride, tiles away from the printer.
-    let mut sim = Sim::new(&colony_map());
-    sim.tuning.capacity = 1;
-    sim.apply(&Command::DeployProgram { faction: 0, color: Color::GREEN, source: IDLER.into() })
-        .unwrap();
-    let veteran = sim
-        .apply(&Command::SpawnBot {
-            pos: TilePos::new(2, 3),
-            source: IDLER.into(),
-            cpu: 2,
-            cargo_cap: 1,
-            faction: 0,
-            hp: 100,
-            color: Color::GREEN,
-        })
-        .unwrap()
-        .unwrap();
+    let mut spec = colony_map();
+    spec.fleet_cap_override = Some(1);
+    let mut sim = Sim::new(&spec);
+    let veteran = spawn_green(&mut sim, TilePos::new(2, 3));
     // The victim starts across the map, so the recall is a real walk.
-    let victim = sim
-        .apply(&Command::SpawnBot {
-            pos: TilePos::new(10, 6),
-            source: IDLER.into(),
-            cpu: 2,
-            cargo_cap: 1,
-            faction: 0,
-            hp: 100,
-            color: Color::GREEN,
-        })
-        .unwrap()
-        .unwrap();
+    let victim = spawn_green(&mut sim, TilePos::new(10, 6));
     sim.world.bots.get_mut(&veteran).unwrap().data.xp.insert(sim::world::XpTrack::Combat, 900);
 
     let printer_pos = TilePos::new(2, 2);
@@ -318,10 +433,39 @@ fn scrap_walk_ends_beside_the_printer_for_a_visible_tick() {
 }
 
 #[test]
+fn reprint_queue_counts_down_as_jobs_start() {
+    let mut spec = colony_map();
+    spec.fleet_cap_override = Some(2);
+    let mut sim = Sim::new(&spec);
+    sim.apply(&Command::QueuePrint { faction: 0 }).unwrap();
+    sim.apply(&Command::QueuePrint { faction: 0 }).unwrap();
+    assert_eq!(sim.world.reprint_queue.get(&0), Some(&2));
+    for _ in 0..60 {
+        sim.step();
+    }
+    assert!(
+        sim.world.reprint_queue.is_empty(),
+        "queued reprints are consumed as print jobs start"
+    );
+    assert_eq!(sim.world.bots.len(), 2, "a reprint IS a fresh print — the cap still rules");
+}
+
+#[test]
+fn printers_are_born_with_an_empty_program_file() {
+    let sim = Sim::new(&colony_map());
+    for slot in [(0u8, 0u8), (0, 1)] {
+        let cp = sim.world.color_programs.get(&slot).expect("born with a file");
+        assert_eq!(cp.source, "", "the birth file is empty (Q85)");
+    }
+}
+
+#[test]
 fn printer_colony_is_deterministic() {
     let build = || {
-        let mut sim = Sim::new(&colony_map());
-        let [green, red] = printer_ids(&sim)[..] else { panic!() };
+        let mut spec = colony_map();
+        spec.fleet_cap_override = Some(3); // cap 6 once red works
+        let mut sim = Sim::new(&spec);
+        let red = printer_ids(&sim)[1];
         sim.apply(&Command::DeployProgram {
             faction: 0,
             color: Color::GREEN,
@@ -332,8 +476,8 @@ fn printer_colony_is_deterministic() {
             .unwrap();
         sim.world.data.insert(0, sim.tuning.repair_cost_data);
         sim.apply(&Command::RepairPrinter { printer: red }).unwrap();
-        sim.apply(&Command::SetDesiredMax { printer: green, value: 3 }).unwrap();
-        sim.apply(&Command::SetDesiredMax { printer: red, value: 2 }).unwrap();
+        dial(&mut sim, red, 2, SelectKey::TotalXp, true);
+        sim.apply(&Command::QueuePrint { faction: 0 }).unwrap();
         sim
     };
     let mut a = build();
@@ -343,7 +487,7 @@ fn printer_colony_is_deterministic() {
         b.step();
         assert_eq!(a.state_hash(), b.state_hash(), "desync at tick {tick}");
     }
-    assert_eq!(a.world.bots.len(), 5);
+    assert_eq!(a.world.bots.len(), 6, "red prints its 2, the remainder fills to the cap");
 }
 
 /// A recall target with NO route to it must not start the walk: an empty
@@ -357,14 +501,13 @@ fn unreachable_home_printer_never_scraps_in_place() {
         faction: 0,
         color: 0,
         ruined: false,
-        desired_max: 0,
     });
+    spec.fleet_cap_override = Some(1); // 2 live bots → capacity scrap wants a victim
     // Wall the printer's side of the map off with water.
     for y in 0..5 {
         spec.water.push(TilePos::new(6, y));
     }
     let mut sim = Sim::new(&spec);
-    sim.tuning.capacity = 1; // 2 live bots -> capacity scrap wants a victim
     for pos in [TilePos::new(1, 1), TilePos::new(1, 3)] {
         sim.apply(&Command::SpawnBot {
             pos,

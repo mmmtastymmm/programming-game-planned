@@ -14,9 +14,10 @@ fn printed_bots_get_the_floor_statline() {
         pos: TilePos::new(2, 2),
         faction: 0,
         color: 0,
-        ruined: false,
-        desired_max: 1,
+        ruined: false
     });
+    // M9: the remainder printer prints to the fleet cap — pin it.
+    spec.fleet_cap_override = Some(1);
     let mut sim = Sim::new(&spec);
     sim.apply(&Command::DeployProgram { faction: 0, color: Color::GREEN, source: "log(1)\n".into() })
         .unwrap();

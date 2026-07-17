@@ -40,7 +40,6 @@ Tuning(
     ],
     // Melee damage per hit (per-weapon hardware later).
     attack_damage: 10,
-    capacity: 10000,
     // The rammer's TOTAL at-fault stun: the bump factory window waits
     // (this - handler_init_ticks) on top of the forced flinch. The
     // victim's stagger is the flinch itself (M3 template model).

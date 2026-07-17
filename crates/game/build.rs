@@ -82,12 +82,21 @@ const FACES: &[(&str, u32, u32)] = &[
 const MASTER: [&str; 3] = ["#39d98a", "#2aa86b", "#c8ffe6"];
 
 /// (atlas name, [accent, accent-dark, highlight]) — indices match
-/// `sim::world::Color` (0 = green, 1 = red, 2+ = blue). "ruined" is the
-/// dead-gray swap used for wrecked structures.
+/// `sim::world::Color` and the docs/01 named palette (nine colors: Green,
+/// Red, Blue, Yellow, Cyan, Magenta, Orange, Purple, White). "ruined" is
+/// the dead-gray swap used for wrecked structures. Beyond nine, M9's
+/// uncapped procedural tints reuse the ninth atlas (patterned variants
+/// wait on real art direction).
 const TEAMS: &[(&str, [&str; 3])] = &[
     ("green", ["#39d98a", "#2aa86b", "#c8ffe6"]),
     ("red", ["#f24c40", "#c03227", "#ffd8d3"]),
     ("blue", ["#4fa3f2", "#2f7fd1", "#d9ecff"]),
+    ("yellow", ["#f2c94c", "#c9a12e", "#fff3c9"]),
+    ("cyan", ["#45d4d4", "#2cadad", "#d2ffff"]),
+    ("magenta", ["#e254c7", "#b13a9c", "#ffd6f6"]),
+    ("orange", ["#f2913f", "#cc7122", "#ffe0c2"]),
+    ("purple", ["#9b59f2", "#7a3fd1", "#e8d9ff"]),
+    ("white", ["#e8e8f0", "#b9bcc9", "#ffffff"]),
     ("ruined", ["#5a5f6a", "#4a4e57", "#8a8e99"]),
 ];
 

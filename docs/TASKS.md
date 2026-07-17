@@ -449,22 +449,64 @@ hash: statline, XP map, quirk rolls, upkeep settlements).* ✅ CORE COMPLETE (20
 
 ## M9 — Printers v2: target shares (replaces the superseded `desired_max` dial)
 
-- [ ] **Allocation table**: fleet cap +15/printer, per-printer target (count or floored % of
-      cap), selection key = any stat with best/worst direction, player priority order,
-      first-printer un-editable remainder, check interval (default 1000 ticks — today it
-      rebalances every tick), `EditPrinterRules` command replacing `SetDesiredMax`. [sim] (L) ⚠HASH
-- [ ] **Dispatch rules**: lame-duck deploys (assignment changes at once, recall entry waits),
-      polite engine-fired recalls (incl. mid-handler), ghost machines (unowned printer → bots
-      orphan, re-upload on recapture), scrap picks lowest **total** XP (today omits
-      xp_building), hardware bars (Q52: deployed artifact sets memory/variable needs; printer
-      claims only fitting bots; remainder capped at 32 lines/8 names), `QueuePrint(loadout)`.
-      [sim] (L) ⚠HASH
-- [ ] **9 named colors** with procedural tints (today hard-capped at 3 bake-time atlases);
-      printers born with color slot + empty file. [sim][game] (M)
-- [ ] **Game**: printer rules UI (targets/keys/priority/interval), deploy warnings ("exceeds N
-      members' memory" — proceed anyway), reprint queue, fleet-cap display, dormant-printer
-      state, per-printer telemetry viewer with level filtering (replaces the flat "Cloud"
-      panel). [game] (L)
+- [x] **Allocation table**: `data/printers.ron` (fleet cap +15/working printer — the Q84
+      manifest figure; check interval default 1000 ticks, player-set per faction).
+      `PrinterRules { target: Count | CapPct (floored % OF THE CAP, Q64), key, best_first,
+      priority }` on every printer AFTER the faction's first-born — the FIRST printer is the
+      remainder bucket (no dials, edits ignored, implicitly last). SelectKey = stat-sheet
+      rows + XP ledgers (TotalXp/Xp(track)/Hp/MaxHp/CpuCenti/Sensors/CargoCap/MoveRate/
+      ModuleSlots) with best/worst by the key's improvement direction (MoveRate improves
+      downward); key + entity-id tiebreak is the whole sort (no composites, Q64). The pass:
+      down the priority list, hardware-bar filter FIRST (Q52), sort, claim up to target;
+      remainder takes the rest. Triggers: rule edit (signal-like, immediate), the per-faction
+      check interval (signal-like, `tick % interval`), a deploy (polite, scoped to its color).
+      Prints: a dialed printer short of its target prints its own color (priority order),
+      else the remainder prints, while fleet < cap; `EditPrinterRules` replaces
+      `SetDesiredMax`; rules/interval/pending-recalls/reprint-queue all hashed.
+      *NEEDS DISCUSSION: (1) `MapSpec.fleet_cap_override` dev knob added (tests/demos need
+      small populations and the replay format carries only spec+commands — the
+      dev_all_unlocks pattern); (2) the remainder is the FIRST-BORN printer even while
+      ruined (its color's bots are ghosts until repair); (3) nest-gating of colors 3+ waits
+      for M12 nests — printers only come from map specs today.* [sim] (L) ⚠HASH
+- [x] **Dispatch rules**: deploys change assignments at once but their drop/claim recalls
+      land POLITELY via `world.pending_recalls` (retried each tick, never mid-template — the
+      lame-duck rule, Q85 round 4); a lame duck visibly runs the FINAL OLD VERSION (the
+      hot-swap skips over-bar members). Player-fired triggers (rule edits, the interval)
+      dispatch like signals — mid-template landings double-handle to a wreck, as decided.
+      Re-targets are engine-side: an already-walking re-color gets its destination updated
+      (no re-signal); a same-color re-target cancels in place (restart line 1, no boot).
+      Ghost machines are DERIVED (Q65): a bot whose color has no working faction printer is
+      outside the allocation, recalls, and scrap, still drawing upkeep — repair re-uploads
+      survivors by construction. Scrap picks lowest TOTAL XP of the fleet (every track,
+      Building included; ghosts and scrap-walkers excluded from the fleet count so the valve
+      fires once per surplus body). Hardware bars (Q52): deploy computes the artifact's
+      (lines, distinct names) via `pyrite::analysis::artifact_requirements`, stored on
+      `ColorProgram`; printers claim only fitting bots; the REMAINDER deploy is refused over
+      stock (32 lines / 8 names — `RemainderOverBar`); above-stock-bar printers don't print.
+      `QueuePrint { faction }` = a per-faction convenience counter consumed as jobs start.
+      *NEEDS DISCUSSION: (1) the docs' `QueuePrint(loadout)` parameter is UNDEFINED — all
+      prose says a reprint is a fresh stock print with allocation-chosen color, so the
+      counter is the whole feature until "loadout" means something; (2) docs/02 says "a
+      deploy IS a rule edit" while docs/01 says deploys are NOT rule edits in the dispatch
+      taxonomy — same end behavior, opposite wording, needs reconciling; (3) variable-name
+      requirements count assignment targets, loop vars, params, and match binds — reads are
+      free.* [sim] (L) ⚠HASH
+- [x] **9 named colors** (Green, Red, Blue, Yellow, Cyan, Magenta, Orange, Purple, White —
+      docs/01 order): nine bake-time palette-swap atlases (build.rs TEAMS), scene/view/editor
+      plumbed for all nine, `Color::NAMES`/`Color::name()` in the sim. Printers are born with
+      their color slot AND an empty program file (Q85: `Sim::new` deploys `""` per unfilled
+      slot; re-colored bots idle visibly on it). *NEEDS DISCUSSION: tints beyond the ninth
+      reuse the white atlas — "procedurally patterned tints" wants real art direction.*
+      [sim][game] (M)
+- [x] **Game**: printer rules UI (target count/%cap toggle, key combo, best/worst toggle,
+      priority — every change fires EditPrinterRules), fleet-cap display ("Fleet N / cap M"),
+      reprint-queue button with queued count, dormant label on ruined printers ("its bots
+      are ghosts"), Q52 deploy warning ("exceeds N members' memory — deploying drops them to
+      the remainder", proceed allowed), and a per-printer Telemetry viewer with min-level
+      filtering (trace…error) replacing the flat "Cloud" panel. *NEEDS DISCUSSION: the check
+      interval has no UI dial yet (command support exists); telemetry attributes archive
+      entries via LIVE bots only — dead bots' lines don't group under their old color.*
+      [game] (L)
 
 ## M10 — Death, wrecks & intel
 

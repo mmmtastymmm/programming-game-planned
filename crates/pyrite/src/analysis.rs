@@ -16,7 +16,7 @@
 //!    straight-line + `if`, all the way down (Q51). Boundedness is what
 //!    makes "would this take too long?" a compile-time question.
 
-use crate::ast::{Expr, ExprId, Program, SignalKind, Stmt, StmtId};
+use crate::ast::{Block, Expr, ExprId, Pattern, Program, SignalKind, Stmt, StmtId};
 use crate::costs::CostTable;
 use crate::error::{PyriteError, PyriteErrorKind};
 use std::collections::BTreeMap;
@@ -496,4 +496,62 @@ impl Walker<'_> {
         self.worst_memo.insert(name.to_string(), wc);
         Ok(wc)
     }
+}
+
+/// The deployed artifact's hardware requirements (M9, Q52): program
+/// memory in LINES (the source's line count — programs are byte-exact,
+/// docs/01, so the stored source is the artifact) and VARIABLE SLOTS
+/// (every distinct name the program can bind: assignment targets, loop
+/// variables, function parameters, and match-pattern bindings). A
+/// printer claims only bots whose bought hardware meets both figures.
+pub fn artifact_requirements(source: &str, program: &Program) -> (u32, u32) {
+    let lines = source.lines().count() as u32;
+    let mut names: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    let visit_block = |block: &Block, names: &mut std::collections::BTreeSet<String>| {
+        // Iterative walk over statement ids (blocks nest).
+        let mut work: Vec<StmtId> = block.iter().rev().copied().collect();
+        while let Some(id) = work.pop() {
+            match program.stmt(id) {
+                Stmt::Assign { name, .. } | Stmt::IndexAssign { name, .. } => {
+                    names.insert(name.clone());
+                }
+                Stmt::For { var, body, .. } => {
+                    names.insert(var.clone());
+                    work.extend(body.iter().rev().copied());
+                }
+                Stmt::If { arms, else_body, .. } => {
+                    for (_, body) in arms {
+                        work.extend(body.iter().rev().copied());
+                    }
+                    if let Some(body) = else_body {
+                        work.extend(body.iter().rev().copied());
+                    }
+                }
+                Stmt::While { body, .. } => work.extend(body.iter().rev().copied()),
+                Stmt::Match { cases, .. } => {
+                    for case in cases {
+                        if let Pattern::EnumVariant { binds, .. } = &case.pattern {
+                            for b in binds {
+                                names.insert(b.clone());
+                            }
+                        }
+                        work.extend(case.body.iter().rev().copied());
+                    }
+                }
+                Stmt::Expr { .. } | Stmt::Break { .. } | Stmt::Continue { .. }
+                | Stmt::Return { .. } => {}
+            }
+        }
+    };
+    visit_block(&program.body, &mut names);
+    for handler in program.handlers.values() {
+        visit_block(&handler.body, &mut names);
+    }
+    for function in program.functions.values() {
+        for param in &function.params {
+            names.insert(param.name.clone());
+        }
+        visit_block(&function.body, &mut names);
+    }
+    (lines, names.len() as u32)
 }

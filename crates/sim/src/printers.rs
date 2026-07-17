@@ -4,8 +4,20 @@
 use crate::map::{astar_avoiding, TilePos};
 use crate::sim::Sim;
 use crate::world::{
-    ArchiveEntry, ArchiveKind, BotId, Color, EntityId, PrinterState, Recall, RecallPurpose,
+    ArchiveEntry, ArchiveKind, BotId, Color, EntityId, PrinterState, PrintTarget, Recall,
+    RecallPurpose,
 };
+
+/// How an allocation change reaches its bot (M9, docs/01 Q85/Q73):
+/// player-fired triggers (rule edits, the check interval) dispatch like
+/// signals — mid-template landings double-handle, your clock your risk;
+/// engine-fired triggers (deploy drops/claims) queue politely and enter
+/// only when the bot is out of every template phase.
+#[derive(Clone, Copy, PartialEq)]
+pub(crate) enum RecallMode {
+    Signal,
+    Polite,
+}
 use pyrite::Vm;
 use std::collections::BTreeSet;
 use std::rc::Rc;
@@ -138,82 +150,335 @@ impl Sim {
             }
         }
 
-        // Rebalance BEFORE starting print jobs: moving an existing bot is
-        // cheaper than printing and preserves XP, so recalls claim headroom
-        // first (incoming re-colors count toward the destination's
-        // population, which the job loop below then sees as filled).
-        // Recall only fires when a destination exists — docs/01.
-        for pid in printer_ids.iter().copied() {
-            let printer = &self.world.printers[&pid];
-            if printer.state != PrinterState::Working {
-                continue;
+        // --- M9 target shares (docs/01) ---
+        let factions: std::collections::BTreeSet<u8> =
+            self.world.printers.values().map(|p| p.faction).collect();
+
+        // The per-faction re-allocation clock: player-fired, so its
+        // recalls dispatch like signals (mid-template = double-handle;
+        // "turn the dials when your bots are somewhere safe" is literal).
+        for faction in factions.iter().copied() {
+            let interval = self
+                .world
+                .check_interval
+                .get(&faction)
+                .copied()
+                .unwrap_or(self.printer_cfg.check_interval_ticks);
+            if interval > 0 && self.world.tick.is_multiple_of(interval) {
+                self.allocate_fleet(faction, RecallMode::Signal, None);
             }
-            let (faction, color, desired) = (printer.faction, printer.color, printer.desired_max);
-            let population = self.world.color_population(faction, color);
-            if population <= desired {
-                continue;
-            }
-            // Destination: lowest-id working printer of this faction with
-            // headroom (population + pending job below its dial).
-            let dest = printer_ids.iter().copied().find(|did| {
-                let p = &self.world.printers[did];
-                if p.faction != faction || p.color == color || p.state != PrinterState::Working {
-                    return false;
-                }
-                if !self.world.color_programs.contains_key(&(p.faction, p.color.0)) {
-                    return false;
-                }
-                let pop = self.world.color_population(p.faction, p.color)
-                    + p.job.is_some() as u32;
-                pop < p.desired_max
-            });
-            let Some(dest) = dest else { continue };
-            self.start_recall(faction, color, pid, RecallPurpose::Recolor { dest });
         }
 
-        // Start new jobs where population is below the dial.
-        for pid in printer_ids.iter() {
-            let printer = &self.world.printers[pid];
-            if printer.state != PrinterState::Working || printer.job.is_some() {
-                continue;
-            }
-            let (faction, color, desired) = (printer.faction, printer.color, printer.desired_max);
-            if !self.world.color_programs.contains_key(&(faction, color.0)) {
-                continue;
-            }
-            let population = self.world.color_population(faction, color);
-            let print_faction = self.world.printers[&pid].faction;
-            if population < desired
-                && self.world.stock_take(
-                    print_faction,
+        // Polite queue: engine-fired re-colorings enter when their bot is
+        // out of every template phase.
+        self.dispatch_polite_recalls();
+
+        // Prints: while the fleet is under cap, a dialed printer short of
+        // its target prints its own color (priority order); once every
+        // target is met, the remainder printer prints (docs/01). A color
+        // whose artifact exceeds STOCK hardware never prints — fresh
+        // prints are stock machines that couldn't receive it (Q52; its
+        // growth lands at the remainder instead).
+        for faction in factions.iter().copied() {
+            let cap = self.fleet_cap(faction);
+            let jobs: u32 = self
+                .world
+                .printers
+                .values()
+                .filter(|p| p.faction == faction && p.job.is_some())
+                .count() as u32;
+            let mut projected = self.world.fleet_size(faction) + jobs;
+            let Some(remainder) = self.world.remainder_printer(faction) else { continue };
+            let mut order: Vec<(u32, EntityId)> = self
+                .world
+                .printers
+                .iter()
+                .filter(|(id, p)| {
+                    p.faction == faction && **id != remainder && p.state == PrinterState::Working
+                })
+                .filter_map(|(id, p)| p.rules.map(|r| (r.priority, *id)))
+                .collect();
+            order.sort_unstable();
+            let mut queue: Vec<EntityId> = order.into_iter().map(|(_, id)| id).collect();
+            queue.push(remainder);
+            for pid in queue {
+                if projected >= cap {
+                    break;
+                }
+                let printer = &self.world.printers[&pid];
+                if printer.state != PrinterState::Working || printer.job.is_some() {
+                    continue;
+                }
+                let (color, rules) = (printer.color, printer.rules);
+                let Some(cp) = self.world.color_programs.get(&(faction, color.0)) else {
+                    continue;
+                };
+                // Stock-bar suppression (Q52): prints are stock machines.
+                if cp.req_lines > self.stats.program_lines
+                    || cp.req_names > self.stats.variable_slots
+                {
+                    continue;
+                }
+                // A dialed printer prints only while short of its target;
+                // the remainder (rules None) prints whenever the fleet is
+                // short of the cap.
+                if let Some(rules) = rules {
+                    let target = self.resolve_target(rules.target, cap);
+                    let pop = self.world.color_population(faction, color);
+                    if pop >= target {
+                        continue;
+                    }
+                }
+                if !self.world.stock_take(
+                    faction,
                     crate::resources::Resource::Steel,
                     self.tuning.print_cost_steel,
-                )
-            {
-                self.world.printers.get_mut(pid).expect("printer exists").job =
+                ) {
+                    continue;
+                }
+                self.world.printers.get_mut(&pid).expect("printer exists").job =
                     Some(self.tuning.print_ticks);
+                projected += 1;
+                // The reprint queue is a convenience counter (docs/01: a
+                // reprint IS a fresh print) — consume one per started job.
+                if let Some(n) = self.world.reprint_queue.get_mut(&faction) {
+                    *n -= 1;
+                    if *n == 0 {
+                        self.world.reprint_queue.remove(&faction);
+                    }
+                }
             }
         }
 
-        // Capacity: scrap recalls when the colony over-extends.
-        let mut factions: BTreeSet<u8> = BTreeSet::new();
+        // Over-capacity: the fleet cap is printer-derived (docs/02 — the
+        // only hard ceiling); scrap trims the lowest-total-XP FLEET bot
+        // (ghosts exempt, Q65).
+        let mut bot_factions: std::collections::BTreeSet<u8> = std::collections::BTreeSet::new();
         for bot in self.world.bots.values() {
-            factions.insert(bot.data.faction);
+            bot_factions.insert(bot.data.faction);
         }
-        for faction in factions {
-            let live = self
-                .world
-                .bots
-                .values()
-                .filter(|b| b.data.faction == faction && !b.data.dying && b.data.recall.is_none())
-                .count() as u32;
-            if live > self.tuning.capacity {
+        for faction in bot_factions {
+            if self.world.fleet_size(faction) > self.fleet_cap(faction) {
                 self.scrap_recall_lowest(faction);
             }
         }
     }
 
-    /// Fire one scrap recall at the faction's lowest-XP eligible bot —
+    /// The colony's fleet cap: a fixed contribution per WORKING printer
+    /// (printers.ron; docs/02 — a dormant/ruined printer's contribution
+    /// is withdrawn).
+    pub fn fleet_cap(&self, faction: u8) -> u32 {
+        let working = self
+            .world
+            .printers
+            .values()
+            .filter(|p| p.faction == faction && p.state == PrinterState::Working)
+            .count() as u32;
+        working * self.printer_cfg.fleet_cap_per_printer
+    }
+
+    /// A target dial's bot count: absolute, or a floored percentage OF
+    /// THE CAP (Q64 — never the live fleet).
+    fn resolve_target(&self, target: PrintTarget, cap: u32) -> u32 {
+        match target {
+            PrintTarget::Count(n) => n,
+            PrintTarget::CapPct(pct) => cap * pct.min(100) / 100,
+        }
+    }
+
+    /// The target-share allocation (M9, docs/01): down the player's
+    /// priority list, each dialed printer sorts the fleet by its key
+    /// (hardware-bar filter FIRST — Q52; ties break by entity id) and
+    /// claims up to its target; the remainder takes the rest. Every bot
+    /// whose assigned color differs from its current one is recalled —
+    /// by `mode` — and a bot already walking a re-color is RE-TARGETED
+    /// engine-side (never re-signaled): destination updated, or the
+    /// recall cancelled in place when the new assignment matches its
+    /// current color (restart at line 1, no boot — docs/01).
+    /// `only_color` scopes the pass to one color's claims and drops
+    /// (deploys re-allocate their own color only).
+    pub(crate) fn allocate_fleet(
+        &mut self,
+        faction: u8,
+        mode: RecallMode,
+        only_color: Option<Color>,
+    ) {
+        let cap = self.fleet_cap(faction);
+        let Some(remainder) = self.world.remainder_printer(faction) else { return };
+        let remainder_color = self.world.printers[&remainder].color;
+
+        // The fleet: live, non-ghost members. Scrap-recalled bots are
+        // already leaving and stay out; re-color walks stay IN (the
+        // allocation may re-target them).
+        let mut remaining: Vec<BotId> = self
+            .world
+            .bots
+            .values()
+            .filter(|b| {
+                b.data.faction == faction
+                    && !b.data.dying
+                    && !self.world.is_ghost(&b.data)
+                    && !matches!(
+                        b.data.recall,
+                        Some(Recall { purpose: RecallPurpose::Scrap, .. })
+                    )
+            })
+            .map(|b| b.data.id)
+            .collect();
+
+        let mut dialed: Vec<(u32, EntityId)> = self
+            .world
+            .printers
+            .iter()
+            .filter(|(id, p)| {
+                p.faction == faction && **id != remainder && p.state == PrinterState::Working
+            })
+            .filter_map(|(id, p)| p.rules.map(|r| (r.priority, *id)))
+            .collect();
+        dialed.sort_unstable();
+
+        let mut assigned: Vec<(BotId, Color, EntityId)> = Vec::new();
+        for (_, pid) in dialed {
+            let printer = &self.world.printers[&pid];
+            let color = printer.color;
+            let rules = printer.rules.expect("dialed printers filtered on rules");
+            let Some(cp) = self.world.color_programs.get(&(faction, color.0)) else {
+                continue; // no artifact, no bar, no claims
+            };
+            let (req_lines, req_names) = (cp.req_lines, cp.req_names);
+            let target = self.resolve_target(rules.target, cap) as usize;
+            // Hardware bar before the key (Q52): only fitting bots.
+            let ctx = self.ctx();
+            let mut candidates: Vec<(i64, u64, BotId)> = remaining
+                .iter()
+                .filter(|id| {
+                    let data = &self.world.bots[id].data;
+                    ctx.program_lines_for(data) >= req_lines
+                        && ctx.variable_slots_for(data) >= req_names
+                })
+                .map(|id| {
+                    let data = &self.world.bots[id].data;
+                    let value = rules.key.value(data);
+                    // Best-first follows the key's improvement direction
+                    // (Q64); the stored sort key normalizes to ascending.
+                    let sort = if rules.best_first == rules.key.higher_is_better() {
+                        -value
+                    } else {
+                        value
+                    };
+                    (sort, data.entity.0, *id)
+                })
+                .collect();
+            candidates.sort_unstable();
+            let claimed: Vec<BotId> =
+                candidates.into_iter().take(target).map(|(_, _, id)| id).collect();
+            for id in &claimed {
+                remaining.retain(|r| r != id);
+                assigned.push((*id, color, pid));
+            }
+        }
+        for id in remaining {
+            assigned.push((id, remainder_color, remainder));
+        }
+
+        for (bot_id, color, printer) in assigned {
+            let Some(bot) = self.world.bots.get(&bot_id) else { continue };
+            let current = bot.data.color;
+            if let Some(scope) = only_color
+                && current != scope
+                && color != scope
+            {
+                continue; // a deploy re-allocates its own color only
+            }
+            // Already walking a re-color: re-target engine-side.
+            if let Some(Recall { purpose: RecallPurpose::Recolor { dest }, .. }) =
+                &bot.data.recall
+            {
+                if color == current {
+                    // New assignment matches the CURRENT color: cancel in
+                    // place, restart at line 1, no boot (docs/01).
+                    self.cancel_recall_in_place(bot_id);
+                } else if self.world.printers.get(dest).map(|p| p.color) != Some(color) {
+                    let bot = self.world.bots.get_mut(&bot_id).expect("checked");
+                    if let Some(recall) = bot.data.recall.as_mut() {
+                        recall.home = printer;
+                        recall.purpose = RecallPurpose::Recolor { dest: printer };
+                    }
+                    // Re-plan the walk toward the new home.
+                    self.replan_after_bump(bot_id);
+                }
+                continue;
+            }
+            if color == current {
+                self.world.pending_recalls.remove(&bot_id);
+                continue;
+            }
+            match mode {
+                // Player-fired: dispatches like a signal — a mid-template
+                // landing is a double-handle (your clock, your risk).
+                RecallMode::Signal => {
+                    self.world.pending_recalls.remove(&bot_id);
+                    self.begin_recall_walk(
+                        bot_id,
+                        printer,
+                        RecallPurpose::Recolor { dest: printer },
+                    );
+                }
+                // Engine-fired: the lame duck visibly runs the old color
+                // until its entry lands politely.
+                RecallMode::Polite => {
+                    self.world.pending_recalls.insert(bot_id, printer);
+                }
+            }
+        }
+    }
+
+    /// Same-color re-target: the recall cancels and the program restarts
+    /// at line 1 in place — no boot, since no re-coloring happened.
+    fn cancel_recall_in_place(&mut self, id: BotId) {
+        let Some(bot) = self.world.bots.get_mut(&id) else { return };
+        bot.data.recall = None;
+        if let Some(vm) = bot.vm.as_mut() {
+            vm.reset();
+            vm.set_engine_ctx(None);
+        }
+    }
+
+    /// Drain the polite queue (M9, Q85): an engine-fired re-coloring
+    /// enters only when its bot is out of every template phase — never a
+    /// double-handle. Stale entries (dead bots, gone printers, already
+    /// matching colors) drop silently.
+    pub(crate) fn dispatch_polite_recalls(&mut self) {
+        let queue: Vec<(BotId, EntityId)> =
+            self.world.pending_recalls.iter().map(|(b, p)| (*b, *p)).collect();
+        for (bot_id, printer) in queue {
+            let Some(bot) = self.world.bots.get(&bot_id) else {
+                self.world.pending_recalls.remove(&bot_id);
+                continue;
+            };
+            let Some(p) = self.world.printers.get(&printer) else {
+                self.world.pending_recalls.remove(&bot_id);
+                continue;
+            };
+            if bot.data.dying || bot.data.color == p.color {
+                self.world.pending_recalls.remove(&bot_id);
+                continue;
+            }
+            let free = bot.data.recall.is_none()
+                && bot.data.booting.is_none()
+                && !bot.data.pad_sit
+                && bot.vm.as_ref().is_none_or(|vm| vm.phase() == pyrite::Phase::Main);
+            if !free {
+                continue; // stays queued; politeness is patience
+            }
+            self.world.pending_recalls.remove(&bot_id);
+            self.begin_recall_walk(bot_id, printer, RecallPurpose::Recolor { dest: printer });
+        }
+    }
+
+    /// Fire one scrap recall at the faction's lowest-TOTAL-XP eligible
+    /// bot (M9: every track counts — the pre-M9 pick summed only the
+    /// three task tracks and protected the wrong veterans) —
     /// the over-capacity valve, also reused by sustained-rust scrapping
     /// (M5, `upkeep.ron` `rust_scraps`).
     pub(crate) fn scrap_recall_lowest(&mut self, faction: u8) {
@@ -229,12 +494,13 @@ impl Sim {
                 // wrecking its target against the decided intent.
                 b.data.faction == faction
                     && !b.data.dying
+                    && !self.world.is_ghost(&b.data) // ghosts exempt (Q65)
                     && b.data.recall.is_none()
                     && b.data.booting.is_none()
                     && !b.data.pad_sit
                     && b.vm.as_ref().is_none_or(|vm| vm.phase() == pyrite::Phase::Main)
             })
-            .map(|b| (b.data.xp(crate::world::XpTrack::Mining) + b.data.xp(crate::world::XpTrack::Hauling) + b.data.xp(crate::world::XpTrack::Combat), b.data.id))
+            .map(|b| (b.data.xp_total(), b.data.id))
             .min();
         if let Some((_, victim)) = victim {
             let home = self.nearest_faction_printer(victim);
@@ -461,31 +727,6 @@ impl Sim {
         if let Some(vm) = bot.vm.as_mut() {
             vm.reset();
             vm.set_engine_ctx(None);
-        }
-    }
-
-    /// Pick the lowest-total-XP bot of (faction, color) and start its
-    /// recall toward its own printer.
-    pub(crate) fn start_recall(&mut self, faction: u8, color: Color, home: EntityId, purpose: RecallPurpose) {
-        let victim = self
-            .world
-            .bots
-            .values()
-            .filter(|b| {
-                // Polite engine-fired selection: mid-template bots are
-                // skipped, not re-pulled into a double-handle (Q85/M3).
-                b.data.faction == faction
-                    && b.data.color == color
-                    && !b.data.dying
-                    && b.data.recall.is_none()
-                    && b.data.booting.is_none()
-                    && !b.data.pad_sit
-                    && b.vm.as_ref().is_none_or(|vm| vm.phase() == pyrite::Phase::Main)
-            })
-            .map(|b| (b.data.xp(crate::world::XpTrack::Mining) + b.data.xp(crate::world::XpTrack::Hauling) + b.data.xp(crate::world::XpTrack::Combat), b.data.id))
-            .min();
-        if let Some((_, victim)) = victim {
-            self.begin_recall_walk(victim, home, purpose);
         }
     }
 

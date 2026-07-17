@@ -85,9 +85,10 @@ fn brownout_halves_grants_but_the_printer_trickle_powers_one_bot() {
         pos: TilePos::new(9, 2),
         faction: 0,
         color: 0,
-        ruined: false,
-        desired_max: 0,
+        ruined: false
     });
+    // M9: the remainder printer prints to the fleet cap — pin it.
+    spec.fleet_cap_override = Some(0);
     let mut sim = Sim::new(&spec);
     sim.upkeep.interval_ticks = 5;
     let first = spawn(&mut sim, TilePos::new(2, 2), "wait(600)\n");

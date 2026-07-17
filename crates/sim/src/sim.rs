@@ -66,9 +66,6 @@ pub struct Tuning {
     pub attack_damage: i64,
     // (printed_* chassis defaults moved to data/stats.ron with M5 — the
     // universal floor statline is the print.)
-    /// Colony population the economy sustains before scrap recalls fire
-    /// (Energy upkeep stands in later; docs/02).
-    pub capacity: u32,
     /// Rammer's total at-fault stun (50 = 5s @10Hz): expressed as the bump
     /// FACTORY WINDOW's `wait(bump_freeze_ticks - handler_init_ticks)` on
     /// top of the forced flinch, and applied directly on engine walks. The
@@ -208,6 +205,24 @@ impl Tuning {
     }
 }
 
+/// Printer fleet tuning (M9, `data/printers.ron` — docs/01: the
+/// per-printer cap contribution and the default check interval are data).
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PrinterConfig {
+    pub fleet_cap_per_printer: u32,
+    pub check_interval_ticks: u64,
+}
+
+impl Default for PrinterConfig {
+    fn default() -> Self {
+        let cfg: PrinterConfig = ron::from_str(include_str!("../data/printers.ron"))
+            .expect("data/printers.ron parses (unknown fields are errors)");
+        assert!(cfg.check_interval_ticks > 0, "printers: check_interval_ticks must be > 0");
+        cfg
+    }
+}
+
 impl crate::world::BlueprintKind {
     /// Stone price (deci) — beside [`Tuning`], the price sheet's home.
     /// Clear/Demolish/Cleanse are labor-only. Shared with the build bar
@@ -233,6 +248,22 @@ impl crate::world::BlueprintKind {
             K::Cleanse => tuning.cleanse_ticks,
             K::Road => tuning.road_build_ticks,
         }
+    }
+}
+
+/// Stable hash tag for a selection key (phase-9 snapshot).
+fn select_key_tag(key: crate::world::SelectKey) -> u8 {
+    use crate::world::SelectKey as K;
+    match key {
+        K::TotalXp => 0,
+        K::Xp(track) => 16 + track.as_u8(),
+        K::Hp => 1,
+        K::MaxHp => 2,
+        K::CpuCenti => 3,
+        K::Sensors => 4,
+        K::CargoCap => 5,
+        K::MoveRate => 6,
+        K::ModuleSlots => 7,
     }
 }
 
@@ -308,7 +339,23 @@ pub enum Command {
     /// loop boundary (docs/01).
     DeployProgram { faction: u8, color: Color, source: String },
     /// The population dial on a printer.
-    SetDesiredMax { printer: EntityId, value: u32 },
+    /// Edit one dialed printer's target-share rules (M9, replaces the
+    /// superseded desired-max dial). The faction's FIRST printer is the
+    /// remainder bucket — not editable, the edit is ignored. Every rule
+    /// edit fires an immediate signal-like re-allocation (docs/01);
+    /// `check_interval` (when set) retunes the faction's clock.
+    EditPrinterRules {
+        printer: EntityId,
+        target: crate::world::PrintTarget,
+        key: crate::world::SelectKey,
+        best_first: bool,
+        priority: u32,
+        check_interval: Option<u64>,
+    },
+    /// Queue one replacement stock print (M9: a reprint IS a fresh print;
+    /// its color comes from the allocation like anyone else's). The
+    /// docs' `loadout` parameter is undefined — flagged in TASKS.md.
+    QueuePrint { faction: u8 },
     /// Fix a ruined printer (Data cost; ore stands in until Data exists).
     RepairPrinter { printer: EntityId },
     /// Designate a terraform site (the build UI's output). Bots do the
@@ -364,6 +411,7 @@ pub struct Sim {
     pub costs: CostTable,
     pub vm_config: VmConfig,
     pub tuning: Tuning,
+    pub printer_cfg: PrinterConfig,
     /// The universal chassis: floor statline, modifier-pipeline penalties,
     /// and the Upgrade Station catalog (`data/stats.ron`, M5).
     pub stats: crate::stats::Stats,
@@ -443,6 +491,13 @@ impl Sim {
             upkeep: Upkeep::default(),
             xp: crate::xp::XpConfig::default(),
             quirks: quirk_catalog,
+            printer_cfg: {
+                let mut cfg = PrinterConfig::default();
+                if let Some(cap) = spec.fleet_cap_override {
+                    cfg.fleet_cap_per_printer = cap;
+                }
+                cfg
+            },
             last_hash: 0,
         };
         // Map-authored structures place free; Generators start STOKED
@@ -477,6 +532,26 @@ impl Sim {
         // grace window.
         if !sim.world.dev_free_power {
             sim.settle_upkeep();
+        }
+        // A printer is born with its color slot AND an empty program
+        // file (M9, Q85): targets are settable immediately, and a bot
+        // re-colored onto the empty program idles — visibly — until the
+        // player writes something. Real deploys overwrite these.
+        let slots: Vec<(u8, u8)> = sim
+            .world
+            .printers
+            .values()
+            .map(|p| (p.faction, p.color.0))
+            .collect();
+        for (faction, color) in slots {
+            if !sim.world.color_programs.contains_key(&(faction, color)) {
+                sim.apply(&Command::DeployProgram {
+                    faction,
+                    color: crate::world::Color(color),
+                    source: String::new(),
+                })
+                .expect("the empty program parses");
+            }
         }
         // Phase-0 perception seed (docs/07, round 4): tick 1's queries have
         // a "previous tick" to read, so the pre-deployed starter program
@@ -535,29 +610,106 @@ impl Sim {
                 let program = pyrite::parse(source, &unlocks)?;
                 pyrite::check_windows(&program, &self.costs)?;
                 let slot = (*faction, color.0);
+                // The artifact sets the color's HARDWARE BAR (M9, Q52):
+                // its printer claims only bots whose bought hardware
+                // fits. The remainder color must fit STOCK hardware — it
+                // has to be able to receive ANY bot in the colony.
+                let (req_lines, req_names) =
+                    pyrite::analysis::artifact_requirements(source, &program);
+                let remainder_color = self
+                    .world
+                    .remainder_printer(*faction)
+                    .and_then(|id| self.world.printers.get(&id))
+                    .map(|p| p.color);
+                if remainder_color == Some(*color)
+                    && (req_lines > self.stats.program_lines
+                        || req_names > self.stats.variable_slots)
+                {
+                    return Err(PyriteError {
+                        line: 0,
+                        col: 0,
+                        kind: pyrite::PyriteErrorKind::RemainderOverBar {
+                            lines: req_lines,
+                            names: req_names,
+                            cap_lines: self.stats.program_lines,
+                            cap_names: self.stats.variable_slots,
+                        },
+                    });
+                }
                 let hash = crate::world::program_hash(source);
                 self.world.program_library.entry(hash).or_insert_with(|| source.clone());
                 let program = Rc::new(program);
                 self.world.color_programs.insert(
                     slot,
-                    ColorProgram { source: source.clone(), program: Rc::clone(&program), hash },
+                    ColorProgram {
+                        source: source.clone(),
+                        program: Rc::clone(&program),
+                        hash,
+                        req_lines,
+                        req_names,
+                    },
                 );
-                // Hot-swap every live bot of this color at its next loop
-                // boundary (docs/01: redeploy semantics).
-                for bot in self.world.bots.values_mut() {
-                    if bot.data.faction == *faction
-                        && bot.data.color == *color
-                        && let Some(vm) = bot.vm.as_mut()
-                    {
+                // Hot-swap every live FITTING bot of this color at its
+                // next loop boundary (docs/01: redeploy semantics). An
+                // over-bar member never receives the new version — it is
+                // a lame duck, visibly running the FINAL OLD VERSION
+                // until its polite recall lands (Q52/Q85, round 4).
+                let ids: Vec<crate::world::BotId> = self.world.bots.keys().copied().collect();
+                for id in ids {
+                    let data = &self.world.bots[&id].data;
+                    if data.faction != *faction || data.color != *color {
+                        continue;
+                    }
+                    let fits = self.ctx().program_lines_for(data) >= req_lines
+                        && self.ctx().variable_slots_for(data) >= req_names;
+                    if !fits {
+                        continue;
+                    }
+                    if let Some(vm) = self.world.bots.get_mut(&id).and_then(|b| b.vm.as_mut()) {
                         vm.queue_program(Rc::clone(&program));
                     }
                 }
+                // A deploy is its own dispatch trigger, scoped to its
+                // color (docs/01): assignments change at once, the drop/
+                // claim recalls land politely — the lame-duck rule.
+                self.allocate_fleet(
+                    *faction,
+                    crate::printers::RecallMode::Polite,
+                    Some(*color),
+                );
                 Ok(None)
             }
-            Command::SetDesiredMax { printer, value } => {
-                if let Some(p) = self.world.printers.get_mut(printer) {
-                    p.desired_max = *value;
+            Command::EditPrinterRules {
+                printer,
+                target,
+                key,
+                best_first,
+                priority,
+                check_interval,
+            } => {
+                let Some(p) = self.world.printers.get(printer) else { return Ok(None) };
+                let faction = p.faction;
+                if self.world.remainder_printer(faction) == Some(*printer) {
+                    return Ok(None); // the remainder bucket has no dials
                 }
+                if let Some(p) = self.world.printers.get_mut(printer) {
+                    p.rules = Some(crate::world::PrinterRules {
+                        target: *target,
+                        key: *key,
+                        best_first: *best_first,
+                        priority: *priority,
+                    });
+                }
+                if let Some(interval) = check_interval {
+                    self.world.check_interval.insert(faction, (*interval).max(1));
+                }
+                // A rule edit fires the global, signal-like pass NOW —
+                // mid-template bots double-handle (your clock, your risk).
+                self.allocate_fleet(faction, crate::printers::RecallMode::Signal, None);
+                Ok(None)
+            }
+            Command::QueuePrint { faction } => {
+                *self.world.reprint_queue.entry(*faction).or_insert(0) += 1;
                 Ok(None)
             }
             Command::RepairPrinter { printer } => {
@@ -1484,6 +1636,21 @@ impl Sim {
         h.write_u64(w.terrain_hash);
         // Scree wear is real divergent state (M8, Q40): two peers with a
         // half-worn tile must agree before the collapse, not just after.
+        h.write_u32(w.pending_recalls.len() as u32);
+        for (bot, printer) in &w.pending_recalls {
+            h.write_u32(bot.0);
+            h.write_u64(printer.0);
+        }
+        h.write_u32(w.check_interval.len() as u32);
+        for (faction, interval) in &w.check_interval {
+            h.write_u8(*faction);
+            h.write_u64(*interval);
+        }
+        h.write_u32(w.reprint_queue.len() as u32);
+        for (faction, n) in &w.reprint_queue {
+            h.write_u8(*faction);
+            h.write_u32(*n);
+        }
         h.write_u32(w.blight_cores.len() as u32);
         for (id, core) in &w.blight_cores {
             h.write_u64(id.0);
@@ -1606,7 +1773,25 @@ impl Sim {
             h.write_u8(printer.faction);
             h.write_u8(printer.color.0);
             h.write_u8(matches!(printer.state, PrinterState::Working) as u8);
-            h.write_u32(printer.desired_max);
+            match &printer.rules {
+                None => h.write_u8(0), // the remainder bucket
+                Some(r) => {
+                    h.write_u8(1);
+                    match r.target {
+                        crate::world::PrintTarget::Count(n) => {
+                            h.write_u8(0);
+                            h.write_u32(n);
+                        }
+                        crate::world::PrintTarget::CapPct(p) => {
+                            h.write_u8(1);
+                            h.write_u32(p);
+                        }
+                    }
+                    h.write_u8(select_key_tag(r.key));
+                    h.write_u8(r.best_first as u8);
+                    h.write_u32(r.priority);
+                }
+            }
             h.write_u32(printer.job.unwrap_or(0));
         }
         for (pos, overlay) in &w.overlays {

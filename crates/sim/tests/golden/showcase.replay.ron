@@ -42,7 +42,15 @@
                 faction: 0,
                 color: 0,
                 ruined: false,
-                desired_max: 0,
+            ),
+            (
+                pos: (
+                    x: 2,
+                    y: 7,
+                ),
+                faction: 0,
+                color: 1,
+                ruined: false,
             ),
         ],
         starting_ore: 10,
@@ -60,6 +68,7 @@
         starting_stock: [
             (0, Stone, 50),
         ],
+        fleet_cap_override: Some(1),
         blight_cores: [],
         dev_all_unlocks: true,
         dev_free_power: true,
@@ -73,13 +82,6 @@
                 faction: 0,
                 color: (0),
                 source: "move_to(closest(ore).expect())\nmine()\nmove_to(closest(depot).expect())\ndeposit()\n",
-            ),
-        ),
-        (
-            tick: 0,
-            command: SetDesiredMax(
-                printer: (4),
-                value: 2,
             ),
         ),
         (
@@ -126,6 +128,23 @@
             tick: 220,
             command: KillBot(
                 bot: (1),
+            ),
+        ),
+        (
+            tick: 300,
+            command: EditPrinterRules(
+                printer: (5),
+                target: Count(1),
+                key: TotalXp,
+                best_first: true,
+                priority: 0,
+                check_interval: None,
+            ),
+        ),
+        (
+            tick: 320,
+            command: QueuePrint(
+                faction: 0,
             ),
         ),
     ],

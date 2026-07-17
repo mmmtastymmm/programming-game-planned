@@ -107,19 +107,23 @@ pub(crate) fn build_colony() -> Sim {
     spec.printers.push(PrinterSpec {
         pos: TilePos::new(2, 5),
         faction: 0,
-        color: 0,
+        color: 0, // Green: first-born — the remainder bucket (M9)
         ruined: false,
-        desired_max: 4,
     });
-    // Working but idle (dial 0): exists so the showcase scrap recall below
-    // has a nearby, boot-free home to walk to.
+    // A second, dialed printer: target 0 until the player edits its rules
+    // in the Printers panel (turn it up to see red bots run the red file).
     spec.printers.push(PrinterSpec {
         pos: TilePos::new(2, 9),
         faction: 0,
         color: 1,
         ruined: false,
-        desired_max: 0,
     });
+    // M9: the remainder prints to the fleet cap — pin the demo colony at
+    // four miners (2 per printer). The signal-cloud strip below spawns
+    // BLUE bots: blue has no printer, so they are ghost machines (Q65) —
+    // outside the allocation and scrap by rule, which is exactly what
+    // set pieces want.
+    spec.fleet_cap_override = Some(2);
     spec.starting_ore = 30;
     spec.starting_stock.push((0, sim::resources::Resource::Stone, 50));
 
@@ -134,11 +138,11 @@ pub(crate) fn build_colony() -> Sim {
     spec.water.push(TilePos::new(9, 11));
 
     let mut game = Sim::new(&spec);
-    // Slow boots so the power-on cloud is watchable; capacity one below the
-    // steady-state population so exactly one scrap recall fires (the purple
-    // walk) and the chain stops there.
+    // Slow boots so the power-on cloud is watchable. (The old capacity-
+    // driven scrap-walk choreography died with the desired-max dial: the
+    // strip bots are ghosts now, exempt from scrap — dial a printer's
+    // rules to watch recalls instead.)
     game.tuning.boot_ticks = 40;
-    game.tuning.capacity = 9;
     // Both starter programs deploy at boot: green's `from hauling import
     // haul_home` and red's `import hauling` show the two import forms (the
     // red printer idles at dial 0 — turn it up to see red bots run it).
@@ -674,6 +678,12 @@ pub(crate) fn setup_scene(
         (0u8, "green", Color::srgb(0.22, 0.85, 0.54)),
         (1, "red", Color::srgb(0.95, 0.30, 0.25)),
         (2, "blue", Color::srgb(0.31, 0.64, 0.95)),
+        (3, "yellow", Color::srgb(0.95, 0.79, 0.30)),
+        (4, "cyan", Color::srgb(0.27, 0.83, 0.83)),
+        (5, "magenta", Color::srgb(0.89, 0.33, 0.78)),
+        (6, "orange", Color::srgb(0.95, 0.57, 0.25)),
+        (7, "purple", Color::srgb(0.61, 0.35, 0.95)),
+        (8, "white", Color::srgb(0.91, 0.91, 0.94)),
     ] {
         let bot: Handle<Image> = asset_server.load(format!("textures/bot_atlas_{team}.png"));
         bot_tex_mats.insert(c, atlas_mat(&mut materials, bot));

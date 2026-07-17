@@ -382,7 +382,7 @@ pub(crate) fn sync_view(
         if needs_spawn {
             let (mat, scale) = match printer.state {
                 PrinterState::Working => (
-                    palette.printer_tex_mats[&printer.color.0.min(2)].clone(),
+                    palette.printer_tex_mats[&printer.color.0.min(8)].clone(),
                     Vec3::ONE,
                 ),
                 PrinterState::Ruined => {
@@ -537,7 +537,7 @@ pub(crate) fn sync_view(
         let entity = commands
             .spawn((
                 Mesh3d(palette.bot_cube.clone()),
-                MeshMaterial3d(palette.bot_tex_mats[&bot.data.color.0.min(2)].clone()),
+                MeshMaterial3d(palette.bot_tex_mats[&bot.data.color.0.min(8)].clone()),
                 Transform::from_translation(start),
                 Pose {
                     prev: start,
@@ -569,7 +569,7 @@ pub(crate) fn sync_view(
                 ));
                 parent.spawn((
                     Mesh3d(palette.lens_glass.clone()),
-                    MeshMaterial3d(palette.lens_glass_mats[&bot.data.color.0.min(2)].clone()),
+                    MeshMaterial3d(palette.lens_glass_mats[&bot.data.color.0.min(8)].clone()),
                     Transform::from_xyz(0.0, LENS_Y, LENS_GLASS_Z).with_rotation(tip),
                 ));
                 // Health bar: shown for a few seconds after any hp change.

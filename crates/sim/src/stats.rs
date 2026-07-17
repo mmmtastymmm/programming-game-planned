@@ -196,6 +196,29 @@ impl StatCtx<'_> {
         depth.max(1) as usize
     }
 
+    /// Per-bot program memory in LINES (M9, Q52): base → hardware
+    /// (Memory banks). Quirks never enter deploy-time stats.
+    pub fn program_lines_for(&self, data: &BotData) -> u32 {
+        self.stats.program_lines + self.memory_banks(data) * self.stats.memory_bank_lines
+    }
+
+    /// Per-bot variable slots (M9, Q52): base → hardware (Memory banks).
+    pub fn variable_slots_for(&self, data: &BotData) -> u32 {
+        self.stats.variable_slots + self.memory_banks(data) * self.stats.memory_bank_vars
+    }
+
+    fn memory_banks(&self, data: &BotData) -> u32 {
+        data.upgrades
+            .iter()
+            .filter(|&&u| {
+                matches!(
+                    self.stats.upgrades.get(u as usize).map(|s| s.effect),
+                    Some(UpgradeEffect::MemoryBank)
+                )
+            })
+            .count() as u32
+    }
+
     /// Per-bot sensor range: base → hardware (Optics) → XP (Scouting
     /// +1/level) → quirks (Retina Display / Deprecated Drivers), floor 1.
     pub fn sensors_for(&self, data: &BotData) -> u32 {

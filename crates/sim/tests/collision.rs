@@ -89,9 +89,10 @@ fn printed_bots_spread_to_free_tiles() {
         pos: TilePos::new(4, 4),
         faction: 0,
         color: 0,
-        ruined: false,
-        desired_max: 4,
+        ruined: false
     });
+    // M9: the remainder printer prints to the fleet cap — pin it.
+    spec.fleet_cap_override = Some(4);
     spec.starting_ore = 50;
     let mut sim = Sim::new(&spec);
     sim.apply(&Command::DeployProgram { faction: 0, color: Color::GREEN, source: IDLER.into() })

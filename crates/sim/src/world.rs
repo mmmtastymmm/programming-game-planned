@@ -21,6 +21,19 @@ pub struct Color(pub u8);
 impl Color {
     pub const GREEN: Color = Color(0);
     pub const RED: Color = Color(1);
+    pub const BLUE: Color = Color(2);
+
+    /// The named palette (docs/01: nine names, then procedurally
+    /// patterned tints — the count is uncapped).
+    pub const NAMES: [&'static str; 9] =
+        ["Green", "Red", "Blue", "Yellow", "Cyan", "Magenta", "Orange", "Purple", "White"];
+
+    pub fn name(self) -> String {
+        match Self::NAMES.get(self.0 as usize) {
+            Some(n) => (*n).to_string(),
+            None => format!("Color {}", self.0),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -30,16 +43,96 @@ pub enum PrinterState {
     Ruined,
 }
 
-/// A Fabricator: prints/reprints bots for exactly one color and carries the
-/// desired-max population dial (docs/03-resources.md). Printers are also
-/// "the cloud" — they always accept log traffic.
+/// One dialed printer's share of the fleet (M9, docs/01 "Target
+/// shares"): a target, a selection key with direction, and a rank in the
+/// player's priority order. The FIRST printer of a faction (lowest
+/// entity id) is the remainder bucket — no rules, not editable, holds
+/// every bot no other printer claims, implicitly last in priority.
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct PrinterRules {
+    pub target: PrintTarget,
+    pub key: SelectKey,
+    /// Best-first sorts by the key's IMPROVEMENT direction (docs/01 Q64:
+    /// move rate improves downward); worst-first inverts.
+    pub best_first: bool,
+    /// Rank in the player's priority order (lower claims first; ties
+    /// break by printer entity id; the remainder is implicitly last).
+    pub priority: u32,
+}
+
+impl Default for PrinterRules {
+    fn default() -> Self {
+        // A fresh dialed printer wants nothing until the player says so.
+        PrinterRules {
+            target: PrintTarget::Count(0),
+            key: SelectKey::TotalXp,
+            best_first: true,
+            priority: u32::MAX,
+        }
+    }
+}
+
+/// An absolute bot count, or a percentage OF THE FLEET CAP (floored —
+/// Q64: of the cap, never the live fleet, so targets don't reshuffle on
+/// every death).
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+pub enum PrintTarget {
+    Count(u32),
+    CapPct(u32),
+}
+
+/// A selection key: any stat-sheet row or ledger number is a legal sort
+/// (docs/01 Q64 — no composite keys in v1; key + entity-id tiebreak is
+/// the whole sort).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
+pub enum SelectKey {
+    TotalXp,
+    Xp(XpTrack),
+    Hp,
+    MaxHp,
+    CpuCenti,
+    Sensors,
+    CargoCap,
+    MoveRate,
+    ModuleSlots,
+}
+
+impl SelectKey {
+    /// The key's raw per-bot value (base + hardware — deploy-time stats;
+    /// quirks never enter, Q52's rule extended to keys).
+    pub fn value(self, data: &BotData) -> i64 {
+        match self {
+            SelectKey::TotalXp => data.xp_total() as i64,
+            SelectKey::Xp(track) => data.xp(track) as i64,
+            SelectKey::Hp => data.hp,
+            SelectKey::MaxHp => data.max_hp,
+            SelectKey::CpuCenti => data.cpu_centi as i64,
+            SelectKey::Sensors => data.sensors as i64,
+            SelectKey::CargoCap => data.cargo_cap as i64,
+            SelectKey::MoveRate => data.move_rate_deci as i64,
+            SelectKey::ModuleSlots => data.module_slots as i64,
+        }
+    }
+
+    /// Does a HIGHER raw value mean a BETTER machine? (Move rate is
+    /// ticks-per-tile: lower is better.)
+    pub fn higher_is_better(self) -> bool {
+        !matches!(self, SelectKey::MoveRate)
+    }
+}
+
+/// A Fabricator: prints/reprints bots for exactly one color and carries
+/// its target-share dials (M9, docs/01). Printers are also "the cloud" —
+/// they always accept log traffic.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Printer {
     pub pos: TilePos,
     pub faction: u8,
     pub color: Color,
     pub state: PrinterState,
-    pub desired_max: u32,
+    /// The target-share dials (M9). `None` on the faction's FIRST
+    /// printer — the remainder bucket takes what nobody claims.
+    pub rules: Option<PrinterRules>,
     /// In-progress print job: ticks remaining.
     pub job: Option<u32>,
 }
@@ -52,6 +145,11 @@ pub struct ColorProgram {
     /// Version identity = FNV-1a of the source bytes (docs/01: programs are
     /// byte-exact; versions are identified by hashing source bytes).
     pub hash: u64,
+    /// The artifact's HARDWARE BAR (M9, Q52): program memory in lines and
+    /// distinct variable names — its printer claims only bots whose bought
+    /// hardware meets both. Derived from the source at deploy.
+    pub req_lines: u32,
+    pub req_names: u32,
 }
 
 /// FNV-1a over source bytes — the program-version identity (docs/01).
@@ -807,6 +905,18 @@ pub struct World {
     /// readers never need to re-filter. Derived state: excluded from the
     /// state hash.
     pub occupancy: BTreeMap<TilePos, std::collections::BTreeSet<BotId>>,
+    /// Polite recall queue (M9, docs/01 Q85): engine-fired re-colorings
+    /// (deploy drops/claims) wait here until their bot is out of every
+    /// template phase — entry never double-handles. bot → claiming
+    /// printer. Hashed.
+    pub pending_recalls: BTreeMap<BotId, EntityId>,
+    /// Per-faction re-allocation clock (M9): every X ticks the printers
+    /// recompute which bots they own. Player-set (EditPrinterRules);
+    /// absent = the printers.ron default. Hashed.
+    pub check_interval: BTreeMap<u8, u64>,
+    /// Reprint queue (M9): a convenience counter per faction — queued
+    /// stock prints, consumed as print jobs start. Hashed.
+    pub reprint_queue: BTreeMap<u8, u32>,
     /// Blight Cores (M8-C, docs/05): the living sources of Corruption.
     /// Attackable world entities; while one lives it re-corrupts cleansed
     /// ground in its radius every spread interval. Hashed.
@@ -850,7 +960,7 @@ pub struct BlightCore {
 /// machine. Scouting/Hiding income lands with M7 perception, Boot income
 /// with M10 rescues — the tracks exist now so storage never migrates
 /// again. Ordered for deterministic iteration/hashing.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
 pub enum XpTrack {
     // --- task tracks ---
     Mining,
@@ -1012,6 +1122,9 @@ impl World {
             pending_damage: Vec::new(),
             pending_xp: Vec::new(),
             pending_signals: Vec::new(),
+            pending_recalls: BTreeMap::new(),
+            check_interval: BTreeMap::new(),
+            reprint_queue: BTreeMap::new(),
             blight_cores: BTreeMap::new(),
             scree_wear: BTreeMap::new(),
             occupancy: BTreeMap::new(),
@@ -1046,6 +1159,7 @@ impl World {
             let id = world.alloc_entity();
             world.depots.insert(id, Depot { pos });
         }
+        let mut first_printer_of: BTreeSet<u8> = BTreeSet::new();
         for p in &spec.printers {
             let id = world.alloc_entity();
             world.printers.insert(
@@ -1055,7 +1169,14 @@ impl World {
                     faction: p.faction,
                     color: Color(p.color),
                     state: if p.ruined { PrinterState::Ruined } else { PrinterState::Working },
-                    desired_max: p.desired_max,
+                    // The faction's FIRST-BORN printer is the remainder
+                    // bucket (docs/01): no dials. Later printers start
+                    // with empty rules until the player edits them.
+                    rules: if first_printer_of.insert(p.faction) {
+                        None
+                    } else {
+                        Some(PrinterRules::default())
+                    },
                     job: None,
                 },
             );
@@ -1305,6 +1426,51 @@ impl World {
                 && !self.structure_at(p)
                 && !self.tile_occupied(p, BotId(u32::MAX))
         })
+    }
+
+    /// The faction's remainder printer (M9, docs/01): its first-born —
+    /// the lowest-entity-id printer, ANY state (a ruined first printer
+    /// still anchors the remainder color; its bots are ghosts until it
+    /// works again).
+    pub fn remainder_printer(&self, faction: u8) -> Option<EntityId> {
+        self.printers
+            .iter()
+            .filter(|(_, p)| p.faction == faction)
+            .map(|(id, _)| *id)
+            .next() // BTreeMap: lowest id first
+    }
+
+    /// Ghost machines (M9, Q65): a bot whose color has NO working printer
+    /// in its faction is no longer owned by the fleet — excluded from the
+    /// allocation (no claims, no remainder absorb, no recalls, no scrap),
+    /// still drawing upkeep. Derived, never stored: repairing the printer
+    /// re-uploads the survivors by construction.
+    pub fn is_ghost(&self, data: &BotData) -> bool {
+        !self.printers.values().any(|p| {
+            p.faction == data.faction
+                && p.color == data.color
+                && p.state == PrinterState::Working
+        })
+    }
+
+    /// The faction's live FLEET (non-ghost, non-dying bot count) — what
+    /// the fleet cap bounds and scrap trims. A bot already walking a
+    /// SCRAP recall is leaving and no longer counts: the over-capacity
+    /// valve must fire once per surplus body, not once per tick of the
+    /// victim's walk home.
+    pub fn fleet_size(&self, faction: u8) -> u32 {
+        self.bots
+            .values()
+            .filter(|b| {
+                b.data.faction == faction
+                    && !b.data.dying
+                    && !self.is_ghost(&b.data)
+                    && !matches!(
+                        b.data.recall,
+                        Some(Recall { purpose: RecallPurpose::Scrap, .. })
+                    )
+            })
+            .count() as u32
     }
 
     /// The full terraform-site predicate: the kind's ground rule plus
