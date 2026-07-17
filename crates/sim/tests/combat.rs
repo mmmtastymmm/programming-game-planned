@@ -99,7 +99,11 @@ wait(60)
     for _ in 0..300 {
         sim.step();
     }
-    assert!(sim.world.wrecks.contains_key(&victim), "every death is a wreck now");
+    assert!(
+        sim.world.wrecks.contains_key(&victim)
+            || sim.world.black_boxes.iter().any(|bb| bb.bot == victim),
+        "every death is a wreck (whose expiry drops a black box — M10)"
+    );
     assert!(
         sim.world
             .archive
@@ -172,8 +176,9 @@ log(1)
     // Either the retreat outran the hits (then the victim would still be
     // alive — asserted above it isn't) or death landed mid-template:
     assert!(
-        sim.world.wrecks.contains_key(&victim),
-        "death during the hurt window aborts into a wreck where it stood"
+        sim.world.wrecks.contains_key(&victim)
+            || sim.world.black_boxes.iter().any(|bb| bb.bot == victim),
+        "death during the hurt window aborts into a wreck (or its expired black box)"
     );
 }
 

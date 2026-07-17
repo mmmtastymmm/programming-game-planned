@@ -117,6 +117,12 @@ pub(crate) struct EditorState {
     pub(crate) icons: HashMap<&'static str, egui::TextureHandle>,
     /// Telemetry viewer's minimum log level (M9; 0 = trace shows all).
     pub(crate) telemetry_min: u8,
+    /// Staged printer-rule edits, keyed by printer entity id: DragValue
+    /// edits buffer here and commit as ONE EditPrinterRules when the
+    /// interaction settles (each command re-allocates the fleet — a
+    /// per-frame storm would recall bots toward dial values the player
+    /// never intended).
+    pub(crate) pending_rules: BTreeMap<u64, sim::world::PrinterRules>,
 }
 
 impl Default for EditorState {
@@ -137,6 +143,7 @@ impl Default for EditorState {
             build_category: 0,
             icons: HashMap::new(),
             telemetry_min: 0,
+            pending_rules: BTreeMap::new(),
         }
     }
 }
@@ -945,18 +952,28 @@ pub(crate) fn editor_ui(
                     PrinterState::Working if remainder == Some(pid) => {
                         ui.small("remainder — takes what nobody claims");
                     }
-                    PrinterState::Working => {
-                        let mut rules = rules.unwrap_or_default();
+    PrinterState::Working => {
+                        // Edits STAGE locally and commit only once the
+                        // interaction settles: EditPrinterRules fires an
+                        // immediate signal-mode re-allocation, so a
+                        // DragValue must not emit one command per drag
+                        // frame (intermediate dial values could wreck
+                        // mid-template bots the player never aimed at).
+                        let live = rules.unwrap_or_default();
+                        let mut rules =
+                            editor.pending_rules.get(&pid.0).copied().unwrap_or(live);
                         let mut changed = false;
+                        let mut settling = false;
                         // Target: an absolute count, or a floored % of cap.
                         let mut pct = matches!(rules.target, PrintTarget::CapPct(_));
                         let mut value = match rules.target {
                             PrintTarget::Count(n) => n,
                             PrintTarget::CapPct(p) => p,
                         };
-                        changed |= ui
-                            .add(egui::DragValue::new(&mut value).range(0..=999))
-                            .changed();
+                        let target_resp =
+                            ui.add(egui::DragValue::new(&mut value).range(0..=999));
+                        changed |= target_resp.changed();
+                        settling |= target_resp.dragged() || target_resp.has_focus();
                         if ui
                             .selectable_label(pct, "%cap")
                             .on_hover_text("Target reads as a floored % of the fleet cap")
@@ -1011,26 +1028,36 @@ pub(crate) fn editor_ui(
                             changed = true;
                         }
                         let mut priority = rules.priority.min(99);
-                        if ui
+                        let prio_resp = ui
                             .add(egui::DragValue::new(&mut priority).range(0..=99).prefix("#"))
-                            .on_hover_text("Claim order across printers (lower first)")
-                            .changed()
-                        {
+                            .on_hover_text("Claim order across printers (lower first)");
+                        if prio_resp.changed() {
                             rules.priority = priority;
                             changed = true;
                         }
+                        settling |= prio_resp.dragged() || prio_resp.has_focus();
                         if changed {
-                            // A rule edit dispatches like a signal (M9):
-                            // mid-template bots can wreck — the docs mean
-                            // it: turn the dials when your bots are safe.
-                            let _ = game.0.apply(&Command::EditPrinterRules {
-                                printer: pid,
-                                target: rules.target,
-                                key: rules.key,
-                                best_first: rules.best_first,
-                                priority: rules.priority,
-                                check_interval: None,
-                            });
+                            editor.pending_rules.insert(pid.0, rules);
+                        }
+                        // Commit once the drag/typing settles — one
+                        // command per intended value, not per frame. A
+                        // rule edit dispatches like a signal (M9):
+                        // mid-template bots can wreck — the docs mean
+                        // it: turn the dials when your bots are safe.
+                        if let Some(pending) = editor.pending_rules.get(&pid.0).copied()
+                            && !settling
+                        {
+                            if pending != live {
+                                let _ = game.0.apply(&Command::EditPrinterRules {
+                                    printer: pid,
+                                    target: pending.target,
+                                    key: pending.key,
+                                    best_first: pending.best_first,
+                                    priority: pending.priority,
+                                    check_interval: None,
+                                });
+                            }
+                            editor.pending_rules.remove(&pid.0);
                         }
                     }
                 }

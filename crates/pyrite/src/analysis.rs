@@ -122,7 +122,7 @@ fn gutter_block(
     for &sid in block {
         let stmt = program.stmt(sid);
         let mut cost = LineCost::default();
-        let mut add_expr = |cost: &mut LineCost, eid: ExprId| {
+        let add_expr = |cost: &mut LineCost, eid: ExprId| {
             let (c, var) = gutter_expr(program, costs, eid);
             cost.cycles += c;
             cost.variable |= var;

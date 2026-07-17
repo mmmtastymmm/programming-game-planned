@@ -817,7 +817,7 @@ pub(crate) fn sync_view(
                 .spawn((
                     Mesh3d(palette.pad_slab.clone()),
                     MeshMaterial3d(palette.wreck_tex_mat.clone()),
-                    Transform::from_translation(tile_xyz(world, wreck.pos, 0.07)),
+                    Transform::from_translation(tile_xyz(world, wreck.pos(), 0.07)),
                 ))
                 .id();
             e.insert(entity);

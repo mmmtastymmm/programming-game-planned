@@ -340,6 +340,17 @@ pub struct MapSpec {
     /// is 30 Steel + 10 Iron + 5 Coal.
     #[serde(default)]
     pub starting_stock: Vec<(u8, crate::resources::Resource, u64)>,
+    /// Feral nests (M12, docs/04): (position, arcanum 0–21). Nests above
+    /// the match's `max_arcanum` simply don't spawn.
+    #[serde(default)]
+    pub nests: Vec<(TilePos, u8)>,
+    /// Match option (docs/04): the deepest arcanum this map spawns.
+    /// Raising it deepens the frontier, never the neighborhood.
+    #[serde(default = "default_max_arcanum")]
+    pub max_arcanum: u8,
+    /// The rest of the match-settings inventory (M13, docs/08 Q77).
+    #[serde(default)]
+    pub settings: MatchSettings,
     /// DEV KNOB (M9): override printers.ron's per-printer fleet-cap
     /// contribution for this map — tests and demo scenes need small,
     /// predictable populations, and the replay format carries only
@@ -385,6 +396,58 @@ fn default_node_amount() -> u32 {
     20
 }
 
+fn default_max_arcanum() -> u8 {
+    21
+}
+
+/// The server harm setting (M13, docs/08 Modes): Open lets players ally,
+/// trade, raid, or war freely; Non-PvP removes direct HARM (damage,
+/// salvage/analyze/hijack of other players' property) but never indirect
+/// competition; Duel is the stretch mirror-map mode (harm on).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum HarmMode {
+    Open,
+    NonPvp,
+    Duel,
+}
+
+/// The match-settings inventory (M13, docs/08 Q77): every dial a match is
+/// configured with, lockstep-shared, fixed at match start. Two dials from
+/// the inventory live directly on MapSpec for historical reasons —
+/// `quirk_permille` (quirk probability) and `max_arcanum` — and the
+/// Ferals toggle, print cost, and decryption % land here. `None` on an
+/// override means "use tuning.ron's figure".
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+pub struct MatchSettings {
+    pub harm: HarmMode,
+    /// Ferals on/off ("pure" PvP turns them off) — docs/04.
+    pub ferals: bool,
+    /// Print cost override (docs/02: the build receipt is literal —
+    /// refunds scale with what was actually spent).
+    pub print_cost_steel: Option<u64>,
+    /// Salvage decryption % override (docs/08, default 5).
+    pub salvage_decrypt_pct: Option<u32>,
+    /// Sim-speed vote plumbing (docs/08: unanimous consent, cooldown per
+    /// attempt — no vote spam).
+    pub vote_cooldown_ticks: u64,
+    /// How long an open proposal waits for unanimity before it fails.
+    pub vote_window_ticks: u64,
+}
+
+impl Default for MatchSettings {
+    fn default() -> Self {
+        Self {
+            harm: HarmMode::Open,
+            ferals: true,
+            print_cost_steel: None,
+            salvage_decrypt_pct: None,
+            vote_cooldown_ticks: 300,
+            vote_window_ticks: 100,
+        }
+    }
+}
+
 /// A printer placed by the map (docs/03: colonies start with a working
 /// Green printer and a ruined Red one).
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -425,6 +488,9 @@ impl MapSpec {
             dev_free_power: true,
             structures: Vec::new(),
             quirk_permille: default_quirk_permille(),
+            nests: Vec::new(),
+            max_arcanum: default_max_arcanum(),
+            settings: MatchSettings::default(),
         }
     }
 }

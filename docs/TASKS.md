@@ -449,6 +449,20 @@ hash: statline, XP map, quirk rolls, upkeep settlements).* ✅ CORE COMPLETE (20
 
 ## M9 — Printers v2: target shares (replaces the superseded `desired_max` dial)
 
+*Review round (2026-07-16, 10 confirmed findings fixed):* signal-mode allocation now DEFERS
+booting/pad-sitting bots to the polite queue (engine states aren't the player's clock — only
+mid-TEMPLATE landings keep the double-handle gamble); a ruined REMAINDER receives nobody
+(no marched-to-the-ruin ghost manufacturing; unclaimed bots keep their colors until repair);
+`recolor_bot` enforces the Q52 bar and printer state AT ARRIVAL too; polite queue entries are
+consumed only when the walk actually starts (politeness retries); walking + queued re-colors
+count toward the destination's print target (no replacement-print churn); fleet-cap math
+saturates against hostile replay config; the legacy `SetDesiredMax` command variant is kept
+as a deserialize-only alias so pre-M9 replay FILES still load; remainder-aimed
+`EditPrinterRules` still retunes the faction clock; the rules UI stages DragValue edits and
+commits ONE command when the interaction settles. *RULING (docs/01): over-capacity scrap is
+an ECONOMY event only — the cap-shrink trigger is GONE (prints stop, attrition shrinks;
+sustained-rust `rust_scraps` is the surviving valve).*
+
 - [x] **Allocation table**: `data/printers.ron` (fleet cap +15/working printer — the Q84
       manifest figure; check interval default 1000 ticks, player-set per faction).
       `PrinterRules { target: Count | CapPct (floored % OF THE CAP, Q64), key, best_first,
@@ -508,47 +522,162 @@ hash: statline, XP map, quirk rolls, upkeep settlements).* ✅ CORE COMPLETE (20
       entries via LIVE bots only — dead bots' lines don't group under their old color.*
       [game] (L)
 
-## M10 — Death, wrecks & intel
+## M10 — Death, wrecks & intel ✅ CORE COMPLETE (2026-07-16) — discussion items below
 
-- [ ] **Wreck v2**: HP (~25% max), countdown 20s + 1s/100 total XP, blast in damage phase
-      (max-HP scaled, friend-and-foe, never chains), re-wreck countdown resumes, rescue boot
-      at the Damaged line with hurt re-armed. [sim] (M) ⚠HASH
-- [ ] **The wreck race verbs**: field `repair()` (80 progress), `salvage` (build receipt + 5%
-      decryption), `analyze` (other factions only: Data + logs/env + comm key; destroys wreck;
-      banned in Non-PvP), `hijack` (→ claimer's remainder color, full fleet member),
-      `recover_black_box`, `guard`/`escort` (entity-anchored). [pyrite][sim] (L)
-- [ ] **Decryption & comm keys**: per-(color, faction) levels, masked-source rendering,
-      version hashing (M0), alliances never share decryption. [sim] (M)
+- [x] **Wreck v2** (`sim::wrecks`): the whole BotData rides the wreck (rescue/hijack rebuild
+      from it; salvage reads its receipt); hull = 25% max HP, attackable (0 = destroyed,
+      black box, NO blast); countdown 200 ticks + 10/100-XP, ticked at phase-6 start so
+      expiry blasts settle in the SAME damage phase; blast = 50% of the wreck's max HP,
+      radius 1, friend-and-foe, entity-id-ordered expiries, NEVER chains (blast-hit wrecks
+      are destroyed, not detonated); re-wreck RESUMES the carried countdown
+      (`BotData.countdown_carry`); rescue boots at the Damaged line, hurt latch re-armed.
+      The entity handle now outlives the bot into its wreck (targetable). [sim] (M) ⚠HASH
+      *(golden regenerated: the fixture's KillBot wreck now expires and blasts)*
+- [x] **The wreck race verbs**: `repair(target)` (wreck = field repair at the build rate +
+      Building L3's +25%, holds at full progress while the tile is blocked; structures and
+      bots mend too), `salvage` (25% receipt cut — chassis line + bought hardware — plus +5%
+      permanent decryption; destroys the wreck, box drops), `analyze` (other factions only,
+      faults on your own; Data + logs into the cloud + the victim's comm key), `hijack`
+      (boots under the claimer's WORKING remainder color, XP intact, holds while no
+      remainder/blocked tile), `recover_black_box` (banks contents to the archive),
+      `guard`/`escort` (entity-anchored stance: leash 2/1, engages adjacent enemies on a
+      swing cooldown, follows via per-step A*). *NEEDS DISCUSSION: (1) TOOL GATING —
+      repair/hijack should require a build tool; tool modules still don't exist, so both are
+      ungated; (2) analyze's Non-PvP ban waits on M13's harm mode; (3) a rescued dev bot
+      re-boots on its COLOR's program (its custom source died with its VM — wrecks don't
+      carry programs); (4) guard/escort semantics are a first-pass reading (swing cooldown
+      10, leash 2/1, per-tick A* while out of leash); (5) the archive is faction-less, so
+      analyzed logs land in the shared cloud.* [pyrite][sim] (L)
+- [x] **Decryption & comm keys**: `world.decryption[(viewer, owner, color)]` percent —
+      grows +5%/salvage, capped 100, never down, never shared; `world.comm_keys[viewer]` =
+      addressable factions (M11's `faction=` channels consume it; analyze steals one). Both
+      hashed. Masked-source RENDERING deferred with the Codex UI below. [sim] (M)
 - [ ] **Game**: clickable Black Boxes, wreck countdown display, Codex/decryption viewer with
-      per-color enemy-decryption % in the file viewer. [game] (M)
+      per-color enemy-decryption % in the file viewer. *(Deferred — the sim exposes
+      everything: wrecks carry countdown/hp, boxes carry entity + cause, decryption is a
+      readable map.)* [game] (M)
 
-## M11 — Channels ∥ (after M1 kwargs + M3 run states)
+## M11 — Channels ∥ ✅ CORE COMPLETE (2026-07-16) — discussion items below
 
-- [ ] **Blocking `send`/`receive`** with rendezvous, longest-blocked-receiver selection,
-      timeout faults (`err_timeout`), `try_*` message-lost variants, per-faction namespaces
-      (`faction=` param), comm-key gating, mutex-as-lease idiom support; `Blocked(channel)`
-      state; `Channels` construct unlock. [pyrite][sim] (L)
+- [x] **Blocking `send`/`receive`/`broadcast`** (`sim::channels`): rendezvous only — no
+      queues, no mailboxes; a phase-4b settle pairs blocked participants each tick
+      (longest-blocked receiver first, ties by lowest entity id; one broadcast then consumes
+      every remaining receiver). Timeouts fault a TYPED `err_timeout` (new
+      `Vm::resolve_action_fault`); `try_send`/`try_broadcast` park instant deliveries on the
+      receiver's action (message LOST when nobody's blocked), `try_receive` takes from the
+      longest-blocked sender. Per-faction namespaces via the `faction=` param, gated on the
+      target's COMM KEY (`analyze()` steals one; ally grants land M13); the `Channels`
+      construct gates the verbs per faction (Research; dev maps exempt). Corruption jams
+      both ends (blocked participants inside never wake; timeouts still run — the lease
+      recovery). Blocking burns the budget (M5's rule) and signals still interrupt (raise
+      cancels the parked op — the owed result never arrives, which is exactly the
+      mutex-as-lease recovery story). *NEEDS DISCUSSION: (1) `try_receive` matches blocked
+      SENDERS only — polling a blocked broadcaster doesn't count as its audience; (2) the
+      docs' `Blocked(channel)` run-state variant is served by the sim-side action (the HUD
+      shows the channel) rather than a pyrite RunState change; (3) sender-side selection
+      mirrors the receiver rule (longest-blocked, lowest entity) — docs only specify the
+      receiver side; (4) faction ids in `faction=` are raw ints until M13's faction
+      constants.* [pyrite][sim] (L)
 
-## M12 — Ferals ∥ (after M7 perception, M9 colors)
+## M12 — Ferals ∥ ✅ CORE COMPLETE (2026-07-16) — discussion items below
 
-- [ ] **Feral faction**: nests, nest-bound `home`/`patrol_route` bindings, arcana
-      (max-arcanum match setting), escalation, `rng.feral_mutation`, nest-gated printer
-      counts, Feral programs in current builtins, see-first acquisition. [sim] (M) ⚠HASH
+- [x] **Feral faction** (`sim::feral`, faction id 255): nests (MapSpec `nests: (pos,
+      arcanum)`, filtered by the `max_arcanum` match option) print the v1 archetypes —
+      Drone/Stinger/Harvester/Warden, real Pyrite on the shared VM, each on a FIXED Feral
+      color slot (200–203) so decryption accrues per archetype. `home`/`patrol_route`
+      pre-bind as per-print VM constants (Q79's kind-constant mechanism); `deposit()`
+      treats the nest as the Harvester's depot (its stock funds prints). Escalation 0–3 is
+      FOOTPRINT-driven (structures + printers + claims + kills×weight, never wall-clock)
+      and widens the deterministic round-robin print mix. Magician/Moon arcana mutate one
+      integer literal per print via `rng.feral_mutation` (parse-valid by construction;
+      every variant enters the program library for the Codex diff). Beating a nest to 0
+      leaves a DEFEATED site: `RazeNest` banks the Data bounty, `ClaimNest` converts it —
+      and claimed nests gate `PlacePrinter` on docs/01's triangular curve (2 free slots,
+      then 1/3/6/10 nests). Undefended claims are RETAKEN by adjacent Feral activity
+      (guard radius, tuning). Nests see for their side (perception eyes) and see-first
+      acquisition falls out of M7's scoped queries. Sighting-only Feral perception, 9
+      tests in `tests/ferals.rs`. *NEEDS DISCUSSION: (1) archetype sources deviate from
+      docs/04's listings — a `move_to` before each `attack`, an `exists(ore)` guard on the
+      Harvester, and `wait(n)` beats added as mutation targets; ratify or restore the
+      crash-loop-y originals; (2) claim/raze are instant Commands — docs want a build-tool
+      bot converting the site; (3) of the v1 arcana subset only the MUTATION flag (1, 18)
+      is mechanically distinct — Hierophant hijack, Death salvage-denial, Tower siege, and
+      Moon counter-intel personalities are still just difficulty scaling; (4) losing a
+      claimed nest gates only NEW printer placements — docs/01 wants the over-curve
+      printer sent DORMANT with its bots as ghosts (Q65 machinery exists from M9); (5)
+      `patrol_route` = nest + 3 nearest nodes is my drafting; (6) the footprint metric
+      (docs say "territory claimed, energy output, Ferals killed") and the
+      `nest_income_deci` trickle (keeps barren-map nests printing) are first-pass
+      stand-ins; (7) Feral bots have no `color_programs` entry, so a rescued Feral wreck
+      boots the `wait(1)` fallback — the Codex/decrypted-view UI is [game] work that
+      hasn't landed.* [sim] (M) ⚠HASH — golden regenerated: phase 9 now hashes the
+      escalation dial + kill counter unconditionally (and nests when present), so every
+      replay hash moves; the fixture scenario's behavior is unchanged.
 
-## M13 — Match plumbing & multiplayer (last; single-player is lockstep-with-one already)
+## M13 — Match plumbing & multiplayer ✅ SIM CORE COMPLETE (2026-07-16) — game-side work + discussion below
 
-- [ ] **Match settings struct** (08's inventory: harm mode, print cost, max arcanum, quirk
-      probability, decryption %, vote cooldown, Ferals toggle) wired through world init +
-      lobby UI. [sim][game] (M)
-- [ ] **Remaining commands**: `ExchangeData`, `PostRequest`, `Grant`, `SetAlliance`, `Vote`
-      (+ sim-speed voting replacing the viewer-local speed control); Request Box structure;
-      ally grant pools ears (M7 hook). [sim][game] (M)
-- [ ] **Lockstep relay**: actual networking, per-tick command exchange, hash comparison,
-      desync surfacing. The sim API (ordered commands + phase-9 hash) is already shaped for
-      this. [game/new crate] (L)
-- [ ] **Q71 map generation** — still an open design question; unblock before this ships.
+- [x] **Match settings** (docs/08 Q77): `MapSpec.settings: MatchSettings` — harm mode
+      (Open / NonPvp / Duel), Ferals toggle, print-cost and salvage-decryption-% overrides
+      (shadow tuning.ron at `Sim::new`), vote cooldown + window. `quirk_permille` and
+      `max_arcanum` remain direct MapSpec fields (same inventory, older plumbing). Non-PvP
+      enforcement: `World::harm_allowed` gates `attack()` resolution (structures, wrecks,
+      bots — Ferals and your own things always fair game; blasts stay indiscriminate per
+      Q55) and the salvage/analyze/hijack verbs fault `err_action` on other players'
+      wrecks (Q76). *NEEDS DISCUSSION: no lobby UI — [game] work; the PvP entry gate
+      (full construct knowledge to join harm servers) is a matchmaking-layer rule with no
+      sim hook yet.* [sim] (M)
+- [x] **Remaining commands**: `ExchangeData` (clamped Data gifts), `PostRequest` (a
+      64-entry, 200-char-clamped world message board), `Grant`/revoke (Vision pools the
+      granter's eyes into the grantee's perception each tick — the M7 hook; Channels opens
+      the granter's namespace without a stolen comm key), `SetAlliance` (allies advance
+      salvage decryption TOGETHER from then on — docs/08's team level; dissolving takes
+      its grants with it), `Vote` (unanimous `SetSpeed` proposals across live factions;
+      one refusal or window expiry fails it; every attempt starts the cooldown; the agreed
+      `sim_speed_permille` is world state the game layer paces by). *NEEDS DISCUSSION:
+      (1) the Request Box is a world board, not the docs' physical structure; (2)
+      `ExchangeData`/`Grant` trust the relay to forward only a faction's own commands —
+      command AUTHORSHIP isn't modeled in the sim; (3) prior decryption isn't merged when
+      an alliance forms (only future salvages pool) — ratify; (4) the viewer-local speed
+      control still exists in the game crate and should defer to the voted speed
+      [game].* [sim] (M)
+- [x] **Lockstep relay scaffold** (`sim::lockstep`): `Transport` trait (send/recv of
+      `Commands { peer, tick, … }` / `Hash` messages) + `LockstepPeer` — schedules local
+      input at `T + delay` (warm-up ticks pre-seeded empty), barriers on the full roster's
+      command sets, applies them in peer-id order, steps, broadcasts the phase-9 hash, and
+      LATCHES the first `Desync { tick, hashes }` once every roster hash disagrees.
+      `LocalHub` is the in-process reference transport; tests drive two real Sims through
+      command traffic and a deliberate divergence. *NEEDS DISCUSSION: real networking
+      (sockets, host relay ordering, late join / host migration serialization) is [game]/
+      new-crate work — the docs' pause/dump/resync policy on desync also lives above this
+      layer.* [sim] (L→M as scoped)
+- [ ] **Q71 map generation** — still an open design question; unblock before v1 ships.
+      (Unchanged: everything above runs on authored/dev MapSpecs.)
 
 ---
+
+## Review round 2026-07-16 (xhigh, M10–M13 working tree) — all 15 findings fixed
+
+Crashes/losses: `PostRequest` clamps on a char boundary (a mid-codepoint `String::truncate`
+was a remote-triggerable lockstep panic); `LockstepPeer::submit` claims a fresh tick per
+frame (`next_submit`), so a stalled barrier no longer overwrites queued commands. Harm &
+perception gates: guard/escort swings now pass `harm_allowed` + never hit declared allies +
+require the victim in the perception cloud; `attack()`'s victim lookup covers nests (a
+CLAIMED nest is the claimant's property on Non-PvP); `move_to`'s stale-handle exemption is
+owner-scoped (foreign nests need eyes, killing the entity-id fog sweep); channel verbs
+accept faction 0 (per-site range checks replaced the shared `> 0` guard; out-of-u8 factions
+fault instead of truncating). Hash coverage (⚠HASH, golden regenerated — every replay hash
+moves; fixture behavior unchanged): `hash_bot_data` now hashes EVERY BotData field and is
+shared by live bots and wrecks (upgrade/module identity, per-track XP, quirks, carries,
+rng_program, crash_seen — plus in-flight `Action`/`ActionRequest` state incl. channel
+`waited`/parked payloads via exhaustive `hash_action`/`hash_request`); `harm_enabled` +
+vote plumbing and `BlackBox.pos` joined phase 9. Game rules: hijack AND rescue hold at the
+fleet cap (ghosts exempt — the countdown keeps burning, so a stuffed roster can lose the
+race); `try_send`/`try_receive` are jammed from the CALLER's tile too (Corruption blocks
+both ways, matching the blocking verbs); vision grants copy from a pre-grant snapshot
+(never transitive, faction-number independent); nests are solid (structure_at,
+A* blocked set, spawn tiles, PlacePrinter's free check); repair pays Building XP only for
+work actually done. Regression tests in multiplayer/lockstep/channels/ferals/wreckrace/
+building suites.
 
 ## Cross-cutting quick wins (small, independent, grab anytime)
 

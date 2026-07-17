@@ -99,11 +99,38 @@ impl Sim {
         for st in self.world.structures.values() {
             perceivers.entry(st.faction).or_default().push((st.pos, s, sh, false));
         }
+        // Nests are Feral eyes (M12) — a claim transfers them.
+        for n in self.world.nests.values() {
+            let faction = match n.state {
+                crate::world::NestState::Claimed(f) => f,
+                crate::world::NestState::Active => crate::world::FERAL_FACTION,
+                crate::world::NestState::Defeated => continue,
+            };
+            perceivers.entry(faction).or_default().push((n.pos, s, sh, false));
+        }
         // Depots are factionless (pre-M4 simplification) — they see for
         // faction 0 only to avoid granting everyone eyes; flagged with the
         // depot-faction discussion in TASKS.md.
         for d in self.world.depots.values() {
             perceivers.entry(0).or_default().push((d.pos, s, sh, false));
+        }
+
+        // Ally grants pool ears (M13, docs/08): a Vision grant copies the
+        // granter's entire eye list into the grantee's cloud, this tick.
+        let vision_grants: Vec<(u8, u8)> = self
+            .world
+            .grants
+            .iter()
+            .filter(|(_, _, what)| *what == crate::world::GrantKind::Vision)
+            .map(|(from, to, _)| (*from, *to))
+            .collect();
+        // Grants copy from the PRE-GRANT snapshot, so pooled vision never
+        // chains transitively (0→1 plus 1→2 must not hand 2 faction 0's
+        // eyes) and the outcome is independent of faction numbering.
+        let own_eyes = perceivers.clone();
+        for (from, to) in vision_grants {
+            let eyes = own_eyes.get(&from).cloned().unwrap_or_default();
+            perceivers.entry(to).or_default().extend(eyes);
         }
 
         let factions: BTreeSet<u8> = perceivers.keys().copied().collect();
@@ -178,10 +205,27 @@ impl Sim {
             for (id, n) in &self.world.nodes {
                 see_static(*id, n.pos, false);
             }
+            // Wrecks and black boxes are field objects in the race (M10):
+            // own wrecks are colony knowledge; the rest need eyes.
+            for w in self.world.wrecks.values() {
+                see_static(w.data.entity, w.data.pos, w.data.faction == faction);
+            }
+            for bb in &self.world.black_boxes {
+                see_static(bb.entity, bb.pos, false);
+            }
             // Blight Cores (M8-C): nobody's own — seen like any other
             // stationary mass (attack's perception gate then just works).
             for (id, c) in &self.world.blight_cores {
                 see_static(*id, c.pos, false);
+            }
+            // Nests (M12): the Feral colony always knows its own active
+            // nests; a claim hands that knowledge to the claimant.
+            for (id, n) in &self.world.nests {
+                let own = match n.state {
+                    crate::world::NestState::Claimed(f) => f == faction,
+                    _ => faction == crate::world::FERAL_FACTION,
+                };
+                see_static(*id, n.pos, own);
             }
             // seen ∩ heard: sight is absolute — drop the blip.
             let heard: BTreeMap<EntityId, TilePos> =

@@ -72,6 +72,59 @@ Tuning(
     wander_leg: 4,
     // Ford wading quiets the mover: subtracted from heard-at distance.
     ford_quiet: 2,
+    // --- the wreck race (M10, docs/02 Q83/Q84 first-pass figures) ---
+    // Wreck hull, percent of the bot's max HP (docs: ~25%).
+    wreck_hp_pct: 25,
+    // Self-destruct: base ~20s + 1s per 100 total XP (10Hz ticks).
+    wreck_countdown_base_ticks: 200,
+    wreck_countdown_per_100xp_ticks: 10,
+    // Expiry blast: radius in tiles; damage scales with the wreck's max
+    // HP (this percent of it). Friend and foe; never chains.
+    blast_radius: 1,
+    blast_damage_pct: 50,
+    // The race's verb speeds (Q84: salvage < analyze < hijack; ticks).
+    salvage_ticks: 40,
+    analyze_ticks: 60,
+    hijack_ticks: 100,
+    // Field repair: total deci-progress to restore a wreck (80 progress
+    // = ~8s at the base build rate; scales with the rescuer's rate).
+    field_repair_deci: 800,
+    // Salvage: fraction of the invested build receipt returned (percent),
+    // and the permanent decryption gained per salvage (docs/08: +5%).
+    salvage_receipt_pct: 25,
+    salvage_decrypt_pct: 5,
+    // Analyze: flat Data for dissecting an enemy wreck (Feral 5-15 by
+    // arcanum lands with M12).
+    analyze_data: 10,
+    // Guard duty: ticks between autonomous swings (M10 first-pass).
+    guard_swing_ticks: 10,
+    // --- Ferals (M12, docs/04) ---
+    // Nest durability: base + per-arcanum bonus (deeper nests are tougher).
+    nest_hp: 400,
+    nest_hp_per_arcanum: 40,
+    // The nest's private economy, deci-units: what it starts with, its slow
+    // passive trickle per tick, and what one print draws.
+    nest_seed_stock_deci: 300,
+    nest_income_deci: 1,
+    nest_print_cost_deci: 100,
+    nest_print_ticks: 120,
+    // Razing a defeated nest pays Data (docs/04: "a large Data bounty").
+    nest_data_bounty: 100,
+    // A claimed nest with no owner bot within this Chebyshev radius is an
+    // undefended loan — adjacent Feral activity re-takes it (docs/04).
+    nest_guard_radius: 3,
+    // Feral chassis scale over the universal floor: +pct of hp per threat
+    // level above 1 (Drone 1, Stinger/Harvester 2, Warden 3).
+    feral_hp_per_threat_pct: 50,
+    // Escalation tier thresholds on the FOOTPRINT metric (structures +
+    // printers + claimed nests + kills×weight) — never wall-clock.
+    escalation_probing: 6,
+    escalation_contested: 12,
+    escalation_overrun: 20,
+    escalation_kill_weight: 1,
+    // Building a printer (beyond the map's starters) costs Steel; the
+    // SLOT is gated by controlled nests, quadratically (docs/01).
+    printer_cost_steel: 50,
     // --- terrain v2 (M8, docs/05 Q35–Q40) ---
     // Move costs on the ×2 scale (Plains = 2) so Road's ½× stays integer.
     // Kinds absent from the table are impassable (Water, Barricade).

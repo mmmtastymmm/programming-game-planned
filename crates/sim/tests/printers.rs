@@ -377,19 +377,42 @@ fn damage_during_recall_walk_is_double_handle() {
 
 #[test]
 fn over_capacity_scraps_lowest_total_xp_for_refund() {
+    // Scrap is an ECONOMY event only (docs/01: a shrunken cap stops
+    // prints, never scraps) — the surviving trigger is sustained Steel
+    // shortfall with `rust_scraps` on (M5 Q84).
     let mut spec = colony_map();
-    spec.fleet_cap_override = Some(1); // cap 1, two live bots → scrap one
+    spec.dev_free_power = false; // no Steel in stock: rust from the start
+    spec.fleet_cap_override = Some(0); // no prints: scrap semantics only
     let mut sim = Sim::new(&spec);
+    sim.upkeep.interval_ticks = 5;
+    sim.upkeep.rust_scraps = true;
     let veteran = spawn_green(&mut sim, TilePos::new(2, 3));
     spawn_green(&mut sim, TilePos::new(3, 3));
     // TOTAL XP decides (M9: every track counts — Building included).
     sim.world.bots.get_mut(&veteran).unwrap().data.xp.insert(sim::world::XpTrack::Building, 900);
 
     let ore_before = sim.world.stock_get(0, sim::resources::Resource::Iron);
-    for _ in 0..60 {
+    // The valve fires per sustained settlement; disarm it after the first
+    // recall so the SELECTION (lowest total XP) is what this test proves.
+    let mut fired = false;
+    for _ in 0..200 {
         sim.step();
+        if !fired
+            && sim.world.bots.values().any(|b| {
+                matches!(
+                    b.data.recall,
+                    Some(sim::world::Recall { purpose: sim::world::RecallPurpose::Scrap, .. })
+                )
+            })
+        {
+            sim.upkeep.rust_scraps = false;
+            fired = true;
+        }
+        if sim.world.bots.len() == 1 {
+            break;
+        }
     }
-    assert_eq!(sim.world.bots.len(), 1, "over-capacity colony scraps down");
+    assert_eq!(sim.world.bots.len(), 1, "sustained rust scraps the colony down");
     assert!(sim.world.bots.contains_key(&veteran), "the veteran survives (Building XP counts)");
     assert_eq!(
         sim.world.stock_get(0, sim::resources::Resource::Iron),
@@ -405,9 +428,13 @@ fn scrap_walk_ends_beside_the_printer_for_a_visible_tick() {
     // viewer plays the disassembly wherever it last saw the bot, so being
     // consumed in the same tick as the final step reads as a bot scrapped
     // mid-stride, tiles away from the printer.
+    // Driven by the economy valve (sustained rust), like every scrap.
     let mut spec = colony_map();
-    spec.fleet_cap_override = Some(1);
+    spec.dev_free_power = false;
+    spec.fleet_cap_override = Some(0); // no prints: scrap semantics only
     let mut sim = Sim::new(&spec);
+    sim.upkeep.interval_ticks = 5;
+    sim.upkeep.rust_scraps = true;
     let veteran = spawn_green(&mut sim, TilePos::new(2, 3));
     // The victim starts across the map, so the recall is a real walk.
     let victim = spawn_green(&mut sim, TilePos::new(10, 6));
@@ -529,4 +556,111 @@ fn unreachable_home_printer_never_scraps_in_place() {
         sim.world.bots.values().all(|b| b.data.recall.is_none()),
         "no recall walk may start toward an unreachable printer"
     );
+}
+
+
+/// Review fix (M9): a dial nudge must never wreck bots in ENGINE states —
+/// booting (fresh prints) and pad-sitting defer to the polite queue
+/// instead of being signal-recalled into an abort.
+#[test]
+fn rule_edits_defer_for_booting_bots_instead_of_wrecking() {
+    let mut spec = colony_map();
+    spec.fleet_cap_override = Some(2);
+    let mut sim = Sim::new(&spec);
+    sim.tuning.boot_ticks = 40; // a long, observable boot window
+    let red = printer_ids(&sim)[1];
+    sim.world.data.insert(0, sim.tuning.repair_cost_data);
+    sim.apply(&Command::RepairPrinter { printer: red }).unwrap();
+    // Let the remainder print one bot and catch it MID-BOOT.
+    let mut booting: Option<sim::BotId> = None;
+    for _ in 0..30 {
+        sim.step();
+        if let Some((id, _)) =
+            sim.world.bots.iter().find(|(_, b)| b.data.booting.is_some())
+        {
+            booting = Some(*id);
+            break;
+        }
+    }
+    let booting = booting.expect("a print must boot");
+    // Claim everything for Red while the bot is booting.
+    dial(&mut sim, red, 2, SelectKey::TotalXp, true);
+    assert!(
+        sim.world.bots.contains_key(&booting),
+        "the dial nudge must not wreck a booting bot"
+    );
+    assert!(sim.world.wrecks.is_empty(), "no wreck from a rule edit landing mid-boot");
+    // The deferred recall lands politely once the boot finishes.
+    for _ in 0..400 {
+        sim.step();
+    }
+    assert_eq!(
+        sim.world.bots[&booting].data.color,
+        Color::RED,
+        "the deferred claim lands after the boot"
+    );
+}
+
+/// Review fix (M9): a ruined REMAINDER printer receives nobody — surplus
+/// bots of a WORKING color keep that color instead of being marched to
+/// the ruin, re-colored, and turned into permanent ghosts.
+#[test]
+fn ruined_remainder_never_liquidates_the_fleet_into_ghosts() {
+    let mut spec = colony_map();
+    spec.fleet_cap_override = Some(2);
+    // Ruin the FIRST-BORN (remainder, Green); keep Red working.
+    spec.printers[0].ruined = true;
+    spec.printers[1].ruined = false;
+    let mut sim = Sim::new(&spec);
+    let red = printer_ids(&sim)[1];
+    // Two RED bots: the dial claims one; pre-fix the surplus one was
+    // assigned to the ruined remainder and ghosted on arrival.
+    let mut spawn_red = |sim: &mut Sim, pos| -> sim::BotId {
+        sim.apply(&Command::SpawnBot {
+            pos,
+            source: IDLER.into(),
+            cpu: 2,
+            cargo_cap: 1,
+            faction: 0,
+            hp: 100,
+            color: Color::RED,
+        })
+        .unwrap()
+        .unwrap()
+    };
+    let a = spawn_red(&mut sim, TilePos::new(6, 3));
+    let b = spawn_red(&mut sim, TilePos::new(7, 3));
+    dial(&mut sim, red, 1, SelectKey::TotalXp, true);
+    for _ in 0..300 {
+        sim.step();
+    }
+    for id in [a, b] {
+        let bot = &sim.world.bots[&id];
+        assert_eq!(bot.data.color, Color::RED, "nobody re-colors at a ruin");
+        assert!(!sim.world.is_ghost(&bot.data), "no manufactured ghosts");
+        assert!(bot.data.recall.is_none(), "the surplus bot stays put");
+    }
+}
+
+/// Review fix (M9): pre-M9 replay files still DESERIALIZE — the legacy
+/// SetDesiredMax variant is kept as an alias into the v2 rules.
+#[test]
+fn legacy_set_desired_max_still_parses_and_applies() {
+    let ron = r#"SetDesiredMax(printer: (3), value: 2)"#;
+    let command: Command = ron::from_str(ron).expect("legacy command deserializes");
+    let mut spec = colony_map();
+    spec.fleet_cap_override = Some(3);
+    let mut sim = Sim::new(&spec);
+    let red = printer_ids(&sim)[1];
+    sim.world.data.insert(0, sim.tuning.repair_cost_data);
+    sim.apply(&Command::RepairPrinter { printer: red }).unwrap();
+    sim.apply(&Command::SetDesiredMax { printer: red, value: 2 }).unwrap();
+    assert!(
+        matches!(
+            sim.world.printers[&red].rules,
+            Some(sim::world::PrinterRules { target: PrintTarget::Count(2), .. })
+        ),
+        "the legacy dial maps to a Count target"
+    );
+    let _ = command;
 }

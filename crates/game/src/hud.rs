@@ -27,16 +27,16 @@ pub(crate) fn inspector_ui(
             // The bot is gone: wreck or total destruction.
             if let Some(wreck) = world.wrecks.get(&sim::world::BotId(bot_id)) {
                 ui.heading(format!("Bot {bot_id} — WRECKED"));
-                ui.label(format!("at ({}, {})", wreck.pos.x, wreck.pos.y));
+                ui.label(format!("at ({}, {})", wreck.pos().x, wreck.pos().y));
                 ui.separator();
                 ui.strong("recovered logs");
-                for (level, line) in &wreck.logs {
+                for (level, line) in &wreck.data.log_buf {
                     ui.monospace(leveled_line(*level, line));
                 }
-                if !wreck.env.is_empty() {
+                if !wreck.data.env.is_empty() {
                     ui.separator();
                     ui.strong("env snapshot");
-                    for (key, value) in &wreck.env {
+                    for (key, value) in &wreck.data.env {
                         ui.monospace(format!("{key} = {value}"));
                     }
                 }
@@ -96,6 +96,21 @@ pub(crate) fn inspector_ui(
                 Some(sim::world::Action::Build { .. }) => "building".into(),
                 Some(sim::world::Action::Search { reach, current, .. }) => {
                     format!("searching (ring {current}/{reach})")
+                }
+                Some(sim::world::Action::Repair { .. }) => "repairing".into(),
+                Some(sim::world::Action::Race { kind, .. }) => match kind {
+                    sim::world::RaceKind::Salvage => "salvaging".into(),
+                    sim::world::RaceKind::Analyze => "analyzing".into(),
+                    sim::world::RaceKind::Hijack => "hijacking".into(),
+                },
+                Some(sim::world::Action::Recover { .. }) => "recovering a black box".into(),
+                Some(sim::world::Action::Channel { op, ch, .. }) => match op {
+                    sim::world::ChannelOp::Send(_) => format!("send({ch}) — waiting for a receiver"),
+                    sim::world::ChannelOp::Receive => format!("receive({ch}) — listening"),
+                    sim::world::ChannelOp::Broadcast(_) => format!("broadcast({ch}) — waiting for an audience"),
+                },
+                Some(sim::world::Action::Guard { escort, .. }) => {
+                    if *escort { "escorting".into() } else { "guarding".into() }
                 }
                 None => "blocked".into(),
             }

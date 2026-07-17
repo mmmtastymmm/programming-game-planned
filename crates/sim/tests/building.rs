@@ -347,7 +347,7 @@ fn kill_command_wrecks_bot_and_spills_cargo() {
 
     assert!(!sim.world.bots.contains_key(&bot), "killed bot is gone");
     let wreck = sim.world.wrecks.get(&bot).expect("manual kill leaves a wreck");
-    assert!(wreck.logs.iter().any(|l| l.1 == "7"), "logs ride in the wreck");
+    assert!(wreck.data.log_buf.iter().any(|l| l.1 == "7"), "logs ride in the wreck");
     let spilled: u32 = sim
         .world
         .nodes
@@ -378,4 +378,29 @@ fn spilled_cargo_is_recoverable_by_miners() {
         sim.step();
     }
     assert!(sim.world.stock_get(0, sim::resources::Resource::Iron) >= 20, "spilled cargo (2 units = 20 deci) makes it home; got {}", sim.world.stock_get(0, sim::resources::Resource::Iron));
+}
+
+#[test]
+fn repairing_a_full_target_earns_no_building_xp() {
+    let mut spec = MapSpec::empty(8, 4);
+    spec.quirk_permille = 0;
+    spec.structures.push((TilePos::new(3, 1), sim::world::StructureKind::Smelter));
+    let mut sim = Sim::new(&spec);
+    sim.tuning.fault_damage = 0;
+    // The smelter is at FULL hp from birth: looping repair() on it must
+    // mint nothing (review 2026-07-16: the per-tick grant paid before
+    // checking whether any mending happened).
+    let medic = spawn(
+        &mut sim,
+        TilePos::new(2, 1),
+        "repair(closest(smelter).expect())\nwait(2)\n",
+    );
+    for _ in 0..60 {
+        sim.step();
+    }
+    assert_eq!(
+        sim.world.bots[&medic].data.xp(sim::world::XpTrack::Building),
+        0,
+        "no work done, no Building XP"
+    );
 }

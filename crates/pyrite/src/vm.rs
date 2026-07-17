@@ -644,10 +644,20 @@ impl Vm {
         self.state = State::Running;
         match result {
             Ok(v) => self.values.push(v),
-            // Failed world actions carry the generic action id; finer
-            // host-domain ids (err_unreachable, ...) land with M7.
+            // Failed world actions carry the generic action id; typed
+            // host-domain ids go through resolve_action_fault.
             Err(msg) => self.fault(faults::ACTION, msg, host, costs),
         }
+    }
+
+    /// Resolve a blocking action with a TYPED host-domain fault id (M11:
+    /// a channel timeout is `err_timeout`, not the generic action fault).
+    pub fn resolve_action_fault(&mut self, fault: Fault, host: &mut dyn Host, costs: &CostTable) {
+        if self.state != State::Blocked {
+            return;
+        }
+        self.state = State::Running;
+        self.fault(fault.id, fault.msg, host, costs);
     }
 
     /// Deliver an external signal at an op boundary. Every signal enters

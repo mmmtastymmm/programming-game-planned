@@ -119,6 +119,90 @@ impl Sim {
                 ActionRequest::Build(blueprint) => {
                     bot.data.action = Some(Action::Build { blueprint });
                 }
+                // --- the wreck race + guard duty (M10) ---
+                ActionRequest::Repair(target) => {
+                    let Some(tpos) = self.world.entity_pos(target) else {
+                        self.finish_action(id, Err("repair: no such target".into()));
+                        return;
+                    };
+                    if pos.chebyshev(tpos) > 1 {
+                        self.finish_action(id, Err("repair: target out of range".into()));
+                        return;
+                    }
+                    let bot = self.world.bots.get_mut(&id).expect("bot exists");
+                    bot.data.action = Some(Action::Repair { target, done_deci: 0 });
+                }
+                ActionRequest::Salvage(target)
+                | ActionRequest::Analyze(target)
+                | ActionRequest::Hijack(target) => {
+                    let Some(wreck) = self.world.wreck_of(target) else {
+                        self.finish_action(id, Err("wreck race: target is not a wreck".into()));
+                        return;
+                    };
+                    let wpos = self.world.wrecks[&wreck].data.pos;
+                    if pos.chebyshev(wpos) > 1 {
+                        self.finish_action(id, Err("wreck race: out of range".into()));
+                        return;
+                    }
+                    let (kind, ticks) = match request {
+                        ActionRequest::Salvage(_) => {
+                            (crate::world::RaceKind::Salvage, self.tuning.salvage_ticks)
+                        }
+                        ActionRequest::Analyze(_) => {
+                            // Your own wrecks yield you nothing (Q76).
+                            if self.world.wrecks[&wreck].data.faction
+                                == self.world.bots[&id].data.faction
+                            {
+                                self.finish_action(
+                                    id,
+                                    Err("analyze: your own wrecks yield nothing".into()),
+                                );
+                                return;
+                            }
+                            (crate::world::RaceKind::Analyze, self.tuning.analyze_ticks)
+                        }
+                        _ => (crate::world::RaceKind::Hijack, self.tuning.hijack_ticks),
+                    };
+                    let bot = self.world.bots.get_mut(&id).expect("bot exists");
+                    bot.data.action =
+                        Some(Action::Race { wreck, kind, ticks_left: ticks.max(1) });
+                }
+                ActionRequest::Recover(target) => {
+                    let is_box = self.world.black_boxes.iter().any(|bb| bb.entity == target);
+                    let Some(tpos) = self.world.entity_pos(target).filter(|_| is_box) else {
+                        self.finish_action(id, Err("recover: no black box there".into()));
+                        return;
+                    };
+                    if pos.chebyshev(tpos) > 1 {
+                        self.finish_action(id, Err("recover: out of range".into()));
+                        return;
+                    }
+                    let bot = self.world.bots.get_mut(&id).expect("bot exists");
+                    bot.data.action = Some(Action::Recover { target, ticks_left: 1 });
+                }
+                ActionRequest::Guard { target, escort } => {
+                    if self.world.entity_pos(target).is_none() {
+                        self.finish_action(id, Err("guard: no such target".into()));
+                        return;
+                    }
+                    let bot = self.world.bots.get_mut(&id).expect("bot exists");
+                    bot.data.action =
+                        Some(Action::Guard { target, escort, step_wait: 0, cooldown: 0 });
+                }
+                ActionRequest::Channel { op, ch, namespace, timeout } => {
+                    // The rendezvous block (M11): parked here; the settle
+                    // pairs participants. Standing IN Corruption still
+                    // blocks — the jam means nobody can reach you, and
+                    // your timeout is your way out.
+                    bot.data.action = Some(Action::Channel {
+                        op,
+                        ch,
+                        namespace,
+                        waited: 0,
+                        timeout,
+                        delivered: None,
+                    });
+                }
                 ActionRequest::Search => self.start_search(id),
                 ActionRequest::Wander => {
                     // A seeded random walk leg: a random passable free
@@ -211,7 +295,23 @@ impl Sim {
                         })
                         .map(|(sid, _)| *sid)
                         .next();
-                    let target = depot.or(refinery);
+                    // Feral logistics (M12, docs/04): a Harvester's nest
+                    // IS its depot — the whole manifest feeds the nest's
+                    // print stock.
+                    let nest = (faction == crate::world::FERAL_FACTION)
+                        .then(|| {
+                            self.world
+                                .nests
+                                .iter()
+                                .filter(|(_, n)| {
+                                    n.state == crate::world::NestState::Active
+                                        && pos.chebyshev(n.pos) <= 1
+                                })
+                                .map(|(nid, _)| *nid)
+                                .next()
+                        })
+                        .flatten();
+                    let target = nest.or(depot).or(refinery);
                     match target {
                         _ if empty => {
                             let outcome = if fault_on_fail {
@@ -395,6 +495,41 @@ impl Sim {
                 // (its buffered contents are lost with it for now).
                 let damage = self.ctx()
                 .attack_damage_for(&self.world.bots[&id].data, self.tuning.attack_damage);
+                // Non-PvP servers (M13, docs/08): direct harm to another
+                // PLAYER's property is refused — your own things and the
+                // Ferals are always fair game (blasts stay indiscriminate;
+                // they never route through attack()).
+                let attacker = self.world.bots[&id].data.faction;
+                let victim = self
+                    .world
+                    .structures
+                    .get(&target)
+                    .map(|s| s.faction)
+                    .or_else(|| {
+                        self.world.wreck_of(target).map(|w| self.world.wrecks[&w].data.faction)
+                    })
+                    .or_else(|| {
+                        // A claimed nest is the claimant's property; Active
+                        // and Defeated sites belong to the Ferals (always
+                        // fair game).
+                        self.world.nests.get(&target).map(|n| match n.state {
+                            crate::world::NestState::Claimed(f) => f,
+                            _ => crate::world::FERAL_FACTION,
+                        })
+                    })
+                    .or_else(|| {
+                        self.world
+                            .bot_entities
+                            .get(&target)
+                            .and_then(|b| self.world.bots.get(b))
+                            .map(|b| b.data.faction)
+                    });
+                if let Some(v) = victim {
+                    if !self.world.harm_allowed(attacker, v) {
+                        self.finish_action(id, Err("attack: harm disabled on this server".into()));
+                        return;
+                    }
+                }
                 if let Some(st) = self.world.structures.get_mut(&target) {
                     if pos.chebyshev(st.pos) > 1 {
                         self.finish_action(id, Err("attack: target out of range".into()));
@@ -410,6 +545,25 @@ impl Sim {
                     self.finish_action(id, Ok(Value::Unit));
                     return;
                 }
+                // Nests are attackable masses (M12): hitting 0 doesn't
+                // remove the site — it goes DEFEATED, awaiting the raze-
+                // or-claim choice (docs/04).
+                if self.world.nests.contains_key(&target) {
+                    let npos = self.world.nests[&target].pos;
+                    if pos.chebyshev(npos) > 1 {
+                        self.finish_action(id, Err("attack: target out of range".into()));
+                        return;
+                    }
+                    let nest = self.world.nests.get_mut(&target).expect("checked");
+                    nest.hp = (nest.hp - damage).max(0);
+                    if nest.hp == 0 && nest.state != crate::world::NestState::Defeated {
+                        nest.state = crate::world::NestState::Defeated;
+                        nest.job = None;
+                    }
+                    self.world.pending_xp.push((id, XpTrack::Combat, damage.max(0) as u64));
+                    self.finish_action(id, Ok(Value::Unit));
+                    return;
+                }
                 // Blight Cores are attackable like structures (M8-C):
                 // direct damage, no signals. Killing one stops the spread;
                 // the creep it made stays until cleansed.
@@ -421,6 +575,25 @@ impl Sim {
                     core.hp = (core.hp - damage).max(0);
                     if core.hp == 0 {
                         self.world.blight_cores.remove(&target);
+                    }
+                    self.world.pending_xp.push((id, XpTrack::Combat, damage.max(0) as u64));
+                    self.finish_action(id, Ok(Value::Unit));
+                    return;
+                }
+                // Wrecks are attackable hulls (M10): damage falls on the
+                // wreck directly; zero destroys it — black box, NO blast
+                // (expiry is the only explosion).
+                if let Some(wreck) = self.world.wreck_of(target) {
+                    let wpos = self.world.wrecks[&wreck].data.pos;
+                    if pos.chebyshev(wpos) > 1 {
+                        self.finish_action(id, Err("attack: target out of range".into()));
+                        return;
+                    }
+                    let w = self.world.wrecks.get_mut(&wreck).expect("checked");
+                    w.hp = (w.hp - damage).max(0);
+                    let felled = w.hp == 0;
+                    if felled {
+                        self.destroy_wreck(wreck, "destroyed by attack");
                     }
                     self.world.pending_xp.push((id, XpTrack::Combat, damage.max(0) as u64));
                     self.finish_action(id, Ok(Value::Unit));
@@ -534,6 +707,240 @@ impl Sim {
                     self.finish_action(id, Ok(Value::Unit));
                 }
             }
+            Action::Repair { target, done_deci } => {
+                let pos = bot.data.pos;
+                // Rate through the pipeline; Building L3 repairs +25%.
+                let ctx = crate::stats::StatCtx {
+                    stats: &self.stats,
+                    xp: &self.xp,
+                    quirks: &self.quirks,
+                    tuning: &self.tuning,
+                };
+                let mut rate = ctx.build_rate_for(&bot.data);
+                if self.xp.level(bot.data.xp(XpTrack::Building)) >= 3 {
+                    rate += rate * self.xp.building_l3_repair_pct / 100;
+                }
+                let Some(tpos) = self.world.entity_pos(target) else {
+                    // Rescued/salvaged/destroyed by someone else mid-work.
+                    self.finish_action(id, Err("repair: target gone".into()));
+                    return;
+                };
+                if pos.chebyshev(tpos) > 1 {
+                    self.finish_action(id, Err("repair: target moved out of range".into()));
+                    return;
+                }
+                // Building XP pays for WORK DONE, per lane below — a
+                // repair loop on a full-HP target earns nothing (review
+                // 2026-07-16: the unconditional per-tick grant minted
+                // free XP forever).
+                let done_deci = done_deci + rate;
+                if let Some(wreck) = self.world.wreck_of(target) {
+                    // Field repair — the rescue race's rescue lane.
+                    self.world
+                        .pending_xp
+                        .push((id, XpTrack::Building, (rate / 10).max(1) as u64));
+                    if done_deci >= self.tuning.field_repair_deci {
+                        if !self.rescue_wreck(wreck) {
+                            // Tile blocked: hold at full progress.
+                            let bot = self.world.bots.get_mut(&id).expect("bot exists");
+                            bot.data.action = Some(Action::Repair {
+                                target,
+                                done_deci: self.tuning.field_repair_deci,
+                            });
+                            return;
+                        }
+                        self.finish_action(id, Ok(Value::Unit));
+                    } else {
+                        let bot = self.world.bots.get_mut(&id).expect("bot exists");
+                        bot.data.action = Some(Action::Repair { target, done_deci });
+                    }
+                } else if let Some(st) =
+                    self.world.structures.values_mut().find(|s| s.pos == tpos)
+                {
+                    let mended = (rate as i64 / 10).max(1).min(st.max_hp - st.hp);
+                    st.hp += mended;
+                    let full = st.hp == st.max_hp;
+                    if mended > 0 {
+                        self.world
+                            .pending_xp
+                            .push((id, XpTrack::Building, (rate / 10).max(1) as u64));
+                    }
+                    if full {
+                        self.finish_action(id, Ok(Value::Unit));
+                    } else {
+                        let bot = self.world.bots.get_mut(&id).expect("bot exists");
+                        bot.data.action = Some(Action::Repair { target, done_deci });
+                    }
+                } else if let Some(other) = self
+                    .world
+                    .bot_entities
+                    .get(&target)
+                    .copied()
+                    .filter(|b| self.world.bots.contains_key(b))
+                {
+                    let b = self.world.bots.get_mut(&other).expect("checked");
+                    let mended = (rate as i64 / 10).max(1).min(b.data.max_hp - b.data.hp);
+                    b.data.hp += mended;
+                    let full = b.data.hp == b.data.max_hp;
+                    if mended > 0 {
+                        self.world
+                            .pending_xp
+                            .push((id, XpTrack::Building, (rate / 10).max(1) as u64));
+                    }
+                    if full {
+                        self.finish_action(id, Ok(Value::Unit));
+                    } else {
+                        let bot = self.world.bots.get_mut(&id).expect("bot exists");
+                        bot.data.action = Some(Action::Repair { target, done_deci });
+                    }
+                } else {
+                    self.finish_action(id, Err("repair: nothing repairable there".into()));
+                }
+            }
+            Action::Race { wreck, kind, ticks_left } => {
+                let Some(w) = self.world.wrecks.get(&wreck) else {
+                    self.finish_action(id, Err("wreck race: lost — the wreck is gone".into()));
+                    return;
+                };
+                if bot.data.pos.chebyshev(w.data.pos) > 1 {
+                    self.finish_action(id, Err("wreck race: out of range".into()));
+                    return;
+                }
+                let ticks_left = ticks_left - 1;
+                if ticks_left > 0 {
+                    bot.data.action = Some(Action::Race { wreck, kind, ticks_left });
+                    return;
+                }
+                let faction = bot.data.faction;
+                match kind {
+                    crate::world::RaceKind::Salvage => {
+                        self.salvage_wreck(wreck, faction);
+                        self.finish_action(id, Ok(Value::Unit));
+                    }
+                    crate::world::RaceKind::Analyze => {
+                        self.analyze_wreck(wreck, faction);
+                        self.finish_action(id, Ok(Value::Unit));
+                    }
+                    crate::world::RaceKind::Hijack => {
+                        if self.hijack_wreck(wreck, faction) {
+                            self.finish_action(id, Ok(Value::Unit));
+                        } else {
+                            // No working remainder printer / blocked tile:
+                            // hold at the threshold and retry.
+                            let bot = self.world.bots.get_mut(&id).expect("bot exists");
+                            bot.data.action =
+                                Some(Action::Race { wreck, kind, ticks_left: 1 });
+                        }
+                    }
+                }
+            }
+            Action::Recover { target, ticks_left } => {
+                let ticks_left = ticks_left.saturating_sub(1);
+                if ticks_left > 0 {
+                    bot.data.action = Some(Action::Recover { target, ticks_left });
+                    return;
+                }
+                self.recover_black_box(target);
+                self.finish_action(id, Ok(Value::Unit));
+            }
+            Action::Guard { target, escort, step_wait, cooldown } => {
+                let pos = bot.data.pos;
+                let faction = bot.data.faction;
+                let Some(tpos) = self.world.entity_pos(target) else {
+                    // The charge is gone: the stance resolves.
+                    self.finish_action(id, Ok(Value::Unit));
+                    return;
+                };
+                let mut cooldown = cooldown.saturating_sub(1);
+                let mut step_wait = step_wait.saturating_sub(1);
+                // Swing at an adjacent perceived enemy (lowest entity id).
+                // The same gates as attack() (M13): no harm to other
+                // players on Non-PvP servers, never at declared allies,
+                // and only at contacts the colony actually perceives.
+                if cooldown == 0 {
+                    let victim = self
+                        .world
+                        .bots
+                        .iter()
+                        .filter(|(_, b)| {
+                            b.data.faction != faction
+                                && !b.data.dying
+                                && b.data.pos.chebyshev(pos) <= 1
+                                && self.world.harm_allowed(faction, b.data.faction)
+                                && !self.world.allied(faction, b.data.faction)
+                                && self.world.perception.get(&faction).is_some_and(|p| {
+                                    p.seen.contains(&b.data.entity)
+                                })
+                        })
+                        .map(|(bid, b)| (b.data.entity, *bid))
+                        .min();
+                    if let Some((_, victim)) = victim {
+                        let damage = crate::stats::StatCtx {
+                            stats: &self.stats,
+                            xp: &self.xp,
+                            quirks: &self.quirks,
+                            tuning: &self.tuning,
+                        }
+                        .attack_damage_for(&self.world.bots[&id].data, self.tuning.attack_damage);
+                        self.world.pending_xp.push((id, XpTrack::Combat, damage.max(0) as u64));
+                        self.queue_damage(victim, damage, Some((id, faction)));
+                        cooldown = self.tuning.guard_swing_ticks.max(1);
+                    }
+                }
+                // Keep station: escort hugs (<=1), guard holds a short
+                // leash (<=2); step one tile when out of range.
+                let leash = if escort { 1 } else { 2 };
+                if pos.chebyshev(tpos) > leash && step_wait == 0 {
+                    let structures = self.world.structure_tiles();
+                    let mut goals = BTreeSet::new();
+                    for dy in -1..=1 {
+                        for dx in -1..=1 {
+                            let g = TilePos::new(tpos.x + dx, tpos.y + dy);
+                            if self.world.grid.get(g).is_some_and(|t| t.passable())
+                                && !structures.contains(&g)
+                            {
+                                goals.insert(g);
+                            }
+                        }
+                    }
+                    if let Some(path) = astar_avoiding(
+                        &self.world.grid,
+                        &self.world.overlays,
+                        &self.tuning.tile_costs,
+                        pos,
+                        &goals,
+                        &structures,
+                    ) && let Some(&next) = path.first()
+                    {
+                        if !self.world.tile_occupied(next, id) && !self.world.structure_at(next) {
+                            step_wait = crate::stats::step_ticks(
+                                crate::stats::StatCtx {
+                                    stats: &self.stats,
+                                    xp: &self.xp,
+                                    quirks: &self.quirks,
+                                    tuning: &self.tuning,
+                                },
+                                &self.world.grid,
+                                &self.world.bots[&id].data,
+                                next,
+                            )
+                            .unwrap_or(1);
+                            self.world.move_bot(id, next);
+                            self.credit_travel(id);
+                        } else {
+                            step_wait = 1; // blocked: retry next tick
+                        }
+                    }
+                }
+                let bot = self.world.bots.get_mut(&id).expect("bot exists");
+                bot.data.action = Some(Action::Guard { target, escort, step_wait, cooldown });
+            }
+            Action::Channel { op, ch, namespace, waited, timeout, delivered } => {
+                // Rendezvous state is settled by settle_channels; the
+                // advance just keeps the block parked.
+                bot.data.action =
+                    Some(Action::Channel { op, ch, namespace, waited, timeout, delivered });
+            }
             Action::Search { reach, current, ticks_left } => {
                 let ticks_left = ticks_left - 1;
                 if ticks_left > 0 {
@@ -604,7 +1011,17 @@ impl Sim {
                 }
                 let faction = bot.data.faction;
                 let mut total = 0u32;
-                if self.world.structures.contains_key(&depot) {
+                if self.world.nests.contains_key(&depot) {
+                    // Nest feed (M12): everything aboard becomes print
+                    // stock. No colony-stock or milestone bookkeeping —
+                    // the Feral economy is the nest's own.
+                    let bot = self.world.bots.get_mut(&id).expect("bot exists");
+                    let manifest = std::mem::take(&mut bot.data.cargo);
+                    total = manifest.values().sum();
+                    bot.data.withdrawn_aboard = 0;
+                    let nest = self.world.nests.get_mut(&depot).expect("checked above");
+                    nest.stock_deci += total as u64;
+                } else if self.world.structures.contains_key(&depot) {
                     // Structure feed: only what it feeds on moves (recipe
                     // inputs, Generator fuel, Station coolant). No
                     // delivery-milestone credit — feeding a station is
@@ -761,6 +1178,32 @@ impl Sim {
 
     /// Resume a bot's VM with an action result (fault path may run handlers
     /// or force a crash dump — hence the host).
+    /// Like finish_action, but with a TYPED host-domain fault id (M11:
+    /// err_timeout — the generic finish path faults err_action).
+    pub(crate) fn finish_action_fault(&mut self, id: BotId, fault: pyrite::Fault) {
+        let Some(bot) = self.world.bots.get_mut(&id) else { return };
+        bot.data.action = None;
+        bot.data.survey_after_move = false;
+        let mut vm = bot.vm.take().expect("vm present between phases");
+        {
+            let mut host = BotHost {
+                world: &mut self.world,
+                bot: id,
+                tuning: &self.tuning,
+                ctx: crate::stats::StatCtx {
+                    stats: &self.stats,
+                    xp: &self.xp,
+                    quirks: &self.quirks,
+                    tuning: &self.tuning,
+                },
+            };
+            vm.resolve_action_fault(fault, &mut host, &self.costs);
+        }
+        if let Some(bot) = self.world.bots.get_mut(&id) {
+            bot.vm = Some(vm);
+        }
+    }
+
     pub(crate) fn finish_action(&mut self, id: BotId, result: Result<Value, String>) {
         let Some(bot) = self.world.bots.get_mut(&id) else { return };
         bot.data.action = None;

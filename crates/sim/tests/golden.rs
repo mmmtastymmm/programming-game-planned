@@ -156,7 +156,11 @@ fn golden_scenario_is_alive() {
         "miners must out-earn the seeded stock; got {}",
         sim.world.stock_get(0, sim::resources::Resource::Iron)
     );
-    assert!(sim.world.wrecks.contains_key(&BotId(1)), "KillBot(1) must leave a wreck");
+    assert!(
+        sim.world.wrecks.contains_key(&BotId(1))
+            || sim.world.black_boxes.iter().any(|bb| bb.bot == BotId(1)),
+        "KillBot(1) must leave a wreck or its expired black box (M10)"
+    );
     assert_eq!(
         sim.world.program_library.len(),
         3,

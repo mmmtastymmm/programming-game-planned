@@ -263,6 +263,66 @@ impl StructureKind {
     }
 }
 
+/// What one faction can grant another (M13, docs/08's allied-colony
+/// scaffolding): pooled eyes or an open channel namespace. Grants are
+/// unilateral and revocable; alliance itself is a separate declaration.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
+pub enum GrantKind {
+    Vision,
+    Channels,
+}
+
+/// An open sim-speed proposal (M13, docs/08: unanimous consent with a
+/// per-attempt cooldown).
+#[derive(Debug, Clone, PartialEq)]
+pub struct PendingVote {
+    pub proposal: crate::sim::Proposal,
+    pub ayes: BTreeSet<u8>,
+    pub opened: u64,
+}
+
+/// The PvE faction id (M12, docs/04): Ferals are just another faction to
+/// every system — perception, decryption, comm keys, combat — reserved at
+/// the top of the u8 range so player factions count up from 0.
+pub const FERAL_FACTION: u8 = 255;
+
+/// A Feral nest's life stage (M12, docs/04).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NestState {
+    /// Printing Ferals, hostile.
+    Active,
+    /// Beaten to 0 hp: dormant site, awaiting a raze (Data now) or a
+    /// claim (printer-slot credit forever) — docs/04's pick-one.
+    Defeated,
+    /// Converted by a player faction: counts toward that faction's
+    /// quadratic printer gate (docs/01).
+    Claimed(u8),
+}
+
+/// A Feral nest (M12, docs/04): prints archetype programs from harvested
+/// stock, exactly like a player Fabricator in spirit — but its economy is
+/// its own (Harvesters `deposit()` into it; starving it starves the
+/// prints).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Nest {
+    pub entity: EntityId,
+    pub pos: TilePos,
+    /// Allegiance 0–21 (Major Arcana): the difficulty-and-personality
+    /// axis. v1 flags: 1 (Magician) and 18 (Moon) mutate per print.
+    pub arcanum: u8,
+    pub hp: i64,
+    pub max_hp: i64,
+    pub state: NestState,
+    /// The nest's private stock, deci-units (fed by its Harvesters +
+    /// a slow trickle; prints draw from it).
+    pub stock_deci: u64,
+    /// Ticks left on the print in progress.
+    pub job: Option<u64>,
+    /// Lifetime prints — drives the deterministic round-robin archetype
+    /// mix (no RNG spent on the pick; only mutation draws a stream).
+    pub prints: u32,
+}
+
 /// A generic structure (docs/03): solid, damageable, with physical
 /// input/output buffers where its kind refines (feeds are physical;
 /// payments are abstract — Q84). Energy gating lands with M5.
@@ -345,6 +405,35 @@ pub enum ActionRequest {
     Wander,
     /// Pick a random fogged tile within ~15, walk there, survey it.
     Explore,
+    // --- the wreck race + guard duty (M10) ---
+    /// Field repair a wreck (the rescue) or mend a structure/bot.
+    Repair(EntityId),
+    /// The race verbs, timed salvage < analyze < hijack (Q84).
+    Salvage(EntityId),
+    Analyze(EntityId),
+    Hijack(EntityId),
+    /// Bank a black box to the cloud.
+    Recover(EntityId),
+    /// Entity-anchored guard duty; `escort` follows farther afield.
+    Guard { target: EntityId, escort: bool },
+    /// A blocking channel op (M11): rendezvous send/receive/broadcast.
+    Channel { op: ChannelOp, ch: String, namespace: u8, timeout: Option<u32> },
+}
+
+/// What a blocked channel participant is doing (M11, docs/01).
+#[derive(Debug, Clone, PartialEq)]
+pub enum ChannelOp {
+    Send(pyrite::Value),
+    Receive,
+    Broadcast(pyrite::Value),
+}
+
+/// Which race verb a timed wreck action resolves into (M10).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum RaceKind {
+    Salvage,
+    Analyze,
+    Hijack,
 }
 
 /// An in-flight world action.
@@ -367,12 +456,33 @@ pub enum Action {
     /// reached so far, expanding one tile per interval out to `reach`
     /// (the hearing radius at stance start). Resolves at full reach.
     Search { reach: u32, current: u32, ticks_left: u32 },
+    /// Field repair / mending (M10): deci-progress accumulated so far.
+    Repair { target: EntityId, done_deci: u32 },
+    /// A timed race verb against a wreck (M10).
+    Race { wreck: BotId, kind: RaceKind, ticks_left: u32 },
+    /// Picking up a black box (M10).
+    Recover { target: EntityId, ticks_left: u32 },
+    /// Guard duty (M10): stay near `target`, swing at adjacent enemies;
+    /// `step_wait` paces the follow-walk, `cooldown` paces the swings.
+    Guard { target: EntityId, escort: bool, step_wait: u32, cooldown: u32 },
+    /// A channel rendezvous in flight (M11): no queues, no mailboxes —
+    /// the message exists only at the delivery instant. `delivered` parks
+    /// a completed handoff for the settle to resolve; `waited` drives the
+    /// longest-blocked-receiver selection and the timeout.
+    Channel {
+        op: ChannelOp,
+        ch: String,
+        namespace: u8,
+        waited: u32,
+        timeout: Option<u32>,
+        delivered: Option<pyrite::Value>,
+    },
 }
 
 // (The old LOG_BUFFER_CAP const died with M5 — the cap is the per-bot
 // `log_cap` stat: stats.ron floor + Memory banks.)
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct BotData {
     pub id: BotId,
     /// This bot's world entity handle (targetable by other bots).
@@ -464,6 +574,10 @@ pub struct BotData {
     /// after the re-arm window fully unobserved. Opening one pays Hiding
     /// XP — the machine gets good at what keeps happening to it.
     pub episodes: BTreeMap<u8, u32>,
+    /// Remaining self-destruct ticks carried out of a RESCUE (M10: a
+    /// re-wreck's countdown resumes, never resets — failed rescues burn
+    /// the window). None = never wrecked since the last full window.
+    pub countdown_carry: Option<u32>,
     /// Latent quirk rolls, print order (indices into quirks.ron). No
     /// effect, not visible, not introspectable — until total XP crosses a
     /// manifestation threshold (docs/09).
@@ -765,23 +879,35 @@ impl BlueprintKind {
     }
 }
 
-/// A disabled bot awaiting rescue/salvage (countdown comes later). The
-/// logs and env snapshot ride along — they become the Black Box when the
-/// countdown expires (M10).
+/// A disabled bot in the wreck race (M10, docs/02): field-repair it (XP
+/// preserved), salvage it (receipt + decryption), analyze it (Data +
+/// intel + comm key), or hijack it (the bot itself) — before the
+/// countdown expires into the game's ONLY explosion. The whole BotData
+/// rides along: rescue and hijack rebuild the bot from it, salvage reads
+/// its receipt, analyze reads its logs and env.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Wreck {
-    pub pos: TilePos,
-    pub cargo: u32,
-    pub logs: Vec<LogEntry>,
-    /// Env snapshot at the moment of disablement (Q58: exact runtime
-    /// values are read on murder — the game's oldest intel rule).
-    pub env: BTreeMap<String, i64>,
+    pub data: BotData,
+    /// Wreck hull (~25% of the bot's max HP): attackable; 0 destroys it
+    /// (black box, NO blast — expiry is the only explosion).
+    pub hp: i64,
+    /// Self-destruct ticks left (base + per-XP bonus; a re-wreck RESUMES
+    /// where the failed rescue left off, never resets).
+    pub countdown: u32,
+}
+
+impl Wreck {
+    pub fn pos(&self) -> TilePos {
+        self.data.pos
+    }
 }
 
 /// Dropped by every destruction (docs/02-agents.md): the local log buffer
 /// at the moment of destruction, the cause, and the env snapshot (Q58).
+/// Carries an entity id so `recover_black_box(entity)` can target it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct BlackBox {
+    pub entity: EntityId,
     pub tick: u64,
     pub bot: BotId,
     pub pos: TilePos,
@@ -870,6 +996,48 @@ pub struct World {
     /// Factions whose Steel maintenance went unpaid last settlement —
     /// self-repair halts and rust decay applies (docs/03 Q84).
     pub rusting: BTreeSet<u8>,
+    /// Decryption levels (M10, docs/08): (viewer faction, owner faction,
+    /// color) → percent of that color's source readable. Grows +N% per
+    /// salvage of that color's wrecks; NEVER goes down; alliances never
+    /// share it.
+    pub decryption: BTreeMap<(u8, u8, u8), u32>,
+    /// Comm keys held (M10/M11): viewer faction → factions whose channel
+    /// namespaces it can address. `analyze()` steals one.
+    pub comm_keys: BTreeMap<u8, BTreeSet<u8>>,
+    /// Feral nests (M12, docs/04), keyed by entity handle.
+    pub nests: BTreeMap<EntityId, Nest>,
+    /// Server harm setting (M13, docs/08): false = Non-PvP — no direct
+    /// damage to other players' property, no salvage/analyze/hijack of
+    /// their wrecks. Wreck BLASTS hit friend and foe regardless (Q55).
+    pub harm_enabled: bool,
+    /// Declared alliances (M13), stored as normalized (low, high) pairs.
+    /// Allies share decryption progress (docs/08) and may grant further.
+    pub alliances: BTreeSet<(u8, u8)>,
+    /// Standing grants (M13): (granter, grantee, what). Vision pools the
+    /// granter's eyes into the grantee's perception; Channels opens the
+    /// granter's namespace without a stolen comm key.
+    pub grants: BTreeSet<(u8, u8, GrantKind)>,
+    /// The Request Box (M13, docs/08): a small cross-faction message
+    /// board — (tick, poster faction, text). Capped; oldest entries fall
+    /// off. (Docs sketch a physical structure; flagged in TASKS.md.)
+    pub requests: Vec<(u64, u8, String)>,
+    /// Agreed sim speed, per-mille of base (M13 vote outcome; 0 = paused).
+    /// The GAME layer reads this to pace real time — sim state so peers
+    /// agree, but the tick loop itself is the harness's.
+    pub sim_speed_permille: u32,
+    /// The open sim-speed proposal, if any.
+    pub pending_vote: Option<PendingVote>,
+    /// No new proposal before this tick (docs/08: each attempt, pass or
+    /// fail, starts the cooldown).
+    pub vote_cooldown_until: u64,
+    /// Vote plumbing constants, from MatchSettings.
+    pub vote_cooldown_ticks: u64,
+    pub vote_window_ticks: u64,
+    /// Global Feral escalation tier 0–3 (M12, docs/04): driven by player
+    /// FOOTPRINT (structures, printers, claims, kills), never wall-clock.
+    pub escalation: u8,
+    /// Lifetime Feral bot deaths — one input to the footprint metric.
+    pub ferals_killed: u32,
     /// Per-faction construct unlocks (docs/06: permanent knowledge),
     /// consumed at parse. Dev sandboxes get UnlockSet::all() via
     /// MapSpec.dev_all_unlocks.
@@ -1113,6 +1281,20 @@ impl World {
             brownout: BTreeSet::new(),
             powered_bot: BTreeMap::new(),
             rusting: BTreeSet::new(),
+            decryption: BTreeMap::new(),
+            comm_keys: BTreeMap::new(),
+            nests: BTreeMap::new(),
+            escalation: 0,
+            ferals_killed: 0,
+            harm_enabled: true,
+            alliances: BTreeSet::new(),
+            grants: BTreeSet::new(),
+            requests: Vec::new(),
+            sim_speed_permille: 1000,
+            pending_vote: None,
+            vote_cooldown_until: 0,
+            vote_cooldown_ticks: 300,
+            vote_window_ticks: 100,
             unlocks: BTreeMap::new(),
             dev_all_unlocks: spec.dev_all_unlocks,
             dev_free_power: spec.dev_free_power,
@@ -1308,12 +1490,61 @@ impl World {
             .or_else(|| self.structures.get(&id).map(|s| s.pos))
             .or_else(|| self.blueprints.get(&id).map(|b| b.pos))
             .or_else(|| self.blight_cores.get(&id).map(|c| c.pos))
+            .or_else(|| self.nests.get(&id).map(|n| n.pos))
             .or_else(|| {
                 self.bot_entities
                     .get(&id)
                     .and_then(|bid| self.bots.get(bid))
                     .map(|b| b.data.pos)
             })
+            // The entity handle outlives the bot into its wreck (M10:
+            // the wreck race targets it), and black boxes are clickable
+            // field objects.
+            .or_else(|| {
+                self.bot_entities
+                    .get(&id)
+                    .and_then(|bid| self.wrecks.get(bid))
+                    .map(|w| w.data.pos)
+            })
+            .or_else(|| self.black_boxes.iter().find(|bb| bb.entity == id).map(|bb| bb.pos))
+    }
+
+    /// Are two factions allied (M13)? Symmetric; a faction is its own ally.
+    pub fn allied(&self, a: u8, b: u8) -> bool {
+        a == b || self.alliances.contains(&(a.min(b), a.max(b)))
+    }
+
+    /// Does `from` currently grant `what` to `to` (M13)?
+    pub fn granted(&self, from: u8, to: u8, what: GrantKind) -> bool {
+        self.grants.contains(&(from, to, what))
+    }
+
+    /// May `actor` harm `victim`'s property (M13, docs/08)? Ferals are
+    /// fair game on every server; Non-PvP blocks player-vs-player harm.
+    pub fn harm_allowed(&self, actor: u8, victim: u8) -> bool {
+        actor == victim
+            || actor == FERAL_FACTION
+            || victim == FERAL_FACTION
+            || self.harm_enabled
+    }
+
+    /// The factions with a live stake in the match (M13 votes need
+    /// unanimity ACROSS these): anyone owning a bot or a printer.
+    pub fn live_factions(&self) -> BTreeSet<u8> {
+        let mut out: BTreeSet<u8> = self
+            .bots
+            .values()
+            .filter(|b| !b.data.dying)
+            .map(|b| b.data.faction)
+            .collect();
+        out.extend(self.printers.values().map(|p| p.faction));
+        out.remove(&FERAL_FACTION);
+        out
+    }
+
+    /// The wreck a live entity handle points at, if any (M10).
+    pub fn wreck_of(&self, id: EntityId) -> Option<BotId> {
+        self.bot_entities.get(&id).copied().filter(|bid| self.wrecks.contains_key(bid))
     }
 
     /// Is a blocking bot (other than `exclude`) standing on `pos`?
@@ -1401,6 +1632,9 @@ impl World {
             || self.depots.values().any(|d| d.pos == pos)
             || self.structures.values().any(|s| s.pos == pos)
             || self.blight_cores.values().any(|c| c.pos == pos)
+            // Nests are solid, attackable sites (M12) — in every state
+            // (a Defeated site still occupies its ground until razed).
+            || self.nests.values().any(|n| n.pos == pos)
     }
 
     /// All structure tiles, for feeding A*'s blocked set.
@@ -1411,6 +1645,7 @@ impl World {
             .chain(self.depots.values().map(|d| d.pos))
             .chain(self.structures.values().map(|s| s.pos))
             .chain(self.blight_cores.values().map(|c| c.pos))
+            .chain(self.nests.values().map(|n| n.pos))
             .collect()
     }
 
@@ -1498,5 +1733,114 @@ impl World {
             .map(|b| (from.manhattan(b.data.pos), b.data.entity))
             .min()
             .map(|(_, id)| id)
+    }
+}
+
+impl World {
+    /// try_send / try_broadcast (M11, instant): pick the eligible blocked
+    /// receiver(s) NOW and park the delivery for the settle to resolve.
+    /// Returns how many receivers took a copy. Corruption jams both ends.
+    pub(crate) fn try_deliver(
+        &mut self,
+        namespace: u8,
+        ch: &str,
+        value: &pyrite::Value,
+        all: bool,
+        exclude: BotId,
+    ) -> u32 {
+        let jammed = |pos: TilePos, grid: &crate::map::Grid| {
+            grid.get(pos) == Some(crate::map::TileKind::Corruption)
+        };
+        // The jam blocks BOTH ways (M11): a caller standing in Corruption
+        // transmits nothing — the message is lost, like everything else
+        // in the static.
+        if self.bots.get(&exclude).is_some_and(|b| jammed(b.data.pos, &self.grid)) {
+            return 0;
+        }
+        let mut eligible: Vec<(u32, u64, BotId)> = self
+            .bots
+            .iter()
+            .filter(|(id, b)| {
+                **id != exclude
+                    && !b.data.dying
+                    && !jammed(b.data.pos, &self.grid)
+                    && matches!(
+                        &b.data.action,
+                        Some(Action::Channel {
+                            op: ChannelOp::Receive,
+                            ch: c,
+                            namespace: n,
+                            delivered: None,
+                            ..
+                        }) if c == ch && *n == namespace
+                    )
+            })
+            .map(|(id, b)| {
+                let waited = match &b.data.action {
+                    Some(Action::Channel { waited, .. }) => *waited,
+                    _ => 0,
+                };
+                (waited, b.data.entity.0, *id)
+            })
+            .collect();
+        eligible.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
+        let take = if all { eligible.len() } else { 1.min(eligible.len()) };
+        for (_, _, id) in eligible.into_iter().take(take) {
+            if let Some(Action::Channel { delivered, .. }) =
+                &mut self.bots.get_mut(&id).expect("collected").data.action
+            {
+                *delivered = Some(value.clone());
+            }
+        }
+        take as u32
+    }
+
+    /// try_receive (M11, instant): take a blocked sender's message —
+    /// longest-blocked sender, ties by lowest entity id — parking Unit for
+    /// its resolution. None when nobody is offering.
+    pub(crate) fn try_take(&mut self, namespace: u8, ch: &str, exclude: BotId) -> Option<pyrite::Value> {
+        let jammed = |pos: TilePos, grid: &crate::map::Grid| {
+            grid.get(pos) == Some(crate::map::TileKind::Corruption)
+        };
+        // Jammed both ways (M11): a poller inside Corruption hears nothing.
+        if self.bots.get(&exclude).is_some_and(|b| jammed(b.data.pos, &self.grid)) {
+            return None;
+        }
+        let mut offering: Vec<(u32, u64, BotId)> = self
+            .bots
+            .iter()
+            .filter(|(id, b)| {
+                **id != exclude
+                    && !b.data.dying
+                    && !jammed(b.data.pos, &self.grid)
+                    && matches!(
+                        &b.data.action,
+                        Some(Action::Channel {
+                            op: ChannelOp::Send(_),
+                            ch: c,
+                            namespace: n,
+                            delivered: None,
+                            ..
+                        }) if c == ch && *n == namespace
+                    )
+            })
+            .map(|(id, b)| {
+                let waited = match &b.data.action {
+                    Some(Action::Channel { waited, .. }) => *waited,
+                    _ => 0,
+                };
+                (waited, b.data.entity.0, *id)
+            })
+            .collect();
+        offering.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
+        let (_, _, sender) = offering.first().copied()?;
+        let action = &mut self.bots.get_mut(&sender).expect("collected").data.action;
+        if let Some(Action::Channel { op: ChannelOp::Send(v), delivered, .. }) = action {
+            let value = v.clone();
+            *delivered = Some(pyrite::Value::Unit);
+            Some(value)
+        } else {
+            None
+        }
     }
 }

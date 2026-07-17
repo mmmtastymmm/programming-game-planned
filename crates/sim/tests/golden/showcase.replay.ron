@@ -68,6 +68,16 @@
         starting_stock: [
             (0, Stone, 50),
         ],
+        nests: [],
+        max_arcanum: 21,
+        settings: (
+            harm: Open,
+            ferals: true,
+            print_cost_steel: None,
+            salvage_decrypt_pct: None,
+            vote_cooldown_ticks: 300,
+            vote_window_ticks: 100,
+        ),
         fleet_cap_override: Some(1),
         blight_cores: [],
         dev_all_unlocks: true,

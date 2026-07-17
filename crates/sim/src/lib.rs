@@ -23,6 +23,10 @@ pub mod resources;
 pub mod sim;
 pub mod stats;
 pub mod world;
+mod channels;
+pub mod feral;
+pub mod lockstep;
+mod wrecks;
 pub mod xp;
 
 pub use map::{MapSpec, TileKind, TilePos};

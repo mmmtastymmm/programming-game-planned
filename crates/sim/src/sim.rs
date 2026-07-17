@@ -128,6 +128,35 @@ pub struct Tuning {
     pub cleanse_ticks: u32,
     pub road_cost_stone: u64,
     pub road_build_ticks: u32,
+    // --- the wreck race (M10, docs/02) ---
+    pub wreck_hp_pct: u32,
+    pub wreck_countdown_base_ticks: u32,
+    pub wreck_countdown_per_100xp_ticks: u32,
+    pub blast_radius: u32,
+    pub blast_damage_pct: u32,
+    pub salvage_ticks: u32,
+    pub analyze_ticks: u32,
+    pub hijack_ticks: u32,
+    pub field_repair_deci: u32,
+    pub salvage_receipt_pct: u32,
+    pub salvage_decrypt_pct: u32,
+    pub analyze_data: u64,
+    pub guard_swing_ticks: u32,
+    // --- Ferals (M12, docs/04) ---
+    pub nest_hp: i64,
+    pub nest_hp_per_arcanum: i64,
+    pub nest_seed_stock_deci: u64,
+    pub nest_income_deci: u64,
+    pub nest_print_cost_deci: u64,
+    pub nest_print_ticks: u64,
+    pub nest_data_bounty: u64,
+    pub nest_guard_radius: u32,
+    pub feral_hp_per_threat_pct: i64,
+    pub escalation_probing: u64,
+    pub escalation_contested: u64,
+    pub escalation_overrun: u64,
+    pub escalation_kill_weight: u64,
+    pub printer_cost_steel: u64,
 }
 
 impl Default for Tuning {
@@ -268,6 +297,295 @@ fn select_key_tag(key: crate::world::SelectKey) -> u8 {
 }
 
 /// Hash a Station order (queued or mounted) into the phase-9 snapshot.
+/// Hash a Pyrite value (channel payloads park inside actions): type tag +
+/// Display text — Display is deterministic (dicts iterate in key order).
+fn hash_value(h: &mut Fnv1a, v: &pyrite::Value) {
+    h.write_str(v.type_name());
+    h.write_str(&v.to_string());
+}
+
+fn hash_channel_op(h: &mut Fnv1a, op: &crate::world::ChannelOp) {
+    use crate::world::ChannelOp;
+    match op {
+        ChannelOp::Send(v) => {
+            h.write_u8(1);
+            hash_value(h, v);
+        }
+        ChannelOp::Receive => h.write_u8(2),
+        ChannelOp::Broadcast(v) => {
+            h.write_u8(3);
+            hash_value(h, v);
+        }
+    }
+}
+
+/// Hash an in-flight action — cross-tick lockstep state (review
+/// 2026-07-16: a diverged `waited` counter or race timer must move the
+/// phase-9 hash the tick it diverges, not when it finally touches hp).
+fn hash_action(h: &mut Fnv1a, action: &crate::world::Action) {
+    use crate::world::Action;
+    match action {
+        Action::Move { path, ticks_left, goals } => {
+            h.write_u8(1);
+            h.write_u32(path.len() as u32);
+            for p in path {
+                h.write_i32(p.x);
+                h.write_i32(p.y);
+            }
+            h.write_u32(*ticks_left);
+            h.write_u32(goals.len() as u32);
+            for g in goals {
+                h.write_i32(g.x);
+                h.write_i32(g.y);
+            }
+        }
+        Action::Mine { node, ticks_left } => {
+            h.write_u8(2);
+            h.write_u64(node.0);
+            h.write_u32(*ticks_left);
+        }
+        Action::Deposit { depot, ticks_left, fault_on_fail } => {
+            h.write_u8(3);
+            h.write_u64(depot.0);
+            h.write_u32(*ticks_left);
+            h.write_u8(*fault_on_fail as u8);
+        }
+        Action::Attack { target, ticks_left } => {
+            h.write_u8(4);
+            h.write_u64(target.0);
+            h.write_u32(*ticks_left);
+        }
+        Action::Wait { ticks_left } => {
+            h.write_u8(5);
+            h.write_u32(*ticks_left);
+        }
+        Action::Build { blueprint } => {
+            h.write_u8(6);
+            h.write_u64(blueprint.0);
+        }
+        Action::Search { reach, current, ticks_left } => {
+            h.write_u8(7);
+            h.write_u32(*reach);
+            h.write_u32(*current);
+            h.write_u32(*ticks_left);
+        }
+        Action::Repair { target, done_deci } => {
+            h.write_u8(8);
+            h.write_u64(target.0);
+            h.write_u32(*done_deci);
+        }
+        Action::Race { wreck, kind, ticks_left } => {
+            h.write_u8(9);
+            h.write_u32(wreck.0);
+            h.write_u8(match kind {
+                crate::world::RaceKind::Salvage => 1,
+                crate::world::RaceKind::Analyze => 2,
+                crate::world::RaceKind::Hijack => 3,
+            });
+            h.write_u32(*ticks_left);
+        }
+        Action::Recover { target, ticks_left } => {
+            h.write_u8(10);
+            h.write_u64(target.0);
+            h.write_u32(*ticks_left);
+        }
+        Action::Guard { target, escort, step_wait, cooldown } => {
+            h.write_u8(11);
+            h.write_u64(target.0);
+            h.write_u8(*escort as u8);
+            h.write_u32(*step_wait);
+            h.write_u32(*cooldown);
+        }
+        Action::Channel { op, ch, namespace, waited, timeout, delivered } => {
+            h.write_u8(12);
+            hash_channel_op(h, op);
+            h.write_str(ch);
+            h.write_u8(*namespace);
+            h.write_u32(*waited);
+            h.write_u8(timeout.is_some() as u8);
+            h.write_u32(timeout.unwrap_or(0));
+            h.write_u8(delivered.is_some() as u8);
+            if let Some(v) = delivered {
+                hash_value(h, v);
+            }
+        }
+    }
+}
+
+fn hash_request(h: &mut Fnv1a, req: &crate::world::ActionRequest) {
+    use crate::world::ActionRequest;
+    match req {
+        ActionRequest::MoveTo(e) => {
+            h.write_u8(1);
+            h.write_u64(e.0);
+        }
+        ActionRequest::Mine => h.write_u8(2),
+        ActionRequest::Deposit { fault_on_fail } => {
+            h.write_u8(3);
+            h.write_u8(*fault_on_fail as u8);
+        }
+        ActionRequest::Attack(e) => {
+            h.write_u8(4);
+            h.write_u64(e.0);
+        }
+        ActionRequest::Wait(n) => {
+            h.write_u8(5);
+            h.write_u32(*n);
+        }
+        ActionRequest::Build(e) => {
+            h.write_u8(6);
+            h.write_u64(e.0);
+        }
+        ActionRequest::Search => h.write_u8(7),
+        ActionRequest::Wander => h.write_u8(8),
+        ActionRequest::Explore => h.write_u8(9),
+        ActionRequest::Repair(e) => {
+            h.write_u8(10);
+            h.write_u64(e.0);
+        }
+        ActionRequest::Salvage(e) => {
+            h.write_u8(11);
+            h.write_u64(e.0);
+        }
+        ActionRequest::Analyze(e) => {
+            h.write_u8(12);
+            h.write_u64(e.0);
+        }
+        ActionRequest::Hijack(e) => {
+            h.write_u8(13);
+            h.write_u64(e.0);
+        }
+        ActionRequest::Recover(e) => {
+            h.write_u8(14);
+            h.write_u64(e.0);
+        }
+        ActionRequest::Guard { target, escort } => {
+            h.write_u8(15);
+            h.write_u64(target.0);
+            h.write_u8(*escort as u8);
+        }
+        ActionRequest::Channel { op, ch, namespace, timeout } => {
+            h.write_u8(16);
+            hash_channel_op(h, op);
+            h.write_str(ch);
+            h.write_u8(*namespace);
+            h.write_u8(timeout.is_some() as u8);
+            h.write_u32(timeout.unwrap_or(0));
+        }
+    }
+}
+
+/// Hash EVERY BotData field — shared by live bots and wrecks so the two
+/// can never drift apart in coverage (review 2026-07-16: the wreck block
+/// hashed upgrade COUNTS while its data reboots into live play whole).
+fn hash_bot_data(h: &mut Fnv1a, data: &crate::world::BotData) {
+    h.write_u32(data.id.0);
+    h.write_u64(data.entity.0);
+    h.write_u8(data.faction);
+    h.write_i32(data.pos.x);
+    h.write_i32(data.pos.y);
+    h.write_i64(data.hp);
+    h.write_i64(data.max_hp);
+    h.write_u8(data.hurt_fired as u8);
+    h.write_u32(data.cargo.len() as u32);
+    for (kind, deci) in &data.cargo {
+        h.write_u8(kind.as_u8());
+        h.write_u32(*deci);
+    }
+    h.write_u32(data.cargo_cap);
+    h.write_u64(data.cpu_centi);
+    h.write_u32(data.move_rate_deci);
+    h.write_u32(data.sensors);
+    h.write_u32(data.module_slots);
+    h.write_u32(data.log_cap);
+    h.write_u32(data.upgrades.len() as u32);
+    for u in &data.upgrades {
+        h.write_u8(*u);
+    }
+    h.write_u32(data.modules.len() as u32);
+    for m in &data.modules {
+        h.write_u8(*m);
+    }
+    h.write_u32(data.upgrade_queue.len() as u32);
+    for order in &data.upgrade_queue {
+        hash_order(h, order);
+    }
+    h.write_u32(data.withdrawn_aboard);
+    h.write_u8(data.pad_sit as u8);
+    h.write_u8(data.survey_after_move as u8);
+    h.write_u8(data.color.0);
+    h.write_u8(data.requested.is_some() as u8);
+    if let Some(req) = &data.requested {
+        hash_request(h, req);
+    }
+    h.write_u8(data.action.is_some() as u8);
+    if let Some(action) = &data.action {
+        hash_action(h, action);
+    }
+    h.write_u32(data.booting.unwrap_or(0));
+    h.write_u8(data.recall.is_some() as u8);
+    if let Some(recall) = &data.recall {
+        h.write_u32(recall.path.len() as u32);
+        for p in &recall.path {
+            h.write_i32(p.x);
+            h.write_i32(p.y);
+        }
+        h.write_u32(recall.ticks_left);
+        h.write_u64(recall.home.0);
+        match recall.purpose {
+            crate::world::RecallPurpose::Recolor { dest } => {
+                h.write_u8(1);
+                h.write_u64(dest.0);
+            }
+            crate::world::RecallPurpose::Scrap => h.write_u8(2),
+        }
+    }
+    h.write_u32(data.bump_frozen);
+    h.write_u8(data.dying as u8);
+    h.write_u32(data.log_buf.len() as u32);
+    for (level, entry) in &data.log_buf {
+        h.write_u8(*level);
+        h.write_str(entry);
+    }
+    h.write_u32(data.env.len() as u32);
+    for (key, value) in &data.env {
+        h.write_str(key);
+        h.write_i64(*value);
+    }
+    h.write_u32(data.xp.len() as u32);
+    for (track, deci) in &data.xp {
+        h.write_u8(track.as_u8());
+        h.write_u64(*deci);
+    }
+    h.write_u64(data.haul_accum);
+    h.write_u64(data.learning_carry);
+    h.write_u32(data.age_hp_levels);
+    h.write_u32(data.gain_carry.len() as u32);
+    for (track, rem) in &data.gain_carry {
+        h.write_u8(track.as_u8());
+        h.write_u64(*rem);
+    }
+    h.write_u64(data.moved_tick);
+    h.write_u32(data.episodes.len() as u32);
+    for (faction, counter) in &data.episodes {
+        h.write_u8(*faction);
+        h.write_u32(*counter);
+    }
+    h.write_u8(data.countdown_carry.is_some() as u8);
+    h.write_u32(data.countdown_carry.unwrap_or(0));
+    h.write_u32(data.latent_quirks.len() as u32);
+    for q in &data.latent_quirks {
+        h.write_u8(*q);
+    }
+    h.write_u32(data.quirks.len() as u32);
+    for q in &data.quirks {
+        h.write_u8(*q);
+    }
+    h.write_u64(data.crash_seen);
+    h.write_u64(data.rng_program);
+    h.write_u32(data.dune_idle);
+}
+
 fn hash_order(h: &mut Fnv1a, order: &crate::world::UpgradeOrder) {
     match order {
         crate::world::UpgradeOrder::Compute(idx) => {
@@ -322,6 +640,14 @@ impl Default for Upkeep {
 
 /// External inputs: the ONLY way anything outside the sim mutates it
 /// (single-player is lockstep with one peer).
+/// A sim-speed proposal (M13, docs/08): unanimous consent or nothing.
+/// Pause is SetSpeed(0); Resume is SetSpeed(1000).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum Proposal {
+    /// Per-mille of base speed (0 = pause, 1000 = normal, 2000 = double).
+    SetSpeed(u32),
+}
+
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum Command {
     /// Test/debug spawn that bypasses printers (bots normally print).
@@ -352,6 +678,12 @@ pub enum Command {
         priority: u32,
         check_interval: Option<u64>,
     },
+    /// LEGACY (pre-M9 replay files): the superseded desired-max dial.
+    /// Kept ONLY so old recordings still DESERIALIZE — it maps to the
+    /// closest v2 rule (target = Count(value), default key/priority).
+    /// Old replays still diverge in hash (documented with M9's fixture
+    /// regeneration); they just never fail to load.
+    SetDesiredMax { printer: EntityId, value: u32 },
     /// Queue one replacement stock print (M9: a reprint IS a fresh print;
     /// its color comes from the allocation like anyone else's). The
     /// docs' `loadout` parameter is undefined — flagged in TASKS.md.
@@ -382,6 +714,39 @@ pub enum Command {
     /// ride in the wreck; carried cargo spills onto the ground. Kept for
     /// tests, the editor Kill tool, and the golden replay fixture.
     KillBot { bot: BotId },
+    /// Gift Data to another faction (M13, docs/08's trade scaffolding).
+    /// Clamped to what the giver has; lockstep trusts the relay to only
+    /// forward a faction's own commands (flagged in TASKS.md).
+    ExchangeData { from: u8, to: u8, amount: u64 },
+    /// Post to the cross-faction Request Box (M13, docs/08). Text is
+    /// clamped (hostile peers); the board keeps the newest entries.
+    PostRequest { faction: u8, text: String },
+    /// Grant (or revoke) Vision / Channels to another faction (M13,
+    /// docs/08: allies share WORK PRODUCTS, not capability).
+    Grant { from: u8, to: u8, what: crate::world::GrantKind, revoke: bool },
+    /// Declare or dissolve an alliance (M13). Allies pool decryption
+    /// progress from here on (docs/08: one teammate's salvage advances
+    /// the team's level — earlier levels aren't retroactively merged).
+    SetAlliance { a: u8, b: u8, allied: bool },
+    /// Sim-speed voting (M13, docs/08): approve opens (or joins) the
+    /// proposal; unanimity across live factions applies it; a refusal
+    /// fails it. Every attempt, pass or fail, starts the cooldown.
+    Vote { faction: u8, proposal: Proposal, approve: bool },
+    /// Convert a DEFEATED nest into a claimed site (M12, docs/04):
+    /// counts toward the claimant's quadratic printer gate. Instead of
+    /// razing — pick one. (Docs want a build-tool bot doing the labor;
+    /// instant command for now, flagged in TASKS.md.)
+    ClaimNest { nest: EntityId, faction: u8 },
+    /// Raze a DEFEATED nest: the site is gone, the razer banks the Data
+    /// bounty (docs/04: "Data now" vs. the claim's "slots forever").
+    RazeNest { nest: EntityId, faction: u8 },
+    /// Build a printer (M12, docs/01): slots beyond the map's starting
+    /// two are gated by CONTROLLED NESTS on the quadratic curve (3rd
+    /// needs 1, 4th needs 3, then 6, 10, …). Steel cost; the new slot
+    /// takes the faction's lowest unused color index. Ungated or
+    /// unaffordable placements are ignored — lockstep commands never
+    /// error.
+    PlacePrinter { pos: TilePos, faction: u8 },
     /// Place a structure, paying its typed cost from colony stock
     /// (docs/03: payments are abstract). Instant placement for now; build
     /// labor for structures is flagged for discussion in TASKS.md.
@@ -428,7 +793,15 @@ pub struct Sim {
 
 impl Sim {
     pub fn new(spec: &MapSpec) -> Self {
-        let tuning = Tuning::default();
+        let mut tuning = Tuning::default();
+        // Match-settings overrides (M13, docs/08 Q77): the inventory's
+        // dials that shadow tuning.ron figures for this match.
+        if let Some(cost) = spec.settings.print_cost_steel {
+            tuning.print_cost_steel = cost;
+        }
+        if let Some(pct) = spec.settings.salvage_decrypt_pct {
+            tuning.salvage_decrypt_pct = pct;
+        }
         let mut vm_config = VmConfig::default();
         // FACTORY WINDOW contents (docs/01's template table), as REAL
         // Pyrite: watchable, line-highlighted, costed, replaceable by the
@@ -552,6 +925,15 @@ impl Sim {
                 })
                 .expect("the empty program parses");
             }
+        }
+        // The rest of the match settings land on the world (M13).
+        sim.world.harm_enabled = spec.settings.harm != crate::map::HarmMode::NonPvp;
+        sim.world.vote_cooldown_ticks = spec.settings.vote_cooldown_ticks;
+        sim.world.vote_window_ticks = spec.settings.vote_window_ticks;
+        // Feral nests (M12) — allocated last so existing fixtures' entity
+        // ids stay put. The Ferals toggle (M13) is the "pure PvP" switch.
+        if spec.settings.ferals {
+            sim.build_nests(spec);
         }
         // Phase-0 perception seed (docs/07, round 4): tick 1's queries have
         // a "previous tick" to read, so the pre-deployed starter program
@@ -689,6 +1071,12 @@ impl Sim {
             } => {
                 let Some(p) = self.world.printers.get(printer) else { return Ok(None) };
                 let faction = p.faction;
+                // The faction clock retunes regardless of WHICH printer
+                // carried the command — only the RULES edit is ignored on
+                // the remainder (its dials don't exist; the clock does).
+                if let Some(interval) = check_interval {
+                    self.world.check_interval.insert(faction, (*interval).max(1));
+                }
                 if self.world.remainder_printer(faction) == Some(*printer) {
                     return Ok(None); // the remainder bucket has no dials
                 }
@@ -700,13 +1088,25 @@ impl Sim {
                         priority: *priority,
                     });
                 }
-                if let Some(interval) = check_interval {
-                    self.world.check_interval.insert(faction, (*interval).max(1));
-                }
                 // A rule edit fires the global, signal-like pass NOW —
                 // mid-template bots double-handle (your clock, your risk).
                 self.allocate_fleet(faction, crate::printers::RecallMode::Signal, None);
                 Ok(None)
+            }
+            Command::SetDesiredMax { printer, value } => {
+                // Legacy alias: forward to the v2 rules with defaults.
+                let rules = crate::world::PrinterRules {
+                    target: crate::world::PrintTarget::Count(*value),
+                    ..Default::default()
+                };
+                self.apply(&Command::EditPrinterRules {
+                    printer: *printer,
+                    target: rules.target,
+                    key: rules.key,
+                    best_first: rules.best_first,
+                    priority: rules.priority,
+                    check_interval: None,
+                })
             }
             Command::QueuePrint { faction } => {
                 *self.world.reprint_queue.entry(*faction).or_insert(0) += 1;
@@ -814,6 +1214,179 @@ impl Sim {
                             pad: None,
                         },
                     );
+                }
+                Ok(None)
+            }
+            Command::ExchangeData { from, to, amount } => {
+                if from != to && *to != crate::world::FERAL_FACTION {
+                    let have = self.world.data.get(from).copied().unwrap_or(0);
+                    let moved = (*amount).min(have);
+                    if moved > 0 {
+                        *self.world.data.entry(*from).or_insert(0) -= moved;
+                        *self.world.data.entry(*to).or_insert(0) += moved;
+                    }
+                }
+                Ok(None)
+            }
+            Command::PostRequest { faction, text } => {
+                // Clamp hostile input ON A CHAR BOUNDARY — String::truncate
+                // panics mid-codepoint, and a lockstep command must never
+                // panic the sim. The board keeps the newest 64.
+                let mut end = 200.min(text.len());
+                while !text.is_char_boundary(end) {
+                    end -= 1;
+                }
+                let text = text[..end].to_string();
+                let tick = self.world.tick;
+                self.world.requests.push((tick, *faction, text));
+                if self.world.requests.len() > 64 {
+                    let overflow = self.world.requests.len() - 64;
+                    self.world.requests.drain(..overflow);
+                }
+                Ok(None)
+            }
+            Command::Grant { from, to, what, revoke } => {
+                if from != to {
+                    if *revoke {
+                        self.world.grants.remove(&(*from, *to, *what));
+                    } else {
+                        self.world.grants.insert((*from, *to, *what));
+                    }
+                }
+                Ok(None)
+            }
+            Command::SetAlliance { a, b, allied } => {
+                if a != b
+                    && *a != crate::world::FERAL_FACTION
+                    && *b != crate::world::FERAL_FACTION
+                {
+                    let pair = (*a.min(b), *a.max(b));
+                    if *allied {
+                        self.world.alliances.insert(pair);
+                    } else {
+                        self.world.alliances.remove(&pair);
+                        // A broken alliance takes its grants with it.
+                        self.world.grants.retain(|(f, t, _)| {
+                            (*f, *t) != (pair.0, pair.1) && (*f, *t) != (pair.1, pair.0)
+                        });
+                    }
+                }
+                Ok(None)
+            }
+            Command::Vote { faction, proposal, approve } => {
+                let tick = self.world.tick;
+                if tick < self.world.vote_cooldown_until
+                    || !self.world.live_factions().contains(faction)
+                {
+                    return Ok(None);
+                }
+                match &mut self.world.pending_vote {
+                    None => {
+                        if *approve {
+                            let mut ayes = std::collections::BTreeSet::new();
+                            ayes.insert(*faction);
+                            self.world.pending_vote = Some(crate::world::PendingVote {
+                                proposal: *proposal,
+                                ayes,
+                                opened: tick,
+                            });
+                        }
+                    }
+                    Some(vote) if vote.proposal == *proposal => {
+                        if *approve {
+                            vote.ayes.insert(*faction);
+                        } else {
+                            // One refusal kills a unanimity vote.
+                            self.world.pending_vote = None;
+                            self.world.vote_cooldown_until =
+                                tick + self.world.vote_cooldown_ticks;
+                        }
+                    }
+                    // A different proposal while one is open is ignored.
+                    Some(_) => {}
+                }
+                if let Some(vote) = &self.world.pending_vote {
+                    if vote.ayes.is_superset(&self.world.live_factions()) {
+                        let Proposal::SetSpeed(permille) = vote.proposal;
+                        self.world.sim_speed_permille = permille.min(10_000);
+                        self.world.pending_vote = None;
+                        self.world.vote_cooldown_until =
+                            tick + self.world.vote_cooldown_ticks;
+                    }
+                }
+                Ok(None)
+            }
+            Command::ClaimNest { nest, faction } => {
+                if let Some(n) = self.world.nests.get_mut(nest) {
+                    if n.state == crate::world::NestState::Defeated {
+                        n.state = crate::world::NestState::Claimed(*faction);
+                        n.hp = n.max_hp / 2;
+                    }
+                }
+                Ok(None)
+            }
+            Command::RazeNest { nest, faction } => {
+                let razeable = self
+                    .world
+                    .nests
+                    .get(nest)
+                    .is_some_and(|n| n.state == crate::world::NestState::Defeated);
+                if razeable {
+                    self.world.nests.remove(nest);
+                    *self.world.data.entry(*faction).or_insert(0) +=
+                        self.tuning.nest_data_bounty;
+                }
+                Ok(None)
+            }
+            Command::PlacePrinter { pos, faction } => {
+                use crate::resources::{Resource, DECI};
+                let free = self.world.grid.get(*pos).is_some_and(|t| t.spawnable())
+                    && !self.world.structure_at(*pos)
+                    && !self.world.tile_occupied(*pos, BotId(u32::MAX))
+                    && !self.world.printers.values().any(|p| p.pos == *pos);
+                let owned =
+                    self.world.printers.values().filter(|p| p.faction == *faction).count()
+                        as u32;
+                let claimed = self
+                    .world
+                    .nests
+                    .values()
+                    .filter(|n| n.state == crate::world::NestState::Claimed(*faction))
+                    .count() as u32;
+                let gated = owned < crate::feral::printers_allowed(claimed);
+                let cost = self.tuning.printer_cost_steel * DECI as u64;
+                if free && gated && self.world.stock_take(*faction, Resource::Steel, cost) {
+                    // The new slot takes the lowest unused color index.
+                    let mut color = 0u8;
+                    while self
+                        .world
+                        .printers
+                        .values()
+                        .any(|p| p.faction == *faction && p.color.0 == color)
+                    {
+                        color += 1;
+                    }
+                    let id = self.world.alloc_entity();
+                    self.world.printers.insert(
+                        id,
+                        crate::world::Printer {
+                            pos: *pos,
+                            faction: *faction,
+                            color: crate::world::Color(color),
+                            state: crate::world::PrinterState::Working,
+                            // Never the remainder: map-born firsts keep
+                            // that role; built printers start dialed.
+                            rules: Some(crate::world::PrinterRules::default()),
+                            job: None,
+                        },
+                    );
+                    if !self.world.color_programs.contains_key(&(*faction, color)) {
+                        self.apply(&Command::DeployProgram {
+                            faction: *faction,
+                            color: crate::world::Color(color),
+                            source: String::new(),
+                        })?;
+                    }
                 }
                 Ok(None)
             }
@@ -972,6 +1545,7 @@ impl Sim {
                     age_hp_levels: 0,
                     moved_tick: 0,
                     episodes: std::collections::BTreeMap::new(),
+                    countdown_carry: None,
                     latent_quirks,
                     quirks: Vec::new(),
                     crash_seen: 0,
@@ -995,6 +1569,16 @@ impl Sim {
     /// snapshot hash lives here, in stable id order within each phase.
     pub fn step(&mut self) {
         self.world.tick += 1;
+
+        // A sim-speed proposal that never reached unanimity expires
+        // (M13, docs/08) — the attempt still starts the cooldown.
+        if let Some(vote) = &self.world.pending_vote {
+            if self.world.tick >= vote.opened + self.world.vote_window_ticks {
+                self.world.pending_vote = None;
+                self.world.vote_cooldown_until =
+                    self.world.tick + self.world.vote_cooldown_ticks;
+            }
+        }
 
         // --- phase 2: grant + step VMs, stable id order ---
         let ids: Vec<BotId> = self.world.bots.keys().copied().collect();
@@ -1063,6 +1647,9 @@ impl Sim {
         for id in ids.iter().copied() {
             self.resolve_bot(id);
         }
+        // Phase 4b (M11): the channel rendezvous settle — after every bot
+        // resolved, so fresh blocks participate this very tick.
+        self.settle_channels();
         for id in ids.iter().copied() {
             self.advance_engine(id);
         }
@@ -1093,6 +1680,9 @@ impl Sim {
                 self.queue_damage(id, delta as i64 * chip, None);
             }
         }
+        // Wreck countdowns first (M10): expiries queue their blast damage
+        // into this tick.s settle — blasts fire in the damage phase.
+        self.tick_wrecks();
         self.settle_damage();
         self.dispatch_signals();
 
@@ -1106,16 +1696,29 @@ impl Sim {
             // Already out of the occupancy index — dying bots leave it the
             // moment the flag is set.
             let bot = self.world.bots.remove(&id).expect("checked above");
-            let data = bot.data;
-            self.world.bot_entities.remove(&data.entity);
+            let mut data = bot.data;
+            // Escalation input (M12): each Feral down raises the footprint.
+            if data.faction == crate::world::FERAL_FACTION {
+                self.world.ferals_killed += 1;
+            }
+            // The entity handle stays live: the wreck is targetable
+            // (attack, repair, salvage, analyze, hijack) — it is removed
+            // for good only when the wreck itself is destroyed.
             // Carried cargo spills to the ground rather than entombing.
-            self.drop_cargo_to_ground(data.pos, data.cargo);
-
-            // Disabled: an inert wreck (self-destruct countdown comes later).
-            self.world.wrecks.insert(
-                id,
-                Wreck { pos: data.pos, cargo: 0, logs: data.log_buf, env: data.env },
-            );
+            let cargo = std::mem::take(&mut data.cargo);
+            self.drop_cargo_to_ground(data.pos, cargo);
+            data.dying = false; // the wreck may boot again (rescue/hijack)
+            // The wreck race (M10): hull ~25% max HP; countdown = base +
+            // per-XP bonus — or the RESUMED remainder after a failed
+            // rescue (never resets).
+            let hp =
+                (data.max_hp * self.tuning.wreck_hp_pct as i64 / 100).max(1);
+            let countdown = data.countdown_carry.take().unwrap_or_else(|| {
+                self.tuning.wreck_countdown_base_ticks
+                    + (data.xp_total() / 1000) as u32
+                        * self.tuning.wreck_countdown_per_100xp_ticks
+            });
+            self.world.wrecks.insert(id, Wreck { data, hp, countdown });
         }
 
         // --- phase 7: XP settlement ---
@@ -1160,6 +1763,7 @@ impl Sim {
         }
         self.run_refineries();
         self.run_printers();
+        self.tick_nests();
         self.run_pads();
         self.settle_terrain();
         if self.world.tick.is_multiple_of(self.tuning.corruption_spread_ticks) {
@@ -1828,77 +2432,7 @@ impl Sim {
         }
         for (id, bot) in &w.bots {
             h.write_u32(id.0);
-            h.write_i32(bot.data.pos.x);
-            h.write_i32(bot.data.pos.y);
-            for (kind, deci) in &bot.data.cargo {
-                h.write_u8(kind.as_u8());
-                h.write_u32(*deci);
-            }
-            h.write_u32(bot.data.cargo_cap);
-            h.write_u64(bot.data.cpu_centi);
-            h.write_u32(bot.data.move_rate_deci);
-            h.write_u32(bot.data.sensors);
-            h.write_u32(bot.data.module_slots);
-            h.write_u32(bot.data.log_cap);
-            h.write_u32(bot.data.upgrades.len() as u32);
-            for u in &bot.data.upgrades {
-                h.write_u8(*u);
-            }
-            h.write_u32(bot.data.modules.len() as u32);
-            for m in &bot.data.modules {
-                h.write_u8(*m);
-            }
-            h.write_u32(bot.data.upgrade_queue.len() as u32);
-            for order in &bot.data.upgrade_queue {
-                hash_order(&mut h, order);
-            }
-            h.write_u8(bot.data.pad_sit as u8);
-            h.write_u8(bot.data.survey_after_move as u8);
-            h.write_u32(bot.data.withdrawn_aboard);
-            h.write_u8(bot.data.faction);
-            h.write_u8(bot.data.color.0);
-            h.write_i64(bot.data.hp);
-            h.write_u8(bot.data.hurt_fired as u8);
-            h.write_u32(bot.data.xp.len() as u32);
-            for (track, deci) in &bot.data.xp {
-                h.write_u8(track.as_u8());
-                h.write_u64(*deci);
-            }
-            h.write_u64(bot.data.haul_accum);
-            h.write_u64(bot.data.learning_carry);
-            h.write_u32(bot.data.age_hp_levels);
-            for (track, rem) in &bot.data.gain_carry {
-                h.write_u8(track.as_u8());
-                h.write_u64(*rem);
-            }
-            h.write_u64(bot.data.moved_tick);
-            h.write_u32(bot.data.dune_idle);
-            h.write_u32(bot.data.episodes.len() as u32);
-            for (faction, counter) in &bot.data.episodes {
-                h.write_u8(*faction);
-                h.write_u32(*counter);
-            }
-            h.write_u32(bot.data.latent_quirks.len() as u32);
-            for q in &bot.data.latent_quirks {
-                h.write_u8(*q);
-            }
-            h.write_u32(bot.data.quirks.len() as u32);
-            for q in &bot.data.quirks {
-                h.write_u8(*q);
-            }
-            h.write_u8(bot.data.dying as u8);
-            h.write_u32(bot.data.booting.unwrap_or(0));
-            h.write_u32(bot.data.bump_frozen);
-            h.write_u8(bot.data.recall.is_some() as u8);
-            h.write_u64(bot.data.rng_program);
-            for (level, entry) in &bot.data.log_buf {
-                h.write_u8(*level);
-                h.write_str(entry);
-            }
-            for (key, value) in &bot.data.env {
-                h.write_str(key);
-                h.write_i64(*value);
-            }
+            hash_bot_data(&mut h, &bot.data);
             if let Some(vm) = &bot.vm {
                 h.write_i64(vm.budget());
                 h.write_u64(vm.fault_count());
@@ -1910,19 +2444,81 @@ impl Sim {
         }
         for (id, wreck) in &w.wrecks {
             h.write_u32(id.0);
-            h.write_i32(wreck.pos.x);
-            h.write_i32(wreck.pos.y);
-            h.write_u32(wreck.cargo);
-            for (level, log) in &wreck.logs {
-                h.write_u8(*level);
-                h.write_str(log);
+            h.write_i64(wreck.hp);
+            h.write_u32(wreck.countdown);
+            // The FULL BotData — it reboots into live play whole via
+            // rescue/hijack, so every field is lockstep state.
+            hash_bot_data(&mut h, &wreck.data);
+        }
+        // The intel ledgers (M10): decryption never goes down; comm keys
+        // never expire — both are lockstep state.
+        for ((viewer, owner, color), pct) in &w.decryption {
+            h.write_u8(*viewer);
+            h.write_u8(*owner);
+            h.write_u8(*color);
+            h.write_u32(*pct);
+        }
+        for (viewer, keys) in &w.comm_keys {
+            h.write_u8(*viewer);
+            for k in keys {
+                h.write_u8(*k);
             }
-            for (key, value) in &wreck.env {
-                h.write_str(key);
-                h.write_i64(*value);
+        }
+        // Ferals (M12): nests are lockstep state; so is the escalation
+        // dial and its kill counter.
+        h.write_u8(w.escalation);
+        h.write_u32(w.ferals_killed);
+        for (id, n) in &w.nests {
+            h.write_u64(id.0);
+            h.write_i32(n.pos.x);
+            h.write_i32(n.pos.y);
+            h.write_u8(n.arcanum);
+            h.write_i64(n.hp);
+            let (tag, claimant) = match n.state {
+                crate::world::NestState::Active => (0u8, 0u8),
+                crate::world::NestState::Defeated => (1, 0),
+                crate::world::NestState::Claimed(f) => (2, f),
+            };
+            h.write_u8(tag);
+            h.write_u8(claimant);
+            h.write_u64(n.stock_deci);
+            h.write_u64(n.job.unwrap_or(u64::MAX));
+            h.write_u32(n.prints);
+        }
+        // Diplomacy & votes (M13): all lockstep state.
+        for (a, b) in &w.alliances {
+            h.write_u8(*a);
+            h.write_u8(*b);
+        }
+        for (f, t, what) in &w.grants {
+            h.write_u8(*f);
+            h.write_u8(*t);
+            h.write_u8(matches!(what, crate::world::GrantKind::Channels) as u8);
+        }
+        for (tick, faction, text) in &w.requests {
+            h.write_u64(*tick);
+            h.write_u8(*faction);
+            h.write_str(text);
+        }
+        h.write_u32(w.sim_speed_permille);
+        h.write_u64(w.vote_cooldown_until);
+        // Match-settings-derived world state (M13): peers whose configs
+        // disagree must diverge at tick 0, not when the first gate fires.
+        h.write_u8(w.harm_enabled as u8);
+        h.write_u64(w.vote_cooldown_ticks);
+        h.write_u64(w.vote_window_ticks);
+        if let Some(vote) = &w.pending_vote {
+            let crate::sim::Proposal::SetSpeed(permille) = vote.proposal;
+            h.write_u32(permille);
+            h.write_u64(vote.opened);
+            for f in &vote.ayes {
+                h.write_u8(*f);
             }
         }
         for bb in &w.black_boxes {
+            h.write_u64(bb.entity.0);
+            h.write_i32(bb.pos.x);
+            h.write_i32(bb.pos.y);
             h.write_u64(bb.tick);
             h.write_u32(bb.bot.0);
             h.write_str(&bb.cause);

@@ -13,6 +13,8 @@ pub const KINDS: &[&str] = &[
     "blueprint", "depot", "enemy", "ore", "printer", "wreck", "smelter", "foundry", "archive",
     // the creep's heart (M8-C) — attackable, so it must be findable
     "blight",
+    // Feral nests (M12) — attackable and patrol-worthy, so findable
+    "nest",
     // every resource kind is also a queryable kind: raw names find nodes,
     // refined names exist for cargo_count/withdraw (closest() on a refined
     // kind finds nothing until stock queries land)
@@ -69,6 +71,18 @@ impl BotHost<'_> {
             return true;
         }
         if self.world.structures.get(&entity).is_some_and(|s| s.faction == faction) {
+            return true;
+        }
+        // Own wrecks are colony knowledge; black boxes are loud field
+        // objects, targetable by anyone (recovery still walks there).
+        if self
+            .world
+            .wreck_of(entity)
+            .is_some_and(|bid| self.world.wrecks[&bid].data.faction == faction)
+        {
+            return true;
+        }
+        if self.world.black_boxes.iter().any(|bb| bb.entity == entity) {
             return true;
         }
         self.perception()
@@ -144,7 +158,45 @@ impl BotHost<'_> {
                 }
                 best.map(|(_, id)| id)
             }
-            "wreck" => None, // wrecks are BotId-keyed; targeting lands M10
+            "wreck" => {
+                // Perception-scoped like everything else: own wrecks are
+                // colony knowledge, enemy ones need eyes (M10).
+                let mut best: Option<(u32, EntityId)> = None;
+                for w in self.world.wrecks.values() {
+                    let entity = w.data.entity;
+                    let visible = w.data.faction == faction
+                        || self.perception().is_some_and(|per| per.seen.contains(&entity));
+                    if !visible {
+                        continue;
+                    }
+                    let candidate = (bot.pos.manhattan(w.data.pos), entity);
+                    if best.is_none_or(|b| candidate < b) {
+                        best = Some(candidate);
+                    }
+                }
+                best.map(|(_, id)| id)
+            }
+            "nest" => {
+                // Own nests (Feral's active ones, a claimant's claimed
+                // ones) are colony knowledge; foreign nests need eyes.
+                let mut best: Option<(u32, EntityId)> = None;
+                for (id, n) in &self.world.nests {
+                    let own = match n.state {
+                        crate::world::NestState::Claimed(f) => f == faction,
+                        _ => faction == crate::world::FERAL_FACTION,
+                    };
+                    let visible = own
+                        || self.perception().is_some_and(|per| per.seen.contains(id));
+                    if !visible {
+                        continue;
+                    }
+                    let candidate = (bot.pos.manhattan(n.pos), *id);
+                    if best.is_none_or(|b| candidate < b) {
+                        best = Some(candidate);
+                    }
+                }
+                best.map(|(_, id)| id)
+            }
             "smelter" | "foundry" | "archive" => self
                 .world
                 .structures
@@ -276,9 +328,18 @@ impl pyrite::Host for BotHost<'_> {
                         .known_nodes
                         .get(&faction)
                         .is_some_and(|k| k.contains_key(&entity));
+                    // Nests are exempt only for their OWNER (a Feral's own
+                    // active nest, a claimant's claimed one) — foreign
+                    // nests need eyes, same as closest("nest"), so entity-
+                    // id sweeps can't locate fogged nests.
+                    let own_nest = self.world.nests.get(&entity).is_some_and(|n| match n.state {
+                        crate::world::NestState::Claimed(f) => f == faction,
+                        _ => faction == crate::world::FERAL_FACTION,
+                    });
                     if !self.perceived(entity) && !known_node
                         && !self.world.depots.contains_key(&entity)
                         && !self.world.blueprints.contains_key(&entity)
+                        && !own_nest
                     {
                         return HostCall::Fault(Fault::new(
                             UNKNOWN_CONTACT,
@@ -595,6 +656,172 @@ impl pyrite::Host for BotHost<'_> {
                     format!("attack requires an entity, got {}", other.type_name()),
                 )),
                 _ => HostCall::Fault(Fault::new(faults::ARITY, "attack takes 1 argument")),
+            },
+            // --- channels (M11): rendezvous radio. The Channels construct
+            // gates the verbs per faction (Research); foreign namespaces
+            // need that faction's comm key (analyze steals one).
+            "send" | "receive" | "broadcast" | "try_send" | "try_receive"
+            | "try_broadcast" => {
+                let own = self.world.bots[&bot_id].data.faction;
+                if !self.world.dev_all_unlocks
+                    && !crate::world::faction_unlocks(self.world, own)
+                        .has(pyrite::Construct::Channels)
+                {
+                    return HostCall::Fault(Fault::new(
+                        faults::UNKNOWN_FUNCTION,
+                        format!("unknown function {name}() (Channels not researched)"),
+                    ));
+                }
+                let Some(Value::Str(ch)) = args.first().cloned() else {
+                    return HostCall::Fault(Fault::new(
+                        faults::TYPE,
+                        format!("{name}: the channel must be a string"),
+                    ));
+                };
+                // Range checks happen per SITE below: a timeout must be
+                // positive, but faction 0 is a real player namespace.
+                let opt_int = |v: Option<&Value>| -> Result<Option<u32>, HostCall> {
+                    match v {
+                        None => Ok(None),
+                        Some(Value::Int(n)) if (0..=u32::MAX as i64).contains(n) => {
+                            Ok(Some(*n as u32))
+                        }
+                        Some(Value::Int(_)) => Err(HostCall::Fault(Fault::new(
+                            faults::RANGE,
+                            format!("{name}: timeout/faction out of range"),
+                        ))),
+                        Some(v) if *v == Value::option_none() => Ok(None),
+                        Some(other) => Err(HostCall::Fault(Fault::new(
+                            faults::TYPE,
+                            format!("{name}: expected an int, got {}", other.type_name()),
+                        ))),
+                    }
+                };
+                // Canonical positional layouts (the registry fills
+                // defaults): send/broadcast [ch, val, timeout(, faction)];
+                // receive [ch, timeout, faction]; try_* [ch(, val)].
+                let (value, timeout_at, faction_at) = match name {
+                    "send" => (args.get(1).cloned(), Some(2), Some(3)),
+                    "broadcast" => (args.get(1).cloned(), Some(2), None),
+                    "receive" => (None, Some(1), Some(2)),
+                    _ => (args.get(1).cloned(), None, None),
+                };
+                let timeout = match timeout_at.map(|i| opt_int(args.get(i))).transpose() {
+                    Ok(t) => t.flatten(),
+                    Err(fault) => return fault,
+                };
+                if timeout == Some(0) {
+                    return HostCall::Fault(Fault::new(
+                        faults::RANGE,
+                        format!("{name}: the timeout must be positive"),
+                    ));
+                }
+                let namespace = match faction_at.map(|i| opt_int(args.get(i))).transpose() {
+                    // Faction 0 is a real player namespace; anything past
+                    // the u8 range faults instead of silently truncating.
+                    Ok(f) => match f.flatten() {
+                        Some(f) if f > u8::MAX as u32 => {
+                            return HostCall::Fault(Fault::new(
+                                faults::RANGE,
+                                format!("{name}: no such faction {f}"),
+                            ));
+                        }
+                        Some(f) => f as u8,
+                        None => own,
+                    },
+                    Err(fault) => return fault,
+                };
+                // A stolen comm key OR a standing Channels grant (M13)
+                // opens a foreign namespace.
+                if namespace != own
+                    && !self
+                        .world
+                        .comm_keys
+                        .get(&own)
+                        .is_some_and(|keys| keys.contains(&namespace))
+                    && !self.world.granted(namespace, own, crate::world::GrantKind::Channels)
+                {
+                    return HostCall::Fault(Fault::new(
+                        faults::ACTION,
+                        format!("{name}: no comm key for faction {namespace}"),
+                    ));
+                }
+                match name {
+                    "try_send" | "try_broadcast" => {
+                        let Some(value) = value else {
+                            return HostCall::Fault(Fault::new(
+                                faults::ARITY,
+                                format!("{name} takes (ch, val)"),
+                            ));
+                        };
+                        let took = self.world.try_deliver(
+                            namespace,
+                            &ch,
+                            &value,
+                            name == "try_broadcast",
+                            bot_id,
+                        );
+                        HostCall::Ready(Value::Bool(took > 0))
+                    }
+                    "try_receive" => match self.world.try_take(namespace, &ch, bot_id) {
+                        Some(v) => HostCall::Ready(Value::option_some(v)),
+                        None => HostCall::Ready(Value::option_none()),
+                    },
+                    _ => {
+                        let op = match name {
+                            "send" => crate::world::ChannelOp::Send(value.clone().unwrap_or(Value::Unit)),
+                            "broadcast" => crate::world::ChannelOp::Broadcast(
+                                value.clone().unwrap_or(Value::Unit),
+                            ),
+                            _ => crate::world::ChannelOp::Receive,
+                        };
+                        self.request(ActionRequest::Channel { op, ch, namespace, timeout })
+                    }
+                }
+            }
+            // --- the wreck race + guard duty (M10). Tool gating (repair/
+            // hijack want a build tool) waits on tool modules — flagged.
+            "repair" | "salvage" | "analyze" | "hijack" | "recover_black_box" | "guard"
+            | "escort" => match args {
+                [Value::Entity(target)] => {
+                    let entity = EntityId(*target);
+                    if !self.perceived(entity) {
+                        return HostCall::Fault(Fault::new(
+                            UNKNOWN_CONTACT,
+                            format!("{name}: stale or unknown contact"),
+                        ));
+                    }
+                    // Non-PvP servers (M13, docs/08 Q76): other PLAYERS'
+                    // wrecks can't be salvaged, analyzed, or hijacked —
+                    // repair (a rescue) stays legal, Ferals stay fair game.
+                    if matches!(name, "salvage" | "analyze" | "hijack") {
+                        let own = self.world.bots[&bot_id].data.faction;
+                        if let Some(w) = self.world.wreck_of(entity) {
+                            let victim = self.world.wrecks[&w].data.faction;
+                            if !self.world.harm_allowed(own, victim) {
+                                return HostCall::Fault(Fault::new(
+                                    faults::ACTION,
+                                    format!("{name}: harm is disabled on this server"),
+                                ));
+                            }
+                        }
+                    }
+                    let request = match name {
+                        "repair" => ActionRequest::Repair(entity),
+                        "salvage" => ActionRequest::Salvage(entity),
+                        "analyze" => ActionRequest::Analyze(entity),
+                        "hijack" => ActionRequest::Hijack(entity),
+                        "recover_black_box" => ActionRequest::Recover(entity),
+                        "guard" => ActionRequest::Guard { target: entity, escort: false },
+                        _ => ActionRequest::Guard { target: entity, escort: true },
+                    };
+                    self.request(request)
+                }
+                [other] => HostCall::Fault(Fault::new(
+                    faults::TYPE,
+                    format!("{name} requires an entity, got {}", other.type_name()),
+                )),
+                _ => HostCall::Fault(Fault::new(faults::ARITY, format!("{name} takes 1 argument"))),
             },
 
             // --- logging (docs/01: ordinary costed functions) ---

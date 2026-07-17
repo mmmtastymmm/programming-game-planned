@@ -19,6 +19,7 @@ XpConfig(
     hauling_l3_loaded_speed_pct: 10,
     combat_damage_pct: 5,
     building_speed_pct: 10,
+    building_l3_repair_pct: 25,
     scouting_sensors_per_level: 1,
 
     age_hp_per_level: 5,

@@ -44,6 +44,8 @@ pub struct XpConfig {
     pub combat_damage_pct: u32,
     /// Building: +% build speed per level (10).
     pub building_speed_pct: u32,
+    /// Building L3: repairs restore this % more (25).
+    pub building_l3_repair_pct: u32,
     /// Scouting: +sensor tiles per level (1).
     pub scouting_sensors_per_level: u32,
 

@@ -44,8 +44,14 @@ impl Sim {
     /// destination is free yet — the caller keeps the recall alive and
     /// retries next tick (bots are solid; finished prints wait the same way).
     pub(crate) fn recolor_bot(&mut self, id: BotId, dest: EntityId) -> bool {
-        let Some(printer) = self.world.printers.get(&dest) else {
-            // Destination vanished: end the recall, resume the old program.
+        let Some(printer) = self
+            .world
+            .printers
+            .get(&dest)
+            .filter(|p| p.state == PrinterState::Working)
+        else {
+            // Destination vanished (or was ruined mid-walk): end the
+            // recall, resume the old program — never re-color at a ruin.
             self.finish_boot(id);
             return true;
         };
@@ -54,6 +60,18 @@ impl Sim {
             self.finish_boot(id);
             return true;
         };
+        // The hardware bar holds at ARRIVAL too (Q52: printers claim only
+        // fitting bots): an over-bar artifact deployed mid-walk turns the
+        // arrival into a plain resume — the lame duck keeps its old code
+        // and the next allocation re-homes it.
+        let ctx = self.ctx();
+        let data = &self.world.bots[&id].data;
+        if cp.req_lines > ctx.program_lines_for(data)
+            || cp.req_names > ctx.variable_slots_for(data)
+        {
+            self.finish_boot(id);
+            return true;
+        }
         let program = Rc::clone(&cp.program);
         let Some(landing) = self.world.free_spawn_tile(printer_pos) else {
             return false;
@@ -221,10 +239,14 @@ impl Sim {
                 }
                 // A dialed printer prints only while short of its target;
                 // the remainder (rules None) prints whenever the fleet is
-                // short of the cap.
+                // short of the cap. Incoming re-colors — walking OR
+                // politely queued — count toward the destination (the
+                // pre-M9 invariant): never print a replacement for a bot
+                // already assigned here.
                 if let Some(rules) = rules {
                     let target = self.resolve_target(rules.target, cap);
-                    let pop = self.world.color_population(faction, color);
+                    let pop = self.world.color_population(faction, color)
+                        + self.incoming_recolors(faction, color);
                     if pop >= target {
                         continue;
                     }
@@ -250,23 +272,18 @@ impl Sim {
             }
         }
 
-        // Over-capacity: the fleet cap is printer-derived (docs/02 — the
-        // only hard ceiling); scrap trims the lowest-total-XP FLEET bot
-        // (ghosts exempt, Q65).
-        let mut bot_factions: std::collections::BTreeSet<u8> = std::collections::BTreeSet::new();
-        for bot in self.world.bots.values() {
-            bot_factions.insert(bot.data.faction);
-        }
-        for faction in bot_factions {
-            if self.world.fleet_size(faction) > self.fleet_cap(faction) {
-                self.scrap_recall_lowest(faction);
-            }
-        }
+        // NO over-capacity scrap here (docs/01: when a ruin shrinks the
+        // cap, "printing simply stops until attrition brings the fleet
+        // back under — over-capacity scrap remains an economy event
+        // only"). Prints already stop at the cap above; the economy's
+        // sustained-rust valve (upkeep.ron `rust_scraps`) is the scrap
+        // trigger that remains.
     }
 
     /// The colony's fleet cap: a fixed contribution per WORKING printer
     /// (printers.ron; docs/02 — a dormant/ruined printer's contribution
-    /// is withdrawn).
+    /// is withdrawn). Saturating: replay-supplied config must never
+    /// panic the sim.
     pub fn fleet_cap(&self, faction: u8) -> u32 {
         let working = self
             .world
@@ -274,16 +291,51 @@ impl Sim {
             .values()
             .filter(|p| p.faction == faction && p.state == PrinterState::Working)
             .count() as u32;
-        working * self.printer_cfg.fleet_cap_per_printer
+        working.saturating_mul(self.printer_cfg.fleet_cap_per_printer)
     }
 
     /// A target dial's bot count: absolute, or a floored percentage OF
-    /// THE CAP (Q64 — never the live fleet).
+    /// THE CAP (Q64 — never the live fleet). Widened arithmetic — a
+    /// hostile cap × pct must wrap nothing.
     fn resolve_target(&self, target: PrintTarget, cap: u32) -> u32 {
         match target {
             PrintTarget::Count(n) => n,
-            PrintTarget::CapPct(pct) => cap * pct.min(100) / 100,
+            PrintTarget::CapPct(pct) => {
+                (cap as u64 * pct.min(100) as u64 / 100) as u32
+            }
         }
+    }
+
+    /// Re-colorings currently headed INTO `color` — walking recalls plus
+    /// polite queue entries — from bots not already wearing it.
+    fn incoming_recolors(&self, faction: u8, color: Color) -> u32 {
+        let walking = self
+            .world
+            .bots
+            .values()
+            .filter(|b| {
+                b.data.faction == faction
+                    && b.data.color != color
+                    && matches!(
+                        &b.data.recall,
+                        Some(Recall { purpose: RecallPurpose::Recolor { dest }, .. })
+                            if self.world.printers.get(dest).map(|p| p.color) == Some(color)
+                    )
+            })
+            .count();
+        let queued = self
+            .world
+            .pending_recalls
+            .iter()
+            .filter(|(b, p)| {
+                self.world
+                    .bots
+                    .get(b)
+                    .is_some_and(|bot| bot.data.faction == faction && bot.data.color != color)
+                    && self.world.printers.get(p).map(|pr| pr.color) == Some(color)
+            })
+            .count();
+        (walking + queued) as u32
     }
 
     /// The target-share allocation (M9, docs/01): down the player's
@@ -306,6 +358,12 @@ impl Sim {
         let cap = self.fleet_cap(faction);
         let Some(remainder) = self.world.remainder_printer(faction) else { return };
         let remainder_color = self.world.printers[&remainder].color;
+        // A ruined remainder can't receive anyone: recalling the unclaimed
+        // fleet to a ruin would re-color them into permanent ghosts. With
+        // no WORKING remainder, unclaimed bots simply keep their colors
+        // until it is repaired.
+        let remainder_working =
+            self.world.printers[&remainder].state == PrinterState::Working;
 
         // The fleet: live, non-ghost members. Scrap-recalled bots are
         // already leaving and stay out; re-color walks stay IN (the
@@ -377,8 +435,10 @@ impl Sim {
                 assigned.push((*id, color, pid));
             }
         }
-        for id in remaining {
-            assigned.push((id, remainder_color, remainder));
+        if remainder_working {
+            for id in remaining {
+                assigned.push((id, remainder_color, remainder));
+            }
         }
 
         for (bot_id, color, printer) in assigned {
@@ -415,14 +475,27 @@ impl Sim {
             }
             match mode {
                 // Player-fired: dispatches like a signal — a mid-template
-                // landing is a double-handle (your clock, your risk).
+                // landing is a double-handle (your clock, your risk). But
+                // boot and pad-sit are ENGINE interrupt states, not the
+                // player's clock: raising Recall there would abort the bot
+                // (begin_recall_walk's own "bug net"), so those defer to
+                // the polite queue instead of wrecking fresh prints and
+                // mid-upgrade bots on a dial nudge.
                 RecallMode::Signal => {
-                    self.world.pending_recalls.remove(&bot_id);
-                    self.begin_recall_walk(
-                        bot_id,
-                        printer,
-                        RecallPurpose::Recolor { dest: printer },
-                    );
+                    let engine_busy = {
+                        let data = &self.world.bots[&bot_id].data;
+                        data.booting.is_some() || data.pad_sit
+                    };
+                    if engine_busy {
+                        self.world.pending_recalls.insert(bot_id, printer);
+                    } else {
+                        self.world.pending_recalls.remove(&bot_id);
+                        let _ = self.begin_recall_walk(
+                            bot_id,
+                            printer,
+                            RecallPurpose::Recolor { dest: printer },
+                        );
+                    }
                 }
                 // Engine-fired: the lame duck visibly runs the old color
                 // until its entry lands politely.
@@ -471,8 +544,13 @@ impl Sim {
             if !free {
                 continue; // stays queued; politeness is patience
             }
-            self.world.pending_recalls.remove(&bot_id);
-            self.begin_recall_walk(bot_id, printer, RecallPurpose::Recolor { dest: printer });
+            // Consume the entry only when the walk ACTUALLY starts: a
+            // momentarily-unreachable printer (or an unhandled raise)
+            // keeps the promise queued and retried next tick — the old
+            // per-tick rebalance re-selected; the queue must too.
+            if self.begin_recall_walk(bot_id, printer, RecallPurpose::Recolor { dest: printer }) {
+                self.world.pending_recalls.remove(&bot_id);
+            }
         }
     }
 
@@ -505,7 +583,7 @@ impl Sim {
         if let Some((_, victim)) = victim {
             let home = self.nearest_faction_printer(victim);
             if let Some(home) = home {
-                self.begin_recall_walk(victim, home, RecallPurpose::Scrap);
+                let _ = self.begin_recall_walk(victim, home, RecallPurpose::Scrap);
             }
         }
     }
@@ -743,9 +821,12 @@ impl Sim {
 
     /// Suspend the program (engine interrupt), cancel any action, and start
     /// walking to the home printer. Double-handle applies the whole way.
-    pub(crate) fn begin_recall_walk(&mut self, id: BotId, home: EntityId, purpose: RecallPurpose) {
-        let Some(home_pos) = self.world.printers.get(&home).map(|p| p.pos) else { return };
-        let Some(bot) = self.world.bots.get_mut(&id) else { return };
+    /// Returns TRUE only when the walk actually started — callers keeping
+    /// a polite queue must not consume their entry on a false (no route,
+    /// raise not handled): politeness is patience, retried next tick.
+    pub(crate) fn begin_recall_walk(&mut self, id: BotId, home: EntityId, purpose: RecallPurpose) -> bool {
+        let Some(home_pos) = self.world.printers.get(&home).map(|p| p.pos) else { return false };
+        let Some(bot) = self.world.bots.get_mut(&id) else { return false };
         let start = bot.data.pos;
         // Goals: the passable, non-structure tiles ORTHOGONALLY beside home
         // (the printer tile itself is solid; diagonal corner-touch reads as
@@ -768,7 +849,7 @@ impl Sim {
         let Some(path) =
             astar_avoiding(&self.world.grid, &self.world.overlays, &self.tuning.tile_costs, start, &goals, &structures)
         else {
-            return;
+            return false;
         };
         let ticks_left = path
             .first()
@@ -784,9 +865,10 @@ impl Sim {
         // Engine-fired callers select politely, so Aborted here is a bug
         // net, not a normal path.
         if self.raise_signal(id, pyrite::Signal::Recall) != pyrite::RaiseOutcome::Handled {
-            return;
+            return false;
         }
         let bot = self.world.bots.get_mut(&id).expect("bot exists");
         bot.data.recall = Some(Recall { path, ticks_left, home, purpose });
+        true
     }
 }
