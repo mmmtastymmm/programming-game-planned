@@ -33,23 +33,14 @@ fn nests_print_ferals_from_their_own_stock() {
         sim.step();
     }
     assert_eq!(feral_count(&sim), 3, "the seed stock paid for exactly three prints");
-    // Calm-tier mix: Drone, Drone, Harvester — archetype = color slot.
-    let mut colors: Vec<u8> = sim
-        .world
-        .bots
-        .values()
-        .filter(|b| b.data.faction == FERAL_FACTION)
-        .map(|b| b.data.color.0)
-        .collect();
-    colors.sort();
-    assert_eq!(
-        colors,
-        vec![
-            Archetype::Drone.color().0,
-            Archetype::Drone.color().0,
-            Archetype::Harvester.color().0
-        ],
-        "the calm-tier round-robin printed two Drones and a Harvester"
+    // Calm tier is DRONES ONLY (docs/04: the harmless tutorial state).
+    assert!(
+        sim.world
+            .bots
+            .values()
+            .filter(|b| b.data.faction == FERAL_FACTION)
+            .all(|b| b.data.color.0 == Archetype::Drone.color().0),
+        "Calm prints only Drones"
     );
 }
 
@@ -95,6 +86,9 @@ fn harvesters_feed_the_nest_economy() {
     sim.tuning.nest_print_ticks = 3;
     sim.tuning.nest_income_deci = 0; // isolate the harvest income
     sim.tuning.fault_damage = 0;
+    // Harvesters only appear at Probing+ (docs/04: Calm is Drones only) —
+    // give the footprint enough kills to escalate past Calm.
+    sim.world.ferals_killed = sim.tuning.escalation_probing as u32;
     for _ in 0..200 {
         sim.step();
     }
@@ -262,6 +256,12 @@ fn drones_hunt_what_they_see_and_players_can_fell_the_nest() {
     // off the map (raze-or-claim comes after).
     let nid = first_nest(&sim);
     sim.world.nests.get_mut(&nid).unwrap().hp = 15;
+    // Halt further prints during the raid so a wall of freshly-printed
+    // Drones can't box the raider out of the nest's one approach.
+    sim.tuning.nest_print_ticks = 100_000;
+    sim.tuning.nest_income_deci = 0;
+    sim.world.nests.get_mut(&nid).unwrap().job = None;
+    sim.world.nests.get_mut(&nid).unwrap().stock_deci = 0;
     // The nest is SOLID (its prints ring it), so the raider spawns clear
     // and walks in before swinging.
     let src = "\

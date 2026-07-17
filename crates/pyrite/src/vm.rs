@@ -68,10 +68,13 @@ pub trait Host {
     /// until the sim calls [`Vm::resolve_action`].
     fn call(&mut self, name: &str, args: &[Value], ctx: CallCtx<'_>) -> HostCall;
 
-    /// Entity attribute lookup (`bot.distance` style).
-    fn attr(&mut self, entity: u64, name: &str) -> Result<Value, String> {
+    /// Entity attribute lookup (`bot.distance` style). Errors carry the
+    /// fault id so the host can distinguish an unknown property
+    /// (`err_name`) from a read through a contact it can't see
+    /// (`err_unknown_contact`).
+    fn attr(&mut self, entity: u64, name: &str) -> Result<Value, (&'static str, String)> {
         let _ = entity;
-        Err(format!("unknown attribute {name}"))
+        Err((faults::NAME, format!("unknown attribute {name}")))
     }
 
     /// Current log-buffer length, for `upload_log`'s sized cost
@@ -1720,7 +1723,7 @@ impl Vm {
                 match base {
                     Value::Entity(id) => match host.attr(id, &name) {
                         Ok(v) => self.values.push(v),
-                        Err(msg) => self.fault(faults::NAME, msg, host, costs),
+                        Err((fid, msg)) => self.fault(fid, msg, host, costs),
                     },
                     Value::Enum(e) => {
                         // Named field access on enum values, resolved via the

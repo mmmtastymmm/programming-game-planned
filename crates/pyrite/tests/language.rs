@@ -31,10 +31,10 @@ impl Host for TestHost {
         HostCall::Ready(self.returns.get(name).cloned().unwrap_or(Value::Unit))
     }
 
-    fn attr(&mut self, entity: u64, name: &str) -> Result<Value, String> {
+    fn attr(&mut self, entity: u64, name: &str) -> Result<Value, (&'static str, String)> {
         match name {
             "id" => Ok(Value::Int(entity as i64)),
-            _ => Err(format!("unknown attribute {name}")),
+            _ => Err((faults::NAME, format!("unknown attribute {name}"))),
         }
     }
 
@@ -1707,4 +1707,23 @@ fn blocked_bots_bank_nothing() {
     let banked = vm.budget();
     vm.grant(10, &costs);
     assert_eq!(vm.budget(), banked, "waiting is what its CPU is doing");
+}
+
+#[test]
+fn hardware_bar_counts_code_not_comments_or_frame_locals() {
+    // docs/01 Q80: def bodies are frame-local — params and in-def locals
+    // never occupy a global variable slot. docs/01: docstrings, comments,
+    // blanks, and imports are not runtime code (review 2026-07-17).
+    let bare = "x = 1\ndef helper(a, b):\n    tmp = a + b\n    return tmp\ny = helper(x, 2)\n";
+    let padded = "# comment\n\nx = 1\n\ndef helper(a, b):\n    \"\"\"doc line\"\"\"\n    tmp = a + b\n    return tmp\n\ny = helper(x, 2)\n# trailing comment\n";
+    let p1 = parse(bare, &UnlockSet::all()).unwrap();
+    let p2 = parse(padded, &UnlockSet::all()).unwrap();
+    let r1 = pyrite::analysis::artifact_requirements(bare, &p1);
+    let r2 = pyrite::analysis::artifact_requirements(padded, &p2);
+    assert_eq!(r1, r2, "comments/blanks/docstrings never change the hardware bar");
+    assert_eq!(r1.1, 2, "only top-level globals (x, y) count; a/b/tmp are frame-local");
+    assert!(
+        r1.0 < padded.lines().count() as u32,
+        "non-code physical lines don't count toward program memory"
+    );
 }

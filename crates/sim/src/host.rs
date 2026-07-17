@@ -266,6 +266,34 @@ impl pyrite::Host for BotHost<'_> {
         self.world.bots[&self.bot].data.log_buf.len() as u64
     }
 
+    /// Entity property reads (docs/01: `t.distance`, priced core language).
+    /// Reads need SIGHT — a heard-only contact is a position-only handle
+    /// that action verbs accept but reads fault (QUESTIONS 2026-07-14), so
+    /// distance resolves only for own things and currently-seen contacts.
+    fn attr(&mut self, entity: u64, name: &str) -> Result<Value, (&'static str, String)> {
+        let e = EntityId(entity);
+        match name {
+            "distance" => {
+                // Own + seen count; heard-only (in `heard`, not `seen`)
+                // does not — the blip is a rumor, not a reading.
+                let heard_only = self
+                    .perception()
+                    .is_some_and(|p| p.heard.contains_key(&e) && !p.seen.contains(&e));
+                match self.world.entity_pos(e) {
+                    Some(pos) if self.perceived(e) && !heard_only => {
+                        let here = self.world.bots[&self.bot].data.pos;
+                        Ok(Value::Int(here.chebyshev(pos) as i64))
+                    }
+                    _ => Err((
+                        UNKNOWN_CONTACT,
+                        "distance: stale or unseen contact".to_string(),
+                    )),
+                }
+            }
+            _ => Err((faults::NAME, format!("unknown attribute {name}"))),
+        }
+    }
+
     fn call(&mut self, name: &str, args: &[Value], ctx: CallCtx<'_>) -> HostCall {
         let tick = self.world.tick;
         let bot_id = self.bot;
@@ -970,6 +998,18 @@ impl pyrite::Host for BotHost<'_> {
                 self.world.unindex_bot(bot_id, pos);
                 HostCall::Ready(Value::Unit)
             }
+
+            // study() is a start-kit verb (docs/01:455 — it can't be
+            // locked), but Template Caches (the thing it learns from) are
+            // a progression-milestone feature not yet in the sim. Fault
+            // gracefully — err_action "nothing to study" — rather than the
+            // misleading err_unknown_function the fallthrough would give
+            // an advertised builtin (review 2026-07-17; TASKS.md tracks
+            // Template Caches as unimplemented).
+            "study" => HostCall::Fault(Fault::new(
+                faults::ACTION,
+                "study: no Template Cache in range".to_string(),
+            )),
 
             other => HostCall::Fault(Fault::new(
                 faults::UNKNOWN_FUNCTION,

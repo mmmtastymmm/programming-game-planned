@@ -2489,8 +2489,13 @@ impl Sim {
             h.write_u8(*color);
             h.write_u32(*pct);
         }
+        h.write_u32(w.comm_keys.len() as u32);
         for (viewer, keys) in &w.comm_keys {
             h.write_u8(*viewer);
+            // Length-prefix the inner set (review 2026-07-17): without it
+            // {1:{2},5:{6}} and {1:{2,5,6}} hash identically and a
+            // comm-key divergence slips past the desync detector.
+            h.write_u32(keys.len() as u32);
             for k in keys {
                 h.write_u8(*k);
             }

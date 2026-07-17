@@ -707,6 +707,33 @@ despawn. docs/02 updated to the docs/01 ruling: the scrap recall is the ECONOMY 
 tests: 2 lockstep, 5 wreckrace, 3 ferals, 1 multiplayer. Golden unchanged (the fixture
 exercises none of the touched paths).
 
+## Spec-conformance review 2026-07-17 (max, M9–M13 vs docs) — 8 divergences fixed, 6 questions opened
+
+Fixed where code contradicted a clear doc: **`attr`** now implemented in BotHost — entity property
+reads (`t.distance`, docs/01) worked in no real game before (the trait method was never overridden,
+so every read faulted); the fault carries the id so heard-only reads give err_unknown_contact.
+**Hardware bars** (`analysis::artifact_requirements`) now derive from the parsed program — variable
+slots count TOP-LEVEL names only (docs/01 Q80: def params/locals are frame-local), and program-memory
+LINES count distinct statement-bearing lines (docstrings/comments/blanks/imports are not runtime code).
+**comm_keys** hash gained a per-viewer length prefix (a missing one collided {1:{2},5:{6}} with
+{1:{2,5,6}}, blinding the desync detector — ⚠HASH, golden regenerated: the length-prefix changes the
+hash format unconditionally; the fixture has no comm keys, so this is format-only). **`study()`** faults
+err_action "no Template Cache in range" instead of the misleading err_unknown_function the fallthrough
+gave an advertised builtin. **Feral Calm** prints Drones only (docs/04's tutorial state), not Harvesters.
+**Attack XP** on wrecks/structures is clamped to damage DEALT (matching the nest rule — an over-kill no
+longer over-credits). **incoming_recolors** counts only queued recolors (color_population already counts
+walkers — the sum double-counted). Regression tests: `tests/conformance.rs` (attr, study, comm-key hash),
+`hardware_bar_counts_code_not_comments_or_frame_locals` (pyrite), feral-mix test updates.
+
+Opened as design questions (docs/QUESTIONS.md Q86–Q91): lockstep command authorization (Q86 — cross-faction
+commands trust their faction operand), nest→printer dormancy binding (Q87), the ruined-remainder-printer
+ghost edge (Q88), faction ownership of depots + the archive/cloud (Q89), `try_receive` vs broadcasters
+(Q90), alliance vs explicit harm (Q91). Two DECIDED-but-UNIMPLEMENTED gaps (not re-opened): **Template
+Caches** (Q79's `study()` has nothing to learn from — the whole Cache/progression-learning system is
+unbuilt) and **nest-loss dormancy** (Q65's ghost machines — the mechanic is decided; only Q87's binding
+sub-question is undecided). Both are follow-on milestone work, flagged here so they aren't mistaken for
+complete.
+
 ## Cross-cutting quick wins (small, independent, grab anytime)
 
 - [x] Delete the spurious `become_disabled` cost entry once M3 lands. [pyrite] *(with M3)*

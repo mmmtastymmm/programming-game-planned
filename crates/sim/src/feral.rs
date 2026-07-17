@@ -100,13 +100,14 @@ pub fn mutates(arcanum: u8) -> bool {
     matches!(arcanum, 1 | 18)
 }
 
-/// The archetype mix per escalation tier (docs/04): Calm prints Drones,
-/// Probing adds Stingers + Harvesters, Contested adds Wardens, Overrun
-/// drops the Drones. Deterministic round-robin over `prints`.
+/// The archetype mix per escalation tier (docs/04's escalation ladder):
+/// Calm is DRONES ONLY (the tutorial state — harmless), Probing adds
+/// Stingers + Harvesters, Contested adds Wardens, Overrun drops the
+/// Drones. Deterministic round-robin over `prints`.
 fn mix(tier: u8) -> &'static [Archetype] {
     use Archetype::*;
     match tier {
-        0 => &[Drone, Drone, Harvester],
+        0 => &[Drone],
         1 => &[Drone, Stinger, Harvester],
         2 => &[Stinger, Harvester, Drone, Warden],
         _ => &[Stinger, Warden, Harvester],

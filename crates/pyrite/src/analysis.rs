@@ -498,25 +498,52 @@ impl Walker<'_> {
     }
 }
 
-/// The deployed artifact's hardware requirements (M9, Q52): program
-/// memory in LINES (the source's line count — programs are byte-exact,
-/// docs/01, so the stored source is the artifact) and VARIABLE SLOTS
-/// (every distinct name the program can bind: assignment targets, loop
-/// variables, function parameters, and match-pattern bindings). A
-/// printer claims only bots whose bought hardware meets both figures.
-pub fn artifact_requirements(source: &str, program: &Program) -> (u32, u32) {
-    let lines = source.lines().count() as u32;
-    let mut names: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
-    let visit_block = |block: &Block, names: &mut std::collections::BTreeSet<String>| {
-        // Iterative walk over statement ids (blocks nest).
+/// The deployed artifact's hardware requirements (M9, Q52), derived from
+/// the PARSED program, not the raw source:
+///
+/// - **Program memory in LINES** = the count of distinct source lines
+///   that carry a statement. Blank lines, comments, docstrings, and
+///   import lines never carry one, so they don't count — docs/01: a
+///   docstring is "stripped from the runtime body (free — doesn't exist
+///   at runtime)", and program memory is "code is code" (Q61). Body,
+///   handlers, and functions all count (code is code).
+/// - **Variable slots** = distinct TOP-LEVEL names the program binds
+///   (assignment targets, top-level loop vars, match binds). Per docs/01
+///   Q80 `def` bodies are frame-local — parameters and names first
+///   assigned inside a `def` live on the call stack (bounded by the
+///   stack-depth stat) and never occupy a global slot — so functions
+///   contribute lines but not names.
+///
+/// A printer claims only bots whose bought hardware meets both figures.
+pub fn artifact_requirements(_source: &str, program: &Program) -> (u32, u32) {
+    use std::collections::BTreeSet;
+    let mut lines: BTreeSet<u32> = BTreeSet::new();
+    let mut names: BTreeSet<String> = BTreeSet::new();
+
+    // Walk a block, collecting every statement's line; collect binding
+    // names only when `top_level` (globals — not inside a `def`). Nested
+    // control flow inside the body/handlers is still top-level scope.
+    fn walk(
+        program: &Program,
+        block: &Block,
+        lines: &mut BTreeSet<u32>,
+        names: &mut BTreeSet<String>,
+        top_level: bool,
+    ) {
         let mut work: Vec<StmtId> = block.iter().rev().copied().collect();
         while let Some(id) = work.pop() {
-            match program.stmt(id) {
+            let stmt = program.stmt(id);
+            lines.insert(stmt.line());
+            match stmt {
                 Stmt::Assign { name, .. } | Stmt::IndexAssign { name, .. } => {
-                    names.insert(name.clone());
+                    if top_level {
+                        names.insert(name.clone());
+                    }
                 }
                 Stmt::For { var, body, .. } => {
-                    names.insert(var.clone());
+                    if top_level {
+                        names.insert(var.clone());
+                    }
                     work.extend(body.iter().rev().copied());
                 }
                 Stmt::If { arms, else_body, .. } => {
@@ -530,7 +557,9 @@ pub fn artifact_requirements(source: &str, program: &Program) -> (u32, u32) {
                 Stmt::While { body, .. } => work.extend(body.iter().rev().copied()),
                 Stmt::Match { cases, .. } => {
                     for case in cases {
-                        if let Pattern::EnumVariant { binds, .. } = &case.pattern {
+                        if top_level
+                            && let Pattern::EnumVariant { binds, .. } = &case.pattern
+                        {
                             for b in binds {
                                 names.insert(b.clone());
                             }
@@ -542,16 +571,15 @@ pub fn artifact_requirements(source: &str, program: &Program) -> (u32, u32) {
                 | Stmt::Return { .. } => {}
             }
         }
-    };
-    visit_block(&program.body, &mut names);
+    }
+
+    walk(program, &program.body, &mut lines, &mut names, true);
     for handler in program.handlers.values() {
-        visit_block(&handler.body, &mut names);
+        walk(program, &handler.body, &mut lines, &mut names, true);
     }
     for function in program.functions.values() {
-        for param in &function.params {
-            names.insert(param.name.clone());
-        }
-        visit_block(&function.body, &mut names);
+        // Frame-local: lines count (code is code), names do not.
+        walk(program, &function.body, &mut lines, &mut names, false);
     }
-    (lines, names.len() as u32)
+    (lines.len() as u32, names.len() as u32)
 }

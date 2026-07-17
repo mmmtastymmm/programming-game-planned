@@ -541,13 +541,16 @@ impl Sim {
                         self.finish_action(id, Err("attack: target out of range".into()));
                         return;
                     }
-                    st.hp = (st.hp - damage).max(0);
+                    // Combat XP pays for damage DEALT, clamped to the hp
+                    // actually removed (review 2026-07-17: an over-kill
+                    // swing must not over-credit — matches the nest rule).
+                    let dealt = damage.max(0).min(st.hp);
+                    st.hp -= dealt;
                     let felled = st.hp == 0;
                     if felled {
                         self.world.structures.remove(&target);
                     }
-                    // Combat income: 1 XP per 10 damage = 1 deci per point.
-                    self.world.pending_xp.push((id, XpTrack::Combat, damage.max(0) as u64));
+                    self.world.pending_xp.push((id, XpTrack::Combat, dealt as u64));
                     self.finish_action(id, Ok(Value::Unit));
                     return;
                 }
@@ -603,12 +606,14 @@ impl Sim {
                         return;
                     }
                     let w = self.world.wrecks.get_mut(&wreck).expect("checked");
-                    w.hp = (w.hp - damage).max(0);
+                    // XP for damage DEALT, clamped to the hull removed.
+                    let dealt = damage.max(0).min(w.hp);
+                    w.hp -= dealt;
                     let felled = w.hp == 0;
                     if felled {
                         self.destroy_wreck(wreck, "destroyed by attack");
                     }
-                    self.world.pending_xp.push((id, XpTrack::Combat, damage.max(0) as u64));
+                    self.world.pending_xp.push((id, XpTrack::Combat, dealt as u64));
                     self.finish_action(id, Ok(Value::Unit));
                     return;
                 }

@@ -308,23 +308,14 @@ impl Sim {
 
     /// Re-colorings currently headed INTO `color` — walking recalls plus
     /// polite queue entries — from bots not already wearing it.
+    /// Bots QUEUED to recolor toward `color` but not yet walking (still
+    /// in a template phase). Walking recolors are NOT counted here —
+    /// `color_population` already counts them at their destination color,
+    /// so adding them again would double-count (review 2026-07-17). The
+    /// print gate is `color_population + incoming_recolors`: settled +
+    /// walking (from the former) + queued (from here), each bot once.
     fn incoming_recolors(&self, faction: u8, color: Color) -> u32 {
-        let walking = self
-            .world
-            .bots
-            .values()
-            .filter(|b| {
-                b.data.faction == faction
-                    && b.data.color != color
-                    && matches!(
-                        &b.data.recall,
-                        Some(Recall { purpose: RecallPurpose::Recolor { dest }, .. })
-                            if self.world.printers.get(dest).map(|p| p.color) == Some(color)
-                    )
-            })
-            .count();
-        let queued = self
-            .world
+        self.world
             .pending_recalls
             .iter()
             .filter(|(b, p)| {
@@ -334,8 +325,7 @@ impl Sim {
                     .is_some_and(|bot| bot.data.faction == faction && bot.data.color != color)
                     && self.world.printers.get(p).map(|pr| pr.color) == Some(color)
             })
-            .count();
-        (walking + queued) as u32
+            .count() as u32
     }
 
     /// The target-share allocation (M9, docs/01): down the player's
