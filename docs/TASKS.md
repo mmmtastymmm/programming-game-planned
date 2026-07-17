@@ -602,9 +602,11 @@ sustained-rust `rust_scraps` is the surviving valve).*
       crash-loop-y originals; (2) claim/raze are instant Commands — docs want a build-tool
       bot converting the site; (3) of the v1 arcana subset only the MUTATION flag (1, 18)
       is mechanically distinct — Hierophant hijack, Death salvage-denial, Tower siege, and
-      Moon counter-intel personalities are still just difficulty scaling; (4) losing a
-      claimed nest gates only NEW printer placements — docs/01 wants the over-curve
-      printer sent DORMANT with its bots as ghosts (Q65 machinery exists from M9); (5)
+      Moon counter-intel personalities are still just difficulty scaling; (4) ~~losing a
+      claimed nest gates only NEW printer placements~~ **RESOLVED 2026-07-17 (Q87)**: an
+      over-base printer now binds to the nest it was built against and is sent
+      `PrinterState::Dormant` (bots become ghosts) when that nest reverts; re-claiming
+      reactivates it. See `Sim::reconcile_dormancy`; (5)
       `patrol_route` = nest + 3 nearest nodes is my drafting; (6) the footprint metric
       (docs say "territory claimed, energy output, Ferals killed") and the
       `nest_income_deci` trickle (keeps barren-map nests printing) are first-pass
@@ -728,11 +730,18 @@ walkers — the sum double-counted). Regression tests: `tests/conformance.rs` (a
 Opened as design questions (docs/QUESTIONS.md Q86–Q91): lockstep command authorization (Q86 — cross-faction
 commands trust their faction operand), nest→printer dormancy binding (Q87), the ruined-remainder-printer
 ghost edge (Q88), faction ownership of depots + the archive/cloud (Q89), `try_receive` vs broadcasters
-(Q90), alliance vs explicit harm (Q91). Two DECIDED-but-UNIMPLEMENTED gaps (not re-opened): **Template
-Caches** (Q79's `study()` has nothing to learn from — the whole Cache/progression-learning system is
-unbuilt) and **nest-loss dormancy** (Q65's ghost machines — the mechanic is decided; only Q87's binding
-sub-question is undecided). Both are follow-on milestone work, flagged here so they aren't mistaken for
-complete.
+(Q90), alliance vs explicit harm (Q91). **ALL ANSWERED + IMPLEMENTED 2026-07-17** (QUESTIONS.md ruling;
+sim/game changes; goldens regenerated for Q87/Q89's ⚠HASH state-format changes): **Q86** relay binds each
+peer to its owned faction and drops mismatched commands at `try_step` (`Command::actor_faction` /
+`Sim::command_actor_faction`; guards the relay, not the trusted golden log); **Q87** over-base printers bind
+to their gating nest and go `PrinterState::Dormant` on its loss (`Sim::reconcile_dormancy`), closing the
+nest-loss dormancy gap above; **Q88** the remainder printer can never be Ruined/Dormant (indestructible);
+**Q89** Depots gained a `faction` field (see/hear for their owner) and the archive split into per-faction
+clouds (`analyze()` files to the analyzer); **Q90** `try_receive` documented send-only (was already so);
+**Q91** the alliance/explicit-harm split ratified as intended. The one remaining DECIDED-but-UNIMPLEMENTED
+gap (not re-opened): **Template Caches** (Q79's `study()` has nothing to learn from — the whole
+Cache/progression-learning system is unbuilt), follow-on milestone work flagged here so it isn't mistaken
+for complete.
 
 ## Cross-cutting quick wins (small, independent, grab anytime)
 

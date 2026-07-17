@@ -103,7 +103,7 @@ pub(crate) fn build_colony() -> Sim {
             spec.resource_tiles.push((TilePos::new(x + dx, y + dy), kind));
         }
     }
-    spec.depots.push(TilePos::new(3, 7));
+    spec.depots.push((TilePos::new(3, 7), 0));
     spec.printers.push(PrinterSpec {
         pos: TilePos::new(2, 5),
         faction: 0,

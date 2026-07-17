@@ -385,7 +385,9 @@ pub(crate) fn sync_view(
                     palette.printer_tex_mats[&printer.color.0.min(8)].clone(),
                     Vec3::ONE,
                 ),
-                PrinterState::Ruined => {
+                // Ruined and Dormant are both dead machines — greyed, no
+                // paper. Dormant (Q87) reuses the ruined look.
+                PrinterState::Ruined | PrinterState::Dormant => {
                     (palette.printer_ruined_mat.clone(), Vec3::new(1.0, 0.45, 1.0))
                 }
             };

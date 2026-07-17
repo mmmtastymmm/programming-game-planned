@@ -49,7 +49,7 @@ fn golden_replay() -> Replay {
     // drains (blind faults are still faults).
     spec.ore_nodes.push((TilePos::new(5, 3), 30));
     spec.ore_nodes.push((TilePos::new(11, 3), 30));
-    spec.depots.push(TilePos::new(2, 3));
+    spec.depots.push((TilePos::new(2, 3), 0));
     spec.printers.push(PrinterSpec {
         pos: TilePos::new(2, 5),
         faction: 0,

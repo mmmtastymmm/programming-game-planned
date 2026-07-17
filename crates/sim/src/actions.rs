@@ -570,12 +570,22 @@ impl Sim {
                     // unbounded Combat XP farm).
                     let dealt = damage.max(0).min(nest.hp);
                     nest.hp -= dealt;
+                    let mut lost_owner = None;
                     if nest.hp == 0 && nest.state != crate::world::NestState::Defeated {
+                        // A claimed nest beaten down is a lost nest (Q87): its
+                        // former owner's bound printer must go Dormant, same as
+                        // a Feral reclaim — not just Feral reclaims.
+                        if let crate::world::NestState::Claimed(owner) = nest.state {
+                            lost_owner = Some(owner);
+                        }
                         nest.state = crate::world::NestState::Defeated;
                         nest.job = None;
                     }
                     if dealt > 0 {
                         self.world.pending_xp.push((id, XpTrack::Combat, dealt as u64));
+                    }
+                    if let Some(owner) = lost_owner {
+                        self.reconcile_dormancy(owner);
                     }
                     self.finish_action(id, Ok(Value::Unit));
                     return;
@@ -876,7 +886,8 @@ impl Sim {
                     bot.data.action = Some(Action::Recover { target, ticks_left });
                     return;
                 }
-                self.recover_black_box(target);
+                let faction = bot.data.faction;
+                self.recover_black_box(target, faction);
                 self.finish_action(id, Ok(Value::Unit));
             }
             Action::Guard { target, escort, step_wait, cooldown } => {
@@ -1162,7 +1173,7 @@ impl Sim {
         };
         self.world.printers.values().any(|p| p.faction == faction && sees(p.pos))
             || self.world.structures.values().any(|st| st.faction == faction && sees(st.pos))
-            || (faction == 0 && self.world.depots.values().any(|d| sees(d.pos)))
+            || self.world.depots.values().any(|d| d.faction == faction && sees(d.pos))
     }
 
     /// Start a walk to a specific tile (the stances' mover): A* around

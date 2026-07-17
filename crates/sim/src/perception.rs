@@ -107,11 +107,9 @@ impl Sim {
             }
             perceivers.entry(n.owner()).or_default().push((n.pos, s, sh, false));
         }
-        // Depots are factionless (pre-M4 simplification) — they see for
-        // faction 0 only to avoid granting everyone eyes; flagged with the
-        // depot-faction discussion in TASKS.md.
+        // Depots see/hear for their owning colony (Q89).
         for d in self.world.depots.values() {
-            perceivers.entry(0).or_default().push((d.pos, s, sh, false));
+            perceivers.entry(d.faction).or_default().push((d.pos, s, sh, false));
         }
 
         // Ally grants pool ears (M13, docs/08): a Vision grant copies the
@@ -199,7 +197,7 @@ impl Sim {
                 see_static(*id, st.pos, st.faction == faction);
             }
             for (id, d) in &self.world.depots {
-                see_static(*id, d.pos, faction == 0); // factionless: see note above
+                see_static(*id, d.pos, d.faction == faction); // owner's structure (Q89)
             }
             for (id, n) in &self.world.nodes {
                 see_static(*id, n.pos, false);

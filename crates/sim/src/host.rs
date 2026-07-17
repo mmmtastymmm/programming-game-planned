@@ -903,18 +903,24 @@ impl pyrite::Host for BotHost<'_> {
                 HostCall::Ready(Value::Unit)
             }
             "upload_log" => {
-                let logs = std::mem::take(
-                    &mut self.world.bots.get_mut(&bot_id).expect("bot exists").data.log_buf,
-                );
-                for (level, text) in logs {
-                    self.world.archive.push(ArchiveEntry {
-                        tick,
-                        bot: bot_id,
-                        kind: ArchiveKind::Log,
-                        level,
-                        line: ctx.line,
-                        text,
-                    });
+                let bot = self.world.bots.get_mut(&bot_id).expect("bot exists");
+                let faction = bot.data.faction;
+                let logs = std::mem::take(&mut bot.data.log_buf);
+                // Only touch the cloud when there's something to file — an
+                // empty upload must stay a true no-op, not materialize a
+                // phantom empty per-faction Vec into the hashed archive.
+                if !logs.is_empty() {
+                    let cloud = self.world.archive.entry(faction).or_default();
+                    for (level, text) in logs {
+                        cloud.push(ArchiveEntry {
+                            tick,
+                            bot: bot_id,
+                            kind: ArchiveKind::Log,
+                            level,
+                            line: ctx.line,
+                            text,
+                        });
+                    }
                 }
                 HostCall::Ready(Value::Unit)
             }
@@ -977,7 +983,8 @@ impl pyrite::Host for BotHost<'_> {
                     [Value::Str(s)] => s.clone(),
                     _ => ctx.last_fault.unwrap_or("").to_string(),
                 };
-                self.world.archive.push(ArchiveEntry {
+                let faction = self.world.bots[&bot_id].data.faction;
+                self.world.archive.entry(faction).or_default().push(ArchiveEntry {
                     tick,
                     bot: bot_id,
                     kind: ArchiveKind::CrashDump,

@@ -23,8 +23,7 @@ fn spawn(sim: &mut Sim, pos: TilePos, source: &str, faction: u8) -> sim::BotId {
 
 fn logged(sim: &Sim, needle: &str) -> bool {
     sim.world
-        .archive
-        .iter()
+        .archive_all()
         .any(|e| e.kind == ArchiveKind::Log && e.text.contains(needle))
 }
 

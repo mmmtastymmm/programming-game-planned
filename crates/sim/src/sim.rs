@@ -771,6 +771,46 @@ pub enum Command {
     Research { faction: u8, construct: pyrite::Construct },
 }
 
+impl Command {
+    /// The faction this command acts *as*, when it's carried in the operand
+    /// (Q86, docs/08). The lockstep relay authorizes each command by
+    /// comparing this against the sender's owned faction(s) — a forged
+    /// cross-faction command (debit a rival's Data, dissolve another pair's
+    /// alliance, vote as someone else, bank another player's nest bounty) is
+    /// dropped before `apply`. Entity-scoped commands (whose actor is the
+    /// *owner* of a printer/bot/structure, not an operand) return `None`
+    /// here; [`Sim::command_actor_faction`] resolves those against the world.
+    /// `None` from both means "no faction to check" — cosmetic/ownerless
+    /// commands anyone may issue.
+    pub fn actor_faction(&self) -> Option<u8> {
+        match self {
+            Command::SpawnBot { faction, .. }
+            | Command::DeployProgram { faction, .. }
+            | Command::QueuePrint { faction }
+            | Command::PlaceBlueprint { faction, .. }
+            | Command::PlaceOverlay { faction, .. }
+            | Command::PostRequest { faction, .. }
+            | Command::Vote { faction, .. }
+            | Command::ClaimNest { faction, .. }
+            | Command::RazeNest { faction, .. }
+            | Command::PlacePrinter { faction, .. }
+            | Command::PlaceStructure { faction, .. }
+            | Command::Research { faction, .. } => Some(*faction),
+            Command::ExchangeData { from, .. } | Command::Grant { from, .. } => Some(*from),
+            Command::SetAlliance { a, .. } => Some(*a),
+            // Entity-scoped: actor is the entity's owner (resolved by Sim).
+            Command::EditPrinterRules { .. }
+            | Command::SetDesiredMax { .. }
+            | Command::RepairPrinter { .. }
+            | Command::SetRecipe { .. }
+            | Command::QueueUpgrade { .. }
+            | Command::KillBot { .. } => None,
+            // Cosmetic / ownerless — no faction to authorize against.
+            Command::PlacePaint { .. } => None,
+        }
+    }
+}
+
 pub struct Sim {
     pub world: World,
     pub costs: CostTable,
@@ -941,6 +981,33 @@ impl Sim {
         sim.run_perception();
         sim.last_hash = sim.state_hash();
         sim
+    }
+
+    /// The faction a command acts *as*, for relay authorization (Q86,
+    /// docs/08). Prefers the operand ([`Command::actor_faction`]); for
+    /// entity-scoped commands it resolves the target entity's owner against
+    /// the world. `None` = no faction to check (cosmetic/ownerless, or a
+    /// stale entity handle that `apply` will no-op on anyway). A pure
+    /// function of (command, world), so every peer resolves it identically —
+    /// authorization stays deterministic.
+    pub fn command_actor_faction(&self, command: &Command) -> Option<u8> {
+        if let Some(f) = command.actor_faction() {
+            return Some(f);
+        }
+        match command {
+            Command::EditPrinterRules { printer, .. }
+            | Command::SetDesiredMax { printer, .. }
+            | Command::RepairPrinter { printer } => {
+                self.world.printers.get(printer).map(|p| p.faction)
+            }
+            Command::SetRecipe { structure, .. } => {
+                self.world.structures.get(structure).map(|s| s.faction)
+            }
+            Command::QueueUpgrade { bot, .. } | Command::KillBot { bot } => {
+                self.world.bots.get(bot).map(|b| b.data.faction)
+            }
+            _ => None,
+        }
     }
 
     /// Phase 1: apply a command. Deterministic given identical call order.
@@ -1323,6 +1390,9 @@ impl Sim {
                     if n.state == crate::world::NestState::Defeated {
                         n.state = crate::world::NestState::Claimed(*faction);
                         n.hp = n.max_hp / 2;
+                        // Re-claiming a nest can reactivate a printer bound to
+                        // it (Q87) — its ghosts fold back into the fleet.
+                        self.reconcile_dormancy(*faction);
                     }
                 }
                 Ok(None)
@@ -1334,9 +1404,22 @@ impl Sim {
                     .get(nest)
                     .is_some_and(|n| n.state == crate::world::NestState::Defeated);
                 if razeable {
+                    // Any printer built against this nest is now permanently
+                    // unsupported — reconcile its owner so it goes Dormant and
+                    // isn't left Working on a dangling handle (Q87).
+                    let bound_owners: Vec<u8> = self
+                        .world
+                        .printers
+                        .values()
+                        .filter(|p| p.nest == Some(*nest))
+                        .map(|p| p.faction)
+                        .collect();
                     self.world.nests.remove(nest);
                     *self.world.data.entry(*faction).or_insert(0) +=
                         self.tuning.nest_data_bounty;
+                    for owner in bound_owners {
+                        self.reconcile_dormancy(owner);
+                    }
                 }
                 Ok(None)
             }
@@ -1368,6 +1451,29 @@ impl Sim {
                     {
                         color += 1;
                     }
+                    // Over-base printers (beyond the two free slots) bind to
+                    // the nest they're built against (Q87): the lowest-id
+                    // claimed nest not already bound to one of this faction's
+                    // printers. Losing that nest sends this printer Dormant.
+                    let bound_nest = if owned >= 2 {
+                        let already: Vec<EntityId> = self
+                            .world
+                            .printers
+                            .values()
+                            .filter(|p| p.faction == *faction)
+                            .filter_map(|p| p.nest)
+                            .collect();
+                        self.world
+                            .nests
+                            .iter()
+                            .filter(|(_, n)| {
+                                n.state == crate::world::NestState::Claimed(*faction)
+                            })
+                            .map(|(nid, _)| *nid)
+                            .find(|nid| !already.contains(nid))
+                    } else {
+                        None
+                    };
                     let id = self.world.alloc_entity();
                     self.world.printers.insert(
                         id,
@@ -1380,6 +1486,7 @@ impl Sim {
                             // that role; built printers start dialed.
                             rules: Some(crate::world::PrinterRules::default()),
                             job: None,
+                            nest: bound_nest,
                         },
                     );
                     if !self.world.color_programs.contains_key(&(*faction, color)) {
@@ -2407,7 +2514,14 @@ impl Sim {
             h.write_i32(printer.pos.y);
             h.write_u8(printer.faction);
             h.write_u8(printer.color.0);
-            h.write_u8(matches!(printer.state, PrinterState::Working) as u8);
+            // Distinct discriminant per state so Dormant ≠ Ruined in the hash
+            // (a hidden desync otherwise); bound nest included (Q87).
+            h.write_u8(match printer.state {
+                PrinterState::Working => 0,
+                PrinterState::Ruined => 1,
+                PrinterState::Dormant => 2,
+            });
+            h.write_u64(printer.nest.map_or(u64::MAX, |n| n.0));
             match &printer.rules {
                 None => h.write_u8(0), // the remainder bucket
                 Some(r) => {
@@ -2568,12 +2682,17 @@ impl Sim {
             }
         }
         h.write_u64(w.archive.len() as u64);
-        for entry in &w.archive {
-            h.write_u64(entry.tick);
-            h.write_u32(entry.bot.0);
-            h.write_u8(entry.level);
-            h.write_u32(entry.line);
-            h.write_str(&entry.text);
+        // BTreeMap iteration is faction-ordered (deterministic).
+        for (faction, entries) in &w.archive {
+            h.write_u8(*faction);
+            h.write_u64(entries.len() as u64);
+            for entry in entries {
+                h.write_u64(entry.tick);
+                h.write_u32(entry.bot.0);
+                h.write_u8(entry.level);
+                h.write_u32(entry.line);
+                h.write_str(&entry.text);
+            }
         }
         h.finish()
     }

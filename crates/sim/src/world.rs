@@ -39,8 +39,15 @@ impl Color {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PrinterState {
     Working,
-    /// Present but broken (the starting Red printer); repairable.
+    /// Present but broken (the starting Red printer); repairable via
+    /// `RepairPrinter`.
     Ruined,
+    /// The nest this over-base printer was built against was lost (Q65/Q87):
+    /// fleet-cap contribution withdrawn, color frozen, its bots become ghost
+    /// machines. Re-claiming the bound nest reactivates it — NOT repairable
+    /// (repair is for Ruined). The remainder printer never enters this state
+    /// (Q88).
+    Dormant,
 }
 
 /// One dialed printer's share of the fleet (M9, docs/01 "Target
@@ -135,6 +142,11 @@ pub struct Printer {
     pub rules: Option<PrinterRules>,
     /// In-progress print job: ticks remaining.
     pub job: Option<u32>,
+    /// The nest this over-base printer was built against (Q87). `None` for
+    /// the two free base slots (never nest-bound, never dormant). When the
+    /// bound nest stops being claimed by this faction, the printer goes
+    /// `Dormant`; re-claiming it reactivates the printer.
+    pub nest: Option<EntityId>,
 }
 
 /// The deployed program for one (faction, color) slot.
@@ -195,6 +207,10 @@ pub struct ResourceNode {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Depot {
     pub pos: TilePos,
+    /// Owning colony (Q89): a Depot sees and hears for its faction, not the
+    /// old faction-0 hardcode. Haul deposits/withdrawals stay open to anyone
+    /// standing on it — ownership governs perception, not access.
+    pub faction: u8,
 }
 
 /// Structure kinds with generic state (docs/03). Printers stay their own
@@ -935,8 +951,11 @@ pub enum ArchiveKind {
     Log,
 }
 
-/// The colony cloud (printer-hosted): crash dumps and uploaded logs.
-/// Printers always accept log traffic (docs/03-resources.md).
+/// A colony cloud (printer-hosted): crash dumps and uploaded logs.
+/// Printers always accept log traffic (docs/03-resources.md). Each colony
+/// has its OWN cloud (Q89, docs/08) — the archive is keyed by faction, so
+/// `analyze()`d victim logs file into the analyzer's cloud, never a shared
+/// list every faction can read.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ArchiveEntry {
     pub tick: u64,
@@ -1061,7 +1080,12 @@ pub struct World {
     pub dev_free_power: bool,
     /// Expected quirks per bot, per-mille (docs/09 match setting; 0 = off).
     pub quirk_permille: u32,
-    pub archive: Vec<ArchiveEntry>,
+    /// Per-faction colony clouds (Q89): faction → its crash dumps + logs.
+    /// Each colony reads only its own cloud; `analyze()` files a victim's
+    /// logs into the *analyzer's* entry, so intel never leaks across factions.
+    /// Read one cloud with `archive.get(&faction)`, or all of them (tests /
+    /// debug) with [`World::archive_all`].
+    pub archive: BTreeMap<u8, Vec<ArchiveEntry>>,
     /// The match seed (kept for seeding per-bot streams at spawn).
     pub seed: u64,
     /// Damage queued during phases 2–4, applied in phase 6 (docs/07: damage
@@ -1312,7 +1336,7 @@ impl World {
             dev_all_unlocks: spec.dev_all_unlocks,
             dev_free_power: spec.dev_free_power,
             quirk_permille: spec.quirk_permille,
-            archive: Vec::new(),
+            archive: BTreeMap::new(),
             seed: spec.seed,
             pending_damage: Vec::new(),
             pending_xp: Vec::new(),
@@ -1350,29 +1374,36 @@ impl World {
             let amount = spec.node_amount * DECI;
             world.nodes.insert(id, ResourceNode { kind, pos, amount, regen });
         }
-        for &pos in &spec.depots {
+        for &(pos, faction) in &spec.depots {
             let id = world.alloc_entity();
-            world.depots.insert(id, Depot { pos });
+            world.depots.insert(id, Depot { pos, faction });
         }
         let mut first_printer_of: BTreeSet<u8> = BTreeSet::new();
         for p in &spec.printers {
             let id = world.alloc_entity();
             world.printers.insert(
                 id,
-                Printer {
-                    pos: p.pos,
-                    faction: p.faction,
-                    color: Color(p.color),
-                    state: if p.ruined { PrinterState::Ruined } else { PrinterState::Working },
+                {
                     // The faction's FIRST-BORN printer is the remainder
-                    // bucket (docs/01): no dials. Later printers start
-                    // with empty rules until the player edits them.
-                    rules: if first_printer_of.insert(p.faction) {
-                        None
-                    } else {
-                        Some(PrinterRules::default())
-                    },
-                    job: None,
+                    // bucket (docs/01): no dials, and INDESTRUCTIBLE (Q88) —
+                    // never Ruined even if the spec marks it so.
+                    let is_remainder = first_printer_of.insert(p.faction);
+                    Printer {
+                        pos: p.pos,
+                        faction: p.faction,
+                        color: Color(p.color),
+                        state: if p.ruined && !is_remainder {
+                            PrinterState::Ruined
+                        } else {
+                            PrinterState::Working
+                        },
+                        rules: if is_remainder { None } else { Some(PrinterRules::default()) },
+                        job: None,
+                        // Seeded printers are the starting slots — not bound to
+                        // a nest (never dormant); over-base printers bind at
+                        // PlacePrinter time.
+                        nest: None,
+                    }
                 },
             );
         }
@@ -1686,6 +1717,13 @@ impl World {
             .filter(|(_, p)| p.faction == faction)
             .map(|(id, _)| *id)
             .next() // BTreeMap: lowest id first
+    }
+
+    /// Every archive entry across all faction clouds, faction-ordered
+    /// (Q89). A test/debug convenience — gameplay always reads one specific
+    /// colony's cloud via `archive.get(&faction)`.
+    pub fn archive_all(&self) -> impl Iterator<Item = &ArchiveEntry> {
+        self.archive.values().flatten()
     }
 
     /// Ghost machines (M9, Q65): a bot whose color has NO working printer

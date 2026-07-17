@@ -319,7 +319,8 @@ pub struct MapSpec {
     pub water: Vec<TilePos>,
     /// (position, ore amount)
     pub ore_nodes: Vec<(TilePos, u32)>,
-    pub depots: Vec<TilePos>,
+    /// (position, owning faction) — depots see/hear for their owner (Q89).
+    pub depots: Vec<(TilePos, u8)>,
     pub printers: Vec<PrinterSpec>,
     /// Seed stockpile (per docs/03 the starting state includes a buffer).
     pub starting_ore: u64,

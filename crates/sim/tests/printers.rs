@@ -34,6 +34,109 @@ fn printer_ids(sim: &Sim) -> Vec<EntityId> {
     sim.world.printers.keys().copied().collect()
 }
 
+#[test]
+fn losing_a_bound_nest_dorms_that_printer_reclaim_revives_it_remainder_immune() {
+    // Q87/Q88: an over-base printer binds to the nest that gated it; losing
+    // that nest sends THAT printer Dormant; re-claiming reactivates it. The
+    // remainder printer is indestructible — never Dormant, whatever happens.
+    use sim::resources::{Resource, DECI};
+    use sim::world::{NestState, FERAL_FACTION};
+
+    let mut spec = colony_map(); // Green remainder + ruined Red = the 2 free slots
+    spec.nests.push((TilePos::new(8, 4), 0)); // (pos, arcanum)
+    let mut sim = Sim::new(&spec);
+    sim.tuning.nest_guard_radius = 1; // only an adjacent defender protects it
+    sim.world.stock_add(0, Resource::Steel, 1_000 * DECI as u64); // fund the printer
+    let nid = *sim.world.nests.keys().next().unwrap();
+
+    // Claim the nest (Defeated → ClaimNest), then build the 3rd printer: with
+    // 1 claimed nest the quadratic gate allows it, and it binds to that nest.
+    sim.world.nests.get_mut(&nid).unwrap().state = NestState::Defeated;
+    sim.apply(&Command::ClaimNest { nest: nid, faction: 0 }).unwrap();
+    sim.apply(&Command::PlacePrinter { pos: TilePos::new(6, 6), faction: 0 }).unwrap();
+    let (pid, _) =
+        sim.world.printers.iter().find(|(_, p)| p.color.0 == 2).expect("3rd printer built");
+    let pid = *pid;
+    let remainder = sim.world.remainder_printer(0).unwrap();
+    assert_eq!(sim.world.printers[&pid].nest, Some(nid), "bound to the nest it was built against");
+    assert_eq!(sim.world.printers[&pid].state, PrinterState::Working);
+
+    // Lose the nest: undefended, with a Feral adjacent → check_reclaim reverts
+    // it, and the reconcile dorms the printer built against it.
+    sim.apply(&Command::SpawnBot {
+        pos: TilePos::new(8, 5),
+        source: IDLER.into(),
+        cpu: 2,
+        cargo_cap: 1,
+        faction: FERAL_FACTION,
+        hp: 100,
+        color: Color(0),
+    })
+    .unwrap();
+    for _ in 0..3 {
+        sim.step();
+    }
+    assert_eq!(sim.world.nests[&nid].state, NestState::Active, "Ferals reclaimed the nest");
+    assert_eq!(sim.world.printers[&pid].state, PrinterState::Dormant, "its printer went dormant");
+    assert_eq!(
+        sim.world.printers[&remainder].state,
+        PrinterState::Working,
+        "the remainder is indestructible (Q88)"
+    );
+
+    // Retake the nest → the dormant printer reactivates.
+    sim.world.nests.get_mut(&nid).unwrap().state = NestState::Defeated;
+    sim.apply(&Command::ClaimNest { nest: nid, faction: 0 }).unwrap();
+    assert_eq!(
+        sim.world.printers[&pid].state,
+        PrinterState::Working,
+        "re-claiming the bound nest revives the printer"
+    );
+}
+
+#[test]
+fn attacking_a_claimed_nest_to_defeat_dorms_its_printer() {
+    // Q87 (review [0]): losing a claimed nest to an ENEMY ATTACK (Claimed →
+    // Defeated), not just a Feral reclaim, must dorm the printer built against
+    // it. Default harm is Open, so a rival may hammer a claimed nest.
+    use sim::resources::{Resource, DECI};
+    use sim::world::NestState;
+
+    let mut spec = colony_map();
+    spec.nests.push((TilePos::new(8, 4), 0));
+    let mut sim = Sim::new(&spec);
+    sim.world.stock_add(0, Resource::Steel, 1_000 * DECI as u64);
+    let nid = *sim.world.nests.keys().next().unwrap();
+    sim.world.nests.get_mut(&nid).unwrap().state = NestState::Defeated;
+    sim.apply(&Command::ClaimNest { nest: nid, faction: 0 }).unwrap();
+    sim.apply(&Command::PlacePrinter { pos: TilePos::new(6, 6), faction: 0 }).unwrap();
+    let pid = *sim.world.printers.iter().find(|(_, p)| p.color.0 == 2).map(|(id, _)| id).unwrap();
+    assert_eq!(sim.world.printers[&pid].state, PrinterState::Working);
+
+    // A rival (faction 1) stands next to the claimed nest and hammers it; drop
+    // its hp low so a few swings defeat it.
+    sim.world.nests.get_mut(&nid).unwrap().hp = 3;
+    sim.apply(&Command::SpawnBot {
+        pos: TilePos::new(7, 4),
+        source: "if exists(nest):\n    attack(closest(nest).expect())\nwait(1)\n".into(),
+        cpu: 4,
+        cargo_cap: 1,
+        faction: 1,
+        hp: 100,
+        color: Color(0),
+    })
+    .unwrap();
+    for _ in 0..40 {
+        sim.step();
+    }
+    assert_eq!(sim.world.nests[&nid].state, NestState::Defeated, "the rival beat the nest down");
+    assert_eq!(
+        sim.world.printers[&pid].state,
+        PrinterState::Dormant,
+        "losing the nest to attack dorms its printer (Q87 review [0])"
+    );
+}
+
 fn spawn_green(sim: &mut Sim, pos: TilePos) -> sim::BotId {
     sim.apply(&Command::SpawnBot {
         pos,
@@ -601,21 +704,30 @@ fn rule_edits_defer_for_booting_bots_instead_of_wrecking() {
     );
 }
 
-/// Review fix (M9): a ruined REMAINDER printer receives nobody — surplus
-/// bots of a WORKING color keep that color instead of being marched to
-/// the ruin, re-colored, and turned into permanent ghosts.
+/// Q88: the remainder printer is INDESTRUCTIBLE — a spec that marks the
+/// first-born (remainder, Green) ruined comes up Working anyway. So the
+/// remainder is always a valid receiver and the old "ruined remainder
+/// liquidates the fleet into ghosts" failure mode is impossible by
+/// construction: the working remainder absorbs surplus bots normally.
 #[test]
-fn ruined_remainder_never_liquidates_the_fleet_into_ghosts() {
+fn the_remainder_printer_is_indestructible() {
     let mut spec = colony_map();
     spec.fleet_cap_override = Some(2);
-    // Ruin the FIRST-BORN (remainder, Green); keep Red working.
+    // Attempt to ruin the FIRST-BORN (remainder, Green); Q88 forbids it.
     spec.printers[0].ruined = true;
     spec.printers[1].ruined = false;
     let mut sim = Sim::new(&spec);
+    let remainder = sim.world.remainder_printer(0).unwrap();
+    assert_eq!(
+        sim.world.printers[&remainder].state,
+        PrinterState::Working,
+        "the remainder can never be Ruined (Q88)"
+    );
     let red = printer_ids(&sim)[1];
-    // Two RED bots: the dial claims one; pre-fix the surplus one was
-    // assigned to the ruined remainder and ghosted on arrival.
-    let mut spawn_red = |sim: &mut Sim, pos| -> sim::BotId {
+    // Two RED bots over a fleet cap of 2: the dial claims the best for Red,
+    // the working remainder absorbs the surplus (re-colored Green) — nobody
+    // is stranded as a manufactured ghost.
+    let spawn_red = |sim: &mut Sim, pos| -> sim::BotId {
         sim.apply(&Command::SpawnBot {
             pos,
             source: IDLER.into(),
@@ -636,9 +748,7 @@ fn ruined_remainder_never_liquidates_the_fleet_into_ghosts() {
     }
     for id in [a, b] {
         let bot = &sim.world.bots[&id];
-        assert_eq!(bot.data.color, Color::RED, "nobody re-colors at a ruin");
-        assert!(!sim.world.is_ghost(&bot.data), "no manufactured ghosts");
-        assert!(bot.data.recall.is_none(), "the surplus bot stays put");
+        assert!(!sim.world.is_ghost(&bot.data), "no manufactured ghosts — the remainder receives");
     }
 }
 

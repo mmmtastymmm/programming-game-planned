@@ -23,6 +23,49 @@ use std::collections::BTreeSet;
 use std::rc::Rc;
 
 impl Sim {
+    /// Reconcile over-base printer dormancy against the faction's claimed
+    /// nests (Q87/Q88). A printer bound to a nest (`printer.nest`) is Working
+    /// iff that nest is still Claimed by the faction, else Dormant — so
+    /// losing the nest it was built against freezes it and ghosts its bots
+    /// (Q65), and re-claiming that nest reactivates it (the derived
+    /// `is_ghost` check un-ghosts the survivors, folding them back into the
+    /// next allocation). The remainder printer (Q88) and any Ruined printer
+    /// (repair path) are never touched. Call after any nest claim/loss.
+    pub(crate) fn reconcile_dormancy(&mut self, faction: u8) {
+        let remainder = self.world.remainder_printer(faction);
+        let claimed: Vec<EntityId> = self
+            .world
+            .nests
+            .iter()
+            .filter(|(_, n)| n.state == crate::world::NestState::Claimed(faction))
+            .map(|(id, _)| *id)
+            .collect();
+        let ids: Vec<EntityId> = self
+            .world
+            .printers
+            .iter()
+            .filter(|(_, p)| p.faction == faction)
+            .map(|(id, _)| *id)
+            .collect();
+        for pid in ids {
+            if Some(pid) == remainder {
+                continue; // indestructible remainder (Q88)
+            }
+            let p = self.world.printers.get_mut(&pid).expect("just listed");
+            if p.state == crate::world::PrinterState::Ruined {
+                continue; // Ruined stays Ruined — cleared only by RepairPrinter
+            }
+            let Some(nest) = p.nest else {
+                continue; // free base slot — never nest-bound, never dormant
+            };
+            p.state = if claimed.contains(&nest) {
+                crate::world::PrinterState::Working
+            } else {
+                crate::world::PrinterState::Dormant
+            };
+        }
+    }
+
     /// Boot countdown complete: leave the engine context and enter the
     /// Boot TEMPLATE (docs/01) — forced `upload_log()` when the local
     /// buffer is non-empty (the rescued veteran's automatic incident
@@ -107,15 +150,20 @@ impl Sim {
             self.world.stock_add(faction, *kind, *deci as u64);
         }
         let tick = self.world.tick;
-        for (level, text) in bot.data.log_buf {
-            self.world.archive.push(ArchiveEntry {
-                tick,
-                bot: id,
-                kind: ArchiveKind::Log,
-                level,
-                line: 0,
-                text,
-            });
+        // Only materialize the cloud when there are logs to file (no phantom
+        // empty per-faction Vec in the hashed archive — Q89).
+        if !bot.data.log_buf.is_empty() {
+            let cloud = self.world.archive.entry(faction).or_default();
+            for (level, text) in bot.data.log_buf {
+                cloud.push(ArchiveEntry {
+                    tick,
+                    bot: id,
+                    kind: ArchiveKind::Log,
+                    level,
+                    line: 0,
+                    text,
+                });
+            }
         }
         self.world.stock_add(faction, crate::resources::Resource::Steel, self.tuning.scrap_refund_steel);
     }

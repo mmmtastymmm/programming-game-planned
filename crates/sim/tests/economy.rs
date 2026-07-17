@@ -25,7 +25,7 @@ fn spawn(sim: &mut Sim, pos: TilePos, source: &str) -> sim::BotId {
 fn typed_nodes_ride_their_ground_tiles_and_mine_typed() {
     let mut spec = MapSpec::empty(8, 4);
     spec.resource_tiles.push((TilePos::new(4, 1), sim::TileKind::CoalSeam));
-    spec.depots.push(TilePos::new(0, 1));
+    spec.depots.push((TilePos::new(0, 1), 0));
     let mut sim = Sim::new(&spec);
     let miner = spawn(
         &mut sim,
@@ -193,7 +193,7 @@ fn structures_are_attackable_and_fall_at_zero() {
 #[test]
 fn delivery_milestones_mint_data() {
     let mut spec = MapSpec::empty(8, 4);
-    spec.depots.push(TilePos::new(0, 1));
+    spec.depots.push((TilePos::new(0, 1), 0));
     let mut sim = Sim::new(&spec);
     sim.tuning.delivery_milestone_deci = 30; // tiny milestone for the test
     let mule = spawn(&mut sim, TilePos::new(1, 1), "deposit()\nwait(600)\n");
@@ -213,7 +213,7 @@ fn delivery_milestones_mint_data() {
 #[test]
 fn withdraw_deposit_cycling_mints_no_data() {
     let mut spec = MapSpec::empty(8, 4);
-    spec.depots.push(TilePos::new(2, 1));
+    spec.depots.push((TilePos::new(2, 1), 0));
     spec.starting_stock.push((0, Resource::Iron, 4000));
     let mut sim = Sim::new(&spec);
     // Tight milestone: one cargo load (40 deci) = a whole milestone, so the
@@ -257,7 +257,7 @@ fn withdraw_deposit_cycling_mints_no_data() {
 fn seeded_stock_withdrawals_do_not_suppress_milestones() {
     let mut spec = MapSpec::empty(10, 4);
     spec.ore_nodes.push((TilePos::new(6, 1), 100));
-    spec.depots.push(TilePos::new(1, 1));
+    spec.depots.push((TilePos::new(1, 1), 0));
     spec.starting_stock.push((0, Resource::Steel, 4000));
     let mut sim = Sim::new(&spec);
     sim.tuning.delivery_milestone_deci = 40;
@@ -291,7 +291,7 @@ fn seeded_stock_withdrawals_do_not_suppress_milestones() {
 fn mined_deliveries_still_cross_milestones() {
     let mut spec = MapSpec::empty(8, 4);
     spec.ore_nodes.push((TilePos::new(4, 1), 100));
-    spec.depots.push(TilePos::new(1, 1));
+    spec.depots.push((TilePos::new(1, 1), 0));
     let mut sim = Sim::new(&spec);
     sim.tuning.delivery_milestone_deci = 40;
     let _bot = spawn(

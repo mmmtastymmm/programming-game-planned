@@ -61,6 +61,100 @@ fn peers_stay_in_lockstep_through_command_traffic() {
 }
 
 #[test]
+fn a_forged_cross_faction_command_is_dropped_not_applied() {
+    // Q86 (docs/08): a peer may only issue commands acting as a faction it
+    // owns. Peer 1 forges `ExchangeData { from: 0, .. }` to debit faction 0's
+    // Data — with authorization it's dropped on every peer (deterministically,
+    // no desync), so faction 0's Data is untouched. Peer 0's OWN identical
+    // transfer, by contrast, applies.
+    let mut hub = LocalHub::new();
+    let mut t0 = hub.endpoint(0);
+    let mut t1 = hub.endpoint(1);
+    let mut p0 = LockstepPeer::new(0, Sim::new(&spec()), 2, vec![0, 1]);
+    let mut p1 = LockstepPeer::new(1, Sim::new(&spec()), 2, vec![0, 1]);
+    // Seed identical Data on both peers (part of the shared initial state).
+    for p in [&mut p0, &mut p1] {
+        p.sim.world.data.insert(0, 100);
+        p.sim.world.data.insert(1, 0);
+    }
+
+    for frame in 0..30u64 {
+        // Frame 5: peer 1 forges a debit of faction 0 (drops); peer 0 makes
+        // its own legitimate 10-Data gift to faction 1 (applies).
+        let (c0, c1) = if frame == 5 {
+            (
+                vec![Command::ExchangeData { from: 0, to: 1, amount: 10 }],
+                vec![Command::ExchangeData { from: 0, to: 1, amount: 50 }],
+            )
+        } else {
+            (Vec::new(), Vec::new())
+        };
+        p0.submit(c0, &mut t0);
+        p1.submit(c1, &mut t1);
+        p0.pump(&mut t0);
+        p1.pump(&mut t1);
+        let _ = p0.try_step(&mut t0);
+        let _ = p1.try_step(&mut t1);
+        p0.pump(&mut t0);
+        p1.pump(&mut t1);
+    }
+
+    assert!(p0.desync.is_none() && p1.desync.is_none(), "authorization is deterministic");
+    assert_eq!(p0.sim.last_hash, p1.sim.last_hash, "both peers agree");
+    // Faction 0 lost only its OWN 10-gift; peer 1's forged 50-debit never landed.
+    assert_eq!(p0.sim.world.data.get(&0).copied(), Some(90), "only the owned gift applied");
+    assert_eq!(p0.sim.world.data.get(&1).copied(), Some(10), "faction 1 got 10, not 60");
+}
+
+#[test]
+fn non_identity_ownership_and_symmetric_alliance_authorization() {
+    // Q86 review: with a non-identity peer↔faction map (set_owned_factions),
+    // authorization tracks the real owner — and SetAlliance is symmetric, so a
+    // peer owning EITHER party may declare it. Peer 1 owns faction 5 (not 1);
+    // it declares an alliance from the `b` side (a=0, b=5) — authorized — but
+    // its forged debit of faction 0 is dropped.
+    use std::collections::BTreeMap;
+
+    let mut hub = LocalHub::new();
+    let mut t0 = hub.endpoint(0);
+    let mut t1 = hub.endpoint(1);
+    let mut p0 = LockstepPeer::new(0, Sim::new(&spec()), 2, vec![0, 1]);
+    let mut p1 = LockstepPeer::new(1, Sim::new(&spec()), 2, vec![0, 1]);
+    // Peer 0 owns faction 0; peer 1 owns faction 5 (ids differ from peer ids).
+    let ownership: BTreeMap<u8, Vec<u8>> = [(0u8, vec![0u8]), (1u8, vec![5u8])].into_iter().collect();
+    for p in [&mut p0, &mut p1] {
+        p.set_owned_factions(ownership.clone());
+        p.sim.world.data.insert(0, 100);
+    }
+
+    for frame in 0..30u64 {
+        let c1 = if frame == 5 {
+            vec![
+                // Legit: peer 1 owns faction 5, declares alliance from b-side.
+                Command::SetAlliance { a: 0, b: 5, allied: true },
+                // Forged: peer 1 does NOT own faction 0 — must be dropped.
+                Command::ExchangeData { from: 0, to: 5, amount: 40 },
+            ]
+        } else {
+            Vec::new()
+        };
+        p0.submit(Vec::new(), &mut t0);
+        p1.submit(c1, &mut t1);
+        p0.pump(&mut t0);
+        p1.pump(&mut t1);
+        let _ = p0.try_step(&mut t0);
+        let _ = p1.try_step(&mut t1);
+        p0.pump(&mut t0);
+        p1.pump(&mut t1);
+    }
+
+    assert!(p0.desync.is_none() && p1.desync.is_none(), "authorization stays deterministic");
+    assert_eq!(p0.sim.last_hash, p1.sim.last_hash, "both peers agree");
+    assert!(p0.sim.world.allied(0, 5), "the b-side alliance declaration was authorized");
+    assert_eq!(p0.sim.world.data.get(&0).copied(), Some(100), "the forged debit of faction 0 was dropped");
+}
+
+#[test]
 fn a_diverged_peer_is_caught_by_the_hash_exchange() {
     let mut hub = LocalHub::new();
     let mut t0 = hub.endpoint(0);

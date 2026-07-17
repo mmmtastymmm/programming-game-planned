@@ -52,6 +52,14 @@ pub struct LockstepPeer {
     pub delay: u64,
     /// Every participant id, self included (fixed at match start).
     pub roster: Vec<u8>,
+    /// peer id → the faction(s) that peer owns (fixed at match start,
+    /// identical on every peer). Commands are authorized against this at the
+    /// barrier: a command acting as a faction the sender doesn't own is
+    /// dropped before `apply` (Q86, docs/08). Defaults to identity (peer `id`
+    /// owns faction `id`) — one player, one colony; set explicitly via
+    /// [`LockstepPeer::set_owned_factions`] when peer ids and faction ids
+    /// differ.
+    owned_factions: BTreeMap<u8, Vec<u8>>,
     /// tick → peer → that peer's agreed command list.
     inbox: BTreeMap<u64, BTreeMap<u8, Vec<Command>>>,
     /// tick → peer → phase-9 hash, compared once complete.
@@ -79,7 +87,27 @@ impl LockstepPeer {
             }
         }
         let next_submit = first + delay;
-        Self { id, sim, delay, roster, inbox, hashes: BTreeMap::new(), next_submit, desync: None }
+        // Identity ownership by default: peer `p` owns faction `p`. Real
+        // matches with a peer↔faction indirection call `set_owned_factions`.
+        let owned_factions = roster.iter().map(|&p| (p, vec![p])).collect();
+        Self {
+            id,
+            sim,
+            delay,
+            roster,
+            owned_factions,
+            inbox,
+            hashes: BTreeMap::new(),
+            next_submit,
+            desync: None,
+        }
+    }
+
+    /// Override the peer→faction ownership used for command authorization
+    /// (Q86). Must be identical on every peer (it's part of the match setup,
+    /// like the roster) or peers will authorize differently and desync.
+    pub fn set_owned_factions(&mut self, owned: BTreeMap<u8, Vec<u8>>) {
+        self.owned_factions = owned;
     }
 
     /// The tick the NEXT `try_step` will simulate.
@@ -156,8 +184,30 @@ impl LockstepPeer {
             return false;
         }
         let batch = self.inbox.remove(&tick).expect("checked ready");
-        for (_peer, commands) in batch {
+        for (peer, commands) in batch {
+            // A peer may only issue commands acting as a faction it owns
+            // (Q86, docs/08). Authorization is a pure function of (command,
+            // world) run identically on every peer, so an unauthorized
+            // command is dropped in lockstep — no desync, a silent no-op for
+            // the cheat. An unknown sender owns nothing; all its
+            // faction-bearing commands drop.
+            let owned = self.owned_factions.get(&peer);
             for command in &commands {
+                let authorized = match command {
+                    // Alliances are symmetric — EITHER party may declare or
+                    // dissolve one (apply() stores the pair as (min,max)), so
+                    // authorize if the sender owns a OR b, not just `a`.
+                    Command::SetAlliance { a, b, .. } => {
+                        owned.is_some_and(|fs| fs.contains(a) || fs.contains(b))
+                    }
+                    _ => match self.sim.command_actor_faction(command) {
+                        Some(actor) => owned.is_some_and(|fs| fs.contains(&actor)),
+                        None => true, // cosmetic / ownerless — no faction to check
+                    },
+                };
+                if !authorized {
+                    continue;
+                }
                 // A rejected command is a DESYNC RISK only if peers
                 // disagree; apply() is deterministic, so all peers
                 // reject identically. Parse errors just drop the command.

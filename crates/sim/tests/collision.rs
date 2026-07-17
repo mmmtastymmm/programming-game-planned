@@ -31,7 +31,7 @@ fn bots_never_overlap_and_bumps_freeze() {
         spec.water.push(TilePos::new(x, 0));
         spec.water.push(TilePos::new(x, 2));
     }
-    spec.depots.push(TilePos::new(0, 1));
+    spec.depots.push((TilePos::new(0, 1), 0));
     let mut sim = Sim::new(&spec);
     sim.tuning.bump_damage = 0; // freeze/replan semantics test
     let blocker = spawn(&mut sim, TilePos::new(1, 1), IDLER);
@@ -65,7 +65,7 @@ fn frozen_bots_do_not_think() {
         spec.water.push(TilePos::new(x, 0));
         spec.water.push(TilePos::new(x, 2));
     }
-    spec.depots.push(TilePos::new(0, 1));
+    spec.depots.push((TilePos::new(0, 1), 0));
     let mut sim = Sim::new(&spec);
     sim.tuning.bump_damage = 0; // frozen-brain semantics test
     spawn(&mut sim, TilePos::new(1, 1), IDLER);
@@ -115,7 +115,7 @@ fn collision_world_is_deterministic() {
             spec.water.push(TilePos::new(x, 0));
             spec.water.push(TilePos::new(x, 2));
         }
-        spec.depots.push(TilePos::new(0, 1));
+        spec.depots.push((TilePos::new(0, 1), 0));
         let mut sim = Sim::new(&spec);
         spawn(&mut sim, TilePos::new(1, 1), IDLER);
         spawn(&mut sim, TilePos::new(4, 1), "move_to(closest(depot).expect())\n");
@@ -136,7 +136,7 @@ fn sidestep_dodges_blocker_without_freezing() {
     // Open ground: when the next tile is occupied the mover takes a free
     // sidestep (no freeze), re-plans, and arrives at the depot.
     let mut spec = MapSpec::empty(7, 3);
-    spec.depots.push(TilePos::new(0, 1));
+    spec.depots.push((TilePos::new(0, 1), 0));
     let mut sim = Sim::new(&spec);
     let blocker = spawn(&mut sim, TilePos::new(2, 1), IDLER);
     let mover = spawn(&mut sim, TilePos::new(4, 1), "move_to(closest(depot).expect())\n");
@@ -186,7 +186,7 @@ fn bumps_hurt_both_parties() {
         spec.water.push(TilePos::new(x, 0));
         spec.water.push(TilePos::new(x, 2));
     }
-    spec.depots.push(TilePos::new(0, 1));
+    spec.depots.push((TilePos::new(0, 1), 0));
     let mut sim = Sim::new(&spec);
     let blocker = spawn(&mut sim, TilePos::new(1, 1), IDLER);
     let mover = spawn(&mut sim, TilePos::new(3, 1), "move_to(closest(depot).expect())\n");
@@ -212,7 +212,7 @@ fn corridor_deadlock_ends_in_mutual_destruction() {
         spec.water.push(TilePos::new(x, 0));
         spec.water.push(TilePos::new(x, 2));
     }
-    spec.depots.push(TilePos::new(0, 1));
+    spec.depots.push((TilePos::new(0, 1), 0));
     spec.ore_nodes.push((TilePos::new(7, 1), 50));
     let mut sim = Sim::new(&spec);
     sim.tuning.fault_damage = 0; // isolate bump damage
@@ -242,7 +242,7 @@ fn rammer_freezes_longer_than_the_rammed() {
         spec.water.push(TilePos::new(x, 0));
         spec.water.push(TilePos::new(x, 2));
     }
-    spec.depots.push(TilePos::new(0, 1));
+    spec.depots.push((TilePos::new(0, 1), 0));
     let mut sim = Sim::new(&spec);
     let blocker = spawn(&mut sim, TilePos::new(1, 1), IDLER);
     let rammer = spawn(&mut sim, TilePos::new(3, 1), "move_to(closest(depot).expect())\n");
@@ -296,7 +296,7 @@ wait(3)
         spec.water.push(TilePos::new(x, 0));
         spec.water.push(TilePos::new(x, 2));
     }
-    spec.depots.push(TilePos::new(0, 1));
+    spec.depots.push((TilePos::new(0, 1), 0));
     let mut sim = Sim::new(&spec);
     let victim = spawn(&mut sim, TilePos::new(1, 1), victim_src);
     let rammer = spawn(&mut sim, TilePos::new(3, 1), rammer_src);
@@ -338,7 +338,7 @@ wait(600)
         spec.water.push(TilePos::new(x, 0));
         spec.water.push(TilePos::new(x, 2));
     }
-    spec.depots.push(TilePos::new(0, 1));
+    spec.depots.push((TilePos::new(0, 1), 0));
     let mut sim = Sim::new(&spec);
     sim.tuning.bump_damage = 60; // one ram crosses the victim's 50% line
     let victim = spawn(&mut sim, TilePos::new(1, 1), victim_src);
@@ -375,7 +375,7 @@ fn mutual_ram_keeps_the_at_fault_stun() {
         spec.water.push(TilePos::new(x, 0));
         spec.water.push(TilePos::new(x, 2));
     }
-    spec.depots.push(TilePos::new(0, 1));
+    spec.depots.push((TilePos::new(0, 1), 0));
     spec.ore_nodes.push((TilePos::new(7, 1), 50));
     let mut sim = Sim::new(&spec);
     sim.tuning.bump_damage = 0; // isolate the stun mechanics
@@ -420,7 +420,7 @@ wait(3)
             }
         }
     }
-    spec.depots.push(TilePos::new(0, 2));
+    spec.depots.push((TilePos::new(0, 2), 0));
     let mut sim = Sim::new(&spec);
     sim.tuning.bump_damage = 0; // isolate the signal mechanics
     // Pin the pre-M5 pace: this test stages a second bump INSIDE the
@@ -471,7 +471,7 @@ fn spawn_onto_an_occupied_tile_is_rejected() {
 #[test]
 fn structures_placed_mid_route_block_the_walk() {
     let mut spec = MapSpec::empty(12, 5);
-    spec.depots.push(TilePos::new(10, 2));
+    spec.depots.push((TilePos::new(10, 2), 0));
     spec.starting_stock.push((0, sim::resources::Resource::Steel, 100));
     let mut sim = Sim::new(&spec);
     let mover = spawn(

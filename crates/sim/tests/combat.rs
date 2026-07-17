@@ -71,7 +71,7 @@ log(1)
     for _ in 0..900 {
         sim.step();
         if hp_at_ouch.is_none()
-            && sim.world.archive.iter().any(|e| e.text.contains("ouch"))
+            && sim.world.archive_all().any(|e| e.text.contains("ouch"))
         {
             hp_at_ouch = sim.world.bots.get(&victim).map(|b| b.data.hp);
             break;
@@ -106,8 +106,7 @@ wait(60)
     );
     assert!(
         sim.world
-            .archive
-            .iter()
+            .archive_all()
             .any(|e| e.kind == ArchiveKind::Log && e.text.contains("day report")),
         "abort's forced upload always sends the logs home; archive: {:?}",
         sim.world.archive
@@ -145,7 +144,7 @@ log(1)
         "double handle aborts into a wreck — no instant-destroy path exists"
     );
     assert!(
-        sim.world.archive.iter().any(|e| e.kind == ArchiveKind::Log),
+        sim.world.archive_all().any(|e| e.kind == ArchiveKind::Log),
         "the forced upload_log sent the buffer home"
     );
 }
@@ -162,7 +161,7 @@ on hurt:
 log(1)
 ";
     let mut spec = MapSpec::empty(20, 3);
-    spec.depots.push(TilePos::new(19, 1)); // far away: the retreat takes a while
+    spec.depots.push((TilePos::new(19, 1), 0)); // far away: the retreat takes a while
     let mut sim = Sim::new(&spec);
     sim.tuning.regen_amount = 0; // the double-handle race needs static hp
     sim.tuning.fault_damage = 0; // and the chasing brawler must not crash out
@@ -224,7 +223,7 @@ fn crash_loops_are_lethal() {
     // lands mid-factory-window eventually — a double handle → abort. The
     // dumps that completed are in the cloud; the rest ride the wreck.
     assert!(
-        sim.world.archive.iter().filter(|e| e.kind == ArchiveKind::CrashDump).count() >= 1,
+        sim.world.archive_all().filter(|e| e.kind == ArchiveKind::CrashDump).count() >= 1,
         "at least the first crash filed its dump"
     );
 }

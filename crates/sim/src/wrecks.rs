@@ -239,15 +239,21 @@ impl Sim {
         *self.world.data.entry(analyzer_faction).or_insert(0) += self.tuning.analyze_data;
         let tick = self.world.tick;
         let logs = w.data.log_buf.clone();
-        for (level, text) in logs {
-            self.world.archive.push(crate::world::ArchiveEntry {
-                tick,
-                bot: id,
-                kind: crate::world::ArchiveKind::Log,
-                level,
-                line: 0,
-                text: format!("[analyzed] {text}"),
-            });
+        // Files into the ANALYZER's cloud (Q89) — the intel goes to the colony
+        // that earned the murder, not a shared global list. Bind the cloud
+        // once, and only when there's something to file (no phantom empty Vec).
+        if !logs.is_empty() {
+            let cloud = self.world.archive.entry(analyzer_faction).or_default();
+            for (level, text) in logs {
+                cloud.push(crate::world::ArchiveEntry {
+                    tick,
+                    bot: id,
+                    kind: crate::world::ArchiveKind::Log,
+                    level,
+                    line: 0,
+                    text: format!("[analyzed] {text}"),
+                });
+            }
         }
         self.world.comm_keys.entry(analyzer_faction).or_default().insert(victim_faction);
         self.destroy_wreck(id, "analyzed");
@@ -321,14 +327,16 @@ impl Sim {
         true
     }
 
-    /// Bank a black box to the colony cloud and remove it from the field.
-    pub(crate) fn recover_black_box(&mut self, entity: EntityId) {
+    /// Bank a black box into the recovering colony's cloud (Q89: the faction
+    /// that recovered it) and remove it from the field.
+    pub(crate) fn recover_black_box(&mut self, entity: EntityId, faction: u8) {
         let Some(idx) = self.world.black_boxes.iter().position(|bb| bb.entity == entity) else {
             return;
         };
         let bb = self.world.black_boxes.remove(idx);
         let tick = self.world.tick;
-        self.world.archive.push(crate::world::ArchiveEntry {
+        let cloud = self.world.archive.entry(faction).or_default();
+        cloud.push(crate::world::ArchiveEntry {
             tick,
             bot: bb.bot,
             kind: crate::world::ArchiveKind::Log,
@@ -337,7 +345,7 @@ impl Sim {
             text: format!("[black box] {} — {} entries banked", bb.cause, bb.logs.len()),
         });
         for (level, text) in bb.logs {
-            self.world.archive.push(crate::world::ArchiveEntry {
+            cloud.push(crate::world::ArchiveEntry {
                 tick,
                 bot: bb.bot,
                 kind: crate::world::ArchiveKind::Log,

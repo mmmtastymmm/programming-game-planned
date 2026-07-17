@@ -15,8 +15,9 @@ use crate::palette::Palette;
 use crate::scene::tile_xyz;
 use crate::GameSim;
 
-/// The viewer faction whose perception the fog renders.
-const VIEWER: u8 = 0;
+/// The viewer faction whose perception the fog renders (and whose colony
+/// cloud the telemetry panel reads — Q89).
+pub const VIEWER: u8 = 0;
 
 #[derive(Resource, Default)]
 pub(crate) struct FogState {
@@ -112,8 +113,8 @@ pub(crate) fn recompute_fog(game: NonSend<GameSim>, mut fog: ResMut<FogState>) {
     for st in world.structures.values().filter(|st| st.faction == VIEWER) {
         eyes.push((st.pos, s, false));
     }
-    for d in world.depots.values() {
-        eyes.push((d.pos, s, false)); // factionless: viewer's eyes (see sim note)
+    for d in world.depots.values().filter(|d| d.faction == VIEWER) {
+        eyes.push((d.pos, s, false)); // owner's eyes (Q89)
     }
     for (pos, seeing, elevated) in eyes {
         for dy in -seeing..=seeing {

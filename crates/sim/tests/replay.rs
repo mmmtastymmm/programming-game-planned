@@ -18,7 +18,7 @@ deposit()
 fn mining_map() -> MapSpec {
     let mut spec = MapSpec::empty(10, 6);
     spec.ore_nodes.push((TilePos::new(8, 2), 10));
-    spec.depots.push(TilePos::new(1, 2));
+    spec.depots.push((TilePos::new(1, 2), 0));
     // A rubble ridge the path must cross.
     spec.rubble.push(TilePos::new(5, 1));
     spec.rubble.push(TilePos::new(5, 2));
@@ -105,8 +105,7 @@ fn ore_depletes_then_program_faults_into_crash_dumps() {
     assert_eq!(sim.world.stock_get(0, sim::resources::Resource::Iron), 100, "all ore (10 units = 100 deci) ends up in stock");
     assert!(
         sim.world
-            .archive
-            .iter()
+            .archive_all()
             .any(|e| e.kind == sim::world::ArchiveKind::CrashDump && e.text.contains("no ore")),
         "depletion must surface as crash dumps; archive: {:?}",
         sim.world.archive
@@ -126,7 +125,7 @@ fn unreachable_target_faults() {
             }
         }
     }
-    spec.depots.push(TilePos::new(0, 0));
+    spec.depots.push((TilePos::new(0, 0), 0));
     let mut sim = Sim::new(&spec);
     sim.tuning.fault_damage = 0; // unreachable-loop routing test, not a health test
     sim.apply(&Command::SpawnBot {
@@ -144,8 +143,7 @@ fn unreachable_target_faults() {
     }
     assert!(
         sim.world
-            .archive
-            .iter()
+            .archive_all()
             .any(|e| e.text.contains("unreachable")),
         "archive: {:?}",
         sim.world.archive
@@ -180,7 +178,7 @@ abort()
     assert!(!sim.world.bots.contains_key(&id), "bot must be wrecked");
     assert!(sim.world.wrecks.contains_key(&id), "abort exits into a wreck");
     assert!(
-        sim.world.archive.iter().any(|e| e.text.contains("123")),
+        sim.world.archive_all().any(|e| e.text.contains("123")),
         "abort's forced upload sent the log home"
     );
 
@@ -218,7 +216,7 @@ fn rubble_slows_movement() {
     let deliver_tick = |rubble: bool| -> u64 {
         let mut spec = MapSpec::empty(12, 3);
         spec.ore_nodes.push((TilePos::new(10, 1), 50));
-        spec.depots.push(TilePos::new(0, 1));
+        spec.depots.push((TilePos::new(0, 1), 0));
         if rubble {
             for y in 0..3 {
                 spec.rubble.push(TilePos::new(5, y));

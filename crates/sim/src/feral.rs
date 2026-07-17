@@ -296,7 +296,8 @@ impl Sim {
         nest.state = NestState::Active;
         nest.hp = nest.max_hp / 2;
         let tick = self.world.tick;
-        self.world.archive.push(ArchiveEntry {
+        // A Feral-side event → the Feral cloud (Q89: no shared global list).
+        self.world.archive.entry(FERAL_FACTION).or_default().push(ArchiveEntry {
             tick,
             bot: BotId(0),
             kind: ArchiveKind::Log,
@@ -304,6 +305,9 @@ impl Sim {
             line: 0,
             text: format!("nest at {},{} reclaimed by the Ferals", pos.x, pos.y),
         });
+        // The colony just lost this nest — any printer built against it goes
+        // Dormant, its bots become ghosts (Q87/Q65).
+        self.reconcile_dormancy(owner);
     }
 
     /// One Feral print: archetype from the tier mix (round-robin), source

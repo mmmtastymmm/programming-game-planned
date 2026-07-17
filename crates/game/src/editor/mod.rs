@@ -304,12 +304,20 @@ fn file_viewer(ui: &mut egui::Ui, editor: &mut EditorState, game: &GameSim) {
             for key in &keys {
                 let DocKey::Program(color) = *key else { continue };
                 let deployed = game.0.world.color_programs.get(&(0, color));
-                let printer_ruined = game
+                // Surface any down printer for this color — Ruined OR Dormant
+                // (Q87): a dormant color's bots are ghosts that never execute,
+                // so the player must not think an edited program runs.
+                let printer_down = game
                     .0
                     .world
                     .printers
                     .values()
-                    .any(|p| p.color.0 == color && p.state == PrinterState::Ruined);
+                    .filter(|p| p.faction == crate::fog::VIEWER && p.color.0 == color)
+                    .find_map(|p| match p.state {
+                        PrinterState::Ruined => Some("printer ruined"),
+                        PrinterState::Dormant => Some("printer dormant — retake its nest"),
+                        PrinterState::Working => None,
+                    });
                 // The outline parses the doc as it deploys — with its
                 // imported module blocks prepended — then maps lines back
                 // and drops the library's own defs from the children.
@@ -348,8 +356,8 @@ fn file_viewer(ui: &mut egui::Ui, editor: &mut EditorState, game: &GameSim) {
                             ui.small("undeployed");
                         }
                     }
-                    if printer_ruined {
-                        ui.small(egui::RichText::new("printer ruined").weak());
+                    if let Some(msg) = printer_down {
+                        ui.small(egui::RichText::new(msg).weak());
                     }
                 });
                 for (label, line, fdoc) in children {
@@ -935,9 +943,8 @@ pub(crate) fn editor_ui(
                 ui.label(egui::RichText::new(name).color(color_tint(color.0)));
                 match state {
                     PrinterState::Ruined => {
-                        // Dormant: cap contribution withdrawn, no prints,
-                        // its color's bots are ghost machines (Q65).
-                        ui.small("dormant — its bots are ghosts");
+                        // Broken (the starting Red printer): repairable.
+                        ui.small("ruined — repair to bring it online");
                         let affordable = game.0.world.data.get(&0).copied().unwrap_or(0) >= repair_cost;
                         if ui
                             .add_enabled(
@@ -948,6 +955,12 @@ pub(crate) fn editor_ui(
                         {
                             let _ = game.0.apply(&Command::RepairPrinter { printer: pid });
                         }
+                    }
+                    PrinterState::Dormant => {
+                        // Its bound nest was lost: cap contribution withdrawn,
+                        // no prints, its color's bots are ghost machines (Q65).
+                        // Not repairable — retake the nest to reactivate (Q87).
+                        ui.small("dormant — retake its nest; its bots are ghosts");
                     }
                     PrinterState::Working if remainder == Some(pid) => {
                         ui.small("remainder — takes what nobody claims");
@@ -1080,7 +1093,9 @@ pub(crate) fn editor_ui(
             }
         });
         let colors = program_colors(&game);
-        let archive = &game.0.world.archive;
+        // Read only the viewer's own colony cloud (Q89: per-faction clouds).
+        let empty = Vec::new();
+        let archive = game.0.world.archive.get(&crate::fog::VIEWER).unwrap_or(&empty);
         for c in colors {
             let entries: Vec<String> = archive
                 .iter()
@@ -1162,7 +1177,8 @@ pub(crate) fn editor_ui(
                     })
                     .collect();
                 let data = w.data.get(&0).copied().unwrap_or(0);
-                (w.tick, stock, data, w.bots.len(), w.wrecks.len(), w.archive.len())
+                let archive_len = w.archive.get(&0).map_or(0, |v| v.len());
+                (w.tick, stock, data, w.bots.len(), w.wrecks.len(), archive_len)
             };
             let mut texts = vec![format!("tick {tick}")];
             if stock.is_empty() {

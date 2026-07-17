@@ -28,7 +28,7 @@ fn walled_map() -> MapSpec {
         spec.water.push(TilePos::new(4, y));
     }
     spec.ore_nodes.push((TilePos::new(7, 2), 10));
-    spec.depots.push(TilePos::new(0, 2));
+    spec.depots.push((TilePos::new(0, 2), 0));
     spec.starting_ore = 20;
     spec.starting_stock.push((0, sim::resources::Resource::Stone, 20));
     spec
@@ -175,8 +175,7 @@ fn one_way_bridge_only_crosses_with_the_arrow() {
     );
     assert!(
         sim.world
-            .archive
-            .iter()
+            .archive_all()
             .any(|e| e.text.contains("unreachable") && e.bot == miner),
         "the return trip must fault unreachable"
     );
@@ -232,7 +231,7 @@ fn arrow_overlay_works_on_plain_ground() {
         spec.water.push(TilePos::new(x, 0));
         spec.water.push(TilePos::new(x, 2));
     }
-    spec.depots.push(TilePos::new(0, 1));
+    spec.depots.push((TilePos::new(0, 1), 0));
     spec.starting_ore = 10;
     spec.starting_stock.push((0, sim::resources::Resource::Stone, 20));
     let mut sim = Sim::new(&spec);
@@ -247,7 +246,7 @@ fn arrow_overlay_works_on_plain_ground() {
         sim.step();
     }
     assert!(
-        sim.world.archive.iter().any(|e| e.text.contains("unreachable") && e.bot == bot),
+        sim.world.archive_all().any(|e| e.text.contains("unreachable") && e.bot == bot),
         "westbound travel over an east arrow must be unreachable"
     );
     // Clear the arrow: the road reopens.
@@ -363,7 +362,7 @@ fn spilled_cargo_is_recoverable_by_miners() {
     // A dead hauler's spilled ore is just an ore node: another bot mines
     // it and delivers — closest(ore) finds it, no new mechanics needed.
     let mut spec = MapSpec::empty(8, 4);
-    spec.depots.push(TilePos::new(0, 1));
+    spec.depots.push((TilePos::new(0, 1), 0));
     let mut sim = Sim::new(&spec);
     let mule = spawn(&mut sim, TilePos::new(6, 2), "wait(50)\n");
     sim.world.bots.get_mut(&mule).unwrap().data.cargo = [(sim::resources::Resource::Iron, 20u32)].into_iter().collect();

@@ -138,7 +138,7 @@ fn ice_slides_carry_bots_past_their_turn() {
     for x in 4..7 {
         spec.water.push(TilePos::new(x, 3));
     }
-    spec.depots.push(TilePos::new(3, 4));
+    spec.depots.push((TilePos::new(3, 4), 0));
     let mut sim = Sim::new(&spec);
     sim.world.grid.set(TilePos::new(4, 2), TileKind::Ice);
     sim.world.grid.set(TilePos::new(3, 2), TileKind::Ice);
@@ -190,7 +190,7 @@ fn dunes_swallow_idlers() {
 #[test]
 fn moving_shakes_the_sand_off() {
     let mut spec = MapSpec::empty(8, 3);
-    spec.depots.push(TilePos::new(6, 1));
+    spec.depots.push((TilePos::new(6, 1), 0));
     let mut sim = Sim::new(&spec);
     sim.world.grid.set(TilePos::new(2, 1), TileKind::Dunes);
     let id = spawn(&mut sim, TilePos::new(2, 1), "wait(30)\nmove_to(closest(depot).expect())\nwait(500)\n");
@@ -215,7 +215,7 @@ fn scree_collapses_to_rubble_after_enough_crossings() {
         spec.water.push(TilePos::new(x, 0));
         spec.water.push(TilePos::new(x, 2));
     }
-    spec.depots.push(TilePos::new(0, 1));
+    spec.depots.push((TilePos::new(0, 1), 0));
     spec.ore_nodes.push((TilePos::new(6, 1), 50));
     let mut sim = Sim::new(&spec);
     sim.world.grid.set(TilePos::new(3, 1), TileKind::Scree);
@@ -253,7 +253,7 @@ fn ford_wading_quiets_the_mover() {
         // One row: A*'s tie-breaks would otherwise let the walker pass
         // the ford's COLUMN on the row beside it.
         let mut spec = MapSpec::empty(16, 1);
-        spec.depots.push(TilePos::new(15, 0));
+        spec.depots.push((TilePos::new(15, 0), 0));
         let mut sim = Sim::new(&spec);
         if ford {
             sim.world.grid.set(TilePos::new(3, 0), TileKind::Ford);
@@ -405,7 +405,7 @@ move_to(closest(depot).expect())
 
 fn terraform_map() -> MapSpec {
     let mut spec = MapSpec::empty(9, 5);
-    spec.depots.push(TilePos::new(0, 2));
+    spec.depots.push((TilePos::new(0, 2), 0));
     spec.starting_stock.push((0, sim::resources::Resource::Stone, 20));
     spec
 }
@@ -552,7 +552,7 @@ fn ground_hardening_under_a_plan_replans_instead_of_panicking() {
         spec.water.push(TilePos::new(x, 0));
         spec.water.push(TilePos::new(x, 2));
     }
-    spec.depots.push(TilePos::new(0, 1));
+    spec.depots.push((TilePos::new(0, 1), 0));
     spec.starting_stock.push((0, sim::resources::Resource::Stone, 20));
     let mut sim = Sim::new(&spec);
     let wall = TilePos::new(3, 1);

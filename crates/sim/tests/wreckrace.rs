@@ -270,7 +270,7 @@ fn black_boxes_bank_to_the_cloud() {
         .find(|bb| bb.bot == victim)
         .expect("black box dropped");
     let target = bb.entity;
-    let archive_before = sim.world.archive.len();
+    let archive_before = sim.world.archive_all().count();
     // Recover it (the hunter is adjacent).
     sim.apply(&Command::DeployProgram {
         faction: 1,
@@ -294,7 +294,7 @@ fn black_boxes_bank_to_the_cloud() {
         !sim.world.black_boxes.iter().any(|bb| bb.entity == target),
         "the box leaves the field"
     );
-    assert!(sim.world.archive.len() > archive_before, "its contents banked to the cloud");
+    assert!(sim.world.archive_all().count() > archive_before, "its contents banked to the cloud");
 }
 
 #[test]
@@ -424,8 +424,7 @@ wait(600)
     }
     assert!(
         sim.world
-            .archive
-            .iter()
+            .archive_all()
             .any(|e| e.text.contains("err_action")),
         "the self-block resolves as a trappable fault, not an infinite hold"
     );
@@ -466,7 +465,7 @@ fn rescue_never_bypasses_the_hardware_bar() {
         sim.step();
     }
     assert!(
-        !sim.world.archive.iter().any(|e| e.text.contains("elite")),
+        !sim.world.archive_all().any(|e| e.text.contains("elite")),
         "Q52 holds at the rescue boot: the over-bar artifact yields the fallback"
     );
 }
@@ -541,7 +540,7 @@ wait(2)
     }
     assert!(sim.world.black_boxes.is_empty(), "the box was found and banked");
     assert!(
-        sim.world.archive.iter().any(|e| e.text.contains("[black box]")),
+        sim.world.archive_all().any(|e| e.text.contains("[black box]")),
         "the banked forensics reached the colony cloud"
     );
 }
