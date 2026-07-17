@@ -9,7 +9,6 @@
 //! FOREIGN faction's channel needs its comm key (`analyze()` steals one;
 //! ally grants land with M13).
 
-use crate::map::TileKind;
 use crate::sim::Sim;
 use crate::world::{Action, BotId, ChannelOp};
 use pyrite::{faults, Fault, Value};
@@ -17,7 +16,7 @@ use std::collections::BTreeMap;
 
 impl Sim {
     fn jammed(&self, pos: crate::map::TilePos) -> bool {
-        self.world.grid.get(pos) == Some(TileKind::Corruption)
+        self.world.grid.is_corruption(pos)
     }
 
     /// Phase 4b: the rendezvous settle. Runs after every bot has resolved

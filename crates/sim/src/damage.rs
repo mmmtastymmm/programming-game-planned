@@ -1,6 +1,5 @@
 //! Damage, signals, and destruction.
 
-use crate::host::BotHost;
 use crate::sim::Sim;
 use crate::world::BotId;
 use pyrite::{RaiseOutcome, Signal};
@@ -169,10 +168,7 @@ impl Sim {
     pub(crate) fn raise_signal(&mut self, id: BotId, signal: Signal) -> RaiseOutcome {
         let Some(bot) = self.world.bots.get_mut(&id) else { return RaiseOutcome::Ignored };
         let mut vm = bot.vm.take().expect("vm present between phases");
-        let outcome = {
-            let mut host = BotHost { world: &mut self.world, bot: id, tuning: &self.tuning, ctx: crate::stats::StatCtx { stats: &self.stats, xp: &self.xp, quirks: &self.quirks, tuning: &self.tuning } };
-            vm.raise(signal, &mut host, &self.costs)
-        };
+        let outcome = self.with_host(id, |host, costs| vm.raise(signal, host, costs));
         match outcome {
             RaiseOutcome::Handled => {
                 // Entering a template abandons any in-flight action (the

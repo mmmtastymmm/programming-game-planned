@@ -171,12 +171,14 @@ pub(crate) fn build_colony() -> Sim {
         .expect("blueprint placement");
     }
 
-    // The showcase cast, one signal cloud each. `on signal(s): wait(...)`
-    // parks a bot inside whichever handler fires, holding its cloud.
-    // Spawn order matters: the scrap recall picks the lowest (XP, id) bot,
-    // and ties on the attackers' closest(enemy) break by id.
+    // The showcase cast, one signal cloud each. An `on <signal>:` handler
+    // (M3's seven-template model) parks a bot inside the handler its cloud
+    // demonstrates, holding it open. Spawn order matters: the scrap recall
+    // picks the lowest (XP, id) bot, and ties on the attackers'
+    // closest(enemy) break by id.
     const IDLE: &str = "wait(100000)\n";
-    const PARK: &str = "on signal(s):\n    wait(100000)\n\nwait(100000)\n";
+    const PARK_BUMPED: &str = "on bumped:\n    wait(100000)\n\nwait(100000)\n";
+    const PARK_HURT: &str = "on hurt:\n    wait(100000)\n\nwait(100000)\n";
     let spawn = |game: &mut Sim, pos, faction, color, hp, source: &str| {
         game.apply(&Command::SpawnBot {
             pos,
@@ -203,14 +205,14 @@ pub(crate) fn build_colony() -> Sim {
         0,
         blue,
         100,
-        "on signal(s):\n    wait(100000)\n\nmove_to(closest(enemy).expect())\n",
+        "on bump:\n    wait(100000)\n\nmove_to(closest(enemy).expect())\n",
     );
     // bumped (dizzy): the blocker, parked in its bumped handler.
-    spawn(&mut game, TilePos::new(6, 11), 0, blue, 100, PARK);
+    spawn(&mut game, TilePos::new(6, 11), 0, blue, 100, PARK_BUMPED);
     // The bait: an enemy idler behind the blocker, out of reach.
     spawn(&mut game, TilePos::new(8, 11), 1, BotColor::RED, 100, IDLE);
     // hurt (amber): hp tuned so one 10-damage hit crosses the 50% line.
-    spawn(&mut game, TilePos::new(10, 11), 0, blue, 18, PARK);
+    spawn(&mut game, TilePos::new(10, 11), 0, blue, 18, PARK_HURT);
     // Its attacker: exactly one swing, then sleep.
     spawn(
         &mut game,
@@ -227,7 +229,7 @@ pub(crate) fn build_colony() -> Sim {
         0,
         blue,
         100,
-        "on signal(s):\n    wait(100000)\n\nmine()\n",
+        "on error:\n    wait(100000)\n\nmine()\n",
     );
     // death (skull, then the wreck race): one hit from its neighbor kills.
     spawn(&mut game, TilePos::new(14, 11), 0, blue, 10, IDLE);
@@ -1087,4 +1089,21 @@ pub(crate) fn setup_scene(
     ));
 
     commands.insert_resource(palette);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_demo_colony_builds_without_panicking() {
+        // build_colony() `.expect()`s every hardcoded Pyrite program to
+        // parse — a stale program (e.g. the pre-M3 `on signal(s):`
+        // syntax) panics the game at startup. No sim test exercises this
+        // scene, so this smoke test is the only guard (regression
+        // 2026-07-17: the showcase cast used the removed unified-handler
+        // syntax).
+        let sim = build_colony();
+        assert!(sim.world.bots.len() > 1, "the showcase cast spawned");
+    }
 }

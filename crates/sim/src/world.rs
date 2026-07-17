@@ -323,6 +323,19 @@ pub struct Nest {
     pub prints: u32,
 }
 
+impl Nest {
+    /// The faction that controls this nest and sees for it: its claimant,
+    /// or the Ferals (Active/Defeated sites are theirs). The single source
+    /// of the "who owns this nest" rule that perception, `find_kind`,
+    /// `move_to`, and the harm gate all consult.
+    pub fn owner(&self) -> u8 {
+        match self.state {
+            NestState::Claimed(f) => f,
+            _ => FERAL_FACTION,
+        }
+    }
+}
+
 /// A generic structure (docs/03): solid, damageable, with physical
 /// input/output buffers where its kind refines (feeds are physical;
 /// payments are abstract — Q84). Energy gating lands with M5.
@@ -1748,9 +1761,7 @@ impl World {
         all: bool,
         exclude: BotId,
     ) -> u32 {
-        let jammed = |pos: TilePos, grid: &crate::map::Grid| {
-            grid.get(pos) == Some(crate::map::TileKind::Corruption)
-        };
+        let jammed = |pos: TilePos, grid: &crate::map::Grid| grid.is_corruption(pos);
         // The jam blocks BOTH ways (M11): a caller standing in Corruption
         // transmits nothing — the message is lost, like everything else
         // in the static.
@@ -1799,9 +1810,7 @@ impl World {
     /// longest-blocked sender, ties by lowest entity id — parking Unit for
     /// its resolution. None when nobody is offering.
     pub(crate) fn try_take(&mut self, namespace: u8, ch: &str, exclude: BotId) -> Option<pyrite::Value> {
-        let jammed = |pos: TilePos, grid: &crate::map::Grid| {
-            grid.get(pos) == Some(crate::map::TileKind::Corruption)
-        };
+        let jammed = |pos: TilePos, grid: &crate::map::Grid| grid.is_corruption(pos);
         // Jammed both ways (M11): a poller inside Corruption hears nothing.
         if self.bots.get(&exclude).is_some_and(|b| jammed(b.data.pos, &self.grid)) {
             return None;

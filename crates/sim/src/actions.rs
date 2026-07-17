@@ -1,7 +1,6 @@
 //! Action resolution: starting, advancing, and finishing the blocking
 //! world actions bots issue (move, mine, build, ...).
 
-use crate::host::BotHost;
 use crate::map::{astar_avoiding, edge_allowed, TileKind, TilePos};
 use crate::sim::Sim;
 use crate::world::{
@@ -9,6 +8,16 @@ use crate::world::{
 };
 use pyrite::Value;
 use std::collections::BTreeSet;
+
+/// One tick of mending: raise `hp` toward `max_hp` by the per-tick heal
+/// (deci-rate ÷ 10, floored at 1), clamped so it never overshoots.
+/// Returns (hp restored this tick, whether the target is now full) — the
+/// shared arithmetic behind repairing a structure or a friendly bot.
+fn mend(hp: &mut i64, max_hp: i64, rate: u32) -> (i64, bool) {
+    let mended = (rate as i64 / 10).max(1).min(max_hp - *hp);
+    *hp += mended;
+    (mended, *hp == max_hp)
+}
 
 impl Sim {
     /// Phase 4 for one bot: start its requested action or advance the
@@ -512,10 +521,7 @@ impl Sim {
                         // A claimed nest is the claimant's property; Active
                         // and Defeated sites belong to the Ferals (always
                         // fair game).
-                        self.world.nests.get(&target).map(|n| match n.state {
-                            crate::world::NestState::Claimed(f) => f,
-                            _ => crate::world::FERAL_FACTION,
-                        })
+                        self.world.nests.get(&target).map(|n| n.owner())
                     })
                     .or_else(|| {
                         self.world
@@ -777,47 +783,49 @@ impl Sim {
                         let bot = self.world.bots.get_mut(&id).expect("bot exists");
                         bot.data.action = Some(Action::Repair { target, done_deci });
                     }
-                } else if let Some(st) =
-                    self.world.structures.values_mut().find(|s| s.pos == tpos)
-                {
-                    let mended = (rate as i64 / 10).max(1).min(st.max_hp - st.hp);
-                    st.hp += mended;
-                    let full = st.hp == st.max_hp;
-                    if mended > 0 {
-                        self.world
-                            .pending_xp
-                            .push((id, XpTrack::Building, (rate / 10).max(1) as u64));
-                    }
-                    if full {
-                        self.finish_action(id, Ok(Value::Unit));
-                    } else {
-                        let bot = self.world.bots.get_mut(&id).expect("bot exists");
-                        bot.data.action = Some(Action::Repair { target, done_deci });
-                    }
-                } else if let Some(other) = self
-                    .world
-                    .bot_entities
-                    .get(&target)
-                    .copied()
-                    .filter(|b| self.world.bots.contains_key(b))
-                {
-                    let b = self.world.bots.get_mut(&other).expect("checked");
-                    let mended = (rate as i64 / 10).max(1).min(b.data.max_hp - b.data.hp);
-                    b.data.hp += mended;
-                    let full = b.data.hp == b.data.max_hp;
-                    if mended > 0 {
-                        self.world
-                            .pending_xp
-                            .push((id, XpTrack::Building, (rate / 10).max(1) as u64));
-                    }
-                    if full {
-                        self.finish_action(id, Ok(Value::Unit));
-                    } else {
-                        let bot = self.world.bots.get_mut(&id).expect("bot exists");
-                        bot.data.action = Some(Action::Repair { target, done_deci });
-                    }
                 } else {
-                    self.finish_action(id, Err("repair: nothing repairable there".into()));
+                    // Mending lane — a structure or a friendly bot at the
+                    // tile. Both heal identically (only the hp field
+                    // differs), so compute the mend, drop the target
+                    // borrow, then run the shared XP-and-repark tail once.
+                    let healed = if let Some(st) =
+                        self.world.structures.values_mut().find(|s| s.pos == tpos)
+                    {
+                        Some(mend(&mut st.hp, st.max_hp, rate))
+                    } else if let Some(other) = self
+                        .world
+                        .bot_entities
+                        .get(&target)
+                        .copied()
+                        .filter(|b| self.world.bots.contains_key(b))
+                    {
+                        let b = self.world.bots.get_mut(&other).expect("checked");
+                        Some(mend(&mut b.data.hp, b.data.max_hp, rate))
+                    } else {
+                        None
+                    };
+                    match healed {
+                        Some((mended, full)) => {
+                            // XP pays for HP actually restored (a full
+                            // target earns nothing — review 2026-07-16).
+                            if mended > 0 {
+                                self.world.pending_xp.push((
+                                    id,
+                                    XpTrack::Building,
+                                    (rate / 10).max(1) as u64,
+                                ));
+                            }
+                            if full {
+                                self.finish_action(id, Ok(Value::Unit));
+                            } else {
+                                let bot = self.world.bots.get_mut(&id).expect("bot exists");
+                                bot.data.action = Some(Action::Repair { target, done_deci });
+                            }
+                        }
+                        None => {
+                            self.finish_action(id, Err("repair: nothing repairable there".into()))
+                        }
+                    }
                 }
             }
             Action::Race { wreck, kind, ticks_left } => {
@@ -1217,20 +1225,7 @@ impl Sim {
         bot.data.action = None;
         bot.data.survey_after_move = false;
         let mut vm = bot.vm.take().expect("vm present between phases");
-        {
-            let mut host = BotHost {
-                world: &mut self.world,
-                bot: id,
-                tuning: &self.tuning,
-                ctx: crate::stats::StatCtx {
-                    stats: &self.stats,
-                    xp: &self.xp,
-                    quirks: &self.quirks,
-                    tuning: &self.tuning,
-                },
-            };
-            vm.resolve_action_fault(fault, &mut host, &self.costs);
-        }
+        self.with_host(id, |host, costs| vm.resolve_action_fault(fault, host, costs));
         if let Some(bot) = self.world.bots.get_mut(&id) {
             bot.vm = Some(vm);
         }
@@ -1243,10 +1238,7 @@ impl Sim {
         // chain behind — complete_move consumed it already if it applied.
         bot.data.survey_after_move = false;
         let mut vm = bot.vm.take().expect("vm present between phases");
-        {
-            let mut host = BotHost { world: &mut self.world, bot: id, tuning: &self.tuning, ctx: crate::stats::StatCtx { stats: &self.stats, xp: &self.xp, quirks: &self.quirks, tuning: &self.tuning } };
-            vm.resolve_action(result, &mut host, &self.costs);
-        }
+        self.with_host(id, |host, costs| vm.resolve_action(result, host, costs));
         if let Some(bot) = self.world.bots.get_mut(&id) {
             bot.vm = Some(vm);
         }

@@ -185,10 +185,7 @@ impl BotHost<'_> {
                 // ones) are colony knowledge; foreign nests need eyes.
                 let mut best: Option<(u32, EntityId)> = None;
                 for (id, n) in &self.world.nests {
-                    let own = match n.state {
-                        crate::world::NestState::Claimed(f) => f == faction,
-                        _ => faction == crate::world::FERAL_FACTION,
-                    };
+                    let own = n.owner() == faction;
                     let visible = own
                         || self.perception().is_some_and(|per| per.seen.contains(id));
                     if !visible {
@@ -351,10 +348,8 @@ impl pyrite::Host for BotHost<'_> {
                     // active nest, a claimant's claimed one) — foreign
                     // nests need eyes, same as closest("nest"), so entity-
                     // id sweeps can't locate fogged nests.
-                    let own_nest = self.world.nests.get(&entity).is_some_and(|n| match n.state {
-                        crate::world::NestState::Claimed(f) => f == faction,
-                        _ => faction == crate::world::FERAL_FACTION,
-                    });
+                    let own_nest =
+                        self.world.nests.get(&entity).is_some_and(|n| n.owner() == faction);
                     if !self.perceived(entity) && !known_node
                         && !self.world.depots.contains_key(&entity)
                         && !self.world.blueprints.contains_key(&entity)

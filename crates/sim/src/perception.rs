@@ -99,14 +99,13 @@ impl Sim {
         for st in self.world.structures.values() {
             perceivers.entry(st.faction).or_default().push((st.pos, s, sh, false));
         }
-        // Nests are Feral eyes (M12) — a claim transfers them.
+        // Nests are Feral eyes (M12) — a claim transfers them; a Defeated
+        // site sees for nobody.
         for n in self.world.nests.values() {
-            let faction = match n.state {
-                crate::world::NestState::Claimed(f) => f,
-                crate::world::NestState::Active => crate::world::FERAL_FACTION,
-                crate::world::NestState::Defeated => continue,
-            };
-            perceivers.entry(faction).or_default().push((n.pos, s, sh, false));
+            if n.state == crate::world::NestState::Defeated {
+                continue;
+            }
+            perceivers.entry(n.owner()).or_default().push((n.pos, s, sh, false));
         }
         // Depots are factionless (pre-M4 simplification) — they see for
         // faction 0 only to avoid granting everyone eyes; flagged with the
@@ -221,11 +220,7 @@ impl Sim {
             // Nests (M12): the Feral colony always knows its own active
             // nests; a claim hands that knowledge to the claimant.
             for (id, n) in &self.world.nests {
-                let own = match n.state {
-                    crate::world::NestState::Claimed(f) => f == faction,
-                    _ => faction == crate::world::FERAL_FACTION,
-                };
-                see_static(*id, n.pos, own);
+                see_static(*id, n.pos, n.owner() == faction);
             }
             // seen ∩ heard: sight is absolute — drop the blip.
             let heard: BTreeMap<EntityId, TilePos> =

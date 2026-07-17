@@ -1619,8 +1619,7 @@ impl Sim {
             // Set fresh before EVERY grant — the overlay is derived from
             // where the bot is now, never persisted. (Flat only; the
             // per-op-key generalization is flagged in TASKS.md.)
-            let on_corruption =
-                self.world.grid.get(bot.data.pos) == Some(crate::map::TileKind::Corruption);
+            let on_corruption = self.world.grid.is_corruption(bot.data.pos);
             vm.set_cost_overlay_centi(if on_corruption {
                 self.tuning.corruption_op_tax as i64
             } else {
@@ -1633,10 +1632,7 @@ impl Sim {
                 bot.vm = Some(vm);
                 continue;
             }
-            let outcome = {
-                let mut host = BotHost { world: &mut self.world, bot: id, tuning: &self.tuning, ctx: crate::stats::StatCtx { stats: &self.stats, xp: &self.xp, quirks: &self.quirks, tuning: &self.tuning } };
-                vm.run(&mut host, &self.costs)
-            };
+            let outcome = self.with_host(id, |host, costs| vm.run(host, costs));
             self.after_vm(id, vm, outcome);
         }
 
@@ -2216,6 +2212,31 @@ impl Sim {
     /// composes with `world` reads.
     pub fn ctx(&self) -> crate::stats::StatCtx<'_> {
         crate::stats::StatCtx { stats: &self.stats, xp: &self.xp, quirks: &self.quirks, tuning: &self.tuning }
+    }
+
+    /// Run `f` with a freshly built per-bot [`BotHost`] and the cost
+    /// table. Centralizes the disjoint-field borrow — the host takes
+    /// `world` mutably while `stats`/`xp`/`quirks`/`tuning`/`costs` borrow
+    /// `self` shared, which only type-checks inside one `&mut self` body
+    /// (not via `self.ctx()`, whose whole-`self` borrow conflicts with the
+    /// world). One place to touch when BotHost gains a field.
+    pub(crate) fn with_host<R>(
+        &mut self,
+        id: BotId,
+        f: impl FnOnce(&mut BotHost, &CostTable) -> R,
+    ) -> R {
+        let mut host = BotHost {
+            world: &mut self.world,
+            bot: id,
+            tuning: &self.tuning,
+            ctx: crate::stats::StatCtx {
+                stats: &self.stats,
+                xp: &self.xp,
+                quirks: &self.quirks,
+                tuning: &self.tuning,
+            },
+        };
+        f(&mut host, &self.costs)
     }
 
     /// Per-bot VM config: the shared template with the hardware and quirk

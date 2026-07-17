@@ -298,6 +298,12 @@ impl Grid {
         self.tiles[(pos.y * self.width + pos.x) as usize] = kind;
     }
 
+    /// Is this tile Corruption? The radio jam (M11) and the creep front
+    /// both key on it — one predicate so "the static" is defined once.
+    pub fn is_corruption(&self, pos: TilePos) -> bool {
+        self.get(pos) == Some(TileKind::Corruption)
+    }
+
     pub fn tiles(&self) -> &[TileKind] {
         &self.tiles
     }

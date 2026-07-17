@@ -30,21 +30,15 @@ pub(crate) struct FogState {
     rings: Vec<(u32, u32)>,
 }
 
-impl FogState {
-    pub(crate) fn tile_visible(&self, pos: TilePos) -> bool {
-        self.visible.contains(&(pos.x, pos.y))
-    }
-}
-
 /// One fog overlay quad (per tile).
 #[derive(Component)]
 pub(crate) struct FogTile(i32, i32);
-/// A heard-only contact blip.
+/// A heard-only contact blip (marker; identity lives in `FogAssets.blips`).
 #[derive(Component)]
-pub(crate) struct Blip(u64);
-/// A search-stance survey ring, keyed by bot id.
+pub(crate) struct Blip;
+/// A search-stance survey ring (marker; keyed in `FogAssets.rings`).
 #[derive(Component)]
-pub(crate) struct SurveyRing(u32);
+pub(crate) struct SurveyRing;
 
 #[derive(Resource, Default)]
 pub(crate) struct FogAssets {
@@ -221,7 +215,7 @@ pub(crate) fn apply_fog(
             None => {
                 let e = commands
                     .spawn((
-                        Blip(*id),
+                        Blip,
                         Mesh3d(palette.gem.clone()),
                         MeshMaterial3d(assets.blip.clone()),
                         Transform::from_translation(at).with_scale(Vec3::splat(0.4)),
@@ -255,7 +249,7 @@ pub(crate) fn apply_fog(
             None => {
                 let e = commands
                     .spawn((
-                        SurveyRing(*bot_id),
+                        SurveyRing,
                         Mesh3d(palette.sel_ring.clone()),
                         MeshMaterial3d(assets.ring.clone()),
                         Transform::from_translation(at)
