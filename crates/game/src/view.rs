@@ -89,7 +89,7 @@ pub(crate) struct ViewIndex {
     pub(crate) bots: HashMap<u32, Entity>,
     pub(crate) ore: HashMap<u64, Entity>,
     pub(crate) wrecks: HashMap<u32, Entity>,
-    pub(crate) black_boxes: usize,
+    pub(crate) black_boxes: HashMap<u64, Entity>,
     pub(crate) printers: HashMap<u64, (Entity, PrinterState)>,
     pub(crate) blueprints: HashMap<u64, Entity>,
     pub(crate) bridges: HashMap<(i32, i32), Entity>,
@@ -810,7 +810,9 @@ pub(crate) fn sync_view(
         }
     });
 
-    // Wrecks: charred dead-bot slabs.
+    // Wrecks: charred dead-bot slabs. M10 made wreck removal routine
+    // (salvage/analyze/hijack/rescue/attack/blast), so stale slabs are
+    // despawned and a re-wrecked bot re-renders at its new tile.
     for (id, wreck) in &world.wrecks {
         if let std::collections::hash_map::Entry::Vacant(e) = index.wrecks.entry(id.0) {
             let entity = commands
@@ -823,24 +825,45 @@ pub(crate) fn sync_view(
             e.insert(entity);
         }
     }
+    index.wrecks.retain(|id, entity| {
+        if world.wrecks.contains_key(&sim::BotId(*id)) {
+            true
+        } else {
+            commands.entity(*entity).despawn();
+            false
+        }
+    });
 
-    // Black boxes: an explosion flash, then the small dark cube remains.
-    while index.black_boxes < world.black_boxes.len() {
-        let bb = &world.black_boxes[index.black_boxes];
-        let at = tile_xyz(world, bb.pos, 0.5);
-        commands.spawn((
-            Explosion { age: 0.0 },
-            Mesh3d(palette.explode_cube.clone()),
-            MeshMaterial3d(palette.explode_mat.clone()),
-            Transform::from_translation(at),
-        ));
-        commands.spawn((
-            Mesh3d(palette.nose_cube.clone()),
-            MeshMaterial3d(palette.black_mat.clone()),
-            Transform::from_translation(tile_xyz(world, bb.pos, 0.12)),
-        ));
-        index.black_boxes += 1;
+    // Black boxes: an explosion flash on first sight, then the small dark
+    // cube remains until the box is recovered (keyed by entity id —
+    // recover_black_box removes mid-Vec, so a spawn cursor goes stale).
+    for bb in &world.black_boxes {
+        if let std::collections::hash_map::Entry::Vacant(e) = index.black_boxes.entry(bb.entity.0)
+        {
+            commands.spawn((
+                Explosion { age: 0.0 },
+                Mesh3d(palette.explode_cube.clone()),
+                MeshMaterial3d(palette.explode_mat.clone()),
+                Transform::from_translation(tile_xyz(world, bb.pos, 0.5)),
+            ));
+            let cube = commands
+                .spawn((
+                    Mesh3d(palette.nose_cube.clone()),
+                    MeshMaterial3d(palette.black_mat.clone()),
+                    Transform::from_translation(tile_xyz(world, bb.pos, 0.12)),
+                ))
+                .id();
+            e.insert(cube);
+        }
     }
+    index.black_boxes.retain(|id, entity| {
+        if world.black_boxes.iter().any(|bb| bb.entity.0 == *id) {
+            true
+        } else {
+            commands.entity(*entity).despawn();
+            false
+        }
+    });
 }
 
 /// Grow each progress fill (left-anchored): blueprints always show their

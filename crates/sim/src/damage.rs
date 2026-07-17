@@ -38,6 +38,7 @@ impl Sim {
             if bot.data.dying {
                 continue; // effectively a wreck already
             }
+            let hp_before = bot.data.hp;
             bot.data.hp = (bot.data.hp - amount).max(0);
             let hp = bot.data.hp;
             let max_hp = bot.data.max_hp;
@@ -51,6 +52,15 @@ impl Sim {
                 if let Some((attacker_bot, attacker_faction)) = attacker
                     && attacker_faction != victim_faction
                 {
+                    // Escalation counts PLAYER-attributed Feral kills only
+                    // (docs/04: footprint, never wall-clock — Feral fault
+                    // deaths and blast chains are their own business).
+                    if victim_faction == crate::world::FERAL_FACTION
+                        && attacker_faction != crate::world::FERAL_FACTION
+                        && hp_before > 0
+                    {
+                        self.world.ferals_killed += 1;
+                    }
                     // First-kill Data (docs/03) — once per faction.
                     if self.world.first_kill_done.insert(attacker_faction) {
                         *self.world.data.entry(attacker_faction).or_insert(0) +=

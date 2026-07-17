@@ -679,6 +679,34 @@ A* blocked set, spawn tiles, PlacePrinter's free check); repair pays Building XP
 work actually done. Regression tests in multiplayer/lockstep/channels/ferals/wreckrace/
 building suites.
 
+## Review round 2026-07-16b (max, full working tree) — all 15 findings fixed
+
+Lockstep redesign (`sim::lockstep`): `submit` now covers EVERY owed tick through the input
+horizon (`next_tick + delay`) — a catch-up burst back-fills instead of skipping keys (the
+old `.max()` could deadlock every peer), and when frames outpace ticks empty frames send
+NOTHING (bounded drift; only a command-bearing frame claims one extra tick). `pump` drops
+messages from ids outside the roster (arrival-timing-dependent application was a silent
+desync vector). XP integrity: the Repair WRECK lane pays only while progress accrues (a
+rescue HELD at full progress mints nothing) and a rescuer standing ON the wreck tile now
+fails loudly instead of holding forever; nest attacks pay Combat XP for damage DEALT
+(a Defeated site at 0 hp is no longer an infinite farm). Q52: rescue/hijack boots filter
+the color artifact against the chassis bars (over-bar → the inert fallback; note the
+deploy layer already stock-caps REMAINDER artifacts, so hijack was closed at the source —
+the live exposure was rescue-after-redeploy). Diplomacy: SetAlliance(false) strips grants
+only when an alliance actually existed. Wreck race: `countdown_carry` re-arms when the
+chassis is fully mended (docs/02: None = never wrecked since the last FULL window) — no
+more one-way ratchet to insta-blast. Escalation: `ferals_killed` counts in settle_damage
+where ATTRIBUTION is known — only non-Feral-attributed kills raise the footprint (docs/04:
+fault-loops and blast chains are not player activity). `black_box` joined KINDS +
+find_kind (recover_black_box() was unreachable from real programs). Feral deposits
+re-check nest state at settle (a site beaten to Defeated mid-deposit absorbs nothing).
+[game] view: wrecks get a retain/despawn pass (salvage/rescue removal is routine now);
+black boxes are keyed by entity id instead of an append-only cursor, and recovered cubes
+despawn. docs/02 updated to the docs/01 ruling: the scrap recall is the ECONOMY valve
+(sustained Steel shortfall, `rust_scraps`); being over cap only stops prints. Regression
+tests: 2 lockstep, 5 wreckrace, 3 ferals, 1 multiplayer. Golden unchanged (the fixture
+exercises none of the touched paths).
+
 ## Cross-cutting quick wins (small, independent, grab anytime)
 
 - [x] Delete the spurious `become_disabled` cost entry once M3 lands. [pyrite] *(with M3)*

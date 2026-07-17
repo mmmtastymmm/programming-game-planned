@@ -555,12 +555,19 @@ impl Sim {
                         return;
                     }
                     let nest = self.world.nests.get_mut(&target).expect("checked");
-                    nest.hp = (nest.hp - damage).max(0);
+                    // XP pays for damage DEALT: a Defeated site sits at 0
+                    // hp forever, so swinging at it must mint nothing
+                    // (review 2026-07-16: the unconditional grant was an
+                    // unbounded Combat XP farm).
+                    let dealt = damage.max(0).min(nest.hp);
+                    nest.hp -= dealt;
                     if nest.hp == 0 && nest.state != crate::world::NestState::Defeated {
                         nest.state = crate::world::NestState::Defeated;
                         nest.job = None;
                     }
-                    self.world.pending_xp.push((id, XpTrack::Combat, damage.max(0) as u64));
+                    if dealt > 0 {
+                        self.world.pending_xp.push((id, XpTrack::Combat, dealt as u64));
+                    }
                     self.finish_action(id, Ok(Value::Unit));
                     return;
                 }
@@ -733,12 +740,28 @@ impl Sim {
                 // repair loop on a full-HP target earns nothing (review
                 // 2026-07-16: the unconditional per-tick grant minted
                 // free XP forever).
+                let was_deci = done_deci;
                 let done_deci = done_deci + rate;
                 if let Some(wreck) = self.world.wreck_of(target) {
-                    // Field repair — the rescue race's rescue lane.
-                    self.world
-                        .pending_xp
-                        .push((id, XpTrack::Building, (rate / 10).max(1) as u64));
+                    // A rescuer standing ON the wreck tile blocks its own
+                    // boot forever — fail loudly instead of holding (and
+                    // minting XP) for eternity (review 2026-07-16).
+                    if pos == tpos {
+                        self.finish_action(
+                            id,
+                            Err("repair: move off the wreck to boot it".into()),
+                        );
+                        return;
+                    }
+                    // Field repair — the rescue race's rescue lane. XP
+                    // flows only while progress accrues; a rescue HELD at
+                    // full progress (blocked tile, full fleet) earns
+                    // nothing further.
+                    if was_deci < self.tuning.field_repair_deci {
+                        self.world
+                            .pending_xp
+                            .push((id, XpTrack::Building, (rate / 10).max(1) as u64));
+                    }
                     if done_deci >= self.tuning.field_repair_deci {
                         if !self.rescue_wreck(wreck) {
                             // Tile blocked: hold at full progress.
@@ -1011,7 +1034,16 @@ impl Sim {
                 }
                 let faction = bot.data.faction;
                 let mut total = 0u32;
-                if self.world.nests.contains_key(&depot) {
+                // A nest beaten to Defeated (or claimed) mid-deposit is a
+                // dead acceptor — the manifest must not pre-fund a dormant
+                // site's reclaim (review 2026-07-16). State re-checked at
+                // settle, like the destroyed-depot arm below.
+                if self
+                    .world
+                    .nests
+                    .get(&depot)
+                    .is_some_and(|n| n.state == crate::world::NestState::Active)
+                {
                     // Nest feed (M12): everything aboard becomes print
                     // stock. No colony-stock or milestone bookkeeping —
                     // the Feral economy is the nest's own.

@@ -1263,9 +1263,11 @@ impl Sim {
                     let pair = (*a.min(b), *a.max(b));
                     if *allied {
                         self.world.alliances.insert(pair);
-                    } else {
-                        self.world.alliances.remove(&pair);
-                        // A broken alliance takes its grants with it.
+                    } else if self.world.alliances.remove(&pair) {
+                        // A broken alliance takes its grants with it —
+                        // but ONLY a broken one: dissolving an alliance
+                        // that never existed must not strip standing
+                        // grants issued independently (review 2026-07-16).
                         self.world.grants.retain(|(f, t, _)| {
                             (*f, *t) != (pair.0, pair.1) && (*f, *t) != (pair.1, pair.0)
                         });
@@ -1697,10 +1699,9 @@ impl Sim {
             // moment the flag is set.
             let bot = self.world.bots.remove(&id).expect("checked above");
             let mut data = bot.data;
-            // Escalation input (M12): each Feral down raises the footprint.
-            if data.faction == crate::world::FERAL_FACTION {
-                self.world.ferals_killed += 1;
-            }
+            // (Escalation's ferals_killed counts in settle_damage, where
+            // the kill's ATTRIBUTION is known — docs/04: player footprint,
+            // so Feral fault-loops and blast chains never raise it.)
             // The entity handle stays live: the wreck is targetable
             // (attack, repair, salvage, analyze, hijack) — it is removed
             // for good only when the wreck itself is destroyed.
@@ -1742,7 +1743,16 @@ impl Sim {
             }
             for id in ids.iter() {
                 let Some(bot) = self.world.bots.get_mut(id) else { continue };
-                if bot.data.dying || bot.data.hp >= bot.data.max_hp {
+                if bot.data.dying {
+                    continue;
+                }
+                if bot.data.hp >= bot.data.max_hp {
+                    // A fully mended chassis re-arms its self-destruct
+                    // window (world.rs: None = never wrecked since the
+                    // last FULL window) — without this, every rescue
+                    // ratcheted the countdown toward insta-blast forever
+                    // (review 2026-07-16).
+                    bot.data.countdown_carry = None;
                     continue;
                 }
                 if self.world.rusting.contains(&bot.data.faction) {

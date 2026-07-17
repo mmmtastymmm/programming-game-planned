@@ -15,6 +15,10 @@ pub const KINDS: &[&str] = &[
     "blight",
     // Feral nests (M12) — attackable and patrol-worthy, so findable
     "nest",
+    // Black boxes (M10) — recover_black_box() needs a handle, so the
+    // field object must be queryable (review 2026-07-16: no query could
+    // ever produce one, making the verb unreachable from real programs)
+    "black_box",
     // every resource kind is also a queryable kind: raw names find nodes,
     // refined names exist for cargo_count/withdraw (closest() on a refined
     // kind finds nothing until stock queries land)
@@ -191,6 +195,21 @@ impl BotHost<'_> {
                         continue;
                     }
                     let candidate = (bot.pos.manhattan(n.pos), *id);
+                    if best.is_none_or(|b| candidate < b) {
+                        best = Some(candidate);
+                    }
+                }
+                best.map(|(_, id)| id)
+            }
+            "black_box" => {
+                // Perception-scoped field objects (M10): boxes are
+                // nobody's own — finding one needs eyes on it.
+                let mut best: Option<(u32, EntityId)> = None;
+                for bb in &self.world.black_boxes {
+                    if !self.perception().is_some_and(|per| per.seen.contains(&bb.entity)) {
+                        continue;
+                    }
+                    let candidate = (bot.pos.manhattan(bb.pos), bb.entity);
                     if best.is_none_or(|b| candidate < b) {
                         best = Some(candidate);
                     }
