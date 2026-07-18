@@ -652,13 +652,14 @@ sustained-rust `rust_scraps` is the surviving valve).*
       (sockets, host relay ordering, late join / host migration serialization) is [game]/
       new-crate work — the docs' pause/dump/resync policy on desync also lives above this
       layer.* [sim] (L→M as scoped)
-- [ ] **Q71 map generation** — **DESIGN DECIDED 2026-07-17** ([05-terrain.md](05-terrain.md)
-      *Map Generation*, QUESTIONS.md); now **implementation-milestone work** (below), not a
-      design blocker. Everything above still runs on authored/dev MapSpecs until it lands.
+- [x] **Q71 map generation** — **DESIGN DECIDED 2026-07-17** ([05-terrain.md](05-terrain.md)
+      *Map Generation*, QUESTIONS.md); **SIM CORE IMPLEMENTED 2026-07-18** (M14 below — the
+      `sim::mapgen` producer, validator, config, and tests all land). The game still hand-authors
+      its scene; wiring `generate` into match setup is the one open M14 item.
 
 ---
 
-## M14 — Procedural map generation (Q71) — NOT STARTED
+## M14 — Procedural map generation (Q71) ✅ SIM CORE COMPLETE (2026-07-18) — game wiring below
 
 Design is settled (docs/05 *Map Generation*): a deterministic, seeded, **integer-only,
 setup-time** producer — never in the tick, never in the phase-9 hash. Consumes a config +
@@ -666,28 +667,48 @@ seed, emits a `MapSpec` the existing `Sim::new`/`World::from_spec` path takes un
 this milestone adds a producer and a validator without touching the sim's hot path. **v1 is
 co-op-first**; PvP rotational symmetry is deferred to a later pass.
 
-- [ ] **`sim::mapgen` module** — `fn generate(&MapgenConfig, seed) -> MapSpec`. Draws from a
-      dedicated `mapgen` RNG (seed `stream_seed(seed, "mapgen")`, `next_rand` SplitMix64 —
-      integer only, BTree/sorted). Pipeline **skeleton → fill → validate → regenerate**. Not
-      wired into `RngStreams`/the state hash (it runs before the tick loop, once). [sim] (L)
-- [ ] **Skeleton stage** — center-out band layout; place-by-construction of the start-zone
-      kit (Iron+Coal+Wood+Stone + Vent + shore strip), tier bands, nest rings by arcanum
-      (`max_arcanum` gate), Crystal-beside-Corruption, Template Caches ringing starts. Needs
-      the progression Cache entity to exist (dependency). [sim] (M)
-- [ ] **Fill stage** — integer value-noise painting decorative biomes (Rubble/Mud/Snow/
-      Dunes/Ice/Scree/extra Water/High Ground) against per-band budgets; must never overwrite
-      placed guarantees. [sim] (M)
-- [ ] **Validator + regenerate loop** — BFS/flood-fill playability floor (kit walkable from
-      printer, a start vein within base sight, reachable shoreline per start, Copper+Tin
-      reachable, no sealed start); on failure derive the next sub-seed (counter folded into
-      the seed) and retry, capped; loud error if the cap is hit. Also the general
-      `MapSpec::validate` (bounds, no fatal overlaps) the codebase lacks today. [sim] (M)
-- [ ] **`MapgenConfig` in data** — band widths, per-band resource densities, Corruption
-      amount, retry cap, wedge size, size-vs-player-count scaling — all tuning constants
-      (`mapgen.ron` or similar), per the doc convention. [sim] (S)
-- [ ] **Wire into match setup + tests** — the game calls `generate` at match creation instead
-      of hand-authoring; headless tests assert the floor holds across many seeds and that the
-      same seed reproduces byte-identical `MapSpec`s. [sim][game] (M)
+- [x] **`sim::mapgen` module** — `fn generate(&MapgenConfig, seed, players) -> MapSpec`. Draws
+      from a dedicated `mapgen` stream (`stream_seed(seed, "mapgen")` + `next_rand` SplitMix64
+      via `Fnv1a`-hashed value-noise — integer only, BTree/sorted, no floats). Pipeline
+      **skeleton → fill → validate → regenerate**; each attempt folds the retry counter into
+      the seed (`mix(base, k)`) so `seed S` deterministically resolves to the first passing
+      candidate. Runs before the tick loop, once — untouched by `RngStreams`/the state hash.
+      `spec.seed` (the sim's runtime RNG) is `stream_seed(seed, "sim")`. [sim] (L)
+- [x] **Skeleton stage** — center-out concentric bands (Chebyshev), rim start zones on a
+      square-ring perimeter walk (any player count, no trig). Place-by-construction: the
+      start-zone kit (Iron+Coal+Wood+Stone within `start_vein_sight` of the printer), a Vent,
+      a reachable Water+Sand shore strip, Green(remainder)+ruined-Red printers, a depot, a
+      stoked Generator; per-wedge Copper/Tin (mid) and Silver/Gold (deep) along the radial; a
+      shared central Blight Core ringed by Corruption + Crystal; per-wedge and apex Feral
+      nests (arcanum scaled, capped at `nest_max_arcanum`). A reserved set (start disc + kit +
+      a 4-connected radial corridor to center) keeps fill off every guarantee. *Template
+      Caches are NOT placed — the progression Cache entity is still unbuilt (no `MapSpec`
+      field for it); deferred with that system.* [sim] (M)
+- [x] **Fill stage** — coherent integer value-noise (coarse-cell corners + integer bilinear)
+      paints decorative biomes against per-band budgets, skipping reserved tiles. *v1 palette
+      is limited to the kinds `MapSpec` can carry (Rubble/Mud/Snow, + Water/High Ground in the
+      deep band only); Dunes/Ice/Scree have no `MapSpec` list yet and degrade to Rubble.* [sim] (M)
+- [x] **Validator + regenerate loop** — `mapgen::playability_floor` runs a flat-bitmap BFS
+      flood-fill per start and checks the floor (kit walkable, an ore-family vein in sight,
+      reachable shoreline, Copper+Tin reachable, start not sealed from the frontier); on
+      failure `generate` tries the next sub-seed, capped at `retry_cap`, panicking loudly if
+      the cap is hit. Also the general `MapSpec::validate` (bounds, spawnability, no bare-ground
+      nodes, no duplicate printers) + the shared `MapSpec::paint_grid` the codebase lacked;
+      `World::from_spec` now uses the shared painter. [sim] (M)
+- [x] **`MapgenConfig` in data** — `crates/sim/data/mapgen.ron`: band percents, per-band fill
+      budgets + weighted biome palettes, `start_vein_sight`, `node_amount`, `retry_cap`,
+      `noise_cell`, Blight radius/hp, `nest_max_arcanum`, per-faction starting stock, size
+      scaling (`base_size` + `size_per_player`, `max_size`), dev flags. Load + validate mirror
+      `Tuning` (`include_str!` + `ron::from_str`). [sim] (S)
+- [x] **Headless tests** (`crates/sim/tests/mapgen.rs`, 14 cases) — same-seed byte-identical
+      reproduction (across seeds × player counts), the floor holds across 1–8 players × many
+      seeds, distinct seeds differ, size scales with players, 0→1 clamp, a generated spec
+      builds + steps a `Sim`, every start gets an ore vein in sight, the floor *rejects* a
+      sealed start, and the `MapSpec::validate` positive/negative cases. [sim] (M)
+- [ ] **Wire into game match setup** — the game still hand-authors `build_colony`; a real
+      match should call `mapgen::generate` at creation (and deploy starter programs to the
+      generated printers). Left out of the sim milestone deliberately: the scene hardcodes
+      Pyrite source (see the scene smoke test) and needs its own pass. [game] (M)
 - [ ] **PvP rotational symmetry** — generate one wedge, rotate-copy N times, resource-exact.
       **Deferred past co-op v1** — layers on the co-op generator. [sim] (M)
 

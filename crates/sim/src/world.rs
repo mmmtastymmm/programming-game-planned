@@ -1266,32 +1266,11 @@ pub fn next_rand(state: &mut u64) -> u64 {
 
 impl World {
     pub fn from_spec(spec: &MapSpec) -> Self {
-        let mut grid = Grid::filled(spec.width, spec.height, TileKind::Plains);
-        for &pos in &spec.rubble {
-            grid.set(pos, TileKind::Rubble);
-        }
-        for &pos in &spec.water {
-            grid.set(pos, TileKind::Water);
-        }
-        for &pos in &spec.bridges {
-            grid.set(pos, TileKind::Bridge);
-        }
-        for (tiles, kind) in [
-            (&spec.mud, TileKind::Mud),
-            (&spec.corruption, TileKind::Corruption),
-            (&spec.ore_veins, TileKind::OreVein),
-            (&spec.crystal, TileKind::CrystalField),
-            (&spec.high_ground, TileKind::HighGround),
-            (&spec.vents, TileKind::Vent),
-            (&spec.snow, TileKind::Snow),
-        ] {
-            for &pos in tiles {
-                grid.set(pos, kind);
-            }
-        }
-        for &(pos, kind) in &spec.resource_tiles {
-            grid.set(pos, kind);
-        }
+        // Terrain painting is shared with MapSpec::validate (map.rs) — the
+        // painting order lives in one place. Blight-Core Corruption is
+        // re-stamped below after entity allocation (paint_grid already
+        // includes it, but the cores are allocated as entities here).
+        let grid = spec.paint_grid();
         let mut world = Self {
             tick: 0,
             grid,

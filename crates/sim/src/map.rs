@@ -466,7 +466,172 @@ pub struct PrinterSpec {
     pub ruined: bool,
 }
 
+/// Why a `MapSpec` failed [`MapSpec::validate`]. Every variant names the
+/// offending position so a generator bug points at the tile, not "somewhere".
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MapSpecError {
+    /// width or height non-positive.
+    BadDimensions { width: i32, height: i32 },
+    /// A referenced tile lies outside the grid.
+    OutOfBounds { what: &'static str, pos: TilePos },
+    /// A printer / depot / structure was placed where nothing may
+    /// materialize (Water, Barricade, or a Ramp-gated plateau).
+    NotSpawnable { what: &'static str, pos: TilePos, kind: TileKind },
+    /// A resource node sits on ground that yields no resource.
+    NodeOnBareGround { pos: TilePos, kind: TileKind },
+    /// Two printers claim the same tile.
+    DuplicatePrinter { pos: TilePos },
+}
+
 impl MapSpec {
+    /// Paint the terrain grid this spec describes — the single source of
+    /// truth shared by [`crate::World::from_spec`] and [`Self::validate`]
+    /// (painting order is load-bearing: later kinds overwrite earlier, e.g.
+    /// a Mud tile drawn over the water strip). Assumes in-bounds positions;
+    /// `validate` bounds-checks first, so only pre-validated specs reach the
+    /// `set` calls here.
+    pub fn paint_grid(&self) -> Grid {
+        let mut grid = Grid::filled(self.width, self.height, TileKind::Plains);
+        for &pos in &self.rubble {
+            grid.set(pos, TileKind::Rubble);
+        }
+        for &pos in &self.water {
+            grid.set(pos, TileKind::Water);
+        }
+        for &pos in &self.bridges {
+            grid.set(pos, TileKind::Bridge);
+        }
+        for (tiles, kind) in [
+            (&self.mud, TileKind::Mud),
+            (&self.corruption, TileKind::Corruption),
+            (&self.ore_veins, TileKind::OreVein),
+            (&self.crystal, TileKind::CrystalField),
+            (&self.high_ground, TileKind::HighGround),
+            (&self.vents, TileKind::Vent),
+            (&self.snow, TileKind::Snow),
+        ] {
+            for &pos in tiles {
+                grid.set(pos, kind);
+            }
+        }
+        for &(pos, kind) in &self.resource_tiles {
+            grid.set(pos, kind);
+        }
+        // Blight Cores squat on corrupted ground from tick 0 (from_spec
+        // paints these too, after entity allocation).
+        for &(pos, _, _) in &self.blight_cores {
+            grid.set(pos, TileKind::Corruption);
+        }
+        grid
+    }
+
+    /// Structural sanity for a spec before it builds a world: bounds, no
+    /// fatal placements (a printer in a lake, a node on bare plains), no
+    /// duplicate printers. This is the *authoring* floor — the emergent
+    /// playability floor (walkable kit, reachable shoreline) lives in
+    /// [`crate::mapgen`], which validates the finished layout by flood-fill.
+    /// Returns the FIRST problem found (in a deterministic scan order).
+    pub fn validate(&self) -> Result<(), MapSpecError> {
+        if self.width <= 0 || self.height <= 0 {
+            return Err(MapSpecError::BadDimensions { width: self.width, height: self.height });
+        }
+        let in_bounds = |p: TilePos| p.x >= 0 && p.y >= 0 && p.x < self.width && p.y < self.height;
+
+        // 1. Every referenced position must be on the grid. Scanned in a
+        //    fixed field order so the reported error is deterministic.
+        let point_lists: [(&'static str, &[TilePos]); 9] = [
+            ("rubble", &self.rubble),
+            ("water", &self.water),
+            ("bridges", &self.bridges),
+            ("mud", &self.mud),
+            ("corruption", &self.corruption),
+            ("ore_veins", &self.ore_veins),
+            ("crystal", &self.crystal),
+            ("high_ground", &self.high_ground),
+            ("vents", &self.vents),
+        ];
+        for (what, list) in point_lists {
+            for &pos in list {
+                if !in_bounds(pos) {
+                    return Err(MapSpecError::OutOfBounds { what, pos });
+                }
+            }
+        }
+        for &pos in &self.snow {
+            if !in_bounds(pos) {
+                return Err(MapSpecError::OutOfBounds { what: "snow", pos });
+            }
+        }
+        for &(pos, _) in &self.resource_tiles {
+            if !in_bounds(pos) {
+                return Err(MapSpecError::OutOfBounds { what: "resource_tiles", pos });
+            }
+        }
+        for &(pos, _) in &self.ore_nodes {
+            if !in_bounds(pos) {
+                return Err(MapSpecError::OutOfBounds { what: "ore_nodes", pos });
+            }
+        }
+        for &(pos, _) in &self.depots {
+            if !in_bounds(pos) {
+                return Err(MapSpecError::OutOfBounds { what: "depots", pos });
+            }
+        }
+        for p in &self.printers {
+            if !in_bounds(p.pos) {
+                return Err(MapSpecError::OutOfBounds { what: "printers", pos: p.pos });
+            }
+        }
+        for &(pos, _) in &self.structures {
+            if !in_bounds(pos) {
+                return Err(MapSpecError::OutOfBounds { what: "structures", pos });
+            }
+        }
+        for &(pos, _) in &self.nests {
+            if !in_bounds(pos) {
+                return Err(MapSpecError::OutOfBounds { what: "nests", pos });
+            }
+        }
+        for &(pos, _, _) in &self.blight_cores {
+            if !in_bounds(pos) {
+                return Err(MapSpecError::OutOfBounds { what: "blight_cores", pos });
+            }
+        }
+
+        // 2. With bounds guaranteed, paint the grid and check placements.
+        let grid = self.paint_grid();
+        for &(pos, kind) in &self.resource_tiles {
+            let painted = grid.get(pos).expect("in-bounds");
+            if crate::resources::Resource::for_tile(painted).is_none() {
+                return Err(MapSpecError::NodeOnBareGround { pos, kind: painted });
+            }
+            let _ = kind;
+        }
+        let mut printer_seen: BTreeSet<TilePos> = BTreeSet::new();
+        for p in &self.printers {
+            let kind = grid.get(p.pos).expect("in-bounds");
+            if !kind.spawnable() {
+                return Err(MapSpecError::NotSpawnable { what: "printer", pos: p.pos, kind });
+            }
+            if !printer_seen.insert(p.pos) {
+                return Err(MapSpecError::DuplicatePrinter { pos: p.pos });
+            }
+        }
+        for &(pos, _) in &self.depots {
+            let kind = grid.get(pos).expect("in-bounds");
+            if !kind.spawnable() {
+                return Err(MapSpecError::NotSpawnable { what: "depot", pos, kind });
+            }
+        }
+        for &(pos, _) in &self.structures {
+            let kind = grid.get(pos).expect("in-bounds");
+            if !kind.spawnable() {
+                return Err(MapSpecError::NotSpawnable { what: "structure", pos, kind });
+            }
+        }
+        Ok(())
+    }
+
     pub fn empty(width: i32, height: i32) -> Self {
         Self {
             width,

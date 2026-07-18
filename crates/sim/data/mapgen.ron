@@ -1,0 +1,52 @@
+// Procedural map-generation tuning (docs/05 Map Generation, Q71).
+// Consumed by sim::mapgen::MapgenConfig. Integer-only, per the doc
+// convention that every numeric knob lives in data, not code.
+//
+// Bands are concentric squares measured in Chebyshev distance from the map
+// center, as a percent of the half-size: 0..deep is the rich, dangerous
+// core; deep..mid the contested midfield; mid..start_ring the safe rim
+// where start zones sit. Require 0 < deep_pct < mid_pct < start_ring_pct < 100.
+//
+// Fill palettes name only TileKinds MapSpec can carry (Rubble/Mud/Snow/
+// Water/HighGround); Water & HighGround are impassable, so they appear in
+// the deep band only — inward of every guarantee, where they cannot seal a
+// rim start. Weights are relative within a palette.
+(
+    base_size: 48,
+    size_per_player: 16,
+    max_size: 128,
+
+    deep_pct: 35,
+    mid_pct: 65,
+    start_ring_pct: 85,
+
+    start_vein_sight: 5,
+    node_amount: 40,
+    retry_cap: 32,
+    noise_cell: 6,
+
+    rim_fill: (
+        fill_permille: 180,
+        biomes: [ (Snow, 3), (Rubble, 2), (Mud, 1) ],
+    ),
+    mid_fill: (
+        fill_permille: 300,
+        biomes: [ (Rubble, 3), (Mud, 3), (Snow, 1) ],
+    ),
+    deep_fill: (
+        fill_permille: 340,
+        biomes: [ (Rubble, 2), (Mud, 2), (HighGround, 2), (Water, 1) ],
+    ),
+
+    blight_radius: 4,
+    blight_hp: 300,
+    nest_max_arcanum: 12,
+
+    starting_stock: [ (Steel, 30), (Iron, 10), (Coal, 5) ],
+
+    // v1 generated maps run as dev sandboxes (free power, all constructs
+    // unlocked) so they are immediately steppable; production match wiring
+    // flips these once the economy bootstraps from generated Generators.
+    dev_all_unlocks: true,
+    dev_free_power: true,
+)

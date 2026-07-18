@@ -12,6 +12,7 @@
 mod actions;
 mod damage;
 pub mod hash;
+pub mod mapgen;
 mod movement;
 mod printers;
 pub mod host;
