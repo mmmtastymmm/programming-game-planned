@@ -659,7 +659,7 @@ sustained-rust `rust_scraps` is the surviving valve).*
 
 ---
 
-## M14 — Procedural map generation (Q71) ✅ SIM CORE COMPLETE (2026-07-18) — game wiring below
+## M14 — Procedural map generation (Q71) ✅ CO-OP v1 COMPLETE (2026-07-18) — PvP symmetry deferred
 
 Design is settled (docs/05 *Map Generation*): a deterministic, seeded, **integer-only,
 setup-time** producer — never in the tick, never in the phase-9 hash. Consumes a config +
@@ -705,10 +705,13 @@ co-op-first**; PvP rotational symmetry is deferred to a later pass.
       seeds, distinct seeds differ, size scales with players, 0→1 clamp, a generated spec
       builds + steps a `Sim`, every start gets an ore vein in sight, the floor *rejects* a
       sealed start, and the `MapSpec::validate` positive/negative cases. [sim] (M)
-- [ ] **Wire into game match setup** — the game still hand-authors `build_colony`; a real
-      match should call `mapgen::generate` at creation (and deploy starter programs to the
-      generated printers). Left out of the sim milestone deliberately: the scene hardcodes
-      Pyrite source (see the scene smoke test) and needs its own pass. [game] (M)
+- [x] **Wire into game match setup** — `scene::build_generated_colony(seed, players)` calls
+      `mapgen::generate`, builds the `Sim`, and deploys the starter Green/Red programs to every
+      faction's printers. `main::setup_sim` picks it when `MAPGEN_SEED` is set (`MAPGEN_PLAYERS`
+      optional, default 1); with no seed the hand-authored showcase demo runs as before, so the
+      demo set pieces + smoke test are untouched. The existing terrain renderer already draws
+      every `TileKind` the generator emits. Guarded by a game-side smoke test (build + deploy +
+      step). *Making generated the default (retiring the showcase) is a later call.* [game] (M)
 - [ ] **PvP rotational symmetry** — generate one wedge, rotate-copy N times, resource-exact.
       **Deferred past co-op v1** — layers on the co-op generator. [sim] (M)
 

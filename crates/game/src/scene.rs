@@ -2,6 +2,7 @@
 
 use bevy::prelude::*;
 use sim::map::{MapSpec, PrinterSpec};
+use sim::mapgen::{self, MapgenConfig};
 use sim::sim::{Command, Sim};
 use sim::world::{BlueprintKind, Color as BotColor};
 use sim::{TileKind, TilePos};
@@ -242,6 +243,35 @@ pub(crate) fn build_colony() -> Sim {
         100,
         "wait(300)\nattack(closest(enemy).expect())\nwait(100000)\n",
     );
+    game
+}
+
+/// Build a colony from the **procedural generator** (M14, docs/05 Map
+/// Generation) instead of the hand-authored showcase above. Runs
+/// `sim::mapgen::generate` once (deterministic in `(seed, players)`), then
+/// deploys the starter Green/Red programs to every faction's printers so the
+/// generated colonies actually boot and mine. Opt-in via `MAPGEN_SEED` (see
+/// [`main`]) — the showcase stays the default so the demo set pieces and
+/// their smoke test are untouched.
+pub(crate) fn build_generated_colony(seed: u64, players: u32) -> Sim {
+    let cfg = MapgenConfig::default();
+    let spec = mapgen::generate(&cfg, seed, players);
+    let mut game = Sim::new(&spec);
+    // Slow boots so the power-on cloud is watchable, matching the demo.
+    game.tuning.boot_ticks = 40;
+    // Give every faction a working program on both its colors. Green is the
+    // remainder (working) printer; Red ships ruined but the deploy is
+    // harmless (it just files the color's source for when it's repaired).
+    for faction in 0..players as u8 {
+        for color in [BotColor::GREEN, BotColor::RED] {
+            game.apply(&Command::DeployProgram {
+                faction,
+                color,
+                source: crate::editor::starter_deploy_source(color.0),
+            })
+            .expect("starter program parses");
+        }
+    }
     game
 }
 
@@ -1105,5 +1135,27 @@ mod tests {
         // syntax).
         let sim = build_colony();
         assert!(sim.world.bots.len() > 1, "the showcase cast spawned");
+    }
+
+    #[test]
+    fn a_generated_colony_builds_and_deploys() {
+        // Guards the M14 game wiring: mapgen produces a world Sim::new
+        // accepts, AND the starter Green/Red programs still parse when
+        // deployed onto generated printers (the same hardcoded-Pyrite trap
+        // the showcase smoke test guards, on the generated path).
+        let mut sim = build_generated_colony(42, 2);
+        // Two factions, each with its Green (remainder) + Red printer.
+        assert_eq!(sim.world.printers.len(), 4, "2 factions x 2 printers");
+        // Both colors have a deployed program for each faction.
+        assert!(
+            sim.world.color_programs.len() >= 4,
+            "starter programs deployed to every faction/color"
+        );
+        // And it runs: stepping past boot prints and boots bots without a
+        // runtime panic (the generated map is dev-powered, so it self-drives).
+        for _ in 0..120 {
+            sim.step();
+        }
+        assert!(!sim.world.bots.is_empty(), "the generated colony printed bots");
     }
 }

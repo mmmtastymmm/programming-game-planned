@@ -93,7 +93,21 @@ fn main() {
 }
 
 fn setup_sim(world: &mut World) {
-    world.insert_non_send_resource(GameSim(scene::build_colony()));
+    // `MAPGEN_SEED=<n>` (optionally `MAPGEN_PLAYERS=<n>`, default 1) launches
+    // a procedurally generated colony (M14, docs/05 Map Generation); with no
+    // seed set, the hand-authored showcase demo runs as before.
+    let sim = match std::env::var("MAPGEN_SEED").ok().and_then(|s| s.parse::<u64>().ok()) {
+        Some(seed) => {
+            let players = std::env::var("MAPGEN_PLAYERS")
+                .ok()
+                .and_then(|s| s.parse::<u32>().ok())
+                .unwrap_or(1);
+            info!("mapgen: generating colony (seed {seed}, {players} players)");
+            scene::build_generated_colony(seed, players)
+        }
+        None => scene::build_colony(),
+    };
+    world.insert_non_send_resource(GameSim(sim));
 }
 
 fn step_sim(mut game: NonSendMut<GameSim>, editor: Res<EditorState>) {
