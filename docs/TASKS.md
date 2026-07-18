@@ -652,8 +652,44 @@ sustained-rust `rust_scraps` is the surviving valve).*
       (sockets, host relay ordering, late join / host migration serialization) is [game]/
       new-crate work — the docs' pause/dump/resync policy on desync also lives above this
       layer.* [sim] (L→M as scoped)
-- [ ] **Q71 map generation** — still an open design question; unblock before v1 ships.
-      (Unchanged: everything above runs on authored/dev MapSpecs.)
+- [ ] **Q71 map generation** — **DESIGN DECIDED 2026-07-17** ([05-terrain.md](05-terrain.md)
+      *Map Generation*, QUESTIONS.md); now **implementation-milestone work** (below), not a
+      design blocker. Everything above still runs on authored/dev MapSpecs until it lands.
+
+---
+
+## M14 — Procedural map generation (Q71) — NOT STARTED
+
+Design is settled (docs/05 *Map Generation*): a deterministic, seeded, **integer-only,
+setup-time** producer — never in the tick, never in the phase-9 hash. Consumes a config +
+seed, emits a `MapSpec` the existing `Sim::new`/`World::from_spec` path takes unchanged, so
+this milestone adds a producer and a validator without touching the sim's hot path. **v1 is
+co-op-first**; PvP rotational symmetry is deferred to a later pass.
+
+- [ ] **`sim::mapgen` module** — `fn generate(&MapgenConfig, seed) -> MapSpec`. Draws from a
+      dedicated `mapgen` RNG (seed `stream_seed(seed, "mapgen")`, `next_rand` SplitMix64 —
+      integer only, BTree/sorted). Pipeline **skeleton → fill → validate → regenerate**. Not
+      wired into `RngStreams`/the state hash (it runs before the tick loop, once). [sim] (L)
+- [ ] **Skeleton stage** — center-out band layout; place-by-construction of the start-zone
+      kit (Iron+Coal+Wood+Stone + Vent + shore strip), tier bands, nest rings by arcanum
+      (`max_arcanum` gate), Crystal-beside-Corruption, Template Caches ringing starts. Needs
+      the progression Cache entity to exist (dependency). [sim] (M)
+- [ ] **Fill stage** — integer value-noise painting decorative biomes (Rubble/Mud/Snow/
+      Dunes/Ice/Scree/extra Water/High Ground) against per-band budgets; must never overwrite
+      placed guarantees. [sim] (M)
+- [ ] **Validator + regenerate loop** — BFS/flood-fill playability floor (kit walkable from
+      printer, a start vein within base sight, reachable shoreline per start, Copper+Tin
+      reachable, no sealed start); on failure derive the next sub-seed (counter folded into
+      the seed) and retry, capped; loud error if the cap is hit. Also the general
+      `MapSpec::validate` (bounds, no fatal overlaps) the codebase lacks today. [sim] (M)
+- [ ] **`MapgenConfig` in data** — band widths, per-band resource densities, Corruption
+      amount, retry cap, wedge size, size-vs-player-count scaling — all tuning constants
+      (`mapgen.ron` or similar), per the doc convention. [sim] (S)
+- [ ] **Wire into match setup + tests** — the game calls `generate` at match creation instead
+      of hand-authoring; headless tests assert the floor holds across many seeds and that the
+      same seed reproduces byte-identical `MapSpec`s. [sim][game] (M)
+- [ ] **PvP rotational symmetry** — generate one wedge, rotate-copy N times, resource-exact.
+      **Deferred past co-op v1** — layers on the co-op generator. [sim] (M)
 
 ---
 
