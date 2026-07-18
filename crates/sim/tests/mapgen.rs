@@ -40,6 +40,38 @@ fn distinct_seeds_produce_distinct_maps() {
     assert!(differ >= 38, "expected distinct maps across seeds, only {differ}/39 differed");
 }
 
+#[test]
+fn seed_varies_the_strategic_layout_not_just_the_fill() {
+    // The seed must move the *skeleton* (start positions, veins, nests) —
+    // not only the decorative rubble/mud/snow. Guards against the whole
+    // strategic layout being derived from geometry alone.
+    let cfg = MapgenConfig::default();
+    // The strategic footprint = printer tiles + resource veins + nests.
+    let strategic = |seed: u64| {
+        let s = mapgen::generate(&cfg, seed, 3);
+        let mut printers: Vec<_> = s.printers.iter().map(|p| (p.pos, p.faction, p.color)).collect();
+        printers.sort();
+        (printers, s.resource_tiles.clone(), s.nests.clone())
+    };
+    let a = strategic(1);
+    let b = strategic(2);
+    assert_ne!(a.0, b.0, "printer/start positions should vary by seed");
+    assert_ne!(a.1, b.1, "resource-vein layout should vary by seed");
+}
+
+#[test]
+fn huge_player_count_clamps_instead_of_panicking() {
+    // A pathological MAPGEN_PLAYERS must degrade to a full map, never abort.
+    let cfg = MapgenConfig::default();
+    let cap = mapgen::max_supported_players(&cfg);
+    let spec = mapgen::generate(&cfg, 3, 100_000);
+    spec.validate().expect("clamped map is structurally valid");
+    mapgen::playability_floor(&spec, &cfg, cap).expect("clamped map holds the floor");
+    let factions = spec.printers.iter().map(|p| p.faction).max().map(|m| m as u32 + 1).unwrap_or(0);
+    assert_eq!(factions, cap, "player count clamps to the ring capacity");
+    assert!(cap >= 8, "the default config should seat a reasonable roster (got {cap})");
+}
+
 // ------------------------------------------------------------ the floor
 
 #[test]

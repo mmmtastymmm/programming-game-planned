@@ -532,6 +532,14 @@ impl MapSpec {
     /// [`crate::mapgen`], which validates the finished layout by flood-fill.
     /// Returns the FIRST problem found (in a deterministic scan order).
     pub fn validate(&self) -> Result<(), MapSpecError> {
+        self.validate_grid().map(|_| ())
+    }
+
+    /// [`Self::validate`] that also hands back the painted [`Grid`] on
+    /// success, so a caller that needs the grid anyway (the generator's
+    /// floor check) validates and paints in a single pass instead of
+    /// repainting the same spec two or three times.
+    pub fn validate_grid(&self) -> Result<Grid, MapSpecError> {
         if self.width <= 0 || self.height <= 0 {
             return Err(MapSpecError::BadDimensions { width: self.width, height: self.height });
         }
@@ -539,7 +547,7 @@ impl MapSpec {
 
         // 1. Every referenced position must be on the grid. Scanned in a
         //    fixed field order so the reported error is deterministic.
-        let point_lists: [(&'static str, &[TilePos]); 9] = [
+        let point_lists: [(&'static str, &[TilePos]); 10] = [
             ("rubble", &self.rubble),
             ("water", &self.water),
             ("bridges", &self.bridges),
@@ -549,17 +557,13 @@ impl MapSpec {
             ("crystal", &self.crystal),
             ("high_ground", &self.high_ground),
             ("vents", &self.vents),
+            ("snow", &self.snow),
         ];
         for (what, list) in point_lists {
             for &pos in list {
                 if !in_bounds(pos) {
                     return Err(MapSpecError::OutOfBounds { what, pos });
                 }
-            }
-        }
-        for &pos in &self.snow {
-            if !in_bounds(pos) {
-                return Err(MapSpecError::OutOfBounds { what: "snow", pos });
             }
         }
         for &(pos, _) in &self.resource_tiles {
@@ -600,12 +604,11 @@ impl MapSpec {
 
         // 2. With bounds guaranteed, paint the grid and check placements.
         let grid = self.paint_grid();
-        for &(pos, kind) in &self.resource_tiles {
+        for &(pos, _) in &self.resource_tiles {
             let painted = grid.get(pos).expect("in-bounds");
             if crate::resources::Resource::for_tile(painted).is_none() {
                 return Err(MapSpecError::NodeOnBareGround { pos, kind: painted });
             }
-            let _ = kind;
         }
         let mut printer_seen: BTreeSet<TilePos> = BTreeSet::new();
         for p in &self.printers {
@@ -629,7 +632,7 @@ impl MapSpec {
                 return Err(MapSpecError::NotSpawnable { what: "structure", pos, kind });
             }
         }
-        Ok(())
+        Ok(grid)
     }
 
     pub fn empty(width: i32, height: i32) -> Self {

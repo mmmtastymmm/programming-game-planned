@@ -259,10 +259,15 @@ pub(crate) fn build_generated_colony(seed: u64, players: u32) -> Sim {
     let mut game = Sim::new(&spec);
     // Slow boots so the power-on cloud is watchable, matching the demo.
     game.tuning.boot_ticks = 40;
-    // Give every faction a working program on both its colors. Green is the
-    // remainder (working) printer; Red ships ruined but the deploy is
-    // harmless (it just files the color's source for when it's repaired).
-    for faction in 0..players as u8 {
+    // Deploy the starter programs to the factions the generator actually
+    // seated — it clamps `players` to what the rim can hold, so this may be
+    // fewer than requested. Green is the remainder (working) printer; Red
+    // ships ruined but the deploy is harmless (it files the color's source
+    // for when it is repaired). Collected into a sorted set so the deploy
+    // order is deterministic and each faction is deployed exactly once.
+    let factions: std::collections::BTreeSet<u8> =
+        game.world.printers.values().map(|p| p.faction).collect();
+    for faction in factions {
         for color in [BotColor::GREEN, BotColor::RED] {
             game.apply(&Command::DeployProgram {
                 faction,

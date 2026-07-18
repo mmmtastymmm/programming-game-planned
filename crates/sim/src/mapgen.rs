@@ -29,6 +29,16 @@ use crate::map::{Grid, MapSpec, PrinterSpec, TileKind, TilePos};
 use crate::resources::Resource;
 use crate::world::{next_rand, stream_seed, StructureKind};
 
+/// Orthogonal neighbor offsets (N, E, S, W) — the connectivity the reserved
+/// corridors thicken to and the floor floods over. One const so a change to
+/// the movement model (e.g. 8-connectivity) touches a single place.
+const NEIGHBORS4: [(i32, i32); 4] = [(0, -1), (1, 0), (0, 1), (-1, 0)];
+
+/// Minimum tiles between adjacent start zones on the rim ring: the start
+/// footprint (a ±2 disc, 5 wide) plus a gap, so neighbours never collide.
+/// Caps how many players a given map can seat (see [`max_supported_players`]).
+const MIN_START_SPACING: i32 = 7;
+
 /// Per-band decorative fill: what fraction of the band's open tiles gets
 /// painted, and which biomes (weighted) it draws from.
 #[derive(Debug, Clone, PartialEq, serde::Deserialize)]
@@ -116,26 +126,27 @@ impl MapgenConfig {
 
 /// The single public entry point. Deterministic in `(config, seed,
 /// players)`: the same inputs yield a byte-identical `MapSpec` on any
-/// machine. `players` is clamped to at least 1.
+/// machine. `players` is clamped to `1..=max_supported_players` — a count too
+/// large to seat on the rim degrades to a full map, never a startup panic.
 ///
 /// Panics only if `retry_cap` candidate layouts all fail the playability
 /// floor — a config bug (bands too dense), surfaced loudly rather than
 /// shipping a soft-locked map.
 pub fn generate(config: &MapgenConfig, seed: u64, players: u32) -> MapSpec {
-    let players = players.max(1);
+    let players = players.clamp(1, max_supported_players(config));
     // The base mapgen stream: every attempt's sub-seed derives from it, so
     // `seed S` deterministically resolves to the first passing candidate.
     let base = stream_seed(seed, "mapgen");
     for attempt in 0..config.retry_cap {
         // Fold the retry counter into the seed (a fresh named sub-stream
         // per attempt — decorrelated from its neighbors).
-        let mut s = base;
-        s = mix(s, attempt as u64);
+        let s = mix(base, attempt as u64);
         let spec = build_candidate(config, s, players);
-        // The authoring floor first (a generator bug is a hard error, not a
-        // retry), then the emergent playability floor.
-        spec.validate().expect("mapgen emits a structurally valid MapSpec");
-        if playability_floor(&spec, config, players).is_ok() {
+        // Paint the terrain ONCE and share it between the authoring floor (a
+        // generator bug is a hard error, not a retry) and the emergent
+        // playability floor. World-build repaints later — unavoidable.
+        let grid = spec.validate_grid().expect("mapgen emits a structurally valid MapSpec");
+        if floor_on_grid(&spec, &grid, config, players).is_ok() {
             return spec;
         }
     }
@@ -144,6 +155,15 @@ pub fn generate(config: &MapgenConfig, seed: u64, players: u32) -> MapSpec {
          config bands are too dense",
         config.retry_cap, players
     );
+}
+
+/// The most players a map of this config can seat: the widest possible rim
+/// ring (at `max_size`, where the ring is largest) divided by the minimum
+/// start spacing. Beyond this, adjacent start zones would collide.
+pub fn max_supported_players(config: &MapgenConfig) -> u32 {
+    let half = config.max_size / 2;
+    let ring = (half * config.start_ring_pct / 100).max(3);
+    (8 * ring / MIN_START_SPACING).max(1) as u32
 }
 
 /// SplitMix64-style scramble of two words — used to fold the attempt
@@ -205,11 +225,15 @@ impl Geometry {
     }
 
     /// The N start-zone tiles, evenly spaced clockwise around a Chebyshev
-    /// square ring — integer perimeter walk, no trig, any player count.
-    fn start_positions(&self, players: u32) -> Vec<TilePos> {
+    /// square ring — integer perimeter walk, no trig, any player count. The
+    /// `rotation` (a seed-derived perimeter offset) turns the whole ring so
+    /// different seeds seat starts at different rim positions.
+    fn start_positions(&self, players: u32, rotation: i32) -> Vec<TilePos> {
         let r = self.start_ring;
         let perimeter = 8 * r; // tiles on a Chebyshev ring of radius r >= 1
-        (0..players).map(|i| self.ring_point(r, (i as i32 * perimeter) / players as i32)).collect()
+        (0..players)
+            .map(|i| self.ring_point(r, rotation + (i as i32 * perimeter) / players as i32))
+            .collect()
     }
 
     /// Tile at perimeter index `idx` on the square ring of radius `r`,
@@ -284,6 +308,18 @@ fn value_noise(seed: u64, salt: u32, cell: i32, x: i32, y: i32) -> u32 {
     let bot = v01 * (c - fx) + v11 * fx; // scaled by c
     let val = top * (c - fy) + bot * fy; // scaled by c*c, range 0..=255*c*c
     (val * 1000 / (255 * c * c)) as u32
+}
+
+/// A deterministic integer in `0..modulo`, keyed by `(seed, salt, faction)`
+/// — the skeleton's source of per-wedge seed variation (vein radii, nest
+/// arcanum), so the strategic layout differs seed-to-seed, not just the
+/// decorative fill.
+fn seed_pick(seed: u64, salt: u32, faction: u8, modulo: i32) -> i32 {
+    let mut h = Fnv1a::new();
+    h.write_u64(seed);
+    h.write_u32(salt);
+    h.write_u8(faction);
+    (h.finish() % modulo.max(1) as u64) as i32
 }
 
 /// Pick a biome from a weighted palette using a 0..=999 selector.
@@ -362,8 +398,40 @@ impl Skeleton {
     /// into a 4-connected one.
     fn reserve_thick(&mut self, p: TilePos) {
         self.reserve(p);
-        for (dx, dy) in [(0, -1), (1, 0), (0, 1), (-1, 0)] {
+        for (dx, dy) in NEIGHBORS4 {
             self.reserve(TilePos::new(p.x + dx, p.y + dy));
+        }
+    }
+
+    /// Place a guarantee tile: reserve it AND route it to its MapSpec list,
+    /// skipping anything off-grid — parity with [`Self::reserve`], which also
+    /// clamps. A guarantee that can't fit is dropped, and the floor catches
+    /// the resulting gap and regenerates (now that the skeleton is
+    /// seed-varied, a retry actually moves things); the spec is never
+    /// out-of-bounds, which would panic world-build.
+    fn place(&mut self, kind: TileKind, p: TilePos) {
+        if !self.geo.in_bounds(p) {
+            return;
+        }
+        self.reserve(p);
+        match kind {
+            TileKind::Water => self.water.push(p),
+            TileKind::Mud => self.mud.push(p),
+            TileKind::Snow => self.snow.push(p),
+            TileKind::Corruption => self.corruption.push(p),
+            TileKind::HighGround => self.high_ground.push(p),
+            TileKind::Vent => self.vents.push(p),
+            TileKind::CrystalField => self.crystal.push(p),
+            TileKind::Sand
+            | TileKind::StoneOutcrop
+            | TileKind::Grove
+            | TileKind::CoalSeam
+            | TileKind::IronVein
+            | TileKind::CopperVein
+            | TileKind::TinVein
+            | TileKind::SilverVein
+            | TileKind::GoldVein => self.resource_tiles.push((p, kind)),
+            _ => self.rubble.push(p),
         }
     }
 }
@@ -372,11 +440,16 @@ impl Skeleton {
 fn build_candidate(config: &MapgenConfig, seed: u64, players: u32) -> MapSpec {
     let geo = Geometry::new(config, players);
     let mut sk = Skeleton::new(geo);
-    let starts = sk.geo.start_positions(players);
+    // Rotate the whole start ring by a seed-derived amount, so different
+    // seeds seat the starts — and their entire wedges of ore/nests — at
+    // different rim positions, not just a different decorative scatter.
+    let perimeter = (8 * sk.geo.start_ring).max(1);
+    let rotation = (mix(seed, 101) % perimeter as u64) as i32;
+    let starts = sk.geo.start_positions(players, rotation);
 
     // --- Skeleton: place every guarantee, per start wedge -----------------
     for (i, &s) in starts.iter().enumerate() {
-        place_start(&mut sk, config, i as u8, s);
+        place_start(&mut sk, config, seed, i as u8, s);
     }
     // A shared, contested deep-field core: a big Blight Core + Crystal + a
     // top-arcanum nest at the very center (the frontier the team pushes).
@@ -389,7 +462,9 @@ fn build_candidate(config: &MapgenConfig, seed: u64, players: u32) -> MapSpec {
 }
 
 /// Lay out one start zone and its radial wedge (kit → mid ore → deep ore).
-fn place_start(sk: &mut Skeleton, config: &MapgenConfig, faction: u8, s: TilePos) {
+/// Vein radii and nest arcanum are jittered per `(seed, faction)` so seeds
+/// vary the strategic layout, not just the fill.
+fn place_start(sk: &mut Skeleton, config: &MapgenConfig, seed: u64, faction: u8, s: TilePos) {
     let (ix, iy) = sk.geo.inward(s);
     // Tangent (perpendicular to inward), for spacing kit off the corridor.
     let (tx, ty) = (-iy, ix);
@@ -407,6 +482,8 @@ fn place_start(sk: &mut Skeleton, config: &MapgenConfig, faction: u8, s: TilePos
 
     // Printers: Green (remainder, working) + a ruined Red, per docs/03's
     // opening. Green is the faction's first-born → indestructible remainder.
+    // (Both sit at a=0, always inside the reserved disc / margin, so they are
+    // placed directly rather than via the OOB-skipping `place`.)
     let green = at(0, 0);
     let red = at(0, 2);
     sk.reserve(green);
@@ -425,66 +502,54 @@ fn place_start(sk: &mut Skeleton, config: &MapgenConfig, faction: u8, s: TilePos
     // The guaranteed kit — Iron + Coal + Wood + Stone — within sight of the
     // printer (all inside the reserved disc / corridor, so reachable).
     let iron = at(1, 1);
-    let coal = at(2, 0);
-    let grove = at(1, -2);
-    let stone = at(2, 1);
-    for (p, kind) in [
-        (iron, TileKind::IronVein),
-        (coal, TileKind::CoalSeam),
-        (grove, TileKind::Grove),
-        (stone, TileKind::StoneOutcrop),
-    ] {
-        sk.reserve(p);
-        sk.resource_tiles.push((p, kind));
-    }
+    sk.place(TileKind::IronVein, iron);
+    sk.place(TileKind::CoalSeam, at(2, 0));
+    sk.place(TileKind::Grove, at(1, -2));
+    sk.place(TileKind::StoneOutcrop, at(2, 1));
     debug_assert!(
         s.chebyshev(iron) <= config.start_vein_sight as u32,
         "kit Iron vein must sit within start sight"
     );
 
-    // A start Vent (free-energy tap ground).
-    let vent = at(3, 0);
-    sk.reserve(vent);
-    sk.vents.push(vent);
+    // A start Vent (free-energy tap ground) and a reachable shore strip on
+    // the tangential side — Water + a Sand flat (coolant AND Glass feedstock,
+    // the two-birds guarantee), kept beside the reserved disc so the water
+    // borders reachable ground.
+    sk.place(TileKind::Vent, at(3, 0));
+    sk.place(TileKind::Water, at(-1, 2));
+    sk.place(TileKind::Water, at(-2, 2));
+    sk.place(TileKind::Sand, at(-1, 1));
 
-    // A reachable shore strip on the tangential side, kept beside the
-    // reserved disc so it borders reachable ground. Water + a Sand flat
-    // (coolant AND Glass feedstock — the two-birds guarantee). Tiles are
-    // chosen off the printer/kit set so nothing collides.
-    for w in [at(-1, 2), at(-2, 2)] {
-        sk.reserve(w);
-        sk.water.push(w);
-    }
-    let sand = at(-1, 1);
-    sk.reserve(sand);
-    sk.resource_tiles.push((sand, TileKind::Sand));
-
-    // Midfield wedge: Copper + Tin along the radial (no Bronze soft-lock).
-    let mid_r = (sk.geo.deep_r + sk.geo.mid_r) / 2;
+    // Midfield wedge: Copper + Tin along the radial (no Bronze soft-lock),
+    // at a seed-jittered radius. They stay on the reserved (thickened)
+    // corridor, so reachability holds; the floor finds them by kind, not by
+    // recomputing this radius.
+    let mid_base = (sk.geo.deep_r + sk.geo.mid_r) / 2;
+    let mid_r = (mid_base + seed_pick(seed, 20, faction, 3) - 1).clamp(sk.geo.deep_r + 1, sk.geo.mid_r);
     let copper = sk.geo.toward_center(s, mid_r);
     let tin = TilePos::new(copper.x + tx, copper.y + ty);
-    for (p, kind) in [(copper, TileKind::CopperVein), (tin, TileKind::TinVein)] {
-        sk.reserve_thick(p);
-        sk.resource_tiles.push((p, kind));
-    }
+    sk.reserve_thick(copper);
+    sk.reserve_thick(tin);
+    sk.place(TileKind::CopperVein, copper);
+    sk.place(TileKind::TinVein, tin);
 
-    // Deep wedge: Silver + Gold, richer material farther in (inside the
-    // deep band, distinct radii so they never share a tile).
-    let deep_local = sk.geo.deep_r.max(2);
+    // Deep wedge: Silver + Gold, richer material farther in (inside the deep
+    // band, distinct radii so they never share a tile), radius seed-jittered.
+    let deep_local = (sk.geo.deep_r + seed_pick(seed, 21, faction, 3) - 1).clamp(2, sk.geo.mid_r);
     let silver = sk.geo.toward_center(s, deep_local);
     let gold = sk.geo.toward_center(s, (deep_local - 1).max(1));
-    for (p, kind) in [(silver, TileKind::SilverVein), (gold, TileKind::GoldVein)] {
-        sk.reserve(p);
-        sk.resource_tiles.push((p, kind));
-    }
+    sk.place(TileKind::SilverVein, silver);
+    sk.place(TileKind::GoldVein, gold);
 
     // A per-wedge Feral nest guarding the deep ore, pushed one tile off the
-    // radial so it shares no tile with a vein; a mid arcanum here, the map's
-    // peak arcanum sits at the shared core.
+    // radial so it shares no tile with a vein; a seed-jittered mid arcanum
+    // here, the map's peak arcanum sits at the shared core.
     let nest_base = sk.geo.toward_center(s, (sk.geo.deep_r / 2).max(2));
     let nest = TilePos::new(nest_base.x + tx, nest_base.y + ty);
     if sk.geo.in_bounds(nest) && nest != sk.geo.center {
-        let arc = (config.nest_max_arcanum / 2).max(1);
+        let mid_arc = (config.nest_max_arcanum / 2).max(1) as i32;
+        let arc = (mid_arc + seed_pick(seed, 22, faction, 3) - 1)
+            .clamp(1, config.nest_max_arcanum as i32) as u8;
         sk.reserve(nest);
         sk.nests.push((nest, arc));
     }
@@ -510,31 +575,21 @@ fn place_core(sk: &mut Skeleton, config: &MapgenConfig, seed: u64) {
     let c = sk.geo.center;
     sk.blight_cores.push((c, config.blight_radius, config.blight_hp));
     // A ring of Corruption + Crystal around the core (inside the deep band).
-    for (dx, dy) in [(1, 0), (-1, 0), (0, 1), (0, -1)] {
-        let corrupt = TilePos::new(c.x + dx, c.y + dy);
-        if sk.geo.in_bounds(corrupt) {
-            sk.corruption.push(corrupt);
-            sk.reserve(corrupt);
-        }
-        let crystal = TilePos::new(c.x + dx * 2, c.y + dy * 2);
-        if sk.geo.in_bounds(crystal) {
-            sk.crystal.push(crystal);
-            sk.reserve(crystal);
-        }
+    // `place` skips any tile a tiny map would push off-grid.
+    for (dx, dy) in NEIGHBORS4 {
+        sk.place(TileKind::Corruption, TilePos::new(c.x + dx, c.y + dy));
+        sk.place(TileKind::CrystalField, TilePos::new(c.x + dx * 2, c.y + dy * 2));
     }
-    // The apex nest, one tile off-center so it doesn't share the core tile.
-    let nest = TilePos::new(c.x + 1, c.y + 1);
+    // The apex nest sits at a seed-chosen diagonal off-center (never the core
+    // tile), with the High Ground overlook on the opposite diagonal — so the
+    // core's shape varies with the seed too.
+    let diag = [(1, 1), (1, -1), (-1, 1), (-1, -1)][(mix(seed, 202) % 4) as usize];
+    let nest = TilePos::new(c.x + diag.0, c.y + diag.1);
     if sk.geo.in_bounds(nest) {
         sk.nests.push((nest, config.nest_max_arcanum));
         sk.reserve(nest);
     }
-    // A High Ground overlook nearby (an anchor for defensive programs).
-    let hg = TilePos::new(c.x - 2, c.y - 2);
-    if sk.geo.in_bounds(hg) {
-        sk.high_ground.push(hg);
-        sk.reserve(hg);
-    }
-    let _ = seed;
+    sk.place(TileKind::HighGround, TilePos::new(c.x - diag.0 * 2, c.y - diag.1 * 2));
 }
 
 /// Paint decorative biomes from value-noise over unreserved open tiles,
@@ -645,35 +700,48 @@ pub enum FloorError {
     StartSealed { faction: u8 },
 }
 
-/// Flood-fill from each start printer and confirm the floor holds. Pure
-/// integer BFS over 4-neighbors on passable, non-plateau ground (no ramps
-/// are generated, so High Ground reads as a wall for connectivity).
+/// Flood-fill from each start printer and confirm the floor holds. Paints the
+/// terrain and delegates to [`floor_on_grid`]; the generator's hot path calls
+/// `floor_on_grid` directly with the grid it already painted.
 pub fn playability_floor(
     spec: &MapSpec,
     config: &MapgenConfig,
     players: u32,
 ) -> Result<(), FloorError> {
     let grid = spec.paint_grid();
-    let geo = Geometry::new(config, players);
-    // The floor re-derives each start's checked tiles from the seed-
-    // independent geometry (start positions, the mid-radius Copper/Tin) and
-    // from the spec's own lists (printers, resource_tiles, water) — the spec
-    // doesn't carry the skeleton's bookkeeping, and it doesn't need to.
-    let starts = geo.start_positions(players);
+    floor_on_grid(spec, &grid, config, players)
+}
 
-    for (i, &s) in starts.iter().enumerate() {
-        let faction = i as u8;
-        let printer = spec
+/// The floor check over an already-painted grid. Pure integer BFS over
+/// 4-neighbors on passable, non-plateau ground (no ramps are generated, so
+/// High Ground reads as a wall for connectivity).
+///
+/// Every checked tile comes from the SPEC (the faction's remainder printer,
+/// its in-sight veins, its water, its nearest Copper/Tin), so the check is
+/// independent of *how* the skeleton placed them — which is what lets the
+/// skeleton vary placement by seed. Band membership (for the sealed-start
+/// check) is the only geometry it reads, and bands are seed-independent.
+fn floor_on_grid(
+    spec: &MapSpec,
+    grid: &Grid,
+    config: &MapgenConfig,
+    players: u32,
+) -> Result<(), FloorError> {
+    let geo = Geometry::new(config, players);
+    for faction in 0..players as u8 {
+        let Some(printer) = spec
             .printers
             .iter()
             .find(|p| p.faction == faction && p.color == 0)
             .map(|p| p.pos)
-            .expect("every start has a remainder (color 0) printer");
-        let reach = flood_from(&grid, printer);
+        else {
+            continue; // a faction with no remainder printer — nothing to seat
+        };
+        let reach = flood_from(grid, printer, &geo);
 
-        // Kit: the four start-zone veins nearest the printer must be
-        // reachable. We identify them as the resource_tiles within sight of
-        // this printer.
+        // Kit: every resource tile within the printer's sight must be
+        // reachable, and at least one must be an ore-family vein (so tick-1
+        // `closest(ore)` answers).
         let sight = config.start_vein_sight as u32;
         let mut kit_ore_family_in_sight = false;
         for &(pos, kind) in &spec.resource_tiles {
@@ -693,45 +761,57 @@ pub fn playability_floor(
             return Err(FloorError::NoVeinInSight { faction });
         }
 
-        // Reachable shoreline: some Water tile borders a reachable tile.
+        // Reachable shoreline: some nearby Water tile borders a reachable one.
         let shore_ok = spec.water.iter().any(|&w| {
             printer.chebyshev(w) <= geo.mid_r as u32 * 2
-                && [(0, -1), (1, 0), (0, 1), (-1, 0)]
-                    .iter()
-                    .any(|(dx, dy)| reach.contains(TilePos::new(w.x + dx, w.y + dy)))
+                && NEIGHBORS4.iter().any(|(dx, dy)| reach.contains(TilePos::new(w.x + dx, w.y + dy)))
         });
         if !shore_ok {
             return Err(FloorError::NoReachableShore { faction });
         }
 
-        // Copper + Tin: this start's midfield veins must be reachable. They
-        // sit on the radial toward center at the shared mid radius.
-        let mid_r = (geo.deep_r + geo.mid_r) / 2;
-        let copper = geo.toward_center(s, mid_r);
-        if !near_reachable(&reach, copper) {
-            return Err(FloorError::CopperUnreachable { faction });
+        // Copper + Tin: the printer's nearest vein of each kind must be
+        // reachable (no Bronze soft-lock). Found by kind, not by re-deriving
+        // a radius, so seed-jittered vein placement is respected.
+        match nearest_kind(spec, printer, TileKind::CopperVein) {
+            Some(p) if near_reachable(&reach, p) => {}
+            _ => return Err(FloorError::CopperUnreachable { faction }),
         }
-        let (ix, iy) = geo.inward(s);
-        let tin = TilePos::new(copper.x + (-iy), copper.y + ix);
-        if !near_reachable(&reach, tin) {
-            return Err(FloorError::TinUnreachable { faction });
+        match nearest_kind(spec, printer, TileKind::TinVein) {
+            Some(p) if near_reachable(&reach, p) => {}
+            _ => return Err(FloorError::TinUnreachable { faction }),
         }
 
-        // Not sealed: the reachable set must touch the midfield/deep bands.
-        if !reach.touches_non_rim(&geo) {
+        // Not sealed: the flood reached beyond the rim band (computed during
+        // the BFS — no extra whole-grid scan).
+        if !reach.non_rim {
             return Err(FloorError::StartSealed { faction });
         }
     }
     Ok(())
 }
 
+/// The tile of the resource-ground `kind` nearest `from` (manhattan, ties by
+/// position for determinism), or `None` if the spec has none.
+fn nearest_kind(spec: &MapSpec, from: TilePos, kind: TileKind) -> Option<TilePos> {
+    spec.resource_tiles
+        .iter()
+        .filter(|(_, k)| *k == kind)
+        .map(|&(p, _)| (from.manhattan(p), p))
+        .min()
+        .map(|(_, p)| p)
+}
+
 /// The reachable set as a flat bitmap — deterministic (index order is
 /// positional) and O(1) membership, so the floor check scales to the large
-/// grids high player counts produce.
+/// grids high player counts produce. `non_rim` records, during the flood,
+/// whether any reached tile lay outside the rim band (the sealed-start check,
+/// folded in so it costs no extra whole-grid scan).
 struct Reach {
     w: i32,
     h: i32,
     hit: Vec<bool>,
+    non_rim: bool,
 }
 
 impl Reach {
@@ -742,21 +822,6 @@ impl Reach {
             && p.y < self.h
             && self.hit[(p.y * self.w + p.x) as usize]
     }
-
-    /// Does the reachable set include any tile outside the rim band? (The
-    /// "start not sealed from the frontier" floor check.)
-    fn touches_non_rim(&self, geo: &Geometry) -> bool {
-        for y in 0..self.h {
-            for x in 0..self.w {
-                if self.hit[(y * self.w + x) as usize]
-                    && geo.band(TilePos::new(x, y)) != Band::Rim
-                {
-                    return true;
-                }
-            }
-        }
-        false
-    }
 }
 
 /// A tile counts as reachable-for-mining if it or a 4-neighbor is in the
@@ -764,33 +829,35 @@ impl Reach {
 /// passable ground but may be surrounded — adjacency is the real test).
 fn near_reachable(reach: &Reach, p: TilePos) -> bool {
     reach.contains(p)
-        || [(0, -1), (1, 0), (0, 1), (-1, 0)]
-            .iter()
-            .any(|(dx, dy)| reach.contains(TilePos::new(p.x + dx, p.y + dy)))
+        || NEIGHBORS4.iter().any(|(dx, dy)| reach.contains(TilePos::new(p.x + dx, p.y + dy)))
 }
 
 /// BFS over passable, non-plateau ground from `start`. Deterministic: fixed
-/// N/E/S/W neighbor order, positional bitmap visited set.
-fn flood_from(grid: &Grid, start: TilePos) -> Reach {
+/// N/E/S/W neighbor order, positional bitmap visited set. Tracks whether the
+/// flood escaped the rim band as it goes.
+fn flood_from(grid: &Grid, start: TilePos, geo: &Geometry) -> Reach {
     let (w, h) = (grid.width, grid.height);
     let mut hit = vec![false; (w * h) as usize];
     let idx = |p: TilePos| (p.y * w + p.x) as usize;
     let mut queue = VecDeque::new();
+    let mut non_rim = false;
     if walkable(grid, start) {
         hit[idx(start)] = true;
+        non_rim |= geo.band(start) != Band::Rim;
         queue.push_back(start);
     }
     while let Some(p) = queue.pop_front() {
-        for (dx, dy) in [(0, -1), (1, 0), (0, 1), (-1, 0)] {
+        for (dx, dy) in NEIGHBORS4 {
             let n = TilePos::new(p.x + dx, p.y + dy);
             // walkable(n) implies in-bounds, so idx(n) is valid.
             if walkable(grid, n) && !hit[idx(n)] {
                 hit[idx(n)] = true;
+                non_rim |= geo.band(n) != Band::Rim;
                 queue.push_back(n);
             }
         }
     }
-    Reach { w, h, hit }
+    Reach { w, h, hit, non_rim }
 }
 
 /// Ground a bot can stand on for connectivity: passable, and not a

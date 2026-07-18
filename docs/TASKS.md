@@ -803,6 +803,30 @@ gap (not re-opened): **Template Caches** (Q79's `study()` has nothing to learn f
 Cache/progression-learning system is unbuilt), follow-on milestone work flagged here so it isn't mistaken
 for complete.
 
+## Review round 2026-07-18 (high, M14 mapgen + game wiring) — all 8 findings fixed
+
+Correctness: **seed variety was skin-deep** — the whole strategic skeleton (starts, veins, nests,
+crystal, core) derived from geometry/player-count alone, so different seeds changed only the decorative
+fill. Now the start ring is rotated by a seed-derived offset and per-wedge vein radii + nest arcanum +
+the core's apex-nest/overlook diagonal are seed-jittered; the floor check was decoupled from geometry
+(it reads the faction's remainder printer, its in-sight veins, its water, and its nearest Copper/Tin
+from the SPEC — only band membership, which is seed-independent, still comes from geometry) so the
+skeleton is free to vary. **Unbounded `MAPGEN_PLAYERS` panicked** (overcrowded rim → DuplicatePrinter or
+an unsatisfiable floor, identical every retry): `generate` now clamps players to `max_supported_players`
+(rim capacity at `max_size` / `MIN_START_SPACING`). **Guarantee tiles weren't bounds-clamped** like
+`reserve` is: a new `Skeleton::place` reserves + routes + skips off-grid tiles, so a mis-tuned config
+drops a guarantee (floor catches it → regenerate, now meaningful since the skeleton varies) instead of
+emitting an OOB spec that panics world-build. **Malformed env vars swallowed silently**: `setup_sim`
+now warns on a non-numeric `MAPGEN_SEED` (falls back to the showcase) or `MAPGEN_PLAYERS` (uses 1), and
+`build_generated_colony` deploys to the factions actually seated (deterministic BTreeSet), not the raw
+requested count. Cleanups: `paint_grid` is computed once per candidate (new `MapSpec::validate_grid`
+returns the painted grid, shared by the authoring check and `floor_on_grid`); the sealed-start check is
+folded into the flood (`Reach.non_rim`) instead of an O(players·size²) whole-grid rescan; the 4-neighbor
+offset literal is one `NEIGHBORS4` const. Also folded the two verifier-refuted micro-nits (the `snow`
+bounds loop into the array, the dead `let _ = kind`). +2 regression tests (seed varies the strategic
+layout; huge player count clamps not panics). All sim + game suites green; golden replay unchanged
+(mapgen never touches the tick or the state hash).
+
 ## Cross-cutting quick wins (small, independent, grab anytime)
 
 - [x] Delete the spurious `become_disabled` cost entry once M3 lands. [pyrite] *(with M3)*

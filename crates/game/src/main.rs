@@ -95,17 +95,31 @@ fn main() {
 fn setup_sim(world: &mut World) {
     // `MAPGEN_SEED=<n>` (optionally `MAPGEN_PLAYERS=<n>`, default 1) launches
     // a procedurally generated colony (M14, docs/05 Map Generation); with no
-    // seed set, the hand-authored showcase demo runs as before.
-    let sim = match std::env::var("MAPGEN_SEED").ok().and_then(|s| s.parse::<u64>().ok()) {
-        Some(seed) => {
-            let players = std::env::var("MAPGEN_PLAYERS")
-                .ok()
-                .and_then(|s| s.parse::<u32>().ok())
-                .unwrap_or(1);
-            info!("mapgen: generating colony (seed {seed}, {players} players)");
-            scene::build_generated_colony(seed, players)
-        }
-        None => scene::build_colony(),
+    // seed set, the hand-authored showcase demo runs as before. A malformed
+    // value is reported loudly rather than silently swallowed — otherwise the
+    // operator tests the wrong map without knowing.
+    let sim = match std::env::var("MAPGEN_SEED") {
+        Ok(raw) => match raw.parse::<u64>() {
+            Ok(seed) => {
+                let players = match std::env::var("MAPGEN_PLAYERS") {
+                    Ok(p) => match p.parse::<u32>() {
+                        Ok(n) => n,
+                        Err(_) => {
+                            warn!("mapgen: MAPGEN_PLAYERS='{p}' is not a number — using 1");
+                            1
+                        }
+                    },
+                    Err(_) => 1,
+                };
+                info!("mapgen: generating colony (seed {seed}, {players} players)");
+                scene::build_generated_colony(seed, players)
+            }
+            Err(_) => {
+                warn!("mapgen: MAPGEN_SEED='{raw}' is not a u64 — falling back to the showcase demo");
+                scene::build_colony()
+            }
+        },
+        Err(_) => scene::build_colony(),
     };
     world.insert_non_send_resource(GameSim(sim));
 }
