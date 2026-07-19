@@ -105,6 +105,12 @@ pub struct Tuning {
     pub explore_radius: u32,
     pub wander_leg: u32,
     pub ford_quiet: i64,
+    /// Bonus sensor range while on High Ground / a Mountain summit
+    /// (docs/05: +2). Feeds seeing/hearing → the state hash.
+    pub high_ground_sensor_bonus: u32,
+    /// Combat L3 widens a bot's hearing vs enemies by this (docs/02+05:
+    /// "+1 vs enemies").
+    pub combat_hearing_bonus: u32,
     // --- terrain v2 (M8, docs/05 Q35–Q40) ---
     /// The ×2-scale move-cost table + Mountain/Mud edge parameters.
     pub tile_costs: crate::map::TileCostTable,
@@ -142,6 +148,10 @@ pub struct Tuning {
     pub salvage_decrypt_pct: u32,
     pub analyze_data: u64,
     pub guard_swing_ticks: u32,
+    /// How far a guard / escort strays from its anchor before re-closing
+    /// (Chebyshev tiles): escort hugs tight, guard holds a short leash.
+    pub guard_leash: u32,
+    pub escort_leash: u32,
     // --- Ferals (M12, docs/04) ---
     pub nest_hp: i64,
     pub nest_hp_per_arcanum: i64,

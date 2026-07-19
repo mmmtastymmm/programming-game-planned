@@ -1727,3 +1727,16 @@ fn hardware_bar_counts_code_not_comments_or_frame_locals() {
         "non-code physical lines don't count toward program memory"
     );
 }
+
+/// The `%` operator is checked like `//`: i64::MIN % -1 overflows the raw
+/// operator, and the Mod arm must raise a trappable err_overflow fault, never
+/// panic a debug build (release would silently yield 0 — a determinism gap).
+/// i64::MIN is built as MIN+1 - 1 (the literal for its magnitude is
+/// rejected at lex time).
+#[test]
+fn mod_by_negative_one_at_int_min_faults_not_panics() {
+    let (mut vm, mut host, costs) = vm_for("boom((-9223372036854775807 - 1) % -1)\n");
+    vm.grant(100, &costs);
+    vm.run(&mut host, &costs);
+    assert_eq!(vm.last_fault_id(), Some(pyrite::faults::OVERFLOW));
+}

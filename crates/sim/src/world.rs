@@ -1447,14 +1447,14 @@ impl World {
         id
     }
 
-    /// Nearest ore node with ore remaining: (manhattan distance, id) order —
+    /// Nearest ore node with ore remaining: (chebyshev distance, id) order —
     /// fully deterministic tie-breaking.
     pub fn nearest_ore(&self, from: TilePos) -> Option<EntityId> {
         // `ore` is the family constant: any mineral vein or seam.
         self.nodes
             .iter()
             .filter(|(_, n)| n.amount > 0 && n.kind.is_ore_family())
-            .map(|(id, n)| (from.manhattan(n.pos), *id))
+            .map(|(id, n)| (from.chebyshev(n.pos), *id))
             .min()
             .map(|(_, id)| id)
     }
@@ -1462,7 +1462,7 @@ impl World {
     pub fn nearest_depot(&self, from: TilePos) -> Option<EntityId> {
         self.depots
             .iter()
-            .map(|(id, d)| (from.manhattan(d.pos), *id))
+            .map(|(id, d)| (from.chebyshev(d.pos), *id))
             .min()
             .map(|(_, id)| id)
     }
@@ -1498,7 +1498,7 @@ impl World {
         self.nodes
             .iter()
             .filter(|(_, n)| n.amount > 0 && n.kind == kind)
-            .map(|(id, n)| (from.manhattan(n.pos), *id))
+            .map(|(id, n)| (from.chebyshev(n.pos), *id))
             .min()
             .map(|(_, id)| id)
     }
@@ -1749,18 +1749,18 @@ impl World {
     pub fn nearest_blueprint(&self, from: TilePos) -> Option<EntityId> {
         self.blueprints
             .iter()
-            .map(|(id, b)| (from.manhattan(b.pos), *id))
+            .map(|(id, b)| (from.chebyshev(b.pos), *id))
             .min()
             .map(|(_, id)| id)
     }
 
-    /// Nearest living bot of a different faction: (manhattan, entity id)
+    /// Nearest living bot of a different faction: (chebyshev, entity id)
     /// order — deterministic tie-breaking.
     pub fn nearest_enemy(&self, from: TilePos, faction: u8) -> Option<EntityId> {
         self.bots
             .values()
             .filter(|b| b.data.faction != faction && !b.data.dying)
-            .map(|b| (from.manhattan(b.data.pos), b.data.entity))
+            .map(|b| (from.chebyshev(b.data.pos), b.data.entity))
             .min()
             .map(|(_, id)| id)
     }

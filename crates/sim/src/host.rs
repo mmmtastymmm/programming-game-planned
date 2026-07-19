@@ -107,7 +107,7 @@ impl BotHost<'_> {
             known?
                 .iter()
                 .filter(|(_, n)| !n.exhausted && filter(n.kind))
-                .map(|(id, n)| (bot.pos.manhattan(n.pos), *id))
+                .map(|(id, n)| (bot.pos.chebyshev(n.pos), *id))
                 .min()
                 .map(|(_, id)| id)
         };
@@ -124,7 +124,7 @@ impl BotHost<'_> {
                 .world
                 .blight_cores
                 .iter()
-                .map(|(id, c)| (bot.pos.manhattan(c.pos), *id))
+                .map(|(id, c)| (bot.pos.chebyshev(c.pos), *id))
                 .min()
                 .map(|(_, id)| id),
             "depot" => self.world.nearest_depot(bot.pos),
@@ -136,7 +136,7 @@ impl BotHost<'_> {
                     p.faction == faction
                         || self.perception().is_some_and(|per| per.seen.contains(id))
                 })
-                .map(|(id, p)| (bot.pos.manhattan(p.pos), *id))
+                .map(|(id, p)| (bot.pos.chebyshev(p.pos), *id))
                 .min()
                 .map(|(_, id)| id),
             "enemy" => {
@@ -155,7 +155,7 @@ impl BotHost<'_> {
                         continue;
                     };
                     let _ = id;
-                    let candidate = (bot.pos.manhattan(pos), entity);
+                    let candidate = (bot.pos.chebyshev(pos), entity);
                     if best.is_none_or(|b| candidate < b) {
                         best = Some(candidate);
                     }
@@ -173,7 +173,7 @@ impl BotHost<'_> {
                     if !visible {
                         continue;
                     }
-                    let candidate = (bot.pos.manhattan(w.data.pos), entity);
+                    let candidate = (bot.pos.chebyshev(w.data.pos), entity);
                     if best.is_none_or(|b| candidate < b) {
                         best = Some(candidate);
                     }
@@ -191,7 +191,7 @@ impl BotHost<'_> {
                     if !visible {
                         continue;
                     }
-                    let candidate = (bot.pos.manhattan(n.pos), *id);
+                    let candidate = (bot.pos.chebyshev(n.pos), *id);
                     if best.is_none_or(|b| candidate < b) {
                         best = Some(candidate);
                     }
@@ -206,7 +206,7 @@ impl BotHost<'_> {
                     if !self.perception().is_some_and(|per| per.seen.contains(&bb.entity)) {
                         continue;
                     }
-                    let candidate = (bot.pos.manhattan(bb.pos), bb.entity);
+                    let candidate = (bot.pos.chebyshev(bb.pos), bb.entity);
                     if best.is_none_or(|b| candidate < b) {
                         best = Some(candidate);
                     }
@@ -222,7 +222,7 @@ impl BotHost<'_> {
                         && (st.faction == faction
                             || self.perception().is_some_and(|per| per.seen.contains(id)))
                 })
-                .map(|(id, st)| (bot.pos.manhattan(st.pos), *id))
+                .map(|(id, st)| (bot.pos.chebyshev(st.pos), *id))
                 .min()
                 .map(|(_, id)| id),
             _ => unreachable!("kind_arg only admits KINDS"),
@@ -274,17 +274,27 @@ impl pyrite::Host for BotHost<'_> {
         let e = EntityId(entity);
         match name {
             "distance" => {
-                // Own + seen count; heard-only (in `heard`, not `seen`)
-                // does not — the blip is a rumor, not a reading.
-                let heard_only = self
+                // docs/01 Q74: heard-only contacts DO expose position and
+                // distance (only non-positional reads fault). Own + seen read
+                // the true position; a heard-only blip reads its last-heard
+                // tile. Only a stale/unperceived handle faults.
+                let heard_blip = self
                     .perception()
-                    .is_some_and(|p| p.heard.contains_key(&e) && !p.seen.contains(&e));
-                match self.world.entity_pos(e) {
-                    Some(pos) if self.perceived(e) && !heard_only => {
+                    .filter(|p| p.heard.contains_key(&e) && !p.seen.contains(&e))
+                    .and_then(|p| p.heard.get(&e).copied());
+                let ref_pos = if heard_blip.is_some() {
+                    heard_blip
+                } else if self.perceived(e) {
+                    self.world.entity_pos(e)
+                } else {
+                    None
+                };
+                match ref_pos {
+                    Some(pos) => {
                         let here = self.world.bots[&self.bot].data.pos;
                         Ok(Value::Int(here.chebyshev(pos) as i64))
                     }
-                    _ => Err((
+                    None => Err((
                         UNKNOWN_CONTACT,
                         "distance: stale or unseen contact".to_string(),
                     )),
@@ -562,7 +572,7 @@ impl pyrite::Host for BotHost<'_> {
                         known
                             .iter()
                             .filter(|(_, n)| !n.exhausted)
-                            .map(|(id, n)| (bot_pos.manhattan(n.pos), id.0))
+                            .map(|(id, n)| (bot_pos.chebyshev(n.pos), id.0))
                             .collect()
                     })
                     .unwrap_or_default();
@@ -589,7 +599,7 @@ impl pyrite::Host for BotHost<'_> {
                         } else {
                             continue;
                         };
-                        found.push((bot_pos.manhattan(pos), entity.0));
+                        found.push((bot_pos.chebyshev(pos), entity.0));
                     }
                 }
                 found.sort();

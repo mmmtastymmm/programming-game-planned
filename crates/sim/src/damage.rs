@@ -42,36 +42,58 @@ impl Sim {
             let hp = bot.data.hp;
             let max_hp = bot.data.max_hp;
             let source = attacker.map(|(_, f)| f);
-            if hp == 0 {
-                // HP 0 = abort (docs/01): the highest severity — it wins
-                // any co-arrival, and raising it on a mid-template bot is
-                // exactly the double-handle outcome anyway.
-                self.world.pending_signals.push((id, Signal::Abort, source));
-                let victim_faction = self.world.bots[&id].data.faction;
-                if let Some((attacker_bot, attacker_faction)) = attacker
-                    && attacker_faction != victim_faction
-                {
-                    // Escalation counts PLAYER-attributed Feral kills only
-                    // (docs/04: footprint, never wall-clock — Feral fault
-                    // deaths and blast chains are their own business).
-                    if victim_faction == crate::world::FERAL_FACTION
-                        && attacker_faction != crate::world::FERAL_FACTION
-                        && hp_before > 0
-                    {
-                        self.world.ferals_killed += 1;
-                    }
-                    // First-kill Data (docs/03) — once per faction.
-                    if self.world.first_kill_done.insert(attacker_faction) {
-                        *self.world.data.entry(attacker_faction).or_insert(0) +=
-                            self.tuning.first_kill_data;
-                    }
-                    // Combat kill income (docs/02: +25/kill) — settles
-                    // phase 7; drops if the attacker died this tick too.
+            // Combat income: 1 deci-XP per HP ACTUALLY removed (docs/02: 1 XP
+            // per 10 damage). Credited from the attacker tag — the only
+            // tagged damage is attack()/guard()/escort() swings — on the real
+            // HP delta, so an overkill blow or a same-tick gank can never
+            // out-credit the HP the target could absorb.
+            if let Some((attacker_bot, _)) = attacker {
+                let dealt = (hp_before - hp) as u64;
+                if dealt > 0 {
                     self.world.pending_xp.push((
                         attacker_bot,
                         crate::world::XpTrack::Combat,
-                        self.xp.combat_kill_xp * 10,
+                        dealt,
                     ));
+                }
+            }
+            if hp == 0 {
+                // A death is credited only on the TRANSITION to 0
+                // (hp_before > 0): a second same-tick event draining an
+                // already-dead bot must not re-abort or re-mint the kill /
+                // first-kill Data. `dying` is set later (phase 6b dispatch),
+                // so this phase-6a settle loop would otherwise process both
+                // gank events as kills.
+                if hp_before > 0 {
+                    // HP 0 = abort (docs/01): the highest severity — it wins
+                    // any co-arrival, and raising it on a mid-template bot is
+                    // exactly the double-handle outcome anyway.
+                    self.world.pending_signals.push((id, Signal::Abort, source));
+                    let victim_faction = self.world.bots[&id].data.faction;
+                    if let Some((attacker_bot, attacker_faction)) = attacker
+                        && attacker_faction != victim_faction
+                    {
+                        // Escalation counts PLAYER-attributed Feral kills only
+                        // (docs/04: footprint, never wall-clock — Feral fault
+                        // deaths and blast chains are their own business).
+                        if victim_faction == crate::world::FERAL_FACTION
+                            && attacker_faction != crate::world::FERAL_FACTION
+                        {
+                            self.world.ferals_killed += 1;
+                        }
+                        // First-kill Data (docs/03) — once per faction.
+                        if self.world.first_kill_done.insert(attacker_faction) {
+                            *self.world.data.entry(attacker_faction).or_insert(0) +=
+                                self.tuning.first_kill_data;
+                        }
+                        // Combat kill income (docs/02: +25/kill) — settles
+                        // phase 7; drops if the attacker died this tick too.
+                        self.world.pending_xp.push((
+                            attacker_bot,
+                            crate::world::XpTrack::Combat,
+                            self.xp.combat_kill_xp * 10,
+                        ));
+                    }
                 }
                 continue;
             }

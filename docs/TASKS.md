@@ -827,6 +827,28 @@ bounds loop into the array, the dead `let _ = kind`). +2 regression tests (seed 
 layout; huge player count clamps not panics). All sim + game suites green; golden replay unchanged
 (mapgen never touches the tick or the state hash).
 
+## Spec-conformance review 2026-07-19 (xhigh, full codebase vs docs) — 11 of 12 fixed
+
+A whole-codebase audit against docs/00–09. **Income/XP over-credits** (all echoing already-hardened
+sibling paths): Combat XP now pays for HP actually removed, not the full swing — the bot-attack and
+guard/escort paths moved their per-damage credit into `settle_damage` (keyed on the attacker tag,
+clamped to the real HP delta), and the Blight-Core path clamps inline like structures/nests/wrecks
+(docs/02 "1 XP per 10 damage"). Same-tick **gank double-counts** fixed: the kill XP + first-kill Data
+now sit under the `hp_before > 0` guard the escalation counter already carried, so two attackers dropping
+one bot in a single settle mint ONE kill. **Hauling XP** is provenance-guarded (`credit_travel` accrues
+only the mined share, `cargo_total − withdrawn_aboard`) so withdraw→lap→deposit farms nothing, matching
+the Data-milestone rule. **Perception/API**: heard-only contacts expose `.distance` (from the blip, per
+Q74) instead of faulting; `closest()`/`scan_*`/the `nearest_*` helpers rank by **Chebyshev** to match
+`.distance` and the perception circles (was Manhattan); a multi-tick mover stays audible on its
+in-between traverse ticks (`moved_tick` stamped every traverse tick, not only on tile change). **VM**:
+`%` is checked like `//` (`i64::MIN % -1` faults err_overflow, no debug panic / release-0 split).
+**Tuning-to-data**: High-Ground sensor bonus, Combat-L3 "+1 hearing vs enemies" (now implemented), and
+guard/escort leash distances moved to `tuning.ron`. Regression tests added (combat overkill + gank,
+hauling farm + mined control, multi-tick hearing, Mod overflow — the hearing and Mod tests verified to
+fail without their fix). ⚠HASH (income/perception/closest feed phase 9; golden regenerated). **Not fixed:
+Template Caches** — docs/05 lists them by-construction, but the Cache *entity* doesn't exist yet (the
+whole progression-learning subsystem is unbuilt), so mapgen can't place them; stays deferred.
+
 ## Cross-cutting quick wins (small, independent, grab anytime)
 
 - [x] Delete the spurious `become_disabled` cost entry once M3 lands. [pyrite] *(with M3)*

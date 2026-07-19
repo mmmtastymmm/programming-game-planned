@@ -23,6 +23,7 @@ impl Sim {
     /// Phase 4 for one bot: start its requested action or advance the
     /// in-flight one; on completion, resume the VM with the result.
     pub(crate) fn resolve_bot(&mut self, id: BotId) {
+        let tick = self.world.tick;
         let Some(bot) = self.world.bots.get_mut(&id) else { return };
         if bot.data.dying {
             return;
@@ -357,6 +358,12 @@ impl Sim {
             Action::Move { mut path, ticks_left, goals } => {
                 let ticks_left = ticks_left - 1;
                 if ticks_left > 0 {
+                    // Advancing the traverse counts as moving for hearing
+                    // (docs/05: "moving = advanced its traverse") — on every
+                    // in-between tick of a multi-tick crossing, not only when
+                    // the tile changes, so a mover on Rubble/Ford stays
+                    // audible the whole way.
+                    bot.data.moved_tick = tick;
                     bot.data.action = Some(Action::Move { path, ticks_left, goals });
                     return;
                 }
@@ -598,11 +605,15 @@ impl Sim {
                         self.finish_action(id, Err("attack: target out of range".into()));
                         return;
                     }
-                    core.hp = (core.hp - damage).max(0);
+                    // XP pays for HP actually removed, clamped like the
+                    // structure/nest/wreck paths — an over-kill swing on a
+                    // low-HP Core must not over-credit Combat XP.
+                    let dealt = damage.max(0).min(core.hp);
+                    core.hp -= dealt;
                     if core.hp == 0 {
                         self.world.blight_cores.remove(&target);
                     }
-                    self.world.pending_xp.push((id, XpTrack::Combat, damage.max(0) as u64));
+                    self.world.pending_xp.push((id, XpTrack::Combat, dealt as u64));
                     self.finish_action(id, Ok(Value::Unit));
                     return;
                 }
@@ -639,9 +650,9 @@ impl Sim {
                     self.finish_action(id, Err("attack: target out of range".into()));
                     return;
                 }
-                // Combat income: 1 XP per 10 damage = 1 deci per point;
-                // the +25/kill lands in settle_damage via the attacker tag.
-                self.world.pending_xp.push((id, XpTrack::Combat, damage.max(0) as u64));
+                // Combat income (per-damage XP AND the +25/kill) settles in
+                // settle_damage from the attacker tag, credited on the HP
+                // actually removed so overkill/ganks can't over-credit.
                 self.finish_action(id, Ok(Value::Unit));
                 let attacker_faction = self.world.bots[&id].data.faction;
                 self.queue_damage(target_bot, damage, Some((id, attacker_faction)));
@@ -929,14 +940,15 @@ impl Sim {
                             tuning: &self.tuning,
                         }
                         .attack_damage_for(&self.world.bots[&id].data, self.tuning.attack_damage);
-                        self.world.pending_xp.push((id, XpTrack::Combat, damage.max(0) as u64));
+                        // Combat XP settles in settle_damage on HP removed
+                        // (same as attack()), not the full swing here.
                         self.queue_damage(victim, damage, Some((id, faction)));
                         cooldown = self.tuning.guard_swing_ticks.max(1);
                     }
                 }
-                // Keep station: escort hugs (<=1), guard holds a short
-                // leash (<=2); step one tile when out of range.
-                let leash = if escort { 1 } else { 2 };
+                // Keep station: escort hugs, guard holds a short leash
+                // (both from tuning); step one tile when out of range.
+                let leash = if escort { self.tuning.escort_leash } else { self.tuning.guard_leash };
                 if pos.chebyshev(tpos) > leash && step_wait == 0 {
                     let structures = self.world.structure_tiles();
                     let mut goals = BTreeSet::new();
@@ -1226,7 +1238,13 @@ impl Sim {
     pub(crate) fn credit_travel(&mut self, id: BotId) {
         self.world.pending_xp.push((id, XpTrack::Mileage, self.xp.mileage_deci_per_tile));
         let bot = self.world.bots.get_mut(&id).expect("bot exists");
-        let load_units = (bot.data.cargo_total() / crate::resources::DECI) as u64;
+        // Hauling income is DELIVERED production only (docs/02): accrue on the
+        // MINED share of the load, never stock withdrawn from the colony and
+        // cycled back (`withdrawn_aboard` is that recycled share). Without
+        // this, a withdraw → lap → deposit loop farms Hauling XP with zero
+        // net production — matching the Data milestone's provenance exclusion.
+        let mined = bot.data.cargo_total().saturating_sub(bot.data.withdrawn_aboard);
+        let load_units = (mined / crate::resources::DECI) as u64;
         if load_units > 0 {
             bot.data.haul_accum += load_units;
         }

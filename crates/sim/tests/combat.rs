@@ -333,3 +333,59 @@ wait(2)
     let logs = sim.world.bots[&bot].data.log_buf.clone();
     assert_eq!(logs.iter().filter(|l| l.1 == "\"ouch\"").count(), 2, "hurt re-fired: {logs:?}");
 }
+
+#[test]
+fn overkill_swing_credits_only_hp_removed() {
+    // Combat XP pays for HP ACTUALLY removed, not the full swing (docs/02:
+    // 1 XP per 10 damage). A big blow on a low-HP bot must not over-credit —
+    // the review found the bot-attack path pushed the whole swing.
+    let mut sim = Sim::new(&MapSpec::empty(5, 5));
+    sim.tuning.regen_amount = 0;
+    sim.tuning.attack_damage = 40; // far more than the victim's hp
+    let attacker = spawn(&mut sim, TilePos::new(1, 1), BRAWLER, 1, 100);
+    let victim = spawn(&mut sim, TilePos::new(2, 1), IDLER, 0, 6);
+    for _ in 0..200 {
+        sim.step();
+        if !sim.world.bots.contains_key(&victim) {
+            break;
+        }
+    }
+    assert!(!sim.world.bots.contains_key(&victim), "victim must die");
+    // 6 HP removed (60 deci) + the 25-XP kill (250 deci) = 310 deci — NOT
+    // 40 damage (400) + 250 = 650 that the un-clamped swing would mint.
+    assert_eq!(
+        sim.world.bots[&attacker].data.xp(sim::world::XpTrack::Combat),
+        6 + 250,
+        "overkill credits HP removed, not the full swing"
+    );
+}
+
+#[test]
+fn simultaneous_gank_credits_one_kill_bonus() {
+    // Two attackers dropping one bot to 0 in the SAME tick's settle must mint
+    // ONE +25 kill, not two (the review found the kill XP / Data lacked the
+    // hp_before>0 guard that the escalation counter carries). Synchronised,
+    // equidistant attackers both land in the same phase-6a settle.
+    let mut sim = Sim::new(&MapSpec::empty(7, 3));
+    sim.tuning.regen_amount = 0;
+    let a = spawn(&mut sim, TilePos::new(1, 1), BRAWLER, 1, 100);
+    let b = spawn(&mut sim, TilePos::new(3, 1), BRAWLER, 1, 100);
+    // Victim hp <= a single swing (10), so BOTH same-tick events resolve to 0.
+    let victim = spawn(&mut sim, TilePos::new(2, 1), IDLER, 0, 6);
+    for _ in 0..200 {
+        sim.step();
+        if !sim.world.bots.contains_key(&victim) {
+            break;
+        }
+    }
+    assert!(!sim.world.bots.contains_key(&victim), "victim must die");
+    let kill_bonus = (sim.xp.combat_kill_xp * 10) as u64; // 250 deci
+    let got_kill = |id: &sim::BotId| sim.world.bots[id].data.xp(sim::world::XpTrack::Combat) >= kill_bonus;
+    assert_eq!(
+        [a, b].iter().filter(|id| got_kill(id)).count(),
+        1,
+        "exactly one attacker is credited the kill (no same-tick double count)"
+    );
+    // And the first-kill Data lands once for the shared faction.
+    assert!(sim.world.first_kill_done.contains(&1), "first kill recorded for faction 1");
+}

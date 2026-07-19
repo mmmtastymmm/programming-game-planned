@@ -687,3 +687,55 @@ fn blueprint_kind_is_pinned_by_the_state_hash() {
         "kind divergence must desync NOW"
     );
 }
+
+#[test]
+fn a_multi_tick_mover_stays_audible_between_tiles() {
+    // Crossing Mud takes several ticks/tile: the mover advances its traverse
+    // on the in-between ticks WITHOUT changing tile. docs/05 says a moving bot
+    // registers as a contact, so it must stay heard throughout the crossing —
+    // not flicker audible only on the tile-change ticks. (Regression: the
+    // review found `moved_tick` was stamped only on tile change.)
+    // The depot (the walk's target) sits far east: its structure-eyes would
+    // otherwise SEE the walker in the sample zone (seen beats heard). Placed
+    // at x=18 so at x=3 the walker is out of the depot's sight AND hearing —
+    // a genuine heard-only-from-the-listener gap.
+    let mut spec = MapSpec::empty(20, 1);
+    spec.depots.push((TilePos::new(18, 0), 0));
+    for x in 1..=10 {
+        spec.mud.push(TilePos::new(x, 0)); // the path is slow (multi-tick) mud
+    }
+    let mut sim = Sim::new(&spec);
+    sim.stats.sensors = 2; // seeing 2, hearing 2*150% = 3
+    let _listener = spawn(&mut sim, TilePos::new(0, 0), IDLER);
+    let walker = sim
+        .apply(&Command::SpawnBot {
+            pos: TilePos::new(2, 0),
+            source: "move_to(closest(depot).expect())\nwait(500)\n".into(),
+            cpu: 4,
+            cargo_cap: 1,
+            faction: 1,
+            hp: 100,
+            color: Color::GREEN,
+        })
+        .unwrap()
+        .unwrap();
+    let entity = sim.world.bots[&walker].data.entity;
+    let mut prev = sim.world.bots[&walker].data.pos;
+    let mut heard_mid_traverse = false;
+    for _ in 0..400 {
+        sim.step();
+        let Some(w) = sim.world.bots.get(&walker) else { break };
+        let pos = w.data.pos;
+        let per = sim.world.perception.get(&0);
+        let heard = per.is_some_and(|p| p.heard.contains_key(&entity))
+            && !per.is_some_and(|p| p.seen.contains(&entity));
+        // A tick where the walker HELD its tile (mid-traverse) yet is heard
+        // (heard-only, in the hearing-not-seeing ring at chebyshev 3): exactly
+        // the in-between-tick case the fix restores.
+        if pos == prev && TilePos::new(0, 0).chebyshev(pos) == 3 && heard {
+            heard_mid_traverse = true;
+        }
+        prev = pos;
+    }
+    assert!(heard_mid_traverse, "a bot mid-traverse on multi-tick terrain stays audible");
+}

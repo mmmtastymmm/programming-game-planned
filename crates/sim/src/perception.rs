@@ -73,11 +73,21 @@ impl Sim {
                 continue;
             }
             let base_seeing = ctx.sensors_for(&bot.data)
-                + high_ground_bonus(&self.world.grid, bot.data.pos);
+                + high_ground_bonus(
+                    &self.world.grid,
+                    bot.data.pos,
+                    self.tuning.high_ground_sensor_bonus,
+                );
             // Hearing derives from the BASE circle; the search stance then
             // widens actual seeing out to its current ring (docs/05 — the
-            // survey ring is real sight, not just node discovery).
-            let hearing = base_seeing * self.tuning.sense_factor_pct / 100;
+            // survey ring is real sight, not just node discovery). Combat L3
+            // widens hearing vs enemies (docs/02+05): since hearing only ever
+            // detects non-own movers (enemies), the bonus rides the
+            // perceiver's own hearing circle.
+            let mut hearing = base_seeing * self.tuning.sense_factor_pct / 100;
+            if self.xp.level(bot.data.xp(crate::world::XpTrack::Combat)) >= 3 {
+                hearing += self.tuning.combat_hearing_bonus;
+            }
             let seeing = match &bot.data.action {
                 Some(crate::world::Action::Search { current, .. }) => base_seeing.max(*current),
                 _ => base_seeing,
@@ -299,11 +309,11 @@ impl Sim {
     }
 }
 
-/// Standing on High Ground grants bonus sensor range (docs/05: +2; the
-/// figure rides tuning with M8's full table — hardcoded ramp rules wait
-/// there too, flagged).
-pub fn high_ground_bonus(grid: &Grid, pos: TilePos) -> u32 {
-    if on_high_ground(grid, pos) { 2 } else { 0 }
+/// Standing on High Ground grants bonus sensor range (docs/05). The figure
+/// is a tuning constant (`high_ground_sensor_bonus`), passed in by the
+/// caller so the perch bonus retunes from data, not a recompile.
+pub fn high_ground_bonus(grid: &Grid, pos: TilePos, bonus: u32) -> u32 {
+    if on_high_ground(grid, pos) { bonus } else { 0 }
 }
 
 /// Mountain summits share the plateau's privileges (M8, docs/05): the

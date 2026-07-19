@@ -393,3 +393,55 @@ fn recipe_change_scraps_the_batch_and_its_inputs() {
     assert!(st.output.is_empty(), "the scrapped batch emits nothing");
     assert!(st.input.is_empty(), "the consumed inputs are lost, not refunded");
 }
+
+#[test]
+fn hauling_xp_not_farmable_by_stock_cycling() {
+    // Moving withdrawn colony stock out and back must mint NO Hauling XP
+    // (docs/02: income is cargo-distance DELIVERED). The review found
+    // credit_travel accrued from cargo_total regardless of provenance, so a
+    // withdraw → lap → deposit loop farmed Hauling XP with zero net output.
+    // (The prior guard tests never MOVED the bot between withdraw & deposit.)
+    let mut spec = MapSpec::empty(12, 4);
+    spec.depots.push((TilePos::new(2, 1), 0));
+    spec.ore_nodes.push((TilePos::new(5, 1), 100)); // a lap waypoint (in sight), never mined
+    spec.starting_stock.push((0, Resource::Iron, 400));
+    let mut sim = Sim::new(&spec);
+    // Withdraw at the depot, carry a lap to the node and back, then deposit —
+    // repeat. The bot never calls mine(), so all cargo is recycled stock.
+    let src = "try_withdraw(iron)\nmove_to(closest(ore).expect())\nmove_to(closest(depot).expect())\ndeposit()\n";
+    let bot = spawn(&mut sim, TilePos::new(1, 1), src);
+    let mut carried_far = false;
+    for _ in 0..600 {
+        sim.step();
+        if let Some(b) = sim.world.bots.get(&bot) {
+            // Liveness: prove the loop really hauls withdrawn stock a
+            // distance — cargo aboard AND away from the depot.
+            carried_far |= b.data.cargo_total() > 0 && b.data.pos.x >= 4;
+        }
+    }
+    assert!(carried_far, "the bot must actually carry withdrawn stock on a lap");
+    assert_eq!(
+        sim.world.bots[&bot].data.xp(sim::world::XpTrack::Hauling),
+        0,
+        "cycling withdrawn stock mints no Hauling XP"
+    );
+}
+
+#[test]
+fn mined_cargo_still_earns_hauling_xp() {
+    // The provenance guard must not zero LEGITIMATE hauling: a bot that
+    // mines and delivers still earns Hauling XP (the control for the farm fix).
+    let mut spec = MapSpec::empty(12, 4);
+    spec.depots.push((TilePos::new(2, 1), 0));
+    spec.ore_nodes.push((TilePos::new(5, 1), 100));
+    let mut sim = Sim::new(&spec);
+    let src = "move_to(closest(ore).expect())\nmine()\nmove_to(closest(depot).expect())\ndeposit()\n";
+    let bot = spawn(&mut sim, TilePos::new(1, 1), src);
+    for _ in 0..600 {
+        sim.step();
+    }
+    assert!(
+        sim.world.bots[&bot].data.xp(sim::world::XpTrack::Hauling) > 0,
+        "mined cargo hauled to a depot still earns Hauling XP"
+    );
+}

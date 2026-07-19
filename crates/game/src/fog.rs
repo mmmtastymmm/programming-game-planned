@@ -95,7 +95,11 @@ pub(crate) fn recompute_fog(game: NonSend<GameSim>, mut fog: ResMut<FogState>) {
             continue;
         }
         let mut seeing = ctx.sensors_for(&bot.data)
-            + sim::perception::high_ground_bonus(&world.grid, bot.data.pos);
+            + sim::perception::high_ground_bonus(
+                &world.grid,
+                bot.data.pos,
+                simulation.tuning.high_ground_sensor_bonus,
+            );
         // The search stance widens real sight to its current ring.
         if let Some(sim::world::Action::Search { current, .. }) = &bot.data.action {
             seeing = seeing.max(*current);

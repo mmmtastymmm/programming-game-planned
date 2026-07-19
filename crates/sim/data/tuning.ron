@@ -72,6 +72,10 @@ Tuning(
     wander_leg: 4,
     // Ford wading quiets the mover: subtracted from heard-at distance.
     ford_quiet: 2,
+    // High Ground / summit sensor bonus (docs/05: +2 sensor range).
+    high_ground_sensor_bonus: 2,
+    // Combat L3 widens hearing vs enemies by this (docs/02+05: +1).
+    combat_hearing_bonus: 1,
     // --- the wreck race (M10, docs/02 Q83/Q84 first-pass figures) ---
     // Wreck hull, percent of the bot's max HP (docs: ~25%).
     wreck_hp_pct: 25,
@@ -98,6 +102,9 @@ Tuning(
     analyze_data: 10,
     // Guard duty: ticks between autonomous swings (M10 first-pass).
     guard_swing_ticks: 10,
+    // How far a guard / escort strays from its anchor before re-closing.
+    guard_leash: 2,
+    escort_leash: 1,
     // --- Ferals (M12, docs/04) ---
     // Nest durability: base + per-arcanum bonus (deeper nests are tougher).
     nest_hp: 400,

@@ -1922,7 +1922,10 @@ fn binary_op(op: BinOp, lhs: Value, rhs: Value) -> Result<Value, Fault> {
                         Err(Fault::new(faults::DIV_ZERO, "modulo by zero"))
                     } else {
                         // Python-style: result has the sign of the divisor.
-                        let r = a % b;
+                        // Checked like FloorDiv so i64::MIN % -1 faults
+                        // err_overflow instead of panicking a debug build
+                        // (release would silently yield 0 — a determinism gap).
+                        let r = a.checked_rem(b).ok_or_else(overflow)?;
                         Ok(Value::Int(if r != 0 && (a < 0) != (b < 0) { r + b } else { r }))
                     }
                 }
