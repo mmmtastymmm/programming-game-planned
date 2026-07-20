@@ -24,6 +24,10 @@ pub enum PyriteErrorKind {
     UnexpectedToken { found: String, expected: String },
     /// The construct exists in Pyrite but this colony hasn't unlocked it.
     LockedConstruct(Construct),
+    /// A builtin whose function block the colony hasn't STUDIED at a Template
+    /// Cache yet (docs/06). Sim-side (per-match), unlike LockedConstruct
+    /// (parse-time, permanent) — but rendered the same "requires <X>" way.
+    LockedFunction { func: String, block: &'static str },
     DuplicateDefinition(String),
     /// Engine-reserved names (`abort`, `handler_init`, `become_disabled`)
     /// and the builtin enums (`Option`, `Result`) cannot be redefined —
@@ -73,6 +77,9 @@ impl fmt::Display for PyriteError {
             }
             PyriteErrorKind::LockedConstruct(c) => {
                 write!(f, "requires unlock: {}", c.display_name())
+            }
+            PyriteErrorKind::LockedFunction { func, block } => {
+                write!(f, "{func}() requires studying a {block} Template Cache")
             }
             PyriteErrorKind::DuplicateDefinition(name) => write!(f, "duplicate definition of {name}"),
             PyriteErrorKind::ReservedName(name) => {

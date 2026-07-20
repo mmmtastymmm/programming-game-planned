@@ -225,6 +225,11 @@ impl Sim {
             for (id, c) in &self.world.blight_cores {
                 see_static(*id, c.pos, false);
             }
+            // Template Caches (M15, docs/06): visible ruins, nobody's own —
+            // spotted with eyes so study() routing is a fog problem.
+            for (id, c) in &self.world.caches {
+                see_static(*id, c.pos, false);
+            }
             // Nests (M12): the Feral colony always knows its own active
             // nests; a claim hands that knowledge to the claimant.
             for (id, n) in &self.world.nests {

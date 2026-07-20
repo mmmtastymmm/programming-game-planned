@@ -19,6 +19,9 @@ pub const KINDS: &[&str] = &[
     // field object must be queryable (review 2026-07-16: no query could
     // ever produce one, making the verb unreachable from real programs)
     "black_box",
+    // Template Caches (M15, docs/06) — study() needs a handle; routing
+    // study trips down the function tree is the opening craft
+    "cache",
     // every resource kind is also a queryable kind: raw names find nodes,
     // refined names exist for cargo_count/withdraw (closest() on a refined
     // kind finds nothing until stock queries land)
@@ -207,6 +210,21 @@ impl BotHost<'_> {
                         continue;
                     }
                     let candidate = (bot.pos.chebyshev(bb.pos), bb.entity);
+                    if best.is_none_or(|b| candidate < b) {
+                        best = Some(candidate);
+                    }
+                }
+                best.map(|(_, id)| id)
+            }
+            "cache" => {
+                // Perception-scoped (M15, docs/06): a Cache is a visible ruin,
+                // nobody's own — spotting one needs eyes on it (eyes-only fog).
+                let mut best: Option<(u32, EntityId)> = None;
+                for (id, c) in &self.world.caches {
+                    if !self.perception().is_some_and(|per| per.seen.contains(id)) {
+                        continue;
+                    }
+                    let candidate = (bot.pos.chebyshev(c.pos), *id);
                     if best.is_none_or(|b| candidate < b) {
                         best = Some(candidate);
                     }
@@ -1016,17 +1034,11 @@ impl pyrite::Host for BotHost<'_> {
                 HostCall::Ready(Value::Unit)
             }
 
-            // study() is a start-kit verb (docs/01:455 — it can't be
-            // locked), but Template Caches (the thing it learns from) are
-            // a progression-milestone feature not yet in the sim. Fault
-            // gracefully — err_action "nothing to study" — rather than the
-            // misleading err_unknown_function the fallthrough would give
-            // an advertised builtin (review 2026-07-17; TASKS.md tracks
-            // Template Caches as unimplemented).
-            "study" => HostCall::Fault(Fault::new(
-                faults::ACTION,
-                "study: no Template Cache in range".to_string(),
-            )),
+            // study() is a start-kit verb (docs/01:455 — it can't be locked):
+            // it roots the bot at an adjacent Template Cache (M15, docs/06) and
+            // unlocks that Cache's function block colony-wide. Faults if no
+            // Cache is in range (see start_study).
+            "study" => self.request(ActionRequest::Study),
 
             other => HostCall::Fault(Fault::new(
                 faults::UNKNOWN_FUNCTION,

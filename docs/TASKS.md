@@ -223,11 +223,10 @@ full charges + centicycles + wrap-surviving variables move every replay hash at 
       at a depot second), `deposit`/`try_deposit` generalized (depot → stock; refinery → only
       its recipe's inputs; try_ returns False instead of faulting), `cargo_count(kind)`,
       `scan_resources` (all live nodes, distance/id order — omniscient until M7),
-      `drop_cargo` (deliberate spill: typed nodes on the bot's tile, no scatter). *NEEDS
-      DISCUSSION: `study()` deferred — it needs Template Caches (map placement is Q71
-      territory) and the per-match FUNCTION-block unlock model (docs/06's F_* sets), a whole
-      subsystem the other M4 tasks don't touch. withdraw/deposit run instant/1-tick rather
-      than "+ action" costed ticks — flag if the action-time matters before M5.* [pyrite][sim] (M)
+      `drop_cargo` (deliberate spill: typed nodes on the bot's tile, no scatter). *`study()`
+      + Template Caches + the per-match FUNCTION-block unlock model (docs/06's F_* sets) landed
+      in **M15** (2026-07-20). withdraw/deposit run instant/1-tick rather than "+ action" costed
+      ticks — flag if the action-time matters before M5.* [pyrite][sim] (M)
 - [x] **Kind constants**: all 11 raws + 7 refined + `ore` family + smelter/foundry/archive/
       printer/depot/blueprint/enemy/wreck bound; `closest()`/`exists()` resolve resource kinds
       to nodes and structure kinds to structures. *(cache/nest/ally/faction constants land
@@ -682,8 +681,8 @@ co-op-first**; PvP rotational symmetry is deferred to a later pass.
       shared central Blight Core ringed by Corruption + Crystal; per-wedge and apex Feral
       nests (arcanum scaled, capped at `nest_max_arcanum`). A reserved set (start disc + kit +
       a 4-connected radial corridor to center) keeps fill off every guarantee. *Template
-      Caches are NOT placed — the progression Cache entity is still unbuilt (no `MapSpec`
-      field for it); deferred with that system.* [sim] (M)
+      Caches now placed too (M15): shallow blocks ring each start, deep blocks at the core.*
+      [sim] (M)
 - [x] **Fill stage** — coherent integer value-noise (coarse-cell corners + integer bilinear)
       paints decorative biomes against per-band budgets, skipping reserved tiles. *v1 palette
       is limited to the kinds `MapSpec` can carry (Rubble/Mud/Snow, + Water/High Ground in the
@@ -714,6 +713,45 @@ co-op-first**; PvP rotational symmetry is deferred to a later pass.
       step). *Making generated the default (retiring the showcase) is a later call.* [game] (M)
 - [ ] **PvP rotational symmetry** — generate one wedge, rotate-copy N times, resource-exact.
       **Deferred past co-op v1** — layers on the co-op generator. [sim] (M)
+
+---
+
+## M15 — Template Caches & function-block progression (docs/06) ✅ CORE COMPLETE (2026-07-20)
+
+The last decided-but-unbuilt subsystem: `study()` shipped as a dead builtin (nothing to learn
+from), so docs/06's per-match function-block axis was unreachable and M14 couldn't place its
+by-construction Caches. Now built. Constructs (syntax, permanent, Data-researched) were already
+gated by `pyrite::UnlockSet`; this adds the OTHER axis — **function blocks** (which builtins a
+colony may CALL this match, LEARNED at Caches).
+
+- [x] **`sim::progression` module** — `FunctionBlock` enum (Sense/Log/Search/Attack/Salvage/
+      Build/Env/Analyze/Scan/Guard/Hijack) with each block's builtins, cache **depth** (docs/06
+      tree numbers), and `block_of(builtin)`. A builtin in no block is ungated (the start kit).
+      A test cross-checks every listed name against `builtins.ron`. [sim]
+- [x] **Template Cache entity** — `world::Cache { pos, block }` + `World.caches`; `MapSpec.caches:
+      Vec<(TilePos, FunctionBlock)>` (serde-defaulted); `from_spec` builds them; perceived like
+      other field objects (eyes-only); `entity_pos`/`closest("cache")`/`.distance` resolve them;
+      hashed in phase 9. Non-consumable (a school, not a pickup). [sim]
+- [x] **`study()` verb** — start-kit, rooted `study_ticks` (~10 s, tuning) at an adjacent Cache
+      (`ActionRequest::Study` → `Action::Study`), then the block unlocks colony-wide + a little
+      Learning XP. Faults with no Cache in range. [sim]
+- [x] **Per-match function-block state** — `World.studied: BTreeMap<faction, BTreeSet<block>>`;
+      `studied_blocks()`/`locked_builtins()` helpers; dev sandboxes act as if all studied. [sim]
+- [x] **Deploy-time gating** — `pyrite::called_names` + a new `PyriteErrorKind::LockedFunction`;
+      `Sim::check_functions` rejects a deploy calling an un-studied block builtin (both DeployProgram
+      and SpawnBot), like locked syntax. Inert under `dev_all_unlocks`, so every existing map/test
+      is untouched; Ferals bypass (they parse elsewhere; docs/06 rule 3 previews unlocks). [sim][pyrite]
+- [x] **Mapgen places Caches** — shallow blocks (Sense/Log/Attack/Search) ring each start on the
+      reserved disc (reachable from tick one); the deep blocks (Build/Env/Salvage/Analyze/Scan/
+      Guard/Hijack) cluster as shared, contested Caches at the core (docs/06: "shared map features
+      worth controlling access to"). [sim]
+- [x] **Tests** (`crates/sim/tests/progression.rs`, 8 cases) — block-table integrity, `block_of`,
+      deploy gating rejects/allows, start-kit deploys free, dev bypass, study() unlocks
+      colony-wide + non-consumable, study faults with no Cache, mapgen rings starts + places deep
+      Caches. ⚠HASH-neutral (caches/studied hash bytes only emit on non-empty; golden unchanged).
+- [ ] **Follow-on** — the per-match FUNCTION-block editor tree/greying (docs/06 rule 2, [game]);
+      F_TERRA gating the terraform blueprint COMMANDS (blueprints aren't builtins, so out of the
+      builtin-gating scope here); construct *research* economy already exists (M4's `Research`).
 
 ---
 
@@ -845,9 +883,9 @@ in-between traverse ticks (`moved_tick` stamped every traverse tick, not only on
 **Tuning-to-data**: High-Ground sensor bonus, Combat-L3 "+1 hearing vs enemies" (now implemented), and
 guard/escort leash distances moved to `tuning.ron`. Regression tests added (combat overkill + gank,
 hauling farm + mined control, multi-tick hearing, Mod overflow — the hearing and Mod tests verified to
-fail without their fix). ⚠HASH (income/perception/closest feed phase 9; golden regenerated). **Not fixed:
-Template Caches** — docs/05 lists them by-construction, but the Cache *entity* doesn't exist yet (the
-whole progression-learning subsystem is unbuilt), so mapgen can't place them; stays deferred.
+fail without their fix). ⚠HASH (income/perception/closest feed phase 9; golden regenerated). ~~Not fixed:
+Template Caches~~ — **now built (M15, 2026-07-20)**: the Cache entity, `study()`, per-match
+function-block gating, and mapgen placement all landed.
 
 ## Cross-cutting quick wins (small, independent, grab anytime)
 

@@ -49,6 +49,20 @@ pub fn check_windows(program: &Program, costs: &CostTable) -> Result<(), PyriteE
     Ok(())
 }
 
+/// Every distinct name CALLED anywhere in the program (main body, handler
+/// windows, and `def` bodies alike), including user `def`s and imported
+/// module functions — the caller filters to the builtins it gates. Walks the
+/// flat expr arena, so nesting depth is irrelevant.
+pub fn called_names(program: &Program) -> std::collections::BTreeSet<String> {
+    let mut names = std::collections::BTreeSet::new();
+    for expr in &program.exprs {
+        if let Expr::Call { name, .. } = expr {
+            names.insert(name.clone());
+        }
+    }
+    names
+}
+
 /// The per-signal window cap (docs/01's template table; cost-table data).
 pub fn window_cap(costs: &CostTable, kind: SignalKind) -> u64 {
     match kind {

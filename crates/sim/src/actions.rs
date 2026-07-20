@@ -214,6 +214,7 @@ impl Sim {
                     });
                 }
                 ActionRequest::Search => self.start_search(id),
+                ActionRequest::Study => self.start_study(id),
                 ActionRequest::Wander => {
                     // A seeded random walk leg: a random passable free
                     // tile within the leg length; unreachable picks are a
@@ -1061,6 +1062,32 @@ impl Sim {
                         Some(Action::Search { reach, current, ticks_left: interval });
                 }
             }
+            Action::Study { cache, ticks_left } => {
+                let ticks_left = ticks_left - 1;
+                if ticks_left > 0 {
+                    bot.data.action = Some(Action::Study { cache, ticks_left });
+                    return;
+                }
+                // Study complete (M15, docs/06): the Cache must still be in
+                // range (it's non-consumable, so it only vanishes if the map
+                // changed under us). Unlock its block colony-wide + pay a
+                // little Learning XP (studying IS learning).
+                let pos = self.world.bots[&id].data.pos;
+                let faction = self.world.bots[&id].data.faction;
+                match self.world.caches.get(&cache) {
+                    Some(c) if pos.chebyshev(c.pos) <= 1 => {
+                        let block = c.block;
+                        self.world.studied.entry(faction).or_default().insert(block);
+                        self.world.pending_xp.push((
+                            id,
+                            XpTrack::Learning,
+                            self.xp.scouting_survey_xp * 10,
+                        ));
+                        self.finish_action(id, Ok(Value::Unit));
+                    }
+                    _ => self.finish_action(id, Err("study: Cache no longer in range".into())),
+                }
+            }
             Action::Deposit { depot, ticks_left, fault_on_fail } => {
                 let ticks_left = ticks_left - 1;
                 if ticks_left > 0 {
@@ -1216,6 +1243,30 @@ impl Sim {
         let bot = self.world.bots.get_mut(&id).expect("bot exists");
         bot.data.action =
             Some(Action::Search { reach, current: seeing, ticks_left: interval.max(1) });
+    }
+
+    /// Begin studying an adjacent Template Cache (M15, docs/06): root for
+    /// `study_ticks`, then unlock its function block colony-wide. Faults if no
+    /// Cache is within reach — the study verb has to have a school to sit at.
+    pub(crate) fn start_study(&mut self, id: BotId) {
+        let pos = self.world.bots[&id].data.pos;
+        // Nearest adjacent Cache (chebyshev <= 1), lowest entity id on a tie.
+        let cache = self
+            .world
+            .caches
+            .iter()
+            .filter(|(_, c)| pos.chebyshev(c.pos) <= 1)
+            .map(|(id, _)| *id)
+            .min();
+        match cache {
+            None => self
+                .finish_action(id, Err("study: no Template Cache in range".into())),
+            Some(cache) => {
+                let ticks = self.tuning.study_ticks.max(1);
+                self.world.bots.get_mut(&id).expect("bot exists").data.action =
+                    Some(Action::Study { cache, ticks_left: ticks });
+            }
+        }
     }
 
     /// A move just reached its goal: explore() chains into the survey,

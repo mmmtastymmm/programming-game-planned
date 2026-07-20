@@ -102,6 +102,8 @@ pub struct Tuning {
     pub structure_sensors: u32,
     pub episode_rearm_ticks: u32,
     pub search_ring_ticks: u32,
+    /// How long a bot roots to study a Template Cache (docs/06 Q79: ~10 s).
+    pub study_ticks: u32,
     pub explore_radius: u32,
     pub wander_leg: u32,
     pub ford_quiet: i64,
@@ -419,6 +421,11 @@ fn hash_action(h: &mut Fnv1a, action: &crate::world::Action) {
                 hash_value(h, v);
             }
         }
+        Action::Study { cache, ticks_left } => {
+            h.write_u8(13);
+            h.write_u64(cache.0);
+            h.write_u32(*ticks_left);
+        }
     }
 }
 
@@ -482,6 +489,7 @@ fn hash_request(h: &mut Fnv1a, req: &crate::world::ActionRequest) {
             h.write_u8(timeout.is_some() as u8);
             h.write_u32(timeout.unwrap_or(0));
         }
+        ActionRequest::Study => h.write_u8(17),
     }
 }
 
@@ -1022,6 +1030,32 @@ impl Sim {
 
     /// Phase 1: apply a command. Deterministic given identical call order.
     /// Returns the new bot's id for spawn commands.
+    /// Function-block gating (M15, docs/06): reject a deploy that calls a
+    /// builtin whose Cache the colony hasn't studied. Dev sandboxes unlock
+    /// every block, so this is inert until a real match runs `dev_all_unlocks`
+    /// off. Feral programs bypass it (they parse via feral.rs, not here — and
+    /// docs/06 rule 3 has enemies preview unlocks anyway).
+    fn check_functions(
+        &self,
+        faction: u8,
+        program: &pyrite::Program,
+    ) -> Result<(), PyriteError> {
+        let called = pyrite::called_names(program);
+        if let Some((func, block)) =
+            crate::world::locked_builtins(&self.world, faction, &called).into_iter().next()
+        {
+            return Err(PyriteError {
+                line: 0,
+                col: 1,
+                kind: pyrite::PyriteErrorKind::LockedFunction {
+                    func,
+                    block: block.display_name(),
+                },
+            });
+        }
+        Ok(())
+    }
+
     pub fn apply(&mut self, command: &Command) -> Result<Option<BotId>, PyriteError> {
         match command {
             Command::SpawnBot { pos, source, cpu, cargo_cap, faction, hp, color } => {
@@ -1040,6 +1074,9 @@ impl Sim {
                 // Deploy-time window analysis (M3): caps, signal safety,
                 // loop/recursion ban — rejected here, never at runtime.
                 pyrite::check_windows(&program, &self.costs)?;
+                // Function-block gating (M15, docs/06): calls to un-studied
+                // Cache functions are rejected at deploy, like locked syntax.
+                self.check_functions(*faction, &program)?;
                 let vm = Vm::new(Rc::new(program), self.vm_config.clone());
                 // Dev-spawn overrides arrive in human units (cycles/tick,
                 // cargo units); stored units are centi/deci (Q56). Inputs
@@ -1068,6 +1105,7 @@ impl Sim {
                 let unlocks = crate::world::faction_unlocks(&self.world, *faction);
                 let program = pyrite::parse(source, &unlocks)?;
                 pyrite::check_windows(&program, &self.costs)?;
+                self.check_functions(*faction, &program)?;
                 let slot = (*faction, color.0);
                 // The artifact sets the color's HARDWARE BAR (M9, Q52):
                 // its printer claims only bots whose bought hardware
@@ -2430,6 +2468,13 @@ impl Sim {
             h.write_i32(depot.pos.x);
             h.write_i32(depot.pos.y);
         }
+        // Template Caches (M15): id, position, and which block they hold.
+        for (id, cache) in &w.caches {
+            h.write_u64(id.0);
+            h.write_i32(cache.pos.x);
+            h.write_i32(cache.pos.y);
+            h.write_u8(cache.block.as_u8());
+        }
         for (id, st) in &w.structures {
             h.write_u64(id.0);
             h.write_u8(st.kind.as_u8());
@@ -2466,6 +2511,13 @@ impl Sim {
             h.write_u8(*faction);
             for c in pyrite::Construct::ALL {
                 h.write_u8(set.has(c) as u8);
+            }
+        }
+        // Studied function blocks (M15): per faction, which blocks are learned.
+        for (faction, blocks) in &w.studied {
+            h.write_u8(*faction);
+            for b in crate::progression::FunctionBlock::ALL {
+                h.write_u8(blocks.contains(&b) as u8);
             }
         }
         for ((faction, kind), deci) in &w.stock {

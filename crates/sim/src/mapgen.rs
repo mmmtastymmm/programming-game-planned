@@ -26,6 +26,7 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use crate::hash::Fnv1a;
 use crate::map::{Grid, MapSpec, PrinterSpec, TileKind, TilePos};
+use crate::progression::FunctionBlock;
 use crate::resources::Resource;
 use crate::world::{next_rand, stream_seed, StructureKind};
 
@@ -363,6 +364,7 @@ struct Skeleton {
     structures: Vec<(TilePos, StructureKind)>,
     nests: Vec<(TilePos, u8)>,
     blight_cores: Vec<(TilePos, u32, i64)>,
+    caches: Vec<(TilePos, FunctionBlock)>,
 }
 
 impl Skeleton {
@@ -384,7 +386,18 @@ impl Skeleton {
             structures: Vec::new(),
             nests: Vec::new(),
             blight_cores: Vec::new(),
+            caches: Vec::new(),
         }
+    }
+
+    /// Place a Template Cache (docs/06) — reserve its tile and record it,
+    /// skipping off-grid like `place`.
+    fn place_cache(&mut self, block: FunctionBlock, p: TilePos) {
+        if !self.geo.in_bounds(p) {
+            return;
+        }
+        self.reserve(p);
+        self.caches.push((p, block));
     }
 
     /// Reserve a tile (fill will skip it). Clamped-away tiles are ignored.
@@ -520,6 +533,15 @@ fn place_start(sk: &mut Skeleton, config: &MapgenConfig, seed: u64, faction: u8,
     sk.place(TileKind::Water, at(-2, 2));
     sk.place(TileKind::Sand, at(-1, 1));
 
+    // The shallow Template Caches ring every start (docs/06: basic sensors,
+    // log, attack, the scouting stance — the opening toolkit sweep). They sit
+    // on the reserved disc edge, so they're reachable from tick one. Deeper
+    // blocks are shared, contested Caches at the core (see place_core).
+    sk.place_cache(FunctionBlock::Sense, at(-2, -1));
+    sk.place_cache(FunctionBlock::Log, at(-2, 0));
+    sk.place_cache(FunctionBlock::Attack, at(-1, -2));
+    sk.place_cache(FunctionBlock::Search, at(-1, 0));
+
     // Midfield wedge: Copper + Tin along the radial (no Bronze soft-lock),
     // at a seed-jittered radius. They stay on the reserved (thickened)
     // corridor, so reachability holds; the floor finds them by kind, not by
@@ -590,6 +612,23 @@ fn place_core(sk: &mut Skeleton, config: &MapgenConfig, seed: u64) {
         sk.reserve(nest);
     }
     sk.place(TileKind::HighGround, TilePos::new(c.x - diag.0 * 2, c.y - diag.1 * 2));
+
+    // The DEEP function blocks are shared, contested Caches near the core
+    // (docs/06: scan/guard/hijack "lie deeper — shared map features worth
+    // controlling access to"). Placed at radius 3 around the center, off the
+    // corruption/crystal rings, so they sit in the contested deep field.
+    let deep_blocks = [
+        (FunctionBlock::Build, (3, 0)),
+        (FunctionBlock::Env, (-3, 0)),
+        (FunctionBlock::Salvage, (0, 3)),
+        (FunctionBlock::Analyze, (0, -3)),
+        (FunctionBlock::Scan, (3, 3)),
+        (FunctionBlock::Guard, (-3, -3)),
+        (FunctionBlock::Hijack, (3, -3)),
+    ];
+    for (block, (dx, dy)) in deep_blocks {
+        sk.place_cache(block, TilePos::new(c.x + dx, c.y + dy));
+    }
 }
 
 /// Paint decorative biomes from value-noise over unreserved open tiles,
@@ -641,6 +680,10 @@ fn fill_and_assemble(
         let e = nests.entry(pos).or_insert(arc);
         *e = (*e).max(arc);
     }
+    let mut caches: BTreeMap<TilePos, FunctionBlock> = BTreeMap::new();
+    for (pos, block) in sk.caches {
+        caches.insert(pos, block);
+    }
 
     let mut spec = MapSpec::empty(size, size);
     spec.water = dedup_points(sk.water);
@@ -656,6 +699,7 @@ fn fill_and_assemble(
     spec.printers = sk.printers;
     spec.structures = sk.structures;
     spec.nests = nests.into_iter().collect();
+    spec.caches = caches.into_iter().collect();
     spec.blight_cores = sk.blight_cores;
     spec.node_amount = config.node_amount;
     spec.max_arcanum = config.nest_max_arcanum;

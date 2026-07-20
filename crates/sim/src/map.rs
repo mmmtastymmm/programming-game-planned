@@ -351,6 +351,10 @@ pub struct MapSpec {
     /// the match's `max_arcanum` simply don't spawn.
     #[serde(default)]
     pub nests: Vec<(TilePos, u8)>,
+    /// Template Caches (docs/06): (position, function block). Non-consumable
+    /// study sites `study()` unlocks. Serde-defaulted so stored replays parse.
+    #[serde(default)]
+    pub caches: Vec<(TilePos, crate::progression::FunctionBlock)>,
     /// Match option (docs/04): the deepest arcanum this map spawns.
     /// Raising it deepens the frontier, never the neighborhood.
     #[serde(default = "default_max_arcanum")]
@@ -596,6 +600,11 @@ impl MapSpec {
                 return Err(MapSpecError::OutOfBounds { what: "nests", pos });
             }
         }
+        for &(pos, _) in &self.caches {
+            if !in_bounds(pos) {
+                return Err(MapSpecError::OutOfBounds { what: "caches", pos });
+            }
+        }
         for &(pos, _, _) in &self.blight_cores {
             if !in_bounds(pos) {
                 return Err(MapSpecError::OutOfBounds { what: "blight_cores", pos });
@@ -632,6 +641,12 @@ impl MapSpec {
                 return Err(MapSpecError::NotSpawnable { what: "structure", pos, kind });
             }
         }
+        for &(pos, _) in &self.caches {
+            let kind = grid.get(pos).expect("in-bounds");
+            if !kind.spawnable() {
+                return Err(MapSpecError::NotSpawnable { what: "cache", pos, kind });
+            }
+        }
         Ok(grid)
     }
 
@@ -664,6 +679,7 @@ impl MapSpec {
             structures: Vec::new(),
             quirk_permille: default_quirk_permille(),
             nests: Vec::new(),
+            caches: Vec::new(),
             max_arcanum: default_max_arcanum(),
             settings: MatchSettings::default(),
         }

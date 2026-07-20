@@ -97,6 +97,9 @@ pub(crate) fn inspector_ui(
                 Some(sim::world::Action::Search { reach, current, .. }) => {
                     format!("searching (ring {current}/{reach})")
                 }
+                Some(sim::world::Action::Study { ticks_left, .. }) => {
+                    format!("studying ({ticks_left} ticks left)")
+                }
                 Some(sim::world::Action::Repair { .. }) => "repairing".into(),
                 Some(sim::world::Action::Race { kind, .. }) => match kind {
                     sim::world::RaceKind::Salvage => "salvaging".into(),

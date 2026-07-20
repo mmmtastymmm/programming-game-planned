@@ -32,7 +32,7 @@ pub use error::{faults, PyriteError, PyriteErrorKind};
 pub use parser::parse;
 pub use unlocks::{Construct, UnlockSet};
 pub use value::{EnumValue, Value};
-pub use analysis::check_windows;
+pub use analysis::{called_names, check_windows};
 pub use vm::{
     CallCtx, EngineCtx, Fault, Host, HostCall, Outcome, Phase, RaiseOutcome, RunState, Signal,
     Vm, VmConfig,

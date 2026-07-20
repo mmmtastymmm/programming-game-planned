@@ -213,6 +213,16 @@ pub struct Depot {
     pub faction: u8,
 }
 
+/// A Template Cache (docs/06): a ruined installation holding an old-world
+/// function block. `study()` at an adjacent tile unlocks its block for the
+/// studying bot's colony — non-consumable (a school, not a pickup), so any
+/// colony can learn from the same site.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct Cache {
+    pub pos: TilePos,
+    pub block: crate::progression::FunctionBlock,
+}
+
 /// Structure kinds with generic state (docs/03). Printers stay their own
 /// specialized type until M9 reworks them — flagged for discussion in
 /// TASKS.md.
@@ -434,6 +444,9 @@ pub enum ActionRequest {
     Wander,
     /// Pick a random fogged tile within ~15, walk there, survey it.
     Explore,
+    /// Study an adjacent Template Cache (docs/06): root ~10s, then unlock its
+    /// function block colony-wide.
+    Study,
     // --- the wreck race + guard duty (M10) ---
     /// Field repair a wreck (the rescue) or mend a structure/bot.
     Repair(EntityId),
@@ -485,6 +498,9 @@ pub enum Action {
     /// reached so far, expanding one tile per interval out to `reach`
     /// (the hearing radius at stance start). Resolves at full reach.
     Search { reach: u32, current: u32, ticks_left: u32 },
+    /// Studying a Template Cache (docs/06): rooted for `ticks_left`, then the
+    /// `cache`'s function block unlocks colony-wide.
+    Study { cache: EntityId, ticks_left: u32 },
     /// Field repair / mending (M10): deci-progress accumulated so far.
     Repair { target: EntityId, done_deci: u32 },
     /// A timed race verb against a wreck (M10).
@@ -784,6 +800,41 @@ pub fn faction_unlocks(world: &World, faction: u8) -> pyrite::UnlockSet {
     }
 }
 
+/// The function blocks a faction may call this match (docs/06). Dev sandboxes
+/// (`dev_all_unlocks`) act as if every Cache has been studied, so existing
+/// maps and tests deploy freely; a real match starts empty and studies up.
+pub fn studied_blocks(
+    world: &World,
+    faction: u8,
+) -> std::collections::BTreeSet<crate::progression::FunctionBlock> {
+    if world.dev_all_unlocks {
+        crate::progression::FunctionBlock::ALL.into_iter().collect()
+    } else {
+        world.studied.get(&faction).cloned().unwrap_or_default()
+    }
+}
+
+/// Which called builtins a `faction` may NOT yet call: those whose gating
+/// block (progression::block_of) is not in the faction's studied set. Empty
+/// means the program is clear to deploy. Names not gated by any block, and
+/// user `def`s / module functions, are ignored here.
+pub fn locked_builtins(
+    world: &World,
+    faction: u8,
+    called: &std::collections::BTreeSet<String>,
+) -> Vec<(String, crate::progression::FunctionBlock)> {
+    let studied = studied_blocks(world, faction);
+    let mut locked = Vec::new();
+    for name in called {
+        if let Some(block) = crate::progression::block_of(name)
+            && !studied.contains(&block)
+        {
+            locked.push((name.clone(), block));
+        }
+    }
+    locked
+}
+
 /// Read an env key with defaulting and quirk policy (docs/01 + docs/09):
 /// unset means the default — a TEMPERAMENT quirk shifts that default —
 /// and the value always lands inside any COMPULSION clamp (a `setenv`
@@ -973,6 +1024,8 @@ pub struct World {
     pub grid: Grid,
     pub nodes: BTreeMap<EntityId, ResourceNode>,
     pub depots: BTreeMap<EntityId, Depot>,
+    /// Template Caches (docs/06): study sites unlocking function blocks.
+    pub caches: BTreeMap<EntityId, Cache>,
     /// Generic structures (Smelter/Foundry/Archive — docs/03). Printers
     /// stay separate until M9's rework.
     pub structures: BTreeMap<EntityId, Structure>,
@@ -1074,6 +1127,10 @@ pub struct World {
     /// consumed at parse. Dev sandboxes get UnlockSet::all() via
     /// MapSpec.dev_all_unlocks.
     pub unlocks: BTreeMap<u8, pyrite::UnlockSet>,
+    /// Per-faction, per-match function-block unlocks (docs/06): the blocks a
+    /// colony has STUDIED at Template Caches. Gates which builtins its
+    /// programs may call. Dev sandboxes act as if every block is studied.
+    pub studied: BTreeMap<u8, std::collections::BTreeSet<crate::progression::FunctionBlock>>,
     /// Dev flag (from MapSpec): parse with everything unlocked.
     pub dev_all_unlocks: bool,
     /// Dev flag (from MapSpec): skip energy/Steel upkeep entirely.
@@ -1276,6 +1333,7 @@ impl World {
             grid,
             nodes: BTreeMap::new(),
             depots: BTreeMap::new(),
+            caches: BTreeMap::new(),
             structures: BTreeMap::new(),
             bots: BTreeMap::new(),
             bot_entities: BTreeMap::new(),
@@ -1312,6 +1370,7 @@ impl World {
             vote_cooldown_ticks: 300,
             vote_window_ticks: 100,
             unlocks: BTreeMap::new(),
+            studied: BTreeMap::new(),
             dev_all_unlocks: spec.dev_all_unlocks,
             dev_free_power: spec.dev_free_power,
             quirk_permille: spec.quirk_permille,
@@ -1356,6 +1415,11 @@ impl World {
         for &(pos, faction) in &spec.depots {
             let id = world.alloc_entity();
             world.depots.insert(id, Depot { pos, faction });
+        }
+        // Template Caches (docs/06): non-consumable study sites.
+        for &(pos, block) in &spec.caches {
+            let id = world.alloc_entity();
+            world.caches.insert(id, Cache { pos, block });
         }
         let mut first_printer_of: BTreeSet<u8> = BTreeSet::new();
         for p in &spec.printers {
@@ -1509,6 +1573,7 @@ impl World {
             .get(&id)
             .map(|n| n.pos)
             .or_else(|| self.depots.get(&id).map(|d| d.pos))
+            .or_else(|| self.caches.get(&id).map(|c| c.pos))
             .or_else(|| self.printers.get(&id).map(|p| p.pos))
             .or_else(|| self.structures.get(&id).map(|s| s.pos))
             .or_else(|| self.blueprints.get(&id).map(|b| b.pos))

@@ -66,6 +66,8 @@ Tuning(
     episode_rearm_ticks: 50,
     // The scouting stance's seeing ring expands one tile per this many.
     search_ring_ticks: 10,
+    // How long a bot roots to study a Template Cache (docs/06 Q79: ~10 s).
+    study_ticks: 100,
     // explore(): random fogged tile within this radius (docs: ~15).
     explore_radius: 15,
     // wander(): random walk leg length, tiles.
