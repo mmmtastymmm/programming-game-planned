@@ -234,3 +234,32 @@ fn policy_quirks_shift_defaults_and_clamp_setenv() {
         "compulsion clamps to 55..=99"
     );
 }
+
+#[test]
+fn detection_by_an_enemy_pays_the_hiding_track() {
+    // docs/05: a fresh detection episode (an enemy faction newly sees/hears
+    // you) pays the Hiding XP track — "being caught teaches". Two adjacent
+    // bots of different factions detect each other on the first perception
+    // pass. The whole Hiding track (settle_episodes) had no test.
+    let mut spec = MapSpec::empty(6, 3);
+    spec.quirk_permille = 0;
+    let mut sim = Sim::new(&spec);
+    let hider = spawn(&mut sim, TilePos::new(2, 1), "wait(100000)\n"); // faction 0
+    sim.apply(&Command::SpawnBot {
+        pos: TilePos::new(3, 1),
+        source: "wait(100000)\n".into(),
+        cpu: 4,
+        cargo_cap: 1,
+        faction: 1,
+        hp: 100,
+        color: Color::GREEN,
+    })
+    .unwrap();
+    for _ in 0..5 {
+        sim.step();
+    }
+    assert!(
+        sim.world.bots[&hider].data.xp(XpTrack::Hiding) > 0,
+        "being detected by an enemy opens an episode and pays Hiding XP"
+    );
+}

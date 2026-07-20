@@ -259,3 +259,58 @@ fn faction_zero_namespaces_are_addressable() {
         "faction 0 is a real namespace — its stolen key must work (review 2026-07-16)"
     );
 }
+
+#[test]
+fn try_receive_consumes_a_waiting_senders_value() {
+    // The SUCCESS path of the non-blocking receive: a sender is already
+    // blocked, so try_receive() takes its value (not False). Prior coverage
+    // only exercised try_send's jammed-returns-False branch.
+    let mut spec = MapSpec::empty(8, 4);
+    spec.quirk_permille = 0;
+    let mut sim = Sim::new(&spec);
+    sim.tuning.fault_damage = 0;
+    // Sender blocks first.
+    spawn(&mut sim, TilePos::new(1, 1), "send(\"t\", 99)\nwait(600)\n", 0);
+    for _ in 0..10 {
+        sim.step();
+    }
+    // Then a non-blocking receiver takes the value.
+    spawn(
+        &mut sim,
+        TilePos::new(3, 1),
+        "x = try_receive(\"t\")\nlog(x)\nupload_log()\nwait(600)\n",
+        0,
+    );
+    for _ in 0..30 {
+        sim.step();
+    }
+    assert!(logged(&sim, "99"), "try_receive took the waiting sender's value");
+}
+
+#[test]
+fn try_broadcast_delivers_to_waiting_receivers() {
+    // The SUCCESS path of the non-blocking broadcast: receivers are already
+    // waiting, so try_broadcast() delivers to all of them and returns True.
+    let mut spec = MapSpec::empty(10, 4);
+    spec.quirk_permille = 0;
+    let mut sim = Sim::new(&spec);
+    sim.tuning.fault_damage = 0;
+    // Two receivers block first.
+    spawn(&mut sim, TilePos::new(1, 1), "x = receive(\"b\")\nlog(\"got\")\nupload_log()\nwait(600)\n", 0);
+    spawn(&mut sim, TilePos::new(2, 1), "x = receive(\"b\")\nlog(\"got\")\nupload_log()\nwait(600)\n", 0);
+    for _ in 0..10 {
+        sim.step();
+    }
+    // Then a non-blocking broadcaster reaches both.
+    spawn(
+        &mut sim,
+        TilePos::new(5, 1),
+        "x = try_broadcast(\"b\", 7)\nlog(x)\nupload_log()\nwait(600)\n",
+        0,
+    );
+    for _ in 0..30 {
+        sim.step();
+    }
+    assert!(logged(&sim, "True"), "try_broadcast reported a delivery");
+    assert!(logged(&sim, "got"), "waiting receivers got the broadcast");
+}

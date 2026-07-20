@@ -866,6 +866,14 @@ pub fn env_read(
         Some(EnvDefault::HurtLine) => tuning.hurt_line_pct,
         None => 0,
     });
+    // The key's hard range (the same bound `setenv` enforces on writes) is a
+    // floor under EVERY source — including a quirk's EnvDefault, which does
+    // not go through setenv, so an out-of-range temperament can't smuggle in
+    // a value setenv would have rejected (e.g. a 0 hurt_line that silences
+    // the Hurt signal forever).
+    if let Some(spec) = ENV_KEYS.iter().find(|k| k.name == key) {
+        value = value.clamp(spec.min, spec.max);
+    }
     // Compulsion: the hardware refuses, deterministically.
     for effect in quirks.effects_of(data) {
         if let crate::quirks::QuirkEffect::EnvClamp { key: k, min, max } = effect

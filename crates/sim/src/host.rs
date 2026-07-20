@@ -89,9 +89,10 @@ impl BotHost<'_> {
         {
             return true;
         }
-        if self.world.black_boxes.iter().any(|bb| bb.entity == entity) {
-            return true;
-        }
+        // Black boxes are UN-owned field objects: perceiving one needs eyes
+        // on it, exactly like find_kind/scan gate them on perception.seen.
+        // (Falling through to the sight check below keeps is_seen() agreeing
+        // with exists()/closest() — a box the colony can't see is not seen.)
         self.perception()
             .is_some_and(|p| p.seen.contains(&entity) || p.heard.contains_key(&entity))
     }

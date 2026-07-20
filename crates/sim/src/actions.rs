@@ -1013,7 +1013,10 @@ impl Sim {
                 let (pos, faction, elevated) = (
                     bot.data.pos,
                     bot.data.faction,
-                    self.world.grid.get(bot.data.pos) == Some(TileKind::HighGround),
+                    // Mountain summits are elevated too (docs/05) — the survey
+                    // must see over walls just like passive perception does,
+                    // via the same on_high_ground predicate as los_clear.
+                    crate::perception::on_high_ground(&self.world.grid, bot.data.pos),
                 );
                 let discovered: Vec<(crate::world::EntityId, crate::world::KnownNode)> = self
                     .world
@@ -1198,8 +1201,9 @@ impl Sim {
                     &self.world.grid,
                     bot.data.pos,
                     tile,
-                    self.world.grid.get(bot.data.pos)
-                        == Some(crate::map::TileKind::HighGround),
+                    // Mountain summits see over walls too (docs/05), matching
+                    // passive perception's elevation rule.
+                    crate::perception::on_high_ground(&self.world.grid, bot.data.pos),
                 )
             {
                 return true;

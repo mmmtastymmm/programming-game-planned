@@ -5,7 +5,7 @@
 use sim::map::{edge_allowed, MapSpec, TileKind};
 use sim::sim::{Command, Sim};
 use sim::stats;
-use sim::world::{BlueprintKind, Color};
+use sim::world::{BlueprintKind, Color, XpTrack};
 use sim::TilePos;
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -738,4 +738,102 @@ fn a_multi_tick_mover_stays_audible_between_tiles() {
         prev = pos;
     }
     assert!(heard_mid_traverse, "a bot mid-traverse on multi-tick terrain stays audible");
+}
+
+#[test]
+fn snow_mutes_the_mover() {
+    // Q78 "Snow mutes movement" (docs/05): a bot moving ON Snow makes NO
+    // movement noise — undetectable by hearing regardless of signature, only
+    // seeing finds it. Mirrors ford_wading_quiets_the_mover. The walker is
+    // heard at d=3 on plains but goes SILENT the tick it stands on Snow.
+    let heard_at_three = |snow: bool| -> bool {
+        let mut spec = MapSpec::empty(16, 1);
+        spec.depots.push((TilePos::new(15, 0), 0)); // far east: keep depot eyes away
+        let mut sim = Sim::new(&spec);
+        if snow {
+            sim.world.grid.set(TilePos::new(3, 0), TileKind::Snow);
+        }
+        sim.stats.sensors = 2; // seeing 2, hearing 2 * 150% = 3
+        let listener = spawn(&mut sim, TilePos::new(0, 0), IDLER);
+        let _ = listener;
+        let walker = sim
+            .apply(&Command::SpawnBot {
+                pos: TilePos::new(2, 0),
+                source: "move_to(closest(depot).expect())\nwait(500)\n".into(),
+                cpu: 4,
+                cargo_cap: 1,
+                faction: 1,
+                hp: 100,
+                color: Color::GREEN,
+            })
+            .unwrap()
+            .unwrap();
+        let entity = sim.world.bots[&walker].data.entity;
+        let mut heard = false;
+        for _ in 0..400 {
+            sim.step();
+            let data = &sim.world.bots[&walker].data;
+            if TilePos::new(0, 0).chebyshev(data.pos) == 3
+                && sim.world.perception.get(&0).is_some_and(|p| p.heard.contains_key(&entity))
+            {
+                heard = true;
+            }
+        }
+        heard
+    };
+    assert!(heard_at_three(false), "on plains the mover is heard at d=3 (baseline)");
+    assert!(!heard_at_three(true), "on Snow the mover is muted — never heard");
+}
+
+#[test]
+fn scouting_l3_runs_clean_inside_corruption() {
+    // docs/02+05 (Q75): Scouting-L3 veterans are IMMUNE to the Corruption
+    // op-tax — "the only bots whose code runs clean in there". Race an L3
+    // scout against an L0 rookie through the SAME compute loop on corrupted
+    // ground: the untaxed scout finishes first. (The immunity was decided but
+    // unimplemented + untested.)
+    let mut spec = MapSpec::empty(6, 3);
+    spec.quirk_permille = 0;
+    for x in 0..6 {
+        spec.corruption.push(TilePos::new(x, 1));
+    }
+    let mut sim = Sim::new(&spec);
+    sim.tuning.boot_ticks = 1;
+    let prog = "i = 0\nwhile i < 50:\n    i = i + 1\nlog(\"done\")\nwait(100000)\n";
+    let mk = |sim: &mut Sim, x: i32| {
+        sim.apply(&Command::SpawnBot {
+            pos: TilePos::new(x, 1),
+            source: prog.into(),
+            cpu: 1, // cpu 1 makes the per-op tax bite hardest
+            cargo_cap: 1,
+            faction: 0,
+            hp: 100,
+            color: Color::GREEN,
+        })
+        .unwrap()
+        .unwrap()
+    };
+    let scout = mk(&mut sim, 1);
+    let rookie = mk(&mut sim, 4);
+    sim.world.bots.get_mut(&scout).unwrap().data.xp.insert(XpTrack::Scouting, 1_000_000);
+
+    let done = |sim: &Sim, id: &sim::BotId| {
+        sim.world.bots[id].data.log_buf.iter().any(|(_, s)| s == "\"done\"")
+    };
+    let (mut scout_done, mut rookie_done) = (None, None);
+    for t in 0..800 {
+        sim.step();
+        if scout_done.is_none() && done(&sim, &scout) {
+            scout_done = Some(t);
+        }
+        if rookie_done.is_none() && done(&sim, &rookie) {
+            rookie_done = Some(t);
+        }
+        if scout_done.is_some() && rookie_done.is_some() {
+            break;
+        }
+    }
+    let s = scout_done.expect("the scout finishes the loop");
+    let r = rookie_done.expect("the rookie finishes the loop");
+    assert!(s < r, "the immune scout computes faster on corruption (scout t={s} < rookie t={r})");
 }

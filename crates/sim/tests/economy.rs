@@ -445,3 +445,61 @@ fn mined_cargo_still_earns_hauling_xp() {
         "mined cargo hauled to a depot still earns Hauling XP"
     );
 }
+
+#[test]
+fn crystal_field_mines_and_the_chips_recipe_runs() {
+    // The Crystal -> Chips compute loop (docs/03/05) had NO from-scratch test:
+    // CrystalField was never mined and the chips recipe (Silver+Crystal+Wire)
+    // never run — Chips only ever arrived via starting_stock. Do both here.
+    let mut spec = MapSpec::empty(9, 5);
+    spec.crystal.push(TilePos::new(2, 2)); // a CrystalField tile + Crystal node
+    spec.starting_stock.push((0, Resource::Steel, 25)); // Foundry price
+    spec.starting_stock.push((0, Resource::Bronze, 10));
+    let mut sim = Sim::new(&spec);
+    sim.tuning.fault_damage = 0;
+
+    // Phase 1: a bot mines the CrystalField -> Crystal in its hold.
+    let miner = spawn(
+        &mut sim,
+        TilePos::new(1, 2),
+        "move_to(closest(crystal).expect())\nmine()\nmine()\nmine()\nwait(100000)\n",
+    );
+    for _ in 0..200 {
+        sim.step();
+    }
+    let mined = sim.world.bots[&miner].data.cargo.get(&Resource::Crystal).copied().unwrap_or(0);
+    assert!(mined >= 20, "the CrystalField must yield Crystal (got {mined} deci)");
+
+    // Phase 2: top up the other two chip inputs by hand and run the recipe.
+    sim.apply(&Command::PlaceStructure {
+        pos: TilePos::new(5, 2),
+        kind: StructureKind::Foundry,
+        faction: 0,
+    })
+    .unwrap();
+    let foundry = *sim
+        .world
+        .structures
+        .iter()
+        .find(|(_, s)| s.kind == StructureKind::Foundry)
+        .map(|(id, _)| id)
+        .expect("foundry placed");
+    // chips = RECIPES[4] (Silver + 2 Crystal + Wire -> Chips).
+    sim.apply(&Command::SetRecipe { structure: foundry, recipe: Some(4) }).unwrap();
+    {
+        let bot = sim.world.bots.get_mut(&miner).unwrap();
+        bot.data.cargo.insert(Resource::Silver, 10);
+        bot.data.cargo.insert(Resource::Wire, 10);
+    }
+    sim.apply(&Command::DeployProgram {
+        faction: 0,
+        color: Color::GREEN,
+        source: "move_to(closest(foundry).expect())\ndeposit()\nwait(80)\ntry_withdraw(chips)\nwait(600)\n".into(),
+    })
+    .unwrap();
+    for _ in 0..400 {
+        sim.step();
+    }
+    let chips = sim.world.bots[&miner].data.cargo.get(&Resource::Chips).copied().unwrap_or(0);
+    assert!(chips > 0, "the chips recipe produced withdrawable Chips (got {chips} deci)");
+}

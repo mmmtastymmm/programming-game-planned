@@ -887,6 +887,27 @@ fail without their fix). ⚠HASH (income/perception/closest feed phase 9; golden
 Template Caches~~ — **now built (M15, 2026-07-20)**: the Cache entity, `study()`, per-match
 function-block gating, and mapgen placement all landed.
 
+## Test-coverage review 2026-07-20 (max, whole design) — 4 fixes + 11 coverage gaps closed
+
+A max-effort audit of test coverage across docs/00–09 / M0–M15. **Correctness fixes**: the survey &
+fog line-of-sight elevation flag now uses `on_high_ground` (Mountain summits see over walls too, not
+just HighGround — `actions.rs` survey + `tile_visible`); `perceived()` no longer short-circuits black
+boxes to always-seen (they're sight-gated like `find_kind`/`is_seen`, so `is_seen` agrees with
+`exists`/`closest`); the decided **Scouting-L3 Corruption immunity** (Q75) is now implemented (an L3
+scout skips the op-tax) and raced-tested; `env_read` clamps to the ENV_KEYS range so a quirk's
+`EnvDefault` can't smuggle in an out-of-range value `setenv` would reject. **Coverage added** (tests
+that fail if the mechanic breaks): the scouting stance (`search()` → node discovery + Scouting XP),
+`scan_resources` distance-ordering, `is_seen`/`cargo_count`/`path_blocked` start-kit queries
+(`tests/perception.rs`); `setenv`/`getenv` round-trip + range, `my_quirks`/`has_quirk` manifested-only
+(`tests/env_quirks.rs`); a two-run state-hash guard exercising the `feral_mutation`/`wander`/`explore`/
+`quirk_roll` RNG streams the golden never touches (`tests/determinism.rs`); Snow-mutes-movement + the
+Scouting-L3 corruption race (`terrain.rs`); `try_receive`/`try_broadcast` success paths (`channels.rs`);
+the Hiding XP track (`growth.rs`); the Crystal→Chips compute loop mined + refined from scratch
+(`economy.rs`). All sim/pyrite/game suites green; golden unchanged (the fixes only alter previously
+untested edges). *Not isolable under current tuning: the survey/passive elevation ranges coincide, so
+finding [0]'s fix is defensive (guarded by the general survey test); the env-clamp fix has no shipped
+out-of-range quirk to trigger it (guarded by the setenv-range test exercising the same path).*
+
 ## Cross-cutting quick wins (small, independent, grab anytime)
 
 - [x] Delete the spurious `become_disabled` cost entry once M3 lands. [pyrite] *(with M3)*

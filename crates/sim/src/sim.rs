@@ -1763,6 +1763,10 @@ impl Sim {
                 self.world.brownout.contains(&faction),
                 self.world.powered_bot.get(&faction) == Some(&id),
             );
+            // Scouting L3 veterans run CLEAN inside Corruption (docs/02+05,
+            // Q75: "the only bots whose code runs clean in there"). Computed
+            // before the mutable reborrow below.
+            let scout_immune = self.xp.level(bot.data.xp(crate::world::XpTrack::Scouting)) >= 3;
             let bot = self.world.bots.get_mut(&id).expect("checked above");
             let mut vm = bot.vm.take().expect("vm present between phases");
             if vm.is_dead() {
@@ -1775,7 +1779,7 @@ impl Sim {
             // where the bot is now, never persisted. (Flat only; the
             // per-op-key generalization is flagged in TASKS.md.)
             let on_corruption = self.world.grid.is_corruption(bot.data.pos);
-            vm.set_cost_overlay_centi(if on_corruption {
+            vm.set_cost_overlay_centi(if on_corruption && !scout_immune {
                 self.tuning.corruption_op_tax as i64
             } else {
                 0
