@@ -117,28 +117,46 @@ pub(crate) fn orbit_camera(
     *transform = orbit_transform(&cam);
 }
 
-/// Cursor ray onto the ground plane -> tile coordinates.
+/// Cursor ray onto the terrain surface -> tile coordinates.
+///
+/// Picks against a horizontal plane, but since the elevation pass raised tile
+/// tops (and the bots that ride [`terrain_top`]) off `y=0`, a single `y=0`
+/// solve lands on the tile *behind* a raised one. So we solve twice: once
+/// against the ground to find a candidate tile, then again against that tile's
+/// rendered top so clicks on raised tiles and the bots standing on them
+/// resolve correctly. (Cliff *faces* still resolve to the tile above/below;
+/// a true mesh raycast is the eventual fix.)
 pub(crate) fn cursor_tile(
     windows: &Query<&Window>,
     cams: &Query<(&Camera, &GlobalTransform), With<Camera3d>>,
-    grid_w: i32,
-    grid_h: i32,
+    world: &sim::World,
 ) -> Option<TilePos> {
     let window = windows.single().ok()?;
     let cursor = window.cursor_position()?;
     let (camera, cam_transform) = cams.single().ok()?;
     let ray = camera.viewport_to_world(cam_transform, cursor).ok()?;
-    if ray.direction.y.abs() < 1e-4 {
-        return None;
+    let (grid_w, grid_h) = (world.grid.width as f32, world.grid.height as f32);
+    let solve = |plane_y: f32| -> Option<TilePos> {
+        if ray.direction.y.abs() < 1e-4 {
+            return None;
+        }
+        let t = (plane_y - ray.origin.y) / ray.direction.y;
+        if t < 0.0 {
+            return None;
+        }
+        let hit = ray.origin + *ray.direction * t;
+        Some(TilePos::new(
+            (hit.x + grid_w / 2.0).round() as i32,
+            (hit.z + grid_h / 2.0).round() as i32,
+        ))
+    };
+    let ground = solve(0.0)?;
+    let top = crate::palette::terrain_top(world, ground);
+    if top.abs() < 1e-4 {
+        return Some(ground);
     }
-    let t = -ray.origin.y / ray.direction.y;
-    if t < 0.0 {
-        return None;
-    }
-    let hit = ray.origin + *ray.direction * t;
-    Some(TilePos::new(
-        (hit.x + grid_w as f32 / 2.0).round() as i32,
-        (hit.z + grid_h as f32 / 2.0).round() as i32,
-    ))
+    // Re-solve against the hit tile's top; fall back to the ground guess if the
+    // refined ray somehow points away (e.g. a grazing near-horizontal ray).
+    solve(top).or(Some(ground))
 }
 

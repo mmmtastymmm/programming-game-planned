@@ -289,6 +289,15 @@ pub(crate) fn tile_xyz(world: &sim::World, pos: TilePos, y: f32) -> Vec3 {
     )
 }
 
+/// Like [`tile_xyz`], but lifts `y` onto the tile's rendered top surface so
+/// overlays that sit *on* a tile (wrecks, ghosts, depots, bars, markers …)
+/// ride terrain elevation instead of sinking into a raised block. The terrain
+/// slabs/blocks themselves use raw [`tile_xyz`] (their `y` already encodes the
+/// block height), as do bridges (water-level only).
+pub(crate) fn tile_top_xyz(world: &sim::World, pos: TilePos, y: f32) -> Vec3 {
+    tile_xyz(world, pos, y + terrain_top(world, pos))
+}
+
 /// One entity of the terrain slab layer — despawned wholesale and
 /// rebuilt by [`resync_terrain`] when the map changes (M8).
 #[derive(Component)]
@@ -352,16 +361,14 @@ fn spawn_tile(commands: &mut Commands, palette: &Palette, world: &sim::World, x:
         // Rubble): a cliff block at the kind's elevation. Its top autotiles a
         // rim against non-same neighbours; a lower neighbour block occludes
         // this block's wall down to its own top, giving a clean cliff face.
-        let same: fn(TileKind) -> bool = match kind {
-            TileKind::Mountain => |t| matches!(t, TileKind::Mountain),
-            TileKind::HighGround => |t| matches!(t, TileKind::HighGround),
-            TileKind::Barricade => |t| matches!(t, TileKind::Barricade),
-            TileKind::Dunes => |t| matches!(t, TileKind::Dunes),
-            TileKind::Scree => |t| matches!(t, TileKind::Scree),
-            TileKind::Rubble => |t| matches!(t, TileKind::Rubble),
-            _ => |_| false,
+        // Only Mountain and HighGround autotile their cliff tops (16 distinct
+        // variants); Barricade paints one tech face and Rubble/Scree/Dunes use
+        // a uniform atlas, so the neighbour scan would be dead work for them.
+        let mask = match kind {
+            TileKind::Mountain => mask_of(|t| matches!(t, TileKind::Mountain)),
+            TileKind::HighGround => mask_of(|t| matches!(t, TileKind::HighGround)),
+            _ => 0,
         };
-        let mask = mask_of(same);
         let mat = match kind {
             // Barricade is teched-over built mass: the tech tile on every face.
             TileKind::Barricade => palette.ground_tex_mat.clone(),
@@ -379,14 +386,11 @@ fn spawn_tile(commands: &mut Commands, palette: &Palette, world: &sim::World, x:
                 mask_of(|t| !matches!(t, TileKind::Water | TileKind::Bridge));
             (palette.tex_slab.clone(), palette.grass_tex_mats[mask].clone(), 0.0)
         }
-        // Mountains rise a full block: crossing costs double, and
-        // the silhouette should say so. The summit grows a cliff
-        // rim wherever the range ends.
-        // M8 moved the full block from Rubble to Mountain; Rubble
-        // is LOW DEBRIS now — flat broken rock you drive over
-        // (and what worn Scree collapses into).
-        // Mountain / Rubble / Scree are elevated — handled by the block
-        // branch above.
+        // Mountain / HighGround / Barricade / Dunes / Scree / Rubble all
+        // render as raised blocks with cliff faces now — handled by the block
+        // branch above (see `elevation`). Mountain/HighGround/Barricade rise a
+        // full block; Rubble/Scree/Dunes sit low (still passable, "driven
+        // over" — the height is view-only and doesn't change sim traversal).
         // The mesa doorstep: tan plateau art at ground level reads
         // as the cut in the cliff (a true sloped mesh can come
         // with real art passes).
@@ -792,7 +796,7 @@ pub(crate) fn setup_scene(
     // Elevation blocks (view-only): one mesh per elevated kind at its height,
     // plus its cliff-block 2-cell atlas (autotiled top | cliff side).
     let mut block_meshes: HashMap<u8, Handle<Mesh>> = HashMap::new();
-    for k in ELEVATED_KINDS {
+    for k in elevated_kinds() {
         block_meshes.insert(k.as_u8(), meshes.add(block_mesh(elevation(k))));
     }
     let mut block_mats: HashMap<u8, Vec<Handle<StandardMaterial>>> = HashMap::new();
@@ -1105,7 +1109,7 @@ pub(crate) fn setup_scene(
         commands.spawn((
             Mesh3d(palette.crate_box.clone()),
             MeshMaterial3d(palette.crate_mat.clone()),
-            Transform::from_translation(tile_xyz(world, depot.pos, 0.15)),
+            Transform::from_translation(tile_top_xyz(world, depot.pos, 0.15)),
         ));
     }
 

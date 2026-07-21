@@ -12,7 +12,7 @@ use sim::TilePos;
 use std::collections::{HashMap, HashSet};
 
 use crate::palette::Palette;
-use crate::scene::tile_xyz;
+use crate::scene::{tile_top_xyz, tile_xyz};
 use crate::GameSim;
 
 /// The viewer faction whose perception the fog renders (and whose colony
@@ -171,7 +171,7 @@ pub(crate) fn apply_fog(
     mut rings: Query<(&SurveyRing, &mut Transform), Without<Blip>>,
 ) {
     // Dev tool: skip fog so the whole map is lit for a SCREENSHOT_PATH capture.
-    if std::env::var("SCREENSHOT_PATH").is_ok() {
+    if crate::screenshot_path().is_some() {
         return;
     }
     let world = &game.0.world;
@@ -216,7 +216,7 @@ pub(crate) fn apply_fog(
     let mut live: HashSet<u64> = HashSet::new();
     for (id, pos) in &fog.heard {
         live.insert(*id);
-        let at = tile_xyz(world, *pos, 0.8);
+        let at = tile_top_xyz(world, *pos, 0.8);
         match assets.blips.get(id) {
             Some(&e) => {
                 commands.entity(e).insert(Transform::from_translation(at));
@@ -246,7 +246,7 @@ pub(crate) fn apply_fog(
     for (bot_id, reach) in &fog.rings {
         live_rings.insert(*bot_id);
         let Some(bot) = world.bots.get(&sim::world::BotId(*bot_id)) else { continue };
-        let at = tile_xyz(world, bot.data.pos, 0.1);
+        let at = tile_top_xyz(world, bot.data.pos, 0.1);
         let scale = (*reach as f32).max(1.0) * 2.0;
         match assets.rings.get(bot_id) {
             Some(&e) => {

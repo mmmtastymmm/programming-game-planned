@@ -97,17 +97,38 @@ fn main() {
         .run();
 }
 
-/// Dev tool: if `SCREENSHOT_PATH` is set, capture the primary window after the
-/// scene settles and exit — a headless way to eyeball the render (the editor
-/// panels and fog also step aside; see `ui_root` / `fog::apply_fog`). No-op on
-/// normal runs.
+/// Dev-only screenshot capture path (`SCREENSHOT_PATH`), or `None`.
+///
+/// Compiled to `None` in release builds (`debug_assertions` off) so a stray env
+/// var can never cripple a shipped game; only dev builds read it. Every gate
+/// (`screenshot_and_exit`, `ui_root`, `fog::apply_fog`) consults this one
+/// switch, and `screenshot_and_exit` logs loudly when it's on so a dev run is
+/// never *silently* stripped of its UI and fog.
+pub(crate) fn screenshot_path() -> Option<String> {
+    if cfg!(debug_assertions) {
+        std::env::var("SCREENSHOT_PATH").ok()
+    } else {
+        None
+    }
+}
+
+/// Dev tool: if `SCREENSHOT_PATH` is set (dev builds only), capture the primary
+/// window after the scene settles and exit — a headless way to eyeball the
+/// render (the editor panels and fog also step aside; see `ui_root` /
+/// `fog::apply_fog`). No-op on normal runs.
 fn screenshot_and_exit(
     mut commands: Commands,
     mut count: Local<u32>,
     mut exit: MessageWriter<AppExit>,
 ) {
-    let Ok(path) = std::env::var("SCREENSHOT_PATH") else { return };
+    let Some(path) = screenshot_path() else { return };
     *count += 1;
+    if *count == 1 {
+        warn!(
+            "SCREENSHOT_PATH set — dev capture mode: UI and fog are hidden and \
+             the app will exit at ~frame 90 (capturing to {path})."
+        );
+    }
     if *count == 60 {
         use bevy::render::view::screenshot::{save_to_disk, Screenshot};
         commands.spawn(Screenshot::primary_window()).observe(save_to_disk(path));
@@ -130,7 +151,7 @@ fn ui_root(
     mut editor: ResMut<EditorState>,
 ) {
     // Dev tool: hide the panels for a clean SCREENSHOT_PATH capture.
-    if std::env::var("SCREENSHOT_PATH").is_ok() {
+    if screenshot_path().is_some() {
         return;
     }
     let Ok(ctx) = contexts.ctx_mut() else { return };

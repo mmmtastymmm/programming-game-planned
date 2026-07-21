@@ -652,6 +652,18 @@ impl BotData {
     pub fn xp_total(&self) -> u64 {
         self.xp.values().sum()
     }
+
+    /// Whether the bot's Pyrite VM is suspended this tick — the engine is
+    /// driving it (boot, recall, pad-sit), it's dying, or a bump stun froze it.
+    /// Phase 2 skips the VM entirely for these; the cycle-bar view reads the
+    /// same predicate so it never advertises an op that won't run.
+    pub fn vm_suspended(&self) -> bool {
+        self.dying
+            || self.booting.is_some()
+            || self.recall.is_some()
+            || self.pad_sit
+            || self.bump_frozen > 0
+    }
 }
 
 #[derive(Debug)]

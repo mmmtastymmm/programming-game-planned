@@ -1741,17 +1741,12 @@ impl Sim {
         let ids: Vec<BotId> = self.world.bots.keys().copied().collect();
         for id in ids.iter().copied() {
             let Some(bot) = self.world.bots.get(&id) else { continue };
-            if bot.data.dying
-                || bot.data.booting.is_some()
-                || bot.data.recall.is_some()
-                || bot.data.pad_sit
-            {
-                // Boot/recall/pad-sit are engine interrupt contexts: the
-                // program is suspended and the engine drives the bot.
+            if bot.data.vm_suspended() {
+                // Boot/recall/pad-sit are engine interrupt contexts (the
+                // program is suspended and the engine drives the bot), dying is
+                // terminal, and a bump stun freezes thinking — no VM step for
+                // any of them.
                 continue;
-            }
-            if bot.data.bump_frozen > 0 {
-                continue; // stunned by a bump — no thinking either
             }
             // The modifier pipeline (docs/02): base → hardware → XP →
             // quirks → state (Damaged, brownout — the Fabricator trickle

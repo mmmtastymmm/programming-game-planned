@@ -328,7 +328,7 @@ pub(crate) fn place_blueprint(
         return;
     }
     let world = &game.0.world;
-    let Some(pos) = cursor_tile(&windows, &cams, world.grid.width, world.grid.height) else {
+    let Some(pos) = cursor_tile(&windows, &cams, world) else {
         return;
     };
     if !world.grid.in_bounds(pos) {
@@ -401,7 +401,7 @@ pub(crate) fn build_preview(
         hide(&mut slab_vis, &mut strip_vis, &mut tip_vis);
         return;
     };
-    let Some(pos) = cursor_tile(&windows, &cams, world.grid.width, world.grid.height) else {
+    let Some(pos) = cursor_tile(&windows, &cams, world) else {
         hide(&mut slab_vis, &mut strip_vis, &mut tip_vis);
         return;
     };
@@ -432,7 +432,7 @@ pub(crate) fn build_preview(
         ToolKind::Paint(Some(c)) => (true, Some(palette.paint_mats[c as usize % 4].clone())),
     };
 
-    slab_tf.translation = tile_xyz(world, pos, 0.08);
+    slab_tf.translation = tile_top_xyz(world, pos, 0.08);
     *slab_vis = Visibility::Visible;
     slab_mat.0 = paint_ghost.unwrap_or_else(|| {
         if valid {

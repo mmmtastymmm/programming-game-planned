@@ -286,7 +286,7 @@ pub(crate) fn animate_disassembly(
         let target = world
             .printers
             .values()
-            .map(|p| tile_xyz(world, p.pos, 0.15))
+            .map(|p| tile_top_xyz(world, p.pos, 0.15))
             .min_by(|a, b| {
                 let (da, db) = (
                     a.distance_squared(transform.translation),
@@ -403,7 +403,7 @@ pub(crate) fn sync_view(
                     Mesh3d(palette.printer_box.clone()),
                     MeshMaterial3d(mat),
                     // Face the default camera (the atlas front is -Z).
-                    Transform::from_translation(tile_xyz(world, printer.pos, 0.25))
+                    Transform::from_translation(tile_top_xyz(world, printer.pos, 0.25))
                         .with_rotation(Quat::from_rotation_y(std::f32::consts::PI))
                         .with_scale(scale),
                 ))
@@ -492,7 +492,7 @@ pub(crate) fn sync_view(
                     .spawn((
                         Mesh3d(palette.gem.clone()),
                         MeshMaterial3d(palette.ore_mat.clone()),
-                        Transform::from_translation(tile_xyz(world, node.pos, 0.35))
+                        Transform::from_translation(tile_top_xyz(world, node.pos, 0.35))
                             .with_rotation(Quat::from_rotation_z(std::f32::consts::FRAC_PI_4))
                             .with_scale(scale),
                         Spinner(1.5),
@@ -539,7 +539,7 @@ pub(crate) fn sync_view(
             }
             continue;
         }
-        let start = tile_xyz(world, bot.data.pos, 0.45);
+        let start = tile_top_xyz(world, bot.data.pos, 0.45);
         let mut bar_root = Entity::PLACEHOLDER;
         let mut health_fill = Entity::PLACEHOLDER;
         let mut health_trail = Entity::PLACEHOLDER;
@@ -708,7 +708,7 @@ pub(crate) fn sync_view(
             .spawn((
                 Mesh3d(palette.tile_slab.clone()),
                 MeshMaterial3d(palette.print_glow_mat.clone()),
-                Transform::from_translation(tile_xyz(world, bp.pos, 0.05)),
+                Transform::from_translation(tile_top_xyz(world, bp.pos, 0.05)),
             ))
             .with_children(|parent| {
                 parent
@@ -799,12 +799,8 @@ pub(crate) fn sync_view(
             .spawn((
                 Mesh3d(palette.tex_slab.clone()),
                 MeshMaterial3d(palette.oneway_tex_mat.clone()),
-                Transform::from_translation(tile_xyz(
-                    world,
-                    *pos,
-                    terrain_top(world, *pos) + 0.08,
-                ))
-                .with_rotation(rot),
+                Transform::from_translation(tile_top_xyz(world, *pos, 0.08))
+                    .with_rotation(rot),
             ))
             .id();
         index.overlays.insert(key, (entity, *overlay));
@@ -832,12 +828,8 @@ pub(crate) fn sync_view(
             .spawn((
                 Mesh3d(palette.tile_slab.clone()),
                 MeshMaterial3d(palette.paint_mats[*color as usize % 4].clone()),
-                Transform::from_translation(tile_xyz(
-                    world,
-                    *pos,
-                    terrain_top(world, *pos) + 0.02,
-                ))
-                .with_scale(Vec3::new(1.0, 0.25, 1.0)),
+                Transform::from_translation(tile_top_xyz(world, *pos, 0.02))
+                    .with_scale(Vec3::new(1.0, 0.25, 1.0)),
             ))
             .id();
         index.paint.insert(key, (entity, *color));
@@ -860,7 +852,7 @@ pub(crate) fn sync_view(
                 .spawn((
                     Mesh3d(palette.pad_slab.clone()),
                     MeshMaterial3d(palette.wreck_tex_mat.clone()),
-                    Transform::from_translation(tile_xyz(world, wreck.pos(), 0.07)),
+                    Transform::from_translation(tile_top_xyz(world, wreck.pos(), 0.07)),
                 ))
                 .id();
             e.insert(entity);
@@ -885,13 +877,13 @@ pub(crate) fn sync_view(
                 Explosion { age: 0.0 },
                 Mesh3d(palette.explode_cube.clone()),
                 MeshMaterial3d(palette.explode_mat.clone()),
-                Transform::from_translation(tile_xyz(world, bb.pos, 0.5)),
+                Transform::from_translation(tile_top_xyz(world, bb.pos, 0.5)),
             ));
             let cube = commands
                 .spawn((
                     Mesh3d(palette.nose_cube.clone()),
                     MeshMaterial3d(palette.black_mat.clone()),
-                    Transform::from_translation(tile_xyz(world, bb.pos, 0.12)),
+                    Transform::from_translation(tile_top_xyz(world, bb.pos, 0.12)),
                 ))
                 .id();
             e.insert(cube);
@@ -1013,14 +1005,9 @@ pub(crate) fn update_cycle_bars(
         let Ok(mut visibility) = roots.get_mut(root) else { continue };
         // Engine interrupt contexts (boot, recall, pad-sit, bump stun) and
         // death suspend the program entirely — the sim skips the VM, so any
-        // stall left on it is stale. Those bots aren't thinking, they're
-        // being driven.
-        let suspended = bot.data.dying
-            || bot.data.booting.is_some()
-            || bot.data.recall.is_some()
-            || bot.data.pad_sit
-            || bot.data.bump_frozen > 0;
-        let saving = if suspended {
+        // stall left on it is stale. Shared predicate with phase 2 so the bar
+        // never advertises an op the sim won't run.
+        let saving = if bot.data.vm_suspended() {
             None
         } else {
             bot.vm.as_ref().filter(|vm| !vm.is_blocked()).and_then(|vm| {
@@ -1160,7 +1147,7 @@ pub(crate) fn select_bot(
             return; // that was a pan, not a click
         }
         let world = &game.0.world;
-        let Some(tile) = cursor_tile(&windows, &cams, world.grid.width, world.grid.height)
+        let Some(tile) = cursor_tile(&windows, &cams, world)
         else {
             return;
         };

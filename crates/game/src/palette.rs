@@ -126,7 +126,7 @@ pub(crate) struct Palette {
     pub(crate) snow_corner_mats: Vec<Handle<StandardMaterial>>,
     pub(crate) highground_corner_mats: Vec<Handle<StandardMaterial>>,
     /// Raised terrain block meshes, one per elevated `TileKind` (keyed by
-    /// `TileKind::as_u8`) at that kind's [`elevation`] — see `ELEVATED_KINDS`.
+    /// `TileKind::as_u8`) at that kind's [`elevation`] — see [`elevated_kinds`].
     pub(crate) block_meshes: HashMap<u8, Handle<Mesh>>,
     /// Cliff-block 2-cell atlas materials (autotiled top | cliff side), keyed
     /// by `TileKind::as_u8`, for the elevated kinds that own dedicated art.
@@ -242,16 +242,13 @@ pub(crate) fn elevation(kind: TileKind) -> f32 {
     }
 }
 
-/// The elevated kinds, rendered as raised blocks with cliff sides (the flat
-/// kinds render as slabs). Iterated at setup to build one block mesh each.
-pub(crate) const ELEVATED_KINDS: [TileKind; 6] = [
-    TileKind::Mountain,
-    TileKind::HighGround,
-    TileKind::Barricade,
-    TileKind::Dunes,
-    TileKind::Scree,
-    TileKind::Rubble,
-];
+/// The elevated kinds — those [`elevation`] raises above the flat plane —
+/// rendered as raised blocks with cliff sides (the flat kinds render as slabs).
+/// Derived from [`elevation`] so the two can never drift; iterated at setup to
+/// build one block mesh each.
+pub(crate) fn elevated_kinds() -> impl Iterator<Item = TileKind> {
+    TileKind::ALL.into_iter().filter(|&k| elevation(k) > 0.0)
+}
 
 /// Top surface of the tile at `pos` in render space — its elevation, minus a
 /// small sink for water/ford/mud so those read as depressions.
@@ -276,7 +273,7 @@ pub(crate) fn block_mesh(height: f32) -> Mesh {
     const SIDE: [f32; 4] = [0.5, 0.0, 1.0, 1.0];
     const EDGE: [f32; 4] = [0.51, 0.45, 0.53, 0.55];
     box_with_face_uvs(
-        Vec3::new(0.48, (height + 0.05) / 2.0, 0.48),
+        Vec3::new(0.48, block_y_off(height), 0.48),
         [SIDE, SIDE, SIDE, SIDE, TOP, EDGE],
     )
 }
