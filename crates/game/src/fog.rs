@@ -170,6 +170,10 @@ pub(crate) fn apply_fog(
     mut tiles: Query<(&FogTile, &mut Visibility, &mut MeshMaterial3d<StandardMaterial>)>,
     mut rings: Query<(&SurveyRing, &mut Transform), Without<Blip>>,
 ) {
+    // Dev tool: skip fog so the whole map is lit for a SCREENSHOT_PATH capture.
+    if std::env::var("SCREENSHOT_PATH").is_ok() {
+        return;
+    }
     let world = &game.0.world;
     // Lazily cover the whole grid once.
     if assets.tiles.is_empty() {

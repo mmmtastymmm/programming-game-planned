@@ -93,7 +93,28 @@ fn main() {
                 .chain()
                 .after(view::animate_terrain),
         )
+        .add_systems(Update, screenshot_and_exit)
         .run();
+}
+
+/// Dev tool: if `SCREENSHOT_PATH` is set, capture the primary window after the
+/// scene settles and exit — a headless way to eyeball the render (the editor
+/// panels and fog also step aside; see `ui_root` / `fog::apply_fog`). No-op on
+/// normal runs.
+fn screenshot_and_exit(
+    mut commands: Commands,
+    mut count: Local<u32>,
+    mut exit: MessageWriter<AppExit>,
+) {
+    let Ok(path) = std::env::var("SCREENSHOT_PATH") else { return };
+    *count += 1;
+    if *count == 60 {
+        use bevy::render::view::screenshot::{save_to_disk, Screenshot};
+        commands.spawn(Screenshot::primary_window()).observe(save_to_disk(path));
+    }
+    if *count >= 90 {
+        exit.write(AppExit::Success);
+    }
 }
 
 /// The app's single egui entry point.
@@ -108,6 +129,10 @@ fn ui_root(
     mut game: NonSendMut<GameSim>,
     mut editor: ResMut<EditorState>,
 ) {
+    // Dev tool: hide the panels for a clean SCREENSHOT_PATH capture.
+    if std::env::var("SCREENSHOT_PATH").is_ok() {
+        return;
+    }
     let Ok(ctx) = contexts.ctx_mut() else { return };
     let ctx = ctx.clone();
     let mut root = egui::Ui::new(

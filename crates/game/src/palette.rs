@@ -79,7 +79,6 @@ pub(crate) struct Palette {
     /// grow a cliff rim on their "different" sides.
     pub(crate) grass_tex_mats: Vec<Handle<StandardMaterial>>,
     pub(crate) water_tex_mats: Vec<Handle<StandardMaterial>>,
-    pub(crate) mountain_tex_mats: Vec<Handle<StandardMaterial>>,
     /// Static autotiled terrains: mud grows a dried crust, corruption a
     /// creep frontier, ore a broken-rock lip, crystal a frost band.
     pub(crate) mud_tex_mats: Vec<Handle<StandardMaterial>>,
@@ -126,8 +125,12 @@ pub(crate) struct Palette {
     pub(crate) crystal_corner_mats: Vec<Handle<StandardMaterial>>,
     pub(crate) snow_corner_mats: Vec<Handle<StandardMaterial>>,
     pub(crate) highground_corner_mats: Vec<Handle<StandardMaterial>>,
-    /// Full-height block for mountain (Rubble) tiles.
-    pub(crate) mountain_block: Handle<Mesh>,
+    /// Raised terrain block meshes, one per elevated `TileKind` (keyed by
+    /// `TileKind::as_u8`) at that kind's [`elevation`] — see `ELEVATED_KINDS`.
+    pub(crate) block_meshes: HashMap<u8, Handle<Mesh>>,
+    /// Cliff-block 2-cell atlas materials (autotiled top | cliff side), keyed
+    /// by `TileKind::as_u8`, for the elevated kinds that own dedicated art.
+    pub(crate) block_mats: HashMap<u8, Vec<Handle<StandardMaterial>>>,
     pub(crate) preview_valid_mat: Handle<StandardMaterial>,
     pub(crate) preview_invalid_mat: Handle<StandardMaterial>,
     pub(crate) preview_chevron_mat: Handle<StandardMaterial>,
@@ -224,35 +227,65 @@ pub(crate) fn textured_slab_mesh(half: Vec3) -> Mesh {
     box_with_face_uvs(half, [EDGE, EDGE, EDGE, EDGE, [0.0, 0.0, 1.0, 1.0], EDGE])
 }
 
-/// Render height of a mountain (Rubble) or high-ground block's top face;
-/// other terrain tops sit at 0.0 (water and mud slightly below). Bots,
-/// overlays, and paint all ride the terrain they're on.
-pub(crate) const MOUNTAIN_TOP: f32 = 0.25;
-
-/// Top surface of the tile at `pos` in render space.
-pub(crate) fn terrain_top(world: &sim::World, pos: TilePos) -> f32 {
-    match world.grid.get(pos) {
-        // Mountain took the full block from Rubble in M8 (Rubble is low
-        // debris now); Barricades are wall-height built mass.
-        Some(TileKind::Mountain | TileKind::HighGround | TileKind::Barricade) => MOUNTAIN_TOP,
-        Some(TileKind::Water) => -0.05,
-        Some(TileKind::Ford) => -0.03,
-        Some(TileKind::Mud | TileKind::Scree) => -0.02,
+/// Per-tile RENDER elevation (view-only — the sim has no notion of height).
+/// Terrains read as distinct heights with cliff faces between levels: tall
+/// mountains / mesas / barricades, low sandy dunes, low rubble & scree debris,
+/// everything else flat. Bots, overlays, paint, and fog all ride
+/// [`terrain_top`], so they follow the elevation automatically.
+pub(crate) fn elevation(kind: TileKind) -> f32 {
+    match kind {
+        TileKind::Mountain | TileKind::HighGround | TileKind::Barricade => 0.55,
+        TileKind::Dunes => 0.22,
+        TileKind::Scree => 0.14,
+        TileKind::Rubble => 0.10,
         _ => 0.0,
     }
 }
 
-/// Mountain block, mapped into the baked `mountain_atlas` (peaks in the
-/// left cell, rock-face strata in the right): summit art on top, strata on
-/// every side (the bottom face is never seen).
-pub(crate) fn mountain_block_mesh() -> Mesh {
+/// The elevated kinds, rendered as raised blocks with cliff sides (the flat
+/// kinds render as slabs). Iterated at setup to build one block mesh each.
+pub(crate) const ELEVATED_KINDS: [TileKind; 6] = [
+    TileKind::Mountain,
+    TileKind::HighGround,
+    TileKind::Barricade,
+    TileKind::Dunes,
+    TileKind::Scree,
+    TileKind::Rubble,
+];
+
+/// Top surface of the tile at `pos` in render space — its elevation, minus a
+/// small sink for water/ford/mud so those read as depressions.
+pub(crate) fn terrain_top(world: &sim::World, pos: TilePos) -> f32 {
+    match world.grid.get(pos) {
+        Some(TileKind::Water) => -0.05,
+        Some(TileKind::Ford) => -0.03,
+        Some(TileKind::Mud) => -0.02,
+        Some(k) => elevation(k),
+        None => 0.0,
+    }
+}
+
+/// A raised terrain block of the given `height`, mapped into a 2-cell atlas
+/// (autotiled top in the left cell, cliff face in the right): summit/plateau
+/// art on top, the cliff strata on every side (the bottom face is never seen).
+/// The block spans y = -0.05 .. `height` when spawned at [`block_y_off`], so
+/// a lower neighbour block occludes a taller one's wall down to its own top —
+/// producing a clean cliff face between any two levels.
+pub(crate) fn block_mesh(height: f32) -> Mesh {
     const TOP: [f32; 4] = [0.0, 0.0, 0.5, 1.0];
     const SIDE: [f32; 4] = [0.5, 0.0, 1.0, 1.0];
     const EDGE: [f32; 4] = [0.51, 0.45, 0.53, 0.55];
     box_with_face_uvs(
-        Vec3::new(0.48, MOUNTAIN_TOP / 2.0 + 0.025, 0.48),
+        Vec3::new(0.48, (height + 0.05) / 2.0, 0.48),
         [SIDE, SIDE, SIDE, SIDE, TOP, EDGE],
     )
+}
+
+/// The spawn y-offset for a [`block_mesh`] of `height` (the value passed to
+/// `spawn_tile`'s transform before its own -0.05): centers the block so its
+/// top sits exactly at `height` and its bottom at -0.05.
+pub(crate) fn block_y_off(height: f32) -> f32 {
+    (height + 0.05) / 2.0
 }
 
 #[cfg(test)]

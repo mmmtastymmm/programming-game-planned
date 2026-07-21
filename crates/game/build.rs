@@ -337,10 +337,16 @@ fn main() {
         }
     }
 
-    // Side-by-side pairs: (left svg, right svg, output). The mountain
-    // block samples its top from the left cell and its sides from the
-    // right (see `mountain_block_mesh` in main.rs).
-    for (left, right, name) in [("tile_mountain", "rock_face", "mountain_atlas")] {
+    // Side-by-side block atlases: (top svg, cliff svg, output). The elevation
+    // block mesh (`palette::block_mesh`) samples its top from the left cell
+    // and its cliff sides from the right. Rubble/Scree get a broken-rock top
+    // over the rock face; Dunes get sand over a sand cliff.
+    for (left, right, name) in [
+        ("tile_mountain", "rock_face", "mountain_atlas"),
+        ("tile_rubble", "rock_face", "rubble_atlas"),
+        ("tile_scree", "rock_face", "scree_atlas"),
+        ("tile_sand", "sand_cliff", "dunes_atlas"),
+    ] {
         let mut pair = tiny_skia::Pixmap::new(SIZE * 2, SIZE).expect("pair alloc");
         for (i, src) in [left, right].into_iter().enumerate() {
             let svg = fs::read_to_string(art.join(format!("{src}.svg"))).expect("pair svg");

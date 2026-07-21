@@ -347,7 +347,29 @@ fn spawn_tile(commands: &mut Commands, palette: &Palette, world: &sim::World, x:
         TileKind::GoldVein => Some(|t| matches!(t, TileKind::GoldVein)),
         _ => None,
     };
-    let (mesh, mat, y_off) = match kind {
+    let (mesh, mat, y_off) = if elevation(kind) > 0.0 {
+        // Raised terrain (Mountain, HighGround/mesa, Barricade, Dunes, Scree,
+        // Rubble): a cliff block at the kind's elevation. Its top autotiles a
+        // rim against non-same neighbours; a lower neighbour block occludes
+        // this block's wall down to its own top, giving a clean cliff face.
+        let same: fn(TileKind) -> bool = match kind {
+            TileKind::Mountain => |t| matches!(t, TileKind::Mountain),
+            TileKind::HighGround => |t| matches!(t, TileKind::HighGround),
+            TileKind::Barricade => |t| matches!(t, TileKind::Barricade),
+            TileKind::Dunes => |t| matches!(t, TileKind::Dunes),
+            TileKind::Scree => |t| matches!(t, TileKind::Scree),
+            TileKind::Rubble => |t| matches!(t, TileKind::Rubble),
+            _ => |_| false,
+        };
+        let mask = mask_of(same);
+        let mat = match kind {
+            // Barricade is teched-over built mass: the tech tile on every face.
+            TileKind::Barricade => palette.ground_tex_mat.clone(),
+            _ => palette.block_mats[&kind.as_u8()][mask].clone(),
+        };
+        (palette.block_meshes[&kind.as_u8()].clone(), mat, block_y_off(elevation(kind)))
+    } else {
+        match kind {
         // Sand fringes where the meadow meets the river — Bridge
         // counts as water (same beach before and after the planks
         // land, keeping the no-resync invariant). Mountains count
@@ -363,22 +385,8 @@ fn spawn_tile(commands: &mut Commands, palette: &Palette, world: &sim::World, x:
         // M8 moved the full block from Rubble to Mountain; Rubble
         // is LOW DEBRIS now — flat broken rock you drive over
         // (and what worn Scree collapses into).
-        TileKind::Mountain => {
-            let mask = mask_of(|t| matches!(t, TileKind::Mountain));
-            (
-                palette.mountain_block.clone(),
-                palette.mountain_tex_mats[mask].clone(),
-                MOUNTAIN_TOP - 0.10,
-            )
-        }
-        TileKind::Rubble => {
-            (palette.tex_slab.clone(), palette.mountain_tex_mats[15].clone(), 0.0)
-        }
-        // Scree sits slightly sunken; the stone-strewn overlay
-        // below distinguishes it from settled Rubble.
-        TileKind::Scree => {
-            (palette.tex_slab.clone(), palette.mountain_tex_mats[15].clone(), -0.02)
-        }
+        // Mountain / Rubble / Scree are elevated — handled by the block
+        // branch above.
         // The mesa doorstep: tan plateau art at ground level reads
         // as the cut in the cliff (a true sloped mesh can come
         // with real art passes).
@@ -401,23 +409,8 @@ fn spawn_tile(commands: &mut Commands, palette: &Palette, world: &sim::World, x:
         TileKind::Road => {
             (palette.tex_slab.clone(), palette.ground_tex_mat.clone(), 0.0)
         }
-        // Built mass at wall height, teched-over.
-        TileKind::Barricade => {
-            (
-                palette.mountain_block.clone(),
-                palette.ground_tex_mat.clone(),
-                MOUNTAIN_TOP - 0.10,
-            )
-        }
-        // Dunes wear Sand's art (autotiling against both).
-        TileKind::Dunes => {
-            let mask = mask_of(|t| matches!(t, TileKind::Dunes | TileKind::Sand));
-            (
-                palette.tex_slab.clone(),
-                palette.resource_tex_mats[&TileKind::Sand.as_u8()][mask].clone(),
-                0.0,
-            )
-        }
+        // Barricade is elevated — handled by the block branch above.
+        // Dunes are elevated (sand mounds) — handled by the block branch.
         // Banks on the sides that border land. Bridges count as
         // water: the river visibly flows under the planks.
         TileKind::Water => {
@@ -453,16 +446,7 @@ fn spawn_tile(commands: &mut Commands, palette: &Palette, world: &sim::World, x:
             let mask = mask_of(|t| matches!(t, TileKind::Snow));
             (palette.tex_slab.clone(), palette.snow_tex_mats[mask].clone(), 0.0)
         }
-        // High ground is a mesa: same block as the mountain, tan
-        // plateau top, cliff rim wherever the mesa ends.
-        TileKind::HighGround => {
-            let mask = mask_of(|t| matches!(t, TileKind::HighGround));
-            (
-                palette.mountain_block.clone(),
-                palette.highground_tex_mats[mask].clone(),
-                MOUNTAIN_TOP - 0.10,
-            )
-        }
+        // HighGround (mesa) is elevated — handled by the block branch above.
         // Vents are point features: one crater, no autotiling.
         TileKind::Vent => {
             (palette.tex_slab.clone(), palette.vent_tex_mat.clone(), 0.0)
@@ -482,6 +466,14 @@ fn spawn_tile(commands: &mut Commands, palette: &Palette, world: &sim::World, x:
                 palette.resource_tex_mats[&kind.as_u8()][mask].clone(),
                 0.0,
             )
+        }
+        // The elevated kinds are handled by the block branch above.
+        TileKind::Mountain
+        | TileKind::HighGround
+        | TileKind::Barricade
+        | TileKind::Dunes
+        | TileKind::Scree
+        | TileKind::Rubble => unreachable!("elevated kinds render as blocks"),
         }
     };
     commands.spawn((
@@ -796,8 +788,18 @@ pub(crate) fn setup_scene(
             })
             .collect()
     };
-    let mountain_tex_mats = autotile_mats("mountain_atlas", 0.95);
     let highground_tex_mats = autotile_mats("highground_atlas", 0.95);
+    // Elevation blocks (view-only): one mesh per elevated kind at its height,
+    // plus its cliff-block 2-cell atlas (autotiled top | cliff side).
+    let mut block_meshes: HashMap<u8, Handle<Mesh>> = HashMap::new();
+    for k in ELEVATED_KINDS {
+        block_meshes.insert(k.as_u8(), meshes.add(block_mesh(elevation(k))));
+    }
+    let mut block_mats: HashMap<u8, Vec<Handle<StandardMaterial>>> = HashMap::new();
+    block_mats.insert(TileKind::Mountain.as_u8(), autotile_mats("mountain_atlas", 0.95));
+    block_mats.insert(TileKind::HighGround.as_u8(), highground_tex_mats.clone());
+    // Rubble/Scree/Dunes block atlases are added below, after the other
+    // material closures release their &mut materials borrow.
     // The nine raw-resource grounds (docs/03), keyed by kind. Metals get
     // a touch of gloss; sand, stone, and the grove stay matte.
     const RESOURCE_KINDS: [(TileKind, &str, f32); 9] = [
@@ -870,6 +872,18 @@ pub(crate) fn setup_scene(
         perceptual_roughness: 0.9,
         ..default()
     });
+    // Rubble/Scree/Dunes block atlases: a single (non-autotiled) 2-cell
+    // material each, repeated across the 16 mask slots so spawn_tile indexes
+    // them by mask like the autotiled kinds. Built here — after the autotile
+    // closures released their &mut materials borrow.
+    for (kind, atlas) in [
+        (TileKind::Rubble, "rubble_atlas"),
+        (TileKind::Scree, "scree_atlas"),
+        (TileKind::Dunes, "dunes_atlas"),
+    ] {
+        let m = tile_tex_mat(&mut materials, asset_server.load(format!("textures/{atlas}.png")), 0.95);
+        block_mats.insert(kind.as_u8(), vec![m; 16]);
+    }
     let palette = Palette {
         unit_cube: meshes.add(Cuboid::new(0.7, 0.7, 0.7)),
         nose_cube: meshes.add(Cuboid::new(0.22, 0.22, 0.22)),
@@ -921,13 +935,13 @@ pub(crate) fn setup_scene(
         pad_slab: meshes.add(textured_slab_mesh(Vec3::new(0.425, 0.07, 0.425))),
         wreck_tex_mat,
         tex_slab: meshes.add(textured_slab_mesh(Vec3::new(0.48, 0.05, 0.48))),
-        mountain_block: meshes.add(mountain_block_mesh()),
+        block_meshes,
+        block_mats,
         ground_tex_mat,
         bridge_tex_mat,
         oneway_tex_mat,
         grass_tex_mats,
         water_tex_mats,
-        mountain_tex_mats,
         mud_tex_mats,
         corruption_tex_mats,
         ore_tex_mats,

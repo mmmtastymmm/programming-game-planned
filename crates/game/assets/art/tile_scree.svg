@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <!-- scree: tumbled loose stones (top-down) — what worn rock collapses into.
+       Denser, smaller, rounder than rubble's chunks. Base-colored edges. -->
+  <rect width="64" height="64" fill="#5b5f68"/>
+  <g fill="#6d717b">
+    <ellipse cx="12" cy="10" rx="3" ry="2.2"/>
+    <ellipse cx="30" cy="16" rx="2.6" ry="1.9"/>
+    <ellipse cx="50" cy="12" rx="3.2" ry="2.3"/>
+    <ellipse cx="18" cy="30" rx="2.8" ry="2"/>
+    <ellipse cx="42" cy="34" rx="3" ry="2.1"/>
+    <ellipse cx="8" cy="48" rx="2.6" ry="1.9"/>
+    <ellipse cx="34" cy="52" rx="3" ry="2.2"/>
+    <ellipse cx="56" cy="46" rx="2.8" ry="2"/>
+  </g>
+  <g fill="#4c505a">
+    <ellipse cx="22" cy="14" rx="1.8" ry="1.3"/>
+    <ellipse cx="40" cy="20" rx="1.6" ry="1.2"/>
+    <ellipse cx="10" cy="24" rx="1.8" ry="1.3"/>
+    <ellipse cx="52" cy="30" rx="2" ry="1.4"/>
+    <ellipse cx="26" cy="42" rx="1.8" ry="1.3"/>
+    <ellipse cx="48" cy="56" rx="1.6" ry="1.2"/>
+    <ellipse cx="16" cy="58" rx="1.8" ry="1.3"/>
+  </g>
+  <g fill="#787c86">
+    <ellipse cx="36" cy="8" rx="1.4" ry="1"/>
+    <ellipse cx="60" cy="24" rx="1.4" ry="1"/>
+    <ellipse cx="4" cy="38" rx="1.4" ry="1"/>
+    <ellipse cx="30" cy="30" rx="1.5" ry="1.1"/>
+  </g>
+</svg>
