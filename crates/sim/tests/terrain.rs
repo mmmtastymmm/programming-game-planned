@@ -670,7 +670,6 @@ fn blueprint_kind_is_pinned_by_the_state_hash() {
     let build = |kind: BlueprintKind| -> u64 {
         let mut spec = terraform_map();
         spec.starting_stock.clear();
-        let mut spec = spec;
         let site = TilePos::new(4, 2);
         spec.resource_tiles.clear();
         let mut sim = Sim::new(&spec);

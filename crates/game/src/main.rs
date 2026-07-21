@@ -14,6 +14,14 @@
 //! orbit · scroll = zoom.
 //! Run: `cargo run -p game`
 
+// Two clippy lints fight the ECS and are allowed for this crate only —
+// `sim` and `pyrite` keep both switched on, which is where they earn their
+// keep. A Bevy system takes one parameter per resource/query it touches
+// (`orbit_camera` legitimately needs nine), and a filtered `Query<..>` type
+// is "complex" by construction. Bundling either into structs purely to
+// satisfy the heuristic would cost more readability than it buys.
+#![allow(clippy::too_many_arguments, clippy::type_complexity)]
+
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts, EguiPlugin, EguiPrimaryContextPass};
 use sim::sim::Sim;

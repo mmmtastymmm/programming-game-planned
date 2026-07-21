@@ -150,7 +150,7 @@ pub fn mutate_source(source: &str, stream: &mut u64) -> String {
     let pick = (next_rand(stream) % literals.len() as u64) as usize;
     let (start, len) = literals[pick];
     let value: i64 = source[start..start + len].parse().unwrap_or(1);
-    let tweaked = if next_rand(stream) % 2 == 0 { value + 1 } else { (value - 1).max(1) };
+    let tweaked = if next_rand(stream).is_multiple_of(2) { value + 1 } else { (value - 1).max(1) };
     format!("{}{}{}", &source[..start], tweaked, &source[start + len..])
 }
 

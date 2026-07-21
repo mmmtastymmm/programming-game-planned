@@ -1422,26 +1422,25 @@ impl Sim {
                     // A different proposal while one is open is ignored.
                     Some(_) => {}
                 }
-                if let Some(vote) = &self.world.pending_vote {
-                    if vote.ayes.is_superset(&self.world.live_factions()) {
-                        let Proposal::SetSpeed(permille) = vote.proposal;
-                        self.world.sim_speed_permille = permille.min(10_000);
-                        self.world.pending_vote = None;
-                        self.world.vote_cooldown_until =
-                            tick + self.world.vote_cooldown_ticks;
-                    }
+                if let Some(vote) = &self.world.pending_vote
+                    && vote.ayes.is_superset(&self.world.live_factions())
+                {
+                    let Proposal::SetSpeed(permille) = vote.proposal;
+                    self.world.sim_speed_permille = permille.min(10_000);
+                    self.world.pending_vote = None;
+                    self.world.vote_cooldown_until = tick + self.world.vote_cooldown_ticks;
                 }
                 Ok(None)
             }
             Command::ClaimNest { nest, faction } => {
-                if let Some(n) = self.world.nests.get_mut(nest) {
-                    if n.state == crate::world::NestState::Defeated {
-                        n.state = crate::world::NestState::Claimed(*faction);
-                        n.hp = n.max_hp / 2;
-                        // Re-claiming a nest can reactivate a printer bound to
-                        // it (Q87) — its ghosts fold back into the fleet.
-                        self.reconcile_dormancy(*faction);
-                    }
+                if let Some(n) = self.world.nests.get_mut(nest)
+                    && n.state == crate::world::NestState::Defeated
+                {
+                    n.state = crate::world::NestState::Claimed(*faction);
+                    n.hp = n.max_hp / 2;
+                    // Re-claiming a nest can reactivate a printer bound to
+                    // it (Q87) — its ghosts fold back into the fleet.
+                    self.reconcile_dormancy(*faction);
                 }
                 Ok(None)
             }
@@ -1575,10 +1574,10 @@ impl Sim {
                 } else {
                     None
                 };
-                if let (Some(order), Some(b)) = (resolved, self.world.bots.get_mut(bot)) {
-                    if !b.data.dying {
-                        b.data.upgrade_queue.push(order);
-                    }
+                if let (Some(order), Some(b)) = (resolved, self.world.bots.get_mut(bot))
+                    && !b.data.dying
+                {
+                    b.data.upgrade_queue.push(order);
                 }
                 Ok(None)
             }
@@ -1729,12 +1728,11 @@ impl Sim {
 
         // A sim-speed proposal that never reached unanimity expires
         // (M13, docs/08) — the attempt still starts the cooldown.
-        if let Some(vote) = &self.world.pending_vote {
-            if self.world.tick >= vote.opened + self.world.vote_window_ticks {
-                self.world.pending_vote = None;
-                self.world.vote_cooldown_until =
-                    self.world.tick + self.world.vote_cooldown_ticks;
-            }
+        if let Some(vote) = &self.world.pending_vote
+            && self.world.tick >= vote.opened + self.world.vote_window_ticks
+        {
+            self.world.pending_vote = None;
+            self.world.vote_cooldown_until = self.world.tick + self.world.vote_cooldown_ticks;
         }
 
         // --- phase 2: grant + step VMs, stable id order ---
@@ -2134,15 +2132,6 @@ impl Sim {
         }
     }
 
-    /// Phase 5: perception — seeing/hearing recomputed from post-move
-    /// positions, detection episodes, per-faction map knowledge, survey
-
-    /// Phase 7: XP settlement — every award earned anywhere in the tick
-    /// queued, then settled here in arrival order (phases queue in stable
-    /// id order). The Learning multiplier applies at its start-of-tick
-    /// level; it is IDENTITY until M6 lands the body tracks, so today this
-    /// is a plain sum. Awards for bots that died in phase 6 are dropped
-    /// with them.
     /// Phase 8 terrain settle (M8): Dune idle counters advance for every
     /// bot that stood still on sand this tick (Q35 — the counter feeds
     /// step_ticks' exit surcharge), and Scree worn past the crossing
@@ -2214,6 +2203,12 @@ impl Sim {
         }
     }
 
+    /// Phase 7: XP settlement — every award earned anywhere in the tick
+    /// queued, then settled here in arrival order (phases queue in stable
+    /// id order). The Learning multiplier applies at its start-of-tick
+    /// level; it is IDENTITY until M6 lands the body tracks, so today this
+    /// is a plain sum. Awards for bots that died in phase 6 are dropped
+    /// with them.
     pub(crate) fn settle_xp(&mut self) {
         use std::collections::BTreeMap;
         let mut awards = std::mem::take(&mut self.world.pending_xp);

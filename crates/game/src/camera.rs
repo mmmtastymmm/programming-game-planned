@@ -29,6 +29,10 @@ pub(crate) struct LmbGesture {
 }
 
 /// Cursor travel (px) that separates a click from a pan.
+///
+/// LMB click-vs-drag disambiguation while a tool is armed: a press is the
+/// tool's click only if the cursor stays inside this dead zone; traveling
+/// past it turns the gesture into a camera pan instead.
 pub(crate) const LMB_DRAG_THRESHOLD: f32 = 6.0;
 
 // ------------------------------------------------------------------ camera

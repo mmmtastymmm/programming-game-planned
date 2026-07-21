@@ -151,10 +151,6 @@ pub(crate) struct Palette {
     pub(crate) sel_mat: Handle<StandardMaterial>,
 }
 
-/// LMB click-vs-drag disambiguation while a tool is armed: a press is the
-/// tool's click only if the cursor stays inside the dead zone; traveling
-/// past it turns the gesture into a camera pan instead.
-
 // -------------------------------------------------------- textured meshes
 
 /// Axis-aligned box with an explicit UV rectangle `[u0, v0, u1, v1]` per

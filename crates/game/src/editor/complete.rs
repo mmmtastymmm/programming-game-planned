@@ -8,8 +8,8 @@ pub(super) fn word_at(text: &str, idx: usize) -> Option<String> {
     let chars: Vec<char> = text.chars().collect();
     let is_ident = |c: &char| c.is_ascii_alphanumeric() || *c == '_';
     let mut i = idx.min(chars.len());
-    if !chars.get(i).is_some_and(|c| is_ident(c)) {
-        if i > 0 && chars.get(i - 1).is_some_and(|c| is_ident(c)) {
+    if !chars.get(i).is_some_and(&is_ident) {
+        if i > 0 && chars.get(i - 1).is_some_and(&is_ident) {
             i -= 1;
         } else {
             return None;

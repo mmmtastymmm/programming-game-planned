@@ -538,11 +538,11 @@ impl Sim {
                             .and_then(|b| self.world.bots.get(b))
                             .map(|b| b.data.faction)
                     });
-                if let Some(v) = victim {
-                    if !self.world.harm_allowed(attacker, v) {
-                        self.finish_action(id, Err("attack: harm disabled on this server".into()));
-                        return;
-                    }
+                if let Some(v) = victim
+                    && !self.world.harm_allowed(attacker, v)
+                {
+                    self.finish_action(id, Err("attack: harm disabled on this server".into()));
+                    return;
                 }
                 if let Some(st) = self.world.structures.get_mut(&target) {
                     if pos.chebyshev(st.pos) > 1 {

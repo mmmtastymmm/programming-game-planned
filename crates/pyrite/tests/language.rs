@@ -580,7 +580,7 @@ fn become_disabled_is_engine_only() {
     vm.grant(50, &costs);
     vm.run(&mut host, &costs);
     assert!(
-        !call_names(&host).iter().any(|n| *n == "become_disabled"),
+        !call_names(&host).contains(&"become_disabled"),
         "the host must never see a player become_disabled call"
     );
     assert!(vm.fault_count() >= 1, "the call faults");

@@ -991,8 +991,8 @@ impl Vm {
             frame.locals.insert(name, value);
             return;
         }
-        if self.globals.contains_key(&name) {
-            self.globals.insert(name, value);
+        if let Some(slot) = self.globals.get_mut(&name) {
+            *slot = value;
             return;
         }
         self.fault(faults::NAME, format!("cannot mutate '{name}' — not a variable"), host, costs);

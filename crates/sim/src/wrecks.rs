@@ -174,8 +174,8 @@ impl Sim {
         true
     }
 
-    /// Salvage complete: a cut of the invested build receipt (chassis line
-    /// + bought hardware — currently-installed only, Q72) to the
+    /// Salvage complete: a cut of the invested build receipt (the chassis
+    /// line plus bought hardware — currently-installed only, Q72) to the
     /// salvager's stock, plus permanent decryption of the wreck's color.
     /// Destroys the wreck; the black box still drops.
     pub(crate) fn salvage_wreck(&mut self, id: BotId, salvager_faction: u8) {

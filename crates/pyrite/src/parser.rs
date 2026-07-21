@@ -256,12 +256,12 @@ impl<'a> Parser<'a> {
         self.expect(Tok::Newline, "newline")?;
         self.expect(Tok::Indent, "indented block")?;
         let mut doc = None;
-        if let Tok::Str(s) = &self.peek().tok {
-            if matches!(self.peek2(), Some(t) if t.tok == Tok::Newline) {
-                doc = Some(s.clone());
-                self.advance();
-                self.advance();
-            }
+        if let Tok::Str(s) = &self.peek().tok
+            && matches!(self.peek2(), Some(t) if t.tok == Tok::Newline)
+        {
+            doc = Some(s.clone());
+            self.advance();
+            self.advance();
         }
         let mut block = Block::new();
         while !self.check(&Tok::Dedent) {

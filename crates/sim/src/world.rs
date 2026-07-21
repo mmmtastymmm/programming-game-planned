@@ -1038,6 +1038,10 @@ pub struct ArchiveEntry {
     pub text: String,
 }
 
+/// One queued hit: `(victim, amount, attacker)`, where the attacker is
+/// `(bot, faction)` and absent for engine damage with no culprit.
+pub type PendingDamage = (BotId, i64, Option<(BotId, u8)>);
+
 #[derive(Debug)]
 pub struct World {
     pub tick: u64,
@@ -1169,7 +1173,7 @@ pub struct World {
     /// is a phase, not an inline side effect). The attacker rides along as
     /// (bot, faction) — kill XP credits the bot, first-kill Data and
     /// hostile-source filters read the faction. Drained every tick.
-    pub pending_damage: Vec<(BotId, i64, Option<(BotId, u8)>)>,
+    pub pending_damage: Vec<PendingDamage>,
     /// XP earned this tick, settled in phase 7 under the start-of-tick
     /// Learning multiplier (identity until M6). Drained every tick.
     pub pending_xp: Vec<(BotId, XpTrack, u64)>,

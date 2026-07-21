@@ -138,13 +138,13 @@ impl LockstepPeer {
         // Inputs are rare and small (docs/08): a command-bearing frame
         // past the horizon claims exactly one extra tick rather than
         // being dropped or overwriting a sent batch.
-        if let Some(batch) = commands {
-            if !batch.is_empty() {
-                let tick = self.next_submit;
-                self.next_submit += 1;
-                self.inbox.entry(tick).or_default().insert(self.id, batch.clone());
-                transport.send(Message::Commands { peer: self.id, tick, commands: batch });
-            }
+        if let Some(batch) = commands
+            && !batch.is_empty()
+        {
+            let tick = self.next_submit;
+            self.next_submit += 1;
+            self.inbox.entry(tick).or_default().insert(self.id, batch.clone());
+            transport.send(Message::Commands { peer: self.id, tick, commands: batch });
         }
     }
 
@@ -242,9 +242,13 @@ impl LockstepPeer {
 /// In-process reference transport: a shared mailbox hub. Every send is
 /// visible to every OTHER peer on the next `recv` (loopback excluded —
 /// local messages are booked directly by `submit`/`try_step`).
+/// Every peer's inbox, shared by the hub and all its endpoints: one
+/// `(peer id, queued messages)` slot per registered peer.
+type PeerBoxes = Rc<RefCell<Vec<(u8, Vec<Message>)>>>;
+
 #[derive(Default)]
 pub struct LocalHub {
-    boxes: Rc<RefCell<Vec<(u8, Vec<Message>)>>>,
+    boxes: PeerBoxes,
 }
 
 impl LocalHub {
@@ -261,7 +265,7 @@ impl LocalHub {
 
 pub struct LocalEndpoint {
     id: u8,
-    boxes: Rc<RefCell<Vec<(u8, Vec<Message>)>>>,
+    boxes: PeerBoxes,
 }
 
 impl Transport for LocalEndpoint {

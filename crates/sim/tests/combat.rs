@@ -379,7 +379,7 @@ fn simultaneous_gank_credits_one_kill_bonus() {
         }
     }
     assert!(!sim.world.bots.contains_key(&victim), "victim must die");
-    let kill_bonus = (sim.xp.combat_kill_xp * 10) as u64; // 250 deci
+    let kill_bonus = sim.xp.combat_kill_xp * 10; // 250 deci
     let got_kill = |id: &sim::BotId| sim.world.bots[id].data.xp(sim::world::XpTrack::Combat) >= kill_bonus;
     assert_eq!(
         [a, b].iter().filter(|id| got_kill(id)).count(),
