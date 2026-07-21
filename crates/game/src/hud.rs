@@ -1,7 +1,7 @@
 //! The bot inspector panel.
 
 use bevy::prelude::*;
-use bevy_egui::{egui, EguiContexts};
+use bevy_egui::egui;
 use sim::world::Color as BotColor;
 
 use crate::editor::EditorState;
@@ -9,20 +9,17 @@ use crate::GameSim;
 
 /// The inspector: live program with the executing line highlighted, VM
 /// state, vitals, XP, and logs — the transparency pillar as UI.
-pub(crate) fn inspector_ui(
-    mut contexts: EguiContexts,
-    mut editor: ResMut<EditorState>,
-    mut game: NonSendMut<GameSim>,
-) {
+/// Draws into the shared viewport `Ui` — see `editor::editor_ui` for why
+/// every panel has to descend from one root under egui 0.35.
+pub(crate) fn inspector_ui(root: &mut egui::Ui, game: &mut GameSim, editor: &mut EditorState) {
     let Some(bot_id) = editor.selected_bot else { return };
-    let Some(ctx) = contexts.try_ctx_mut() else { return };
     // Station orders queued from the catalog UI, applied after the panel
     // borrow ends (commands are the only mutation path).
     let mut queued: Vec<sim::sim::Command> = Vec::new();
     let world = &game.0.world;
     let mut open = true;
 
-    egui::SidePanel::right("inspector").exact_width(320.0).show(ctx, |ui| {
+    egui::Panel::right("inspector").exact_size(320.0).show(root, |ui| {
         let Some(bot) = world.bots.get(&sim::world::BotId(bot_id)) else {
             // The bot is gone: wreck or total destruction.
             if let Some(wreck) = world.wrecks.get(&sim::world::BotId(bot_id)) {

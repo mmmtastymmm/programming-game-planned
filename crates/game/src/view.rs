@@ -62,6 +62,11 @@ pub(crate) struct HealthTrail {
     pub(crate) frac: f32,
 }
 
+/// Blue "saving up cycles" fill: how close a cycle-starved bot is to
+/// affording its next op. Sibling of `HealthFill` on its own bar root.
+#[derive(Component)]
+pub(crate) struct CycleFill;
+
 /// Marks a bot view's carry-indicator child (slot index).
 #[derive(Component)]
 pub(crate) struct CarrySlot(pub(crate) u32);
@@ -100,6 +105,8 @@ pub(crate) struct ViewIndex {
     pub(crate) printer_fills: HashMap<u64, (Entity, Entity)>,
     /// Bot id -> (bar root, red fill, damage-ghost trail).
     pub(crate) bot_health: HashMap<u32, (Entity, Entity, Entity)>,
+    /// Bot id -> (bar root, blue fill) for the cycle-saving meter.
+    pub(crate) bot_cycles: HashMap<u32, (Entity, Entity)>,
     /// Bot id -> its scribble-cloud entity.
     pub(crate) bot_scribbles: HashMap<u32, Entity>,
     /// Bots currently on a recall walk: a vanish while recalling is the
@@ -326,7 +333,7 @@ pub(crate) fn animate_terrain(
     let vent = SWAY[(t / 0.6) as usize % 4];
     let mut retarget = |mats: &[Handle<StandardMaterial>], frame: &[Handle<Image>]| {
         for (mat, img) in mats.iter().zip(frame) {
-            if let Some(m) = materials.get_mut(mat) {
+            if let Some(mut m) = materials.get_mut(mat) {
                 m.base_color_texture = Some(img.clone());
             }
         }
@@ -349,7 +356,7 @@ pub(crate) fn animate_terrain(
     // The vent pulses base + emissive together, so the glow itself beats.
     if shown[7] != vent {
         shown[7] = vent;
-        if let Some(m) = materials.get_mut(&palette.vent_tex_mat) {
+        if let Some(mut m) = materials.get_mut(&palette.vent_tex_mat) {
             m.base_color_texture = Some(palette.vent_frames[vent].clone());
             m.emissive_texture = Some(palette.vent_frames[vent].clone());
         }
@@ -536,6 +543,8 @@ pub(crate) fn sync_view(
         let mut bar_root = Entity::PLACEHOLDER;
         let mut health_fill = Entity::PLACEHOLDER;
         let mut health_trail = Entity::PLACEHOLDER;
+        let mut cycle_root = Entity::PLACEHOLDER;
+        let mut cycle_fill = Entity::PLACEHOLDER;
         let entity = commands
             .spawn((
                 Mesh3d(palette.bot_cube.clone()),
@@ -609,6 +618,34 @@ pub(crate) fn sync_view(
                             .id();
                     })
                     .id();
+                // Cycle bar: sits just under the health bar, deliberately
+                // slimmer — it is a "what is this bot doing" tell, not a
+                // survival stat, and should never out-shout the hp bar.
+                cycle_root = parent
+                    .spawn((
+                        BillboardBar,
+                        Transform::from_xyz(0.0, 1.04, 0.0),
+                        Visibility::Hidden,
+                    ))
+                    .with_children(|bar| {
+                        bar.spawn((
+                            Mesh3d(palette.bar_mesh.clone()),
+                            MeshMaterial3d(palette.bar_bg_mat.clone()),
+                            Transform::default().with_scale(Vec3::new(0.7, 0.42, 1.0)),
+                        ));
+                        cycle_fill = bar
+                            .spawn((
+                                CycleFill,
+                                Mesh3d(palette.bar_mesh.clone()),
+                                MeshMaterial3d(
+                                    palette.bar_cycle_grad.first().expect("bins").clone(),
+                                ),
+                                Transform::from_xyz(0.0, 0.0, 0.011)
+                                    .with_scale(Vec3::new(0.02, 0.30, 1.0)),
+                            ))
+                            .id();
+                    })
+                    .id();
                 for (slot, y) in [(0u32, 0.55), (1u32, 0.85)] {
                     parent.spawn((
                         CarrySlot(slot),
@@ -622,11 +659,12 @@ pub(crate) fn sync_view(
             .id();
         index.bots.insert(id.0, entity);
         index.bot_health.insert(id.0, (bar_root, health_fill, health_trail));
+        index.bot_cycles.insert(id.0, (cycle_root, cycle_fill));
         let scribble = commands
             .spawn((
                 ScribbleCloud,
                 BillboardBar, // camera-facing, parent-rotation compensated
-                bevy::pbr::NotShadowCaster, // a thought casts no shadow
+                bevy::light::NotShadowCaster, // a thought casts no shadow
                 Mesh3d(palette.scribble_quad.clone()),
                 MeshMaterial3d(palette.scribble_mats["angry"][0].clone()),
                 Transform::from_xyz(0.0, 1.75, 0.0),
@@ -656,6 +694,7 @@ pub(crate) fn sync_view(
         }
     });
     index.bot_health.retain(|id, _| seen.contains(id));
+    index.bot_cycles.retain(|id, _| seen.contains(id));
     index.bot_scribbles.retain(|id, _| seen.contains(id));
     index.bot_recalling.retain(|id| seen.contains(id));
 
@@ -954,6 +993,63 @@ pub(crate) fn update_health_bars(
     }
 }
 
+/// Cycle bars: visible only while a bot is cycle-starved, blue fill =
+/// banked budget as a fraction of the op it is saving up for. Dark blue
+/// just after spending, bright cyan the tick before it executes.
+///
+/// Deliberately NOT shown for a bot that is merely idle-blocked (waiting
+/// on an action or a channel): that bot banks nothing, so a creeping bar
+/// would promise an execution that isn't coming. The VM reports a stall
+/// only when it actually stopped short on price.
+pub(crate) fn update_cycle_bars(
+    game: NonSend<GameSim>,
+    index: Res<ViewIndex>,
+    palette: Res<Palette>,
+    mut fills: Query<(&mut Transform, &mut MeshMaterial3d<StandardMaterial>), With<CycleFill>>,
+    mut roots: Query<&mut Visibility, With<BillboardBar>>,
+) {
+    for (id, bot) in &game.0.world.bots {
+        let Some(&(root, fill)) = index.bot_cycles.get(&id.0) else { continue };
+        let Ok(mut visibility) = roots.get_mut(root) else { continue };
+        // Engine interrupt contexts (boot, recall, pad-sit, bump stun) and
+        // death suspend the program entirely — the sim skips the VM, so any
+        // stall left on it is stale. Those bots aren't thinking, they're
+        // being driven.
+        let suspended = bot.data.dying
+            || bot.data.booting.is_some()
+            || bot.data.recall.is_some()
+            || bot.data.pad_sit
+            || bot.data.bump_frozen > 0;
+        let saving = if suspended {
+            None
+        } else {
+            bot.vm.as_ref().filter(|vm| !vm.is_blocked()).and_then(|vm| {
+                // Debt (a forced charge drove the budget negative) reads as
+                // an empty bar, not a negative one.
+                vm.stall_cost().map(|cost| (vm.budget().max(0), cost))
+            })
+        };
+        let Some((budget, cost)) = saving else {
+            *visibility = Visibility::Hidden;
+            continue;
+        };
+        *visibility = Visibility::Visible;
+        let p = if cost > 0 { (budget as f32 / cost as f32).clamp(0.0, 1.0) } else { 0.0 };
+        if let Ok((mut transform, mut material)) = fills.get_mut(fill) {
+            // Left-anchored within the 0.9-wide mesh scaled by 0.7, matching
+            // the health bar's geometry one row up.
+            let frac = p.clamp(0.02, 1.0);
+            transform.scale = Vec3::new(frac * 0.7, 0.30, 1.0);
+            transform.translation.x = -(0.9 * 0.7 * (1.0 - frac)) / 2.0;
+            let bins = &palette.bar_cycle_grad;
+            let bin = ((p * (bins.len() - 1) as f32).round() as usize).min(bins.len() - 1);
+            if material.0 != bins[bin] {
+                material.0 = bins[bin].clone();
+            }
+        }
+    }
+}
+
 /// Frustration clouds: visible while bump-frozen, cycling scribble frames
 /// with a little scale pulse — thinking, angrily.
 pub(crate) fn update_scribbles(
@@ -1042,14 +1138,14 @@ pub(crate) fn select_bot(
     cams: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
     game: NonSend<GameSim>,
 ) {
-    let typing = contexts.try_ctx_mut().is_some_and(|ctx| ctx.wants_keyboard_input());
+    let typing = contexts.ctx_mut().is_ok_and(|ctx| ctx.egui_wants_keyboard_input());
     if !typing && keys.just_pressed(KeyCode::Escape) && editor.selected_build.is_none() {
         editor.selected_bot = None;
     }
     if editor.selected_build.is_some() {
         return; // armed tools own the mouse
     }
-    let over_ui = contexts.try_ctx_mut().is_some_and(|ctx| ctx.wants_pointer_input());
+    let over_ui = contexts.ctx_mut().is_ok_and(|ctx| ctx.egui_wants_pointer_input());
     let cursor = windows.single().ok().and_then(|w| w.cursor_position());
     if buttons.just_pressed(MouseButton::Left) && !over_ui {
         editor.press_pos = cursor;

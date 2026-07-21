@@ -47,12 +47,14 @@ pub(crate) fn orbit_camera(
     keys: Res<ButtonInput<KeyCode>>,
     windows: Query<&Window>,
     mut last_cursor: Local<Option<Vec2>>,
-    mut wheel: EventReader<MouseWheel>,
+    // 0.17 renamed buffered events to "messages"; EventReader is a
+    // deprecated alias for this.
+    mut wheel: MessageReader<MouseWheel>,
     mut cams: Query<(&mut OrbitCam, &mut Transform)>,
 ) {
-    // try_ctx_mut: the context is gone during shutdown / not yet there on
-    // the first frame — never panic for a camera nicety.
-    let over_ui = contexts.try_ctx_mut().is_some_and(|ctx| ctx.wants_pointer_input());
+    // Tolerate a missing context (gone during shutdown / not yet there on
+    // the first frame) — never panic for a camera nicety.
+    let over_ui = contexts.ctx_mut().is_ok_and(|ctx| ctx.egui_wants_pointer_input());
     let Ok((mut cam, mut transform)) = cams.single_mut() else { return };
 
     // Cursor-position deltas rather than raw MouseMotion: identical for a

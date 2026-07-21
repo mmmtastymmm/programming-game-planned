@@ -1,0 +1,6 @@
+[toolchain]
+# Bevy 0.19 and bevy_egui 0.41 both declare rust-version = "1.95.0".
+# Pinned so CI and every contributor build on the same compiler the
+# golden-replay hashes were generated with.
+channel = "1.97.1"
+components = ["rustfmt", "clippy"]

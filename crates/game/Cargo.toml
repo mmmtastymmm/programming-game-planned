@@ -7,8 +7,8 @@ description = "Bevy app: rendering, UI, networking (placeholder until sim exists
 [dependencies]
 sim = { path = "../sim" }
 pyrite = { path = "../pyrite" }
-bevy = "0.16"
-bevy_egui = "0.34"
+bevy = "0.19"
+bevy_egui = "0.41"
 
 # build.rs bakes assets/art/*.svg into assets/textures/*.png
 [build-dependencies]

@@ -110,7 +110,8 @@ pub(crate) fn same_item(a: ToolKind, b: ToolKind) -> bool {
 pub(crate) fn build_icon(name: &str) -> egui::ColorImage {
     let s = 48usize;
     let water = egui::Color32::from_rgb(26, 72, 140);
-    let mut img = egui::ColorImage::new([s, s], water);
+    // egui 0.33: `new` takes the pixel buffer; `filled` is the old behavior.
+    let mut img = egui::ColorImage::filled([s, s], water);
     if name == "Bridge" {
         let plank_light = egui::Color32::from_rgb(150, 108, 60);
         let plank_dark = egui::Color32::from_rgb(122, 86, 46);
@@ -323,7 +324,7 @@ pub(crate) fn place_blueprint(
     if !painting && !gesture.clicked {
         return;
     }
-    if contexts.try_ctx_mut().is_some_and(|ctx| ctx.wants_pointer_input()) {
+    if contexts.ctx_mut().is_ok_and(|ctx| ctx.egui_wants_pointer_input()) {
         return;
     }
     let world = &game.0.world;
@@ -394,7 +395,7 @@ pub(crate) fn build_preview(
         (*a, *b, *c) = (Visibility::Hidden, Visibility::Hidden, Visibility::Hidden);
     };
 
-    let over_ui = contexts.try_ctx_mut().is_some_and(|ctx| ctx.wants_pointer_input());
+    let over_ui = contexts.ctx_mut().is_ok_and(|ctx| ctx.egui_wants_pointer_input());
     let world = &game.0.world;
     let (Some(kind), false) = (editor.selected_build, over_ui) else {
         hide(&mut slab_vis, &mut strip_vis, &mut tip_vis);

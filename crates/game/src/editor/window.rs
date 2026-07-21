@@ -378,7 +378,10 @@ pub(crate) fn code_editor(
         ui.ctx().memory_mut(|m| m.request_focus(editor_id));
     }
 
-    let mut layouter = |ui: &egui::Ui, text: &str, wrap_width: f32| {
+    // egui 0.33 hands the layouter the buffer behind a trait object rather
+    // than a &str.
+    let mut layouter = |ui: &egui::Ui, buf: &dyn egui::TextBuffer, wrap_width: f32| {
+        let text = buf.as_str();
         // Live parse of the in-progress text: the error location gets a
         // red squiggle. (Programs are tiny; parsing per relayout is fine.)
         // Library errors have no position in this buffer — status only.
@@ -392,7 +395,7 @@ pub(crate) fn code_editor(
             squiggle,
         );
         job.wrap.max_width = wrap_width;
-        ui.fonts(|fonts| fonts.layout_job(job))
+        ui.fonts_mut(|fonts| fonts.layout_job(job))
     };
 
     // Completion keys must be taken BEFORE the TextEdit runs — it would
@@ -466,7 +469,7 @@ pub(crate) fn code_editor(
         let mut next_is_line_start = true;
         for row in &output.galley.rows {
             if next_is_line_start {
-                line_tops.push(row.rect.min.y);
+                line_tops.push(row.rect().min.y);
             }
             next_is_line_start = row.ends_with_newline;
         }
@@ -498,7 +501,7 @@ pub(crate) fn code_editor(
     // reports no cursor — the popup must persist through that frame for
     // the click to land.
     if output.response.has_focus() {
-        doc.completion_cursor = output.cursor_range.map(|c| c.primary.ccursor.index);
+        doc.completion_cursor = output.cursor_range.map(|c| c.primary.index.0);
         // Re-derive from this frame's text so the popup tracks typing.
         completion = doc
             .completion_cursor
@@ -507,9 +510,9 @@ pub(crate) fn code_editor(
     }
     if let Some(c) = completion {
         doc.completion_selected %= c.suggestions.len();
-        let caret = output
-            .galley
-            .pos_from_cursor(&output.galley.from_ccursor(egui::text::CCursor::new(c.cursor)));
+        // egui 0.33: the galley indexes by CCursor directly — the old
+        // Cursor round-trip through from_ccursor is gone.
+        let caret = output.galley.pos_from_cursor(egui::text::CCursor::new(c.cursor));
         let pos = output.galley_pos + caret.left_bottom().to_vec2() + egui::vec2(0.0, 4.0);
         let area = egui::Area::new(editor_id.with("kind_complete"))
             .fixed_pos(pos)
@@ -550,22 +553,24 @@ pub(crate) fn code_editor(
     if let Some(pointer) = output.response.hover_pos() {
         let rel = pointer - output.galley_pos;
         let cursor = output.galley.cursor_from_pos(rel);
-        let caret = output.galley.pos_from_cursor(&cursor);
+        let caret = output.galley.pos_from_cursor(cursor);
         // cursor_from_pos snaps to the nearest column — require the
         // pointer to actually be on the glyph, not in the blank space
         // right of the line.
         let on_text = caret
             .expand2(egui::vec2(8.0, 2.0))
             .contains(egui::pos2(rel.x, rel.y));
-        if on_text && let Some(word) = word_at(&doc.code, cursor.ccursor.index) {
+        if on_text && let Some(word) = word_at(&doc.code, cursor.index.0) {
             let costs = &sim.costs;
             if let Some(doc_entry) = sim::host::builtin_doc(costs, &word) {
                 let cost = costs.cost_display(&word);
-                egui::show_tooltip_at_pointer(
-                    ui.ctx(),
+                egui::Tooltip::always_open(
+                    ui.ctx().clone(),
                     ui.layer_id(),
                     editor_id.with("hover_doc"),
-                    |ui| {
+                    egui::PopupAnchor::Pointer,
+                )
+                .show(|ui| {
                         ui.monospace(egui::RichText::new(&doc_entry.signature).color(HL_FUNCTION));
                         ui.label(&doc_entry.summary);
                         ui.small(format!("cost: {cost} cycles{}", doc_entry.cost_note));
@@ -584,28 +589,30 @@ pub(crate) fn code_editor(
                                 .color(egui::Color32::from_rgb(170, 130, 110)),
                             );
                         }
-                    },
-                );
+                });
             } else if sim::host::KINDS.contains(&word.as_str()) {
-                egui::show_tooltip_at_pointer(
-                    ui.ctx(),
+                egui::Tooltip::always_open(
+                    ui.ctx().clone(),
                     ui.layer_id(),
                     editor_id.with("hover_doc"),
-                    |ui| {
+                    egui::PopupAnchor::Pointer,
+                )
+                .show(|ui| {
                         ui.monospace(
                             egui::RichText::new(format!("{word} — entity kind")).color(HL_VARIABLE),
                         );
                         ui.label("A kind constant: pass it to closest() or exists().");
-                    },
-                );
+                });
             } else if let Some(func) = user_function_at(prefix, &doc.code, &word) {
                 // A user def — local, from-imported, or a module function
                 // called qualified. Its docstring is the documentation.
-                egui::show_tooltip_at_pointer(
-                    ui.ctx(),
+                egui::Tooltip::always_open(
+                    ui.ctx().clone(),
                     ui.layer_id(),
                     editor_id.with("hover_doc"),
-                    |ui| {
+                    egui::PopupAnchor::Pointer,
+                )
+                .show(|ui| {
                         ui.monospace(
                             egui::RichText::new(format!(
                                 "{}({})",
@@ -632,8 +639,7 @@ pub(crate) fn code_editor(
                             }
                         }
                         ui.small(format!("cost: {} cycles + body", costs.user_call));
-                    },
-                );
+                });
             }
         }
     }

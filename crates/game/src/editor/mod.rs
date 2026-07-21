@@ -10,7 +10,7 @@ mod highlight;
 mod window;
 
 use bevy::prelude::*;
-use bevy_egui::{egui, EguiContexts};
+use bevy_egui::egui;
 use sim::sim::Command;
 use sim::world::{Color as BotColor, PrintTarget, PrinterState, SelectKey};
 use sim::map::OverlayKind;
@@ -809,15 +809,15 @@ fn doc_window(
     doc.open = open;
 }
 
-pub(crate) fn editor_ui(
-    mut contexts: EguiContexts,
-    mut game: NonSendMut<GameSim>,
-    mut editor: ResMut<EditorState>,
-) {
-    let Some(ctx) = contexts.try_ctx_mut() else { return };
-    ensure_program_docs(&mut editor, &game);
+/// Draws into the shared viewport `Ui` (see `crate::ui_root`): egui 0.35
+/// panels claim space from an enclosing `Ui`, not from the context, so every
+/// panel in the app has to descend from ONE root or they would each lay out
+/// against the full viewport and overlap.
+pub(crate) fn editor_ui(root: &mut egui::Ui, game: &mut GameSim, editor: &mut EditorState) {
+    let ctx = root.ctx().clone();
+    ensure_program_docs(editor, game);
 
-    egui::TopBottomPanel::bottom("build_bar").exact_height(96.0).show(ctx, |ui| {
+    egui::Panel::bottom("build_bar").exact_size(96.0).show(root, |ui| {
         ui.horizontal(|ui| {
             // Category tabs.
             ui.vertical(|ui| {
@@ -850,7 +850,8 @@ pub(crate) fn editor_ui(
                 let tex_id = editor.icons[item.name].id();
                 let selected = editor.selected_build.is_some_and(|k| same_item(k, item.kind));
                 ui.vertical(|ui| {
-                    let button = egui::ImageButton::new(egui::load::SizedTexture::new(
+                    // egui 0.35 dropped ImageButton in favor of Button::image.
+                    let button = egui::Button::image(egui::load::SizedTexture::new(
                         tex_id,
                         egui::vec2(48.0, 48.0),
                     ))
@@ -910,9 +911,9 @@ pub(crate) fn editor_ui(
         });
     });
 
-    egui::SidePanel::left("editor").exact_width(300.0).show(ctx, |ui| {
+    egui::Panel::left("editor").exact_size(300.0).show(root, |ui| {
         ui.heading("Files");
-        file_viewer(ui, &mut editor, &game);
+        file_viewer(ui, editor, game);
         ui.separator();
 
         ui.heading("Printers");
@@ -1156,14 +1157,14 @@ pub(crate) fn editor_ui(
         };
         let doc = editor.docs.get_mut(&key).unwrap();
         if doc.open {
-            doc_window(ctx, key, doc, &mut game, deploy, &prelude);
+            doc_window(&ctx, key, doc, game, deploy, &prelude);
         }
     }
 
     // Bar across the top of the world view (added after the editor panel,
     // so it spans only the world). Colony counters on the left; time
     // controls in the top right. The cloud stream stays in the side panel.
-    egui::TopBottomPanel::top("world_bar").exact_height(28.0).show(ctx, |ui| {
+    egui::Panel::top("world_bar").exact_size(28.0).show(root, |ui| {
         ui.horizontal_centered(|ui| {
             let (tick, stock, data, bots, wrecks, cloud) = {
                 let w = &game.0.world;

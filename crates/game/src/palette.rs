@@ -2,7 +2,7 @@
 
 use bevy::asset::RenderAssetUsages;
 use bevy::prelude::*;
-use bevy::render::mesh::Indices;
+use bevy::mesh::Indices;
 use bevy::render::render_resource::PrimitiveTopology;
 use sim::{TileKind, TilePos};
 use std::collections::HashMap;
@@ -138,6 +138,9 @@ pub(crate) struct Palette {
     /// Health-fill gradient bins: index 0 = empty/red .. last = full/green.
     pub(crate) bar_health_grad: Vec<Handle<StandardMaterial>>,
     pub(crate) bar_trail_mat: Handle<StandardMaterial>,
+    /// Cycle-bar gradient bins: index 0 = just started saving (dark blue)
+    /// .. last = about to execute (bright cyan-white).
+    pub(crate) bar_cycle_grad: Vec<Handle<StandardMaterial>>,
     pub(crate) scribble_quad: Handle<Mesh>,
     /// Mood-cloud frames, keyed "angry" / "error" / "hurt" / "death".
     pub(crate) scribble_mats: HashMap<&'static str, Vec<Handle<StandardMaterial>>>,

@@ -342,6 +342,13 @@ pub struct Vm {
     /// guards a future negative overlay, not the tax). Derived state:
     /// re-set before every grant, so replays never need it persisted.
     cost_overlay_centi: i64,
+    /// The charged price (centicycles) of the op `run` last stopped short
+    /// of affording — `Some` exactly when the last `run` returned
+    /// `Outcome::Paused`. Purely observational: the UI pairs it with
+    /// `budget` to show a bot saving up. Cleared on entry to `run`, so a
+    /// bot that goes Blocked or Dead reports nothing. Never hashed — it is
+    /// derived from state the replay already covers.
+    stall_centi: Option<i64>,
 }
 
 impl Vm {
@@ -369,6 +376,7 @@ impl Vm {
             crash_count: 0,
             pending_program: None,
             cost_overlay_centi: 0,
+            stall_centi: None,
         }
     }
 
@@ -415,6 +423,18 @@ impl Vm {
     /// for whole cycles in displays).
     pub fn budget(&self) -> i64 {
         self.budget
+    }
+
+    /// The charged price (CENTICYCLES) of the op this VM is saving up for,
+    /// or `None` when it is not cycle-starved (running, blocked, or dead).
+    /// Pair with `budget` for a "cycles until the next op" meter: a bot
+    /// with 43 of 200 is three ticks from moving on a stock CPU.
+    ///
+    /// Blocked is deliberately NOT a stall — a bot waiting on an action
+    /// burns its grant rather than banking it (see `grant_centi`), so a
+    /// fill bar there would creep toward an execution that isn't coming.
+    pub fn stall_cost(&self) -> Option<i64> {
+        self.stall_centi
     }
 
     pub fn globals(&self) -> &BTreeMap<String, Value> {
@@ -742,6 +762,9 @@ impl Vm {
 
     /// Step until the budget runs out, an action blocks, or the bot dies.
     pub fn run(&mut self, host: &mut dyn Host, costs: &CostTable) -> Outcome {
+        // Only a Paused exit below re-arms this, so Blocked/Dead report no
+        // stall and a resumed bot stops advertising the op it just paid for.
+        self.stall_centi = None;
         loop {
             match self.state {
                 State::Blocked => return Outcome::Blocked,
@@ -764,6 +787,7 @@ impl Vm {
                         // clear them.
                         let cost = self.charged(costs.statement as i64 * CENT);
                         if self.budget < cost {
+                            self.stall_centi = Some(cost);
                             return Outcome::Paused;
                         }
                         self.budget -= cost;
@@ -784,6 +808,7 @@ impl Vm {
 
             let cost = self.charged(self.cost_of(top, costs, &*host) as i64 * CENT);
             if self.budget < cost {
+                self.stall_centi = Some(cost);
                 return Outcome::Paused;
             }
             self.budget -= cost;

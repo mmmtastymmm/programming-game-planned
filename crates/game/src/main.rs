@@ -15,7 +15,7 @@
 //! Run: `cargo run -p game`
 
 use bevy::prelude::*;
-use bevy_egui::{EguiContexts, EguiPlugin};
+use bevy_egui::{egui, EguiContexts, EguiPlugin, EguiPrimaryContextPass};
 use sim::sim::Sim;
 
 mod camera;
@@ -43,12 +43,13 @@ fn main() {
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
                 title: "programming game".into(),
-                resolution: (1280.0, 800.0).into(),
+                // 0.17: WindowResolution is physical pixels (u32), not f32.
+                resolution: (1280, 800).into(),
                 ..default()
             }),
             ..default()
         }))
-        .add_plugins(EguiPlugin { enable_multipass_for_primary_context: false })
+        .add_plugins(EguiPlugin::default())
         .insert_resource(ClearColor(palette::CLEAR))
         .insert_resource(Time::<Fixed>::from_hz(10.0))
         .insert_resource(view::ViewIndex::default())
@@ -58,11 +59,13 @@ fn main() {
         .init_resource::<fog::FogAssets>()
         .add_systems(Startup, (setup_sim, scene::setup_scene, fog::setup_fog).chain())
         .add_systems(FixedUpdate, (step_sim, view::update_poses).chain())
+        // egui multi-pass mode (the bevy_egui default since 0.34) requires
+        // every system that DRAWS ui to live in this schedule; systems that
+        // merely ask the context whether it wants input stay in Update.
+        .add_systems(EguiPrimaryContextPass, ui_root)
         .add_systems(
             Update,
             (
-                editor::editor_ui,
-                hud::inspector_ui,
                 time_controls,
                 camera::orbit_camera,
                 tools::place_blueprint,
@@ -71,6 +74,7 @@ fn main() {
                 tools::build_preview,
                 view::update_progress_bars,
                 view::update_health_bars,
+                view::update_cycle_bars,
                 view::update_scribbles,
                 view::interpolate,
                 view::billboard_bars,
@@ -90,6 +94,31 @@ fn main() {
                 .after(view::animate_terrain),
         )
         .run();
+}
+
+/// The app's single egui entry point.
+///
+/// egui 0.35 made panels claim space from an enclosing `Ui` rather than from
+/// the context, so all panels must descend from ONE root or each would lay
+/// out against the full viewport and overlap. The editor's panels are added
+/// first (outermost, as before); the inspector's right panel nests inside
+/// what they leave — the order here IS the layout.
+fn ui_root(
+    mut contexts: EguiContexts,
+    mut game: NonSendMut<GameSim>,
+    mut editor: ResMut<EditorState>,
+) {
+    let Ok(ctx) = contexts.ctx_mut() else { return };
+    let ctx = ctx.clone();
+    let mut root = egui::Ui::new(
+        ctx.clone(),
+        "viewport".into(),
+        egui::UiBuilder::new()
+            .layer_id(egui::LayerId::background())
+            .max_rect(ctx.viewport_rect()),
+    );
+    editor::editor_ui(&mut root, &mut game, &mut editor);
+    hud::inspector_ui(&mut root, &mut game, &mut editor);
 }
 
 fn setup_sim(world: &mut World) {
@@ -121,7 +150,7 @@ fn setup_sim(world: &mut World) {
         },
         Err(_) => scene::build_colony(),
     };
-    world.insert_non_send_resource(GameSim(sim));
+    world.insert_non_send(GameSim(sim));
 }
 
 fn step_sim(mut game: NonSendMut<GameSim>, editor: Res<EditorState>) {
@@ -139,7 +168,7 @@ fn time_controls(
     mut editor: ResMut<EditorState>,
     mut fixed: ResMut<Time<Fixed>>,
 ) {
-    let typing = contexts.try_ctx_mut().is_some_and(|ctx| ctx.wants_keyboard_input());
+    let typing = contexts.ctx_mut().is_ok_and(|ctx| ctx.egui_wants_keyboard_input());
     if !typing && keys.just_pressed(KeyCode::Space) {
         editor.paused = !editor.paused;
     }

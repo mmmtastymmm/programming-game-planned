@@ -174,11 +174,16 @@ pub(super) fn error_byte_range(text: &str, line: u32, col: u32) -> std::ops::Ran
 mod tests {
     use super::*;
 
+    /// egui 0.35 newtyped layout offsets; `str` still indexes by `usize`.
+    fn bytes(range: &std::ops::Range<egui::text::ByteIndex>) -> std::ops::Range<usize> {
+        range.start.0..range.end.0
+    }
+
     fn spans(text: &str) -> Vec<(String, egui::Color32)> {
         highlight_pyrite(text, egui::FontId::monospace(12.0), None)
             .sections
             .iter()
-            .map(|s| (text[s.byte_range.clone()].to_string(), s.format.color))
+            .map(|s| (text[bytes(&s.byte_range)].to_string(), s.format.color))
             .collect()
     }
 
@@ -217,8 +222,8 @@ mod tests {
         let job = highlight_pyrite(text, egui::FontId::monospace(12.0), Some(8..15));
         let mut pos = 0;
         for s in &job.sections {
-            assert_eq!(s.byte_range.start, pos, "gap or overlap at byte {pos}");
-            pos = s.byte_range.end;
+            assert_eq!(s.byte_range.start.0, pos, "gap or overlap at byte {pos}");
+            pos = s.byte_range.end.0;
         }
         assert_eq!(pos, text.len());
     }
@@ -228,13 +233,13 @@ mod tests {
         let text = "move_to(closest(ore))\n";
         let job = highlight_pyrite(text, egui::FontId::monospace(12.0), Some(8..15));
         for s in &job.sections {
-            let overlaps = s.byte_range.start < 15 && s.byte_range.end > 8;
+            let overlaps = s.byte_range.start.0 < 15 && s.byte_range.end.0 > 8;
             assert_eq!(
                 s.format.underline != egui::Stroke::NONE,
                 overlaps,
                 "section {:?} ({})",
                 s.byte_range,
-                &text[s.byte_range.clone()]
+                &text[bytes(&s.byte_range)]
             );
         }
     }

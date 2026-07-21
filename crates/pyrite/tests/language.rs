@@ -161,6 +161,27 @@ fn cycle_debt_ops_wait_until_affordable() {
 }
 
 #[test]
+fn stall_cost_reports_the_op_being_saved_for() {
+    // The UI pairs stall_cost() with budget() to fill a "saving up" bar, so
+    // the pair must describe the SAME pending op every starved tick and go
+    // quiet the moment it is affordable.
+    let (mut vm, mut host, costs) = vm_for("scan_enemies()\n");
+    assert_eq!(vm.stall_cost(), None, "nothing reported before the first run");
+    for tick in 1..=3 {
+        vm.grant(1, &costs);
+        assert_eq!(vm.run(&mut host, &costs), Outcome::Paused);
+        // scan_enemies = 4 cycles = 400 centicycles, unchanging while saving.
+        assert_eq!(vm.stall_cost(), Some(400), "tick {tick}");
+        assert_eq!(vm.budget(), tick * 100, "tick {tick}");
+    }
+    vm.grant(1, &costs);
+    vm.run(&mut host, &costs);
+    assert_eq!(call_names(&host), ["scan_enemies"]);
+    // Afforded and spent: the bar must stop advertising a stall.
+    assert_ne!(vm.stall_cost(), Some(400), "the paid-for op is no longer pending");
+}
+
+#[test]
 fn program_loops_forever_with_a_wrap_charge() {
     // One pass: x = 1 (assign 1) + log(x) (full charge 1) = 2. The wrap
     // costs one statement, so two passes = 2 + 1 + 2 = 5; a 6th cycle is

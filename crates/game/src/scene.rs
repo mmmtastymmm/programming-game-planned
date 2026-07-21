@@ -1009,6 +1009,28 @@ pub(crate) fn setup_scene(
             unlit: true,
             ..default()
         }),
+        bar_cycle_grad: (0..12)
+            .map(|i| {
+                let t = i as f32 / 11.0;
+                // deep navy (just started saving) -> bright cyan-white
+                // (next op affordable). Brightness climbs with the fill, so
+                // "close to executing" reads even at a glance.
+                let (r, g, b) = (0.10 + 0.55 * t, 0.20 + 0.70 * t, 0.45 + 0.55 * t);
+                materials.add(StandardMaterial {
+                    base_color: Color::srgb(r, g, b),
+                    // Emissive ramps faster than base: the bar visibly
+                    // "charges up" rather than just changing hue.
+                    emissive: LinearRgba::new(
+                        r * (0.3 + 0.5 * t),
+                        g * (0.3 + 0.5 * t),
+                        b * (0.4 + 0.5 * t),
+                        1.0,
+                    ),
+                    unlit: true,
+                    ..default()
+                })
+            })
+            .collect(),
         // Sized so the icon inside the thought bubble keeps its old
         // on-screen size (icons render at ~0.58 of the texture now).
         scribble_quad: meshes.add(Rectangle::new(1.05, 0.85)),
@@ -1074,13 +1096,15 @@ pub(crate) fn setup_scene(
     }
 
     // Lighting: bright ambient + warm sun with shadows.
-    commands.insert_resource(AmbientLight {
+    // 0.18 split ambient light: AmbientLight is now a per-camera component,
+    // and GlobalAmbientLight is the scene-wide resource this used to be.
+    commands.insert_resource(GlobalAmbientLight {
         color: Color::srgb(0.75, 0.78, 0.92),
         brightness: 250.0,
         ..default()
     });
     commands.spawn((
-        DirectionalLight { illuminance: 10_000.0, shadows_enabled: true, ..default() },
+        DirectionalLight { illuminance: 10_000.0, shadow_maps_enabled: true, ..default() },
         Transform::from_xyz(6.0, 14.0, 4.0).looking_at(Vec3::ZERO, Vec3::Y),
     ));
 
