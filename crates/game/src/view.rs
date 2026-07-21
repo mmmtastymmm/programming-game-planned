@@ -1164,17 +1164,27 @@ pub(crate) fn update_sel_marker(
     editor: Res<EditorState>,
     index: Res<ViewIndex>,
     time: Res<Time>,
+    game: NonSend<GameSim>,
     views: Query<&Transform, Without<SelMarker>>,
     mut marker: Query<(&mut Transform, &mut Visibility), With<SelMarker>>,
 ) {
     let Ok((mut transform, mut visibility)) = marker.single_mut() else { return };
-    let target = editor
-        .selected_bot
-        .and_then(|id| index.bots.get(&id))
-        .and_then(|&e| views.get(e).ok());
+    let Some(id) = editor.selected_bot else {
+        *visibility = Visibility::Hidden;
+        return;
+    };
+    let target = index.bots.get(&id).and_then(|&e| views.get(e).ok());
     match target {
         Some(view) => {
-            transform.translation = Vec3::new(view.translation.x, 0.06, view.translation.z);
+            // Ride the selected bot's tile elevation so the ring sits on the
+            // surface, not the ground plane. Uses the sim tile (the same source
+            // as the bot's own y) so ring and bot share one height.
+            let world = &game.0.world;
+            let top = world
+                .bots
+                .get(&sim::BotId(id))
+                .map_or(0.0, |b| terrain_top(world, b.data.pos));
+            transform.translation = Vec3::new(view.translation.x, top + 0.06, view.translation.z);
             transform.rotate_y(1.5 * time.delta_secs());
             *visibility = Visibility::Visible;
         }
