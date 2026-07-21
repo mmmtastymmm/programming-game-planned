@@ -1093,7 +1093,7 @@ pub(crate) fn editor_ui(root: &mut egui::Ui, game: &mut GameSim, editor: &mut Ed
                 }
             }
         });
-        let colors = program_colors(&game);
+        let colors = program_colors(game);
         // Read only the viewer's own colony cloud (Q89: per-faction clouds).
         let empty = Vec::new();
         let archive = game.0.world.archive.get(&crate::fog::VIEWER).unwrap_or(&empty);
@@ -1134,9 +1134,9 @@ pub(crate) fn editor_ui(root: &mut egui::Ui, game: &mut GameSim, editor: &mut Ed
     // Floating code windows — one per open document, movable and
     // resizable anywhere over the world view. Assembled sources (body +
     // handlers) are computed first: they are what a deploy ships.
-    let assembled: BTreeMap<u8, String> = program_colors(&game)
+    let assembled: BTreeMap<u8, String> = program_colors(game)
         .into_iter()
-        .map(|c| (c, assembled_source(&editor, c)))
+        .map(|c| (c, assembled_source(editor, c)))
         .collect();
     let keys: Vec<DocKey> = editor.docs.keys().copied().collect();
     for key in keys {
@@ -1152,7 +1152,7 @@ pub(crate) fn editor_ui(root: &mut egui::Ui, game: &mut GameSim, editor: &mut Ed
         // Program windows live-parse with their imported module blocks in
         // front, so import errors show exactly as they would at deploy.
         let prelude = match key {
-            DocKey::Program(_) => module_prelude(&editor, &editor.docs[&key].code),
+            DocKey::Program(_) => module_prelude(editor, &editor.docs[&key].code),
             _ => String::new(),
         };
         let doc = editor.docs.get_mut(&key).unwrap();
@@ -1245,10 +1245,10 @@ pub(crate) fn editor_ui(root: &mut egui::Ui, game: &mut GameSim, editor: &mut Ed
                                 )
                             })
                         };
-                        let before = probe(&game);
+                        let before = probe(game);
                         for _ in 0..300 {
                             game.0.step();
-                            let now = probe(&game);
+                            let now = probe(game);
                             if now != before || now.is_none() {
                                 break;
                             }
