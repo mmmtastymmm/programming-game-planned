@@ -121,15 +121,15 @@ pub(crate) fn orbit_camera(
     *transform = orbit_transform(&cam);
 }
 
-/// Cursor ray onto the terrain surface -> tile coordinates.
+/// Cursor ray -> tile coordinates.
 ///
-/// Picks against a horizontal plane, but since the elevation pass raised tile
-/// tops (and the bots that ride [`terrain_top`]) off `y=0`, a single `y=0`
-/// solve lands on the tile *behind* a raised one. So we solve twice: once
-/// against the ground to find a candidate tile, then again against that tile's
-/// rendered top so clicks on raised tiles and the bots standing on them
-/// resolve correctly. (Cliff *faces* still resolve to the tile above/below;
-/// a true mesh raycast is the eventual fix.)
+/// The elevation pass turned terrain into a heightfield of raised blocks, so a
+/// flat `y=0` pick lands on the tile *behind* a raised one and a click on a
+/// cliff *face* misses the block entirely. Instead we march the ray through the
+/// heightfield front-to-back ([`raycast_tile`]) and take the first tile it
+/// strikes — top face or cliff face both resolve to the tile they belong to.
+/// A near-horizontal / upward ray (no real terrain hit) falls back to the old
+/// ground-plane solve.
 pub(crate) fn cursor_tile(
     windows: &Query<&Window>,
     cams: &Query<(&Camera, &GlobalTransform), With<Camera3d>>,
@@ -139,28 +139,126 @@ pub(crate) fn cursor_tile(
     let cursor = window.cursor_position()?;
     let (camera, cam_transform) = cams.single().ok()?;
     let ray = camera.viewport_to_world(cam_transform, cursor).ok()?;
-    let (grid_w, grid_h) = (world.grid.width as f32, world.grid.height as f32);
-    let solve = |plane_y: f32| -> Option<TilePos> {
-        if ray.direction.y.abs() < 1e-4 {
-            return None;
+    let (grid_w, grid_h) = (world.grid.width, world.grid.height);
+    if ray.direction.y < -1e-4 {
+        if let Some(tile) = raycast_tile(grid_w, grid_h, ray.origin, *ray.direction, |i, j| {
+            crate::palette::terrain_top(world, TilePos::new(i, j))
+        }) {
+            return Some(tile);
         }
-        let t = (plane_y - ray.origin.y) / ray.direction.y;
-        if t < 0.0 {
-            return None;
-        }
-        let hit = ray.origin + *ray.direction * t;
-        Some(TilePos::new(
-            (hit.x + grid_w / 2.0).round() as i32,
-            (hit.z + grid_h / 2.0).round() as i32,
-        ))
-    };
-    let ground = solve(0.0)?;
-    let top = crate::palette::terrain_top(world, ground);
-    if top.abs() < 1e-4 {
-        return Some(ground);
     }
-    // Re-solve against the hit tile's top; fall back to the ground guess if the
-    // refined ray somehow points away (e.g. a grazing near-horizontal ray).
-    solve(top).or(Some(ground))
+    // Fallback: intersect the ground plane (degenerate ray, or the ray cleared
+    // the whole heightfield without touching a block).
+    if ray.direction.y.abs() < 1e-4 {
+        return None;
+    }
+    let t = -ray.origin.y / ray.direction.y;
+    if t < 0.0 {
+        return None;
+    }
+    let hit = ray.origin + *ray.direction * t;
+    Some(TilePos::new(
+        (hit.x + grid_w as f32 / 2.0).round() as i32,
+        (hit.z + grid_h as f32 / 2.0).round() as i32,
+    ))
+}
+
+/// March a descending ray through the terrain heightfield and return the first
+/// tile it strikes, front-to-back — so a click on a cliff face resolves to the
+/// raised tile that owns it, not the ground behind it.
+///
+/// Each tile `(i, j)` is a unit column filling `[bottom, top(i, j)]` in `y`,
+/// exactly as it's drawn (`top` is the tile's [`crate::palette::terrain_top`]).
+/// Uses a 2-D grid DDA (Amanatides–Woo) over the XZ plane; pure over its inputs
+/// so it's unit-testable without a `World`. `None` if the ray leaves the grid
+/// without meeting any block (the caller falls back to the ground plane).
+fn raycast_tile(
+    width: i32,
+    height: i32,
+    origin: Vec3,
+    dir: Vec3,
+    top: impl Fn(i32, i32) -> f32,
+) -> Option<TilePos> {
+    // Grid space: tile (i, j) is centered on integer (i, j) and spans
+    // [i-0.5, i+0.5) — p = worldx + width/2, matching the `.round()` pick.
+    let p0 = origin.x + width as f32 / 2.0;
+    let q0 = origin.z + height as f32 / 2.0;
+    let mut i = (p0 + 0.5).floor() as i32;
+    let mut j = (q0 + 0.5).floor() as i32;
+
+    let step_i = if dir.x > 0.0 { 1 } else { -1 };
+    let step_j = if dir.z > 0.0 { 1 } else { -1 };
+    let t_delta_i = if dir.x != 0.0 { (1.0 / dir.x).abs() } else { f32::INFINITY };
+    let t_delta_j = if dir.z != 0.0 { (1.0 / dir.z).abs() } else { f32::INFINITY };
+    // t to the first cell boundary on each axis (boundaries at half-integers).
+    let bound_i = if step_i > 0 { i as f32 + 0.5 } else { i as f32 - 0.5 };
+    let bound_j = if step_j > 0 { j as f32 + 0.5 } else { j as f32 - 0.5 };
+    let mut t_max_i = if dir.x != 0.0 { (bound_i - p0) / dir.x } else { f32::INFINITY };
+    let mut t_max_j = if dir.z != 0.0 { (bound_j - q0) / dir.z } else { f32::INFINITY };
+
+    let mut entered = false;
+    let max_steps = 2 * (width + height) + 8;
+    for _ in 0..max_steps {
+        let t_exit = t_max_i.min(t_max_j);
+        if (0..width).contains(&i) && (0..height).contains(&j) {
+            entered = true;
+            // Descending ray: it strikes this column if it is at or below the
+            // tile top by the time it leaves the cell (lowest y over the cell —
+            // covers both entering through the cliff face and crossing the top
+            // face within the cell).
+            let y_lo = origin.y + t_exit.min(1e9) * dir.y;
+            if y_lo <= top(i, j) {
+                return Some(TilePos::new(i, j));
+            }
+        } else if entered {
+            break; // crossed the grid without a hit
+        }
+        if t_exit.is_infinite() {
+            break; // no further boundary crossings (axis-aligned ray)
+        }
+        if t_max_i <= t_max_j {
+            i += step_i;
+            t_max_i += t_delta_i;
+        } else {
+            j += step_j;
+            t_max_j += t_delta_j;
+        }
+    }
+    None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn vertical_ray_hits_the_tile_below() {
+        // Camera over tile (1,1) of a flat 3x3 grid, looking straight down.
+        let origin = Vec3::new(1.0 - 1.5, 5.0, 1.0 - 1.5); // tile (1,1) center
+        let dir = Vec3::new(0.0, -1.0, 0.0);
+        assert_eq!(raycast_tile(3, 3, origin, dir, |_, _| 0.0), Some(TilePos::new(1, 1)));
+    }
+
+    #[test]
+    fn shallow_ray_hits_the_cliff_face_not_the_ground_behind_it() {
+        // A wall runs down column i=2 (top 0.55); everything else is flat. A
+        // shallow ray from the east never reaches y=0 inside the grid, so a
+        // plane solve would miss the wall — the DDA must catch its east face.
+        let wall = |i: i32, _j: i32| if i == 2 { 0.55 } else { 0.0 };
+        let origin = Vec3::new(5.0, 1.0, -0.5); // east of a 5x5 grid, row j=2
+        let dir = Vec3::new(-1.0, -0.1, 0.0).normalize();
+        assert_eq!(raycast_tile(5, 5, origin, dir, wall), Some(TilePos::new(2, 2)));
+    }
+
+    #[test]
+    fn ray_over_a_flat_tile_passes_until_it_meets_the_ground() {
+        // Same shallow ray, but flat terrain: it should sail over the near
+        // tiles and land where it finally descends to y=0 (tile i=0, worldx
+        // -2.5 -> y = 1 - 0.1*7.5 = 0.25 still >0; it exits west above ground),
+        // so with no block anywhere the heightfield reports no hit.
+        let origin = Vec3::new(5.0, 1.0, -0.5);
+        let dir = Vec3::new(-1.0, -0.1, 0.0).normalize();
+        assert_eq!(raycast_tile(5, 5, origin, dir, |_, _| 0.0), None);
+    }
 }
 
