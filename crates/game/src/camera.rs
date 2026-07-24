@@ -121,6 +121,17 @@ pub(crate) fn orbit_camera(
     *transform = orbit_transform(&cam);
 }
 
+/// World XZ -> tile indices — the grid is centered on the origin, so tile
+/// `(i, j)` spans `[i-0.5, i+0.5) x [j-0.5, j+0.5)`. One spelling of the
+/// convention, shared by the raycast start cell and the plane fallback so they
+/// can't drift or disagree at half-integer coordinates.
+fn tile_at(x: f32, z: f32, width: i32, height: i32) -> (i32, i32) {
+    (
+        (x + width as f32 / 2.0 + 0.5).floor() as i32,
+        (z + height as f32 / 2.0 + 0.5).floor() as i32,
+    )
+}
+
 /// Cursor ray -> tile coordinates.
 ///
 /// The elevation pass turned terrain into a heightfield of raised blocks, so a
@@ -128,8 +139,9 @@ pub(crate) fn orbit_camera(
 /// cliff *face* misses the block entirely. Instead we march the ray through the
 /// heightfield front-to-back ([`raycast_tile`]) and take the first tile it
 /// strikes — top face or cliff face both resolve to the tile they belong to.
-/// A near-horizontal / upward ray (no real terrain hit) falls back to the old
-/// ground-plane solve.
+/// A near-horizontal / upward ray, or an eye that has been panned below the
+/// ground plane (no valid top-down pick — this is the old `t < 0` guard), falls
+/// back to the ground-plane solve.
 pub(crate) fn cursor_tile(
     windows: &Query<&Window>,
     cams: &Query<(&Camera, &GlobalTransform), With<Camera3d>>,
@@ -140,7 +152,9 @@ pub(crate) fn cursor_tile(
     let (camera, cam_transform) = cams.single().ok()?;
     let ray = camera.viewport_to_world(cam_transform, cursor).ok()?;
     let (grid_w, grid_h) = (world.grid.width, world.grid.height);
-    if ray.direction.y < -1e-4 {
+    // Only cast when the ray genuinely descends onto terrain from above the
+    // ground — a below-ground eye would spuriously "hit" the first edge cell.
+    if ray.direction.y < -1e-4 && ray.origin.y > 0.0 {
         if let Some(tile) = raycast_tile(grid_w, grid_h, ray.origin, *ray.direction, |i, j| {
             crate::palette::terrain_top(world, TilePos::new(i, j))
         }) {
@@ -157,21 +171,23 @@ pub(crate) fn cursor_tile(
         return None;
     }
     let hit = ray.origin + *ray.direction * t;
-    Some(TilePos::new(
-        (hit.x + grid_w as f32 / 2.0).round() as i32,
-        (hit.z + grid_h as f32 / 2.0).round() as i32,
-    ))
+    let (i, j) = tile_at(hit.x, hit.z, grid_w, grid_h);
+    Some(TilePos::new(i, j))
 }
 
 /// March a descending ray through the terrain heightfield and return the first
 /// tile it strikes, front-to-back — so a click on a cliff face resolves to the
 /// raised tile that owns it, not the ground behind it.
 ///
-/// Each tile `(i, j)` is a unit column filling `[bottom, top(i, j)]` in `y`,
-/// exactly as it's drawn (`top` is the tile's [`crate::palette::terrain_top`]).
-/// Uses a 2-D grid DDA (Amanatides–Woo) over the XZ plane; pure over its inputs
-/// so it's unit-testable without a `World`. `None` if the ray leaves the grid
-/// without meeting any block (the caller falls back to the ground plane).
+/// Each tile `(i, j)` is a column whose rendered top is `top(i, j)` (the tile's
+/// [`crate::palette::terrain_top`]); the terrain is a gap-free heightfield on a
+/// shared floor, so only the top matters for a descending ray. Uses a 2-D grid
+/// DDA (Amanatides–Woo) over the XZ plane; pure over its inputs so it's
+/// unit-testable without a `World`. `None` if the ray leaves the grid without
+/// meeting any block (the caller falls back to the ground plane).
+///
+/// Precondition: `dir` descends (`dir.y < 0`) and `origin` is above the terrain
+/// — the caller gates on both. A ray from below would report the first cell.
 fn raycast_tile(
     width: i32,
     height: i32,
@@ -180,11 +196,10 @@ fn raycast_tile(
     top: impl Fn(i32, i32) -> f32,
 ) -> Option<TilePos> {
     // Grid space: tile (i, j) is centered on integer (i, j) and spans
-    // [i-0.5, i+0.5) — p = worldx + width/2, matching the `.round()` pick.
+    // [i-0.5, i+0.5) — p = worldx + width/2.
     let p0 = origin.x + width as f32 / 2.0;
     let q0 = origin.z + height as f32 / 2.0;
-    let mut i = (p0 + 0.5).floor() as i32;
-    let mut j = (q0 + 0.5).floor() as i32;
+    let (mut i, mut j) = tile_at(origin.x, origin.z, width, height);
 
     let step_i = if dir.x > 0.0 { 1 } else { -1 };
     let step_j = if dir.z > 0.0 { 1 } else { -1 };
@@ -196,8 +211,22 @@ fn raycast_tile(
     let mut t_max_i = if dir.x != 0.0 { (bound_i - p0) / dir.x } else { f32::INFINITY };
     let mut t_max_j = if dir.z != 0.0 { (bound_j - q0) / dir.z } else { f32::INFINITY };
 
+    // Budget = cells to reach the grid from the (possibly far, zoomed-out)
+    // origin + cells to cross it. Counting only the perimeter would let a
+    // distant camera run out before entering, silently reverting to the flat
+    // pick. `out_of` is 0 inside the grid, else the gap to the near edge.
+    let out_of = |c: i32, dim: i32| -> i64 {
+        if c < 0 {
+            (-c) as i64
+        } else if c >= dim {
+            (c - dim + 1) as i64
+        } else {
+            0
+        }
+    };
+    let max_steps = out_of(i, width) + out_of(j, height) + 2 * (width + height) as i64 + 8;
+
     let mut entered = false;
-    let max_steps = 2 * (width + height) + 8;
     for _ in 0..max_steps {
         let t_exit = t_max_i.min(t_max_j);
         if (0..width).contains(&i) && (0..height).contains(&j) {
@@ -247,6 +276,20 @@ mod tests {
         let wall = |i: i32, _j: i32| if i == 2 { 0.55 } else { 0.0 };
         let origin = Vec3::new(5.0, 1.0, -0.5); // east of a 5x5 grid, row j=2
         let dir = Vec3::new(-1.0, -0.1, 0.0).normalize();
+        assert_eq!(raycast_tile(5, 5, origin, dir, wall), Some(TilePos::new(2, 2)));
+    }
+
+    #[test]
+    fn far_zoomed_out_origin_still_reaches_the_grid() {
+        // The step budget must count the long march from a distant origin, not
+        // just the grid perimeter — else a zoomed-out camera runs out before
+        // entering and reverts to the flat pick. Origin 55 cells east of a 5x5
+        // grid; a shallow ray still clears the flat east tiles and strikes the
+        // i=2 wall's face. (Under the old 2*(w+h)+8=28 budget this returned
+        // None.)
+        let wall = |i: i32, _j: i32| if i == 2 { 0.55 } else { 0.0 };
+        let origin = Vec3::new(60.0, 1.0, -0.5);
+        let dir = Vec3::new(-1.0, -0.015, 0.0).normalize();
         assert_eq!(raycast_tile(5, 5, origin, dir, wall), Some(TilePos::new(2, 2)));
     }
 
