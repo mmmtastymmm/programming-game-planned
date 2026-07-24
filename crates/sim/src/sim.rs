@@ -540,7 +540,12 @@ fn hash_bot_data(h: &mut Fnv1a, data: &crate::world::BotData) {
     if let Some(action) = &data.action {
         hash_action(h, action);
     }
-    h.write_u32(data.booting.unwrap_or(0));
+    // is_some flag + value, not unwrap_or(0): Some(0) (booting, finishing this
+    // tick) must not hash identically to None (fully booted).
+    h.write_u8(data.booting.is_some() as u8);
+    if let Some(b) = data.booting {
+        h.write_u32(b);
+    }
     h.write_u8(data.recall.is_some() as u8);
     if let Some(recall) = &data.recall {
         h.write_u32(recall.path.len() as u32);
@@ -2449,6 +2454,7 @@ impl Sim {
             h.write_i32(pos.y);
             h.write_u32(*n);
         }
+        h.write_u32(w.nodes.len() as u32);
         for (id, node) in &w.nodes {
             h.write_u64(id.0);
             h.write_u8(node.kind.as_u8());
@@ -2457,18 +2463,21 @@ impl Sim {
             h.write_u32(node.amount);
             h.write_u8(node.regen as u8);
         }
+        h.write_u32(w.depots.len() as u32);
         for (id, depot) in &w.depots {
             h.write_u64(id.0);
             h.write_i32(depot.pos.x);
             h.write_i32(depot.pos.y);
         }
         // Template Caches (M15): id, position, and which block they hold.
+        h.write_u32(w.caches.len() as u32);
         for (id, cache) in &w.caches {
             h.write_u64(id.0);
             h.write_i32(cache.pos.x);
             h.write_i32(cache.pos.y);
             h.write_u8(cache.block.as_u8());
         }
+        h.write_u32(w.structures.len() as u32);
         for (id, st) in &w.structures {
             h.write_u64(id.0);
             h.write_u8(st.kind.as_u8());
@@ -2501,6 +2510,7 @@ impl Sim {
                 None => h.write_u8(0),
             }
         }
+        h.write_u32(w.unlocks.len() as u32);
         for (faction, set) in &w.unlocks {
             h.write_u8(*faction);
             for c in pyrite::Construct::ALL {
@@ -2508,27 +2518,32 @@ impl Sim {
             }
         }
         // Studied function blocks (M15): per faction, which blocks are learned.
+        h.write_u32(w.studied.len() as u32);
         for (faction, blocks) in &w.studied {
             h.write_u8(*faction);
             for b in crate::progression::FunctionBlock::ALL {
                 h.write_u8(blocks.contains(&b) as u8);
             }
         }
+        h.write_u32(w.stock.len() as u32);
         for ((faction, kind), deci) in &w.stock {
             h.write_u8(*faction);
             h.write_u8(kind.as_u8());
             h.write_u64(*deci);
         }
+        h.write_u32(w.data.len() as u32);
         for (faction, data) in &w.data {
             h.write_u8(*faction);
             h.write_u64(*data);
         }
+        h.write_u32(w.delivered.len() as u32);
         for (faction, delivered) in &w.delivered {
             h.write_u8(*faction);
             h.write_u64(*delivered);
         }
         // Permanent map knowledge is real state (docs/05 Q70); the live
         // perception union is derived every tick and deliberately unhashed.
+        h.write_u32(w.known_nodes.len() as u32);
         for (faction, known) in &w.known_nodes {
             h.write_u8(*faction);
             h.write_u32(known.len() as u32);
@@ -2538,22 +2553,30 @@ impl Sim {
                 h.write_u8(node.exhausted as u8);
             }
         }
+        h.write_u32(w.milestones_paid.len() as u32);
         for (faction, paid) in &w.milestones_paid {
             h.write_u8(*faction);
             h.write_u64(*paid);
         }
+        // Three consecutive faction sets: without a length each, {brownout:{f}}
+        // and {rusting:{f}} serialize to the same byte and a genuine divergence
+        // (energy-starved fleet vs rust-scrapping) slips past the desync check.
+        h.write_u32(w.first_kill_done.len() as u32);
         for faction in &w.first_kill_done {
             h.write_u8(*faction);
         }
+        h.write_u32(w.brownout.len() as u32);
         for faction in &w.brownout {
             h.write_u8(*faction);
         }
+        h.write_u32(w.rusting.len() as u32);
         for faction in &w.rusting {
             h.write_u8(*faction);
         }
         // The trickle pick controls per-bot cycle grants for a whole
         // settlement interval — a divergence here must trip the desync
         // alarm immediately, not once the extra compute moves a position.
+        h.write_u32(w.powered_bot.len() as u32);
         for (faction, bot) in &w.powered_bot {
             h.write_u8(*faction);
             h.write_u32(bot.0);
@@ -2564,6 +2587,7 @@ impl Sim {
         h.write_u64(w.rng.sidestep);
         h.write_u64(w.rng.quirk_roll);
         h.write_u64(w.rng.feral_mutation);
+        h.write_u32(w.printers.len() as u32);
         for (id, printer) in &w.printers {
             h.write_u64(id.0);
             h.write_i32(printer.pos.x);
@@ -2599,16 +2623,22 @@ impl Sim {
             }
             h.write_u32(printer.job.unwrap_or(0));
         }
+        // overlays and paint share an (i32, i32, u8) element layout, so an
+        // overlay could otherwise masquerade as a paint entry across the
+        // boundary — length each so the two sets stay distinct.
+        h.write_u32(w.overlays.len() as u32);
         for (pos, overlay) in &w.overlays {
             h.write_i32(pos.x);
             h.write_i32(pos.y);
             h.write_u8(overlay.as_u8());
         }
+        h.write_u32(w.paint.len() as u32);
         for (pos, color) in &w.paint {
             h.write_i32(pos.x);
             h.write_i32(pos.y);
             h.write_u8(*color);
         }
+        h.write_u32(w.blueprints.len() as u32);
         for (id, bp) in &w.blueprints {
             h.write_u64(id.0);
             // The kind was implied while Bridge was the only one; with
@@ -2623,14 +2653,17 @@ impl Sim {
         // Program versions ARE source-byte hashes (CLAUDE.md rule 7), so
         // hashing the stored u64s covers the sources without re-walking
         // every deployed program's bytes each tick.
+        h.write_u32(w.color_programs.len() as u32);
         for ((faction, color), cp) in &w.color_programs {
             h.write_u8(*faction);
             h.write_u8(*color);
             h.write_u64(cp.hash);
         }
+        h.write_u32(w.program_library.len() as u32);
         for hash in w.program_library.keys() {
             h.write_u64(*hash);
         }
+        h.write_u32(w.bots.len() as u32);
         for (id, bot) in &w.bots {
             h.write_u32(id.0);
             hash_bot_data(&mut h, &bot.data);
@@ -2643,6 +2676,7 @@ impl Sim {
                 h.write_u8(vm.is_dead() as u8);
             }
         }
+        h.write_u32(w.wrecks.len() as u32);
         for (id, wreck) in &w.wrecks {
             h.write_u32(id.0);
             h.write_i64(wreck.hp);
@@ -2653,6 +2687,7 @@ impl Sim {
         }
         // The intel ledgers (M10): decryption never goes down; comm keys
         // never expire — both are lockstep state.
+        h.write_u32(w.decryption.len() as u32);
         for ((viewer, owner, color), pct) in &w.decryption {
             h.write_u8(*viewer);
             h.write_u8(*owner);
@@ -2674,6 +2709,7 @@ impl Sim {
         // dial and its kill counter.
         h.write_u8(w.escalation);
         h.write_u32(w.ferals_killed);
+        h.write_u32(w.nests.len() as u32);
         for (id, n) in &w.nests {
             h.write_u64(id.0);
             h.write_i32(n.pos.x);
@@ -2692,15 +2728,18 @@ impl Sim {
             h.write_u32(n.prints);
         }
         // Diplomacy & votes (M13): all lockstep state.
+        h.write_u32(w.alliances.len() as u32);
         for (a, b) in &w.alliances {
             h.write_u8(*a);
             h.write_u8(*b);
         }
+        h.write_u32(w.grants.len() as u32);
         for (f, t, what) in &w.grants {
             h.write_u8(*f);
             h.write_u8(*t);
             h.write_u8(matches!(what, crate::world::GrantKind::Channels) as u8);
         }
+        h.write_u32(w.requests.len() as u32);
         for (tick, faction, text) in &w.requests {
             h.write_u64(*tick);
             h.write_u8(*faction);
@@ -2717,10 +2756,12 @@ impl Sim {
             let crate::sim::Proposal::SetSpeed(permille) = vote.proposal;
             h.write_u32(permille);
             h.write_u64(vote.opened);
+            h.write_u32(vote.ayes.len() as u32);
             for f in &vote.ayes {
                 h.write_u8(*f);
             }
         }
+        h.write_u32(w.black_boxes.len() as u32);
         for bb in &w.black_boxes {
             h.write_u64(bb.entity.0);
             h.write_i32(bb.pos.x);
@@ -2728,10 +2769,12 @@ impl Sim {
             h.write_u64(bb.tick);
             h.write_u32(bb.bot.0);
             h.write_str(&bb.cause);
+            h.write_u32(bb.logs.len() as u32);
             for (level, log) in &bb.logs {
                 h.write_u8(*level);
                 h.write_str(log);
             }
+            h.write_u32(bb.env.len() as u32);
             for (key, value) in &bb.env {
                 h.write_str(key);
                 h.write_i64(*value);

@@ -122,3 +122,22 @@ fn comm_key_states_hash_distinctly() {
         "distinct comm-key distributions must not collide in the snapshot hash"
     );
 }
+
+#[test]
+fn faction_state_sets_hash_distinctly() {
+    // first_kill_done / brownout / rusting are three consecutive BTreeSet<u8>.
+    // Without a length prefix on each, "faction 1 is browning out" and
+    // "faction 1 is rusting" serialized to the identical single byte, so a real
+    // divergence (energy-starved fleet vs rust-scrapping fleet) slipped past
+    // the desync detector (whole-codebase review 2026-07-23).
+    let spec = MapSpec::empty(6, 4);
+    let mut a = Sim::new(&spec);
+    a.world.brownout.insert(1);
+    let mut b = Sim::new(&spec);
+    b.world.rusting.insert(1);
+    assert_ne!(
+        a.state_hash(),
+        b.state_hash(),
+        "a browning-out faction must not hash the same as a rusting one"
+    );
+}

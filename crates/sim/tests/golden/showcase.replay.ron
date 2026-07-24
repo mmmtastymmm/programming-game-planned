@@ -69,6 +69,7 @@
             (0, Stone, 50),
         ],
         nests: [],
+        caches: [],
         max_arcanum: 21,
         settings: (
             harm: Open,
