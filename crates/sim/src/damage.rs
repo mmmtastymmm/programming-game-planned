@@ -141,15 +141,21 @@ impl Sim {
             let faction = bot.data.faction;
             // Ties can only be duplicates (severity is injective per kind),
             // so max_by_key's last-wins tie-break picks an equal value.
-            let (winner, winner_source) =
+            let (winner, _) =
                 *signals.iter().max_by_key(|(s, _)| s.severity()).expect("group is non-empty");
             let outcome = self.raise_signal(id, winner);
             // Flinch income (docs/02): every flinch endured FROM A HOSTILE
             // SOURCE — entering the template is the flinch; self-inflicted
-            // signals (own driving, own faults) grant nothing.
-            if outcome == RaiseOutcome::Handled
-                && winner_source.is_some_and(|f| f != faction)
-            {
+            // signals (own driving, own faults) grant nothing. Co-arriving
+            // duplicates of the winning kind are ONE event (Q81), so ask
+            // whether ANY of them came from a hostile source, not just the
+            // last-pushed one — otherwise a friendly ram arriving after an
+            // enemy ram would rob (or, reversed, wrongly grant) the XP.
+            let hostile_source = signals
+                .iter()
+                .filter(|(s, _)| *s == winner)
+                .any(|(_, src)| src.is_some_and(|f| f != faction));
+            if outcome == RaiseOutcome::Handled && hostile_source {
                 self.world.pending_xp.push((
                     id,
                     crate::world::XpTrack::Flinch,

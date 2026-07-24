@@ -86,6 +86,35 @@ fn hauling_pays_cargo_distance_at_delivery_and_mileage_per_tile() {
 }
 
 #[test]
+fn co_arriving_bumps_grant_flinch_if_any_source_is_hostile() {
+    // A victim rammed by an enemy AND a friendly in the same tick earns the
+    // flinch: the hostile ram happened regardless of which duplicate was
+    // pushed last. Before the fix, eligibility read only the winning signal's
+    // single (last-pushed) source, so a friendly ram arriving after an enemy
+    // one robbed the XP (whole-codebase review 2026-07-23).
+    let mut spec = MapSpec::empty(8, 4);
+    spec.quirk_permille = 0;
+    let mut sim = Sim::new(&spec);
+    let victim = spawn(&mut sim, TilePos::new(2, 1), "on bumped:\n    wait(1)\n\nwait(600)\n");
+    // Let the bot finish booting and settle into its idle wait.
+    for _ in 0..20 {
+        sim.step();
+    }
+    // Enemy (faction 1) pushed FIRST, friendly (faction 0) LAST — the order
+    // whose last-wins source used to deny the flinch XP.
+    sim.world.pending_signals.push((victim, pyrite::Signal::Bumped, Some(1)));
+    sim.world.pending_signals.push((victim, pyrite::Signal::Bumped, Some(0)));
+    for _ in 0..5 {
+        sim.step();
+    }
+    assert_eq!(
+        sim.world.bots[&victim].data.xp(XpTrack::Flinch),
+        100,
+        "a co-arriving enemy ram grants the flinch even if a friendly ram was pushed last"
+    );
+}
+
+#[test]
 fn flinches_train_only_from_hostile_sources() {
     let mut spec = MapSpec::empty(8, 4);
     spec.quirk_permille = 0;

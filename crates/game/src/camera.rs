@@ -155,8 +155,12 @@ pub(crate) fn cursor_tile(
     // Only cast when the ray genuinely descends onto terrain from above the
     // ground — a below-ground eye would spuriously "hit" the first edge cell.
     if ray.direction.y < -1e-4 && ray.origin.y > 0.0 {
+        // Clamp to the ground plane: Water/Ford/Mud render *below* y=0, so an
+        // unclamped ray would sink past a depression tile and first cross y=0
+        // on a neighboring flat land tile, mis-picking it. Treating depressions
+        // as ground-level makes them pick like any flat tile under the cursor.
         if let Some(tile) = raycast_tile(grid_w, grid_h, ray.origin, *ray.direction, |i, j| {
-            crate::palette::terrain_top(world, TilePos::new(i, j))
+            crate::palette::terrain_top(world, TilePos::new(i, j)).max(0.0)
         }) {
             return Some(tile);
         }

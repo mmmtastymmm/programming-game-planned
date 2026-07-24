@@ -1045,7 +1045,16 @@ impl Sim {
         faction: u8,
         program: &pyrite::Program,
     ) -> Result<(), PyriteError> {
-        let called = pyrite::called_names(program);
+        let mut called = pyrite::called_names(program);
+        // A user `def` that shadows a builtin name resolves to the def (the
+        // parser runs user functions before builtins — every other resolution
+        // site checks program.functions first), so such a call never reaches
+        // the gated builtin. Drop the program's own function names before
+        // checking the lock; `called_names` deliberately returns all call names
+        // and leaves this filtering to the caller.
+        for name in program.functions.keys() {
+            called.remove(name);
+        }
         if let Some((func, block)) =
             crate::world::locked_builtins(&self.world, faction, &called).into_iter().next()
         {

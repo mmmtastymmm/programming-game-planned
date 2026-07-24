@@ -97,6 +97,48 @@ fn deploy_rejects_a_call_to_an_unstudied_function() {
 }
 
 #[test]
+fn a_user_def_may_shadow_a_gated_builtin() {
+    // A program that defines its OWN attack() (which the parser resolves before
+    // the builtin) never invokes the gated builtin, so the F_ATK gate must not
+    // reject it (whole-codebase review 2026-07-23: the gate matched call names
+    // without excluding user defs).
+    let mut spec = MapSpec::empty(6, 4);
+    spec.dev_all_unlocks = false;
+    let mut sim = Sim::new(&spec);
+    // Constructs (def/return) available, but no Cache studied — the competitive
+    // state where the shadowing bug bites.
+    sim.world.unlocks.insert(0, pyrite::UnlockSet::all());
+    let shadow = "\
+def attack(target):
+    move_to(target)
+attack(closest(ore).expect())
+";
+    assert!(
+        sim.apply(&Command::DeployProgram {
+            faction: 0,
+            color: Color::GREEN,
+            source: shadow.into(),
+        })
+        .is_ok(),
+        "a user def shadowing attack() must not trip the F_ATK gate"
+    );
+    // ...but the real gated builtin is still rejected until F_ATK is studied.
+    assert!(
+        matches!(
+            sim.apply(&Command::DeployProgram {
+                faction: 0,
+                color: Color::GREEN,
+                source: "attack(closest(enemy).expect())\n".into(),
+            })
+            .unwrap_err()
+            .kind,
+            pyrite::PyriteErrorKind::LockedFunction { ref func, .. } if func == "attack"
+        ),
+        "the builtin attack() must stay gated"
+    );
+}
+
+#[test]
 fn start_kit_deploys_without_any_study() {
     // A straight-line program using only start-kit verbs deploys on a real
     // (non-dev) map with nothing studied — the opening is never gated.
