@@ -1016,6 +1016,17 @@ impl Vm {
         }
     }
 
+    /// Consume a host-call result: push its value, block the VM, or fault.
+    /// Shared by the engine-forced-call path and the general passthrough
+    /// dispatch so the three cases can't drift apart.
+    fn consume_hostcall(&mut self, result: HostCall, host: &mut dyn Host, costs: &CostTable) {
+        match result {
+            HostCall::Ready(v) => self.values.push(v),
+            HostCall::Block => self.state = State::Blocked,
+            HostCall::Fault(f) => self.fault(f.id, f.msg, host, costs),
+        }
+    }
+
     fn execute(&mut self, work: Work, host: &mut dyn Host, costs: &CostTable) {
         let program = Rc::clone(&self.active);
         match work {
@@ -1395,11 +1406,8 @@ impl Vm {
                     // which carries line 0 — never a player line).
                     if name == "handler_init" && line == 0 {
                         // The template prologue's own injected call.
-                        match host.call(&name, &[], self.ctx()) {
-                            HostCall::Ready(v) => self.values.push(v),
-                            HostCall::Block => self.state = State::Blocked,
-                            HostCall::Fault(f) => self.fault(f.id, f.msg, host, costs),
-                        }
+                        let result = host.call(&name, &[], self.ctx());
+                        self.consume_hostcall(result, host, costs);
                     } else {
                         self.fault(
                             faults::UNKNOWN_FUNCTION,
@@ -1514,11 +1522,8 @@ impl Vm {
                         last_fault: self.last_fault.as_deref(),
                         last_fault_id: self.last_fault_id,
                     };
-                    match host.call(&name, &final_args, ctx) {
-                        HostCall::Ready(v) => self.values.push(v),
-                        HostCall::Block => self.state = State::Blocked,
-                        HostCall::Fault(f) => self.fault(f.id, f.msg, host, costs),
-                    }
+                    let result = host.call(&name, &final_args, ctx);
+                    self.consume_hostcall(result, host, costs);
                 }
             }
 
