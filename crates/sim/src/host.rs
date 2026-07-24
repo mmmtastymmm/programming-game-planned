@@ -548,12 +548,7 @@ impl pyrite::Host for BotHost<'_> {
                             // suppress genuinely earned milestones.
                             // (Refinery-output withdrawals above don't
                             // count — that produce was never delivered.)
-                            self.world
-                                .bots
-                                .get_mut(&bot_id)
-                                .expect("bot exists")
-                                .data
-                                .withdrawn_aboard += got;
+                            self.world.bot_mut(bot_id).data.withdrawn_aboard += got;
                         }
                     }
                 }

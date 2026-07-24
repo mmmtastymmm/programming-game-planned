@@ -53,318 +53,318 @@ impl Sim {
         let Some(bot) = self.world.bots.get_mut(&id) else { return };
         let Some(request) = bot.data.requested.take() else { return };
         let pos = bot.data.pos;
-            match request {
-                ActionRequest::MoveTo(target) => {
-                    let Some(target_pos) = self.world.entity_pos(target) else {
-                        self.finish_action(id, Err("move_to: no such entity".into()));
-                        return;
-                    };
-                    if pos.chebyshev(target_pos) <= 1 {
-                        self.finish_action(id, Ok(Value::Unit));
-                        return;
-                    }
-                    // Goal set: passable, non-structure tiles adjacent to
-                    // the target (structures are solid, so "at" a printer
-                    // or depot means standing beside it).
-                    let structures = self.world.structure_tiles();
-                    let mut goals = BTreeSet::new();
-                    for dy in -1..=1 {
-                        for dx in -1..=1 {
-                            let goal = TilePos::new(target_pos.x + dx, target_pos.y + dy);
-                            if self.world.grid.get(goal).is_some_and(|t| t.passable())
-                                && !structures.contains(&goal)
-                            {
-                                goals.insert(goal);
-                            }
-                        }
-                    }
-                    match astar_avoiding(
-                        &self.world.grid,
-                        &self.world.overlays,
-                        &self.tuning.tile_costs,
-                        pos,
-                        &goals,
-                        &structures,
-                    ) {
-                        Some(path) if path.is_empty() => {
-                            self.finish_action(id, Ok(Value::Unit));
-                        }
-                        Some(path) => {
-                            // Ticks per step come from the move-rate stat
-                            // through the pipeline; terrain multiplies (M5).
-                            let first_cost = crate::stats::step_ticks(
-                                self.ctx(),
-                                &self.world.grid,
-                                &self.world.bots[&id].data,
-                                path[0],
-                            )
-                            .expect("path tiles are passable");
-                            let bot = self.world.bot_mut(id);
-                            bot.data.action =
-                                Some(Action::Move { path, ticks_left: first_cost, goals });
-                        }
-                        None => {
-                            self.finish_action(id, Err("move_to: unreachable".into()));
+        match request {
+            ActionRequest::MoveTo(target) => {
+                let Some(target_pos) = self.world.entity_pos(target) else {
+                    self.finish_action(id, Err("move_to: no such entity".into()));
+                    return;
+                };
+                if pos.chebyshev(target_pos) <= 1 {
+                    self.finish_action(id, Ok(Value::Unit));
+                    return;
+                }
+                // Goal set: passable, non-structure tiles adjacent to
+                // the target (structures are solid, so "at" a printer
+                // or depot means standing beside it).
+                let structures = self.world.structure_tiles();
+                let mut goals = BTreeSet::new();
+                for dy in -1..=1 {
+                    for dx in -1..=1 {
+                        let goal = TilePos::new(target_pos.x + dx, target_pos.y + dy);
+                        if self.world.grid.get(goal).is_some_and(|t| t.passable())
+                            && !structures.contains(&goal)
+                        {
+                            goals.insert(goal);
                         }
                     }
                 }
-                ActionRequest::Mine => {
-                    let node = self
-                        .world
-                        .nodes
-                        .iter()
-                        .filter(|(_, n)| n.amount > 0 && pos.chebyshev(n.pos) <= 1)
-                        .map(|(nid, _)| *nid)
-                        .next();
-                    match node {
-                        Some(node) => {
-                            // Mining L3 swings −25% (the pipeline).
-                            let ticks_left = self.ctx().mine_swing_for(
-                                &self.world.bots[&id].data,
-                                self.tuning.mine_swing_ticks,
+                match astar_avoiding(
+                    &self.world.grid,
+                    &self.world.overlays,
+                    &self.tuning.tile_costs,
+                    pos,
+                    &goals,
+                    &structures,
+                ) {
+                    Some(path) if path.is_empty() => {
+                        self.finish_action(id, Ok(Value::Unit));
+                    }
+                    Some(path) => {
+                        // Ticks per step come from the move-rate stat
+                        // through the pipeline; terrain multiplies (M5).
+                        let first_cost = crate::stats::step_ticks(
+                            self.ctx(),
+                            &self.world.grid,
+                            &self.world.bots[&id].data,
+                            path[0],
+                        )
+                        .expect("path tiles are passable");
+                        let bot = self.world.bot_mut(id);
+                        bot.data.action =
+                            Some(Action::Move { path, ticks_left: first_cost, goals });
+                    }
+                    None => {
+                        self.finish_action(id, Err("move_to: unreachable".into()));
+                    }
+                }
+            }
+            ActionRequest::Mine => {
+                let node = self
+                    .world
+                    .nodes
+                    .iter()
+                    .filter(|(_, n)| n.amount > 0 && pos.chebyshev(n.pos) <= 1)
+                    .map(|(nid, _)| *nid)
+                    .next();
+                match node {
+                    Some(node) => {
+                        // Mining L3 swings −25% (the pipeline).
+                        let ticks_left = self.ctx().mine_swing_for(
+                            &self.world.bots[&id].data,
+                            self.tuning.mine_swing_ticks,
+                        );
+                        let bot = self.world.bot_mut(id);
+                        bot.data.action = Some(Action::Mine { node, ticks_left });
+                    }
+                    None => self.finish_action(id, Err("mine: no ore in range".into())),
+                }
+            }
+            ActionRequest::Attack(target) => {
+                if self.world.entity_pos(target).is_none() {
+                    self.finish_action(id, Err("attack: no such target".into()));
+                    return;
+                }
+                let bot = self.world.bot_mut(id);
+                bot.data.action = Some(Action::Attack { target, ticks_left: 1 });
+            }
+            ActionRequest::Wait(ticks) => {
+                bot.data.action = Some(Action::Wait { ticks_left: ticks });
+            }
+            ActionRequest::Build(blueprint) => {
+                bot.data.action = Some(Action::Build { blueprint });
+            }
+            // --- the wreck race + guard duty (M10) ---
+            ActionRequest::Repair(target) => {
+                let Some(tpos) = self.world.entity_pos(target) else {
+                    self.finish_action(id, Err("repair: no such target".into()));
+                    return;
+                };
+                if pos.chebyshev(tpos) > 1 {
+                    self.finish_action(id, Err("repair: target out of range".into()));
+                    return;
+                }
+                let bot = self.world.bot_mut(id);
+                bot.data.action = Some(Action::Repair { target, done_deci: 0 });
+            }
+            ActionRequest::Salvage(target)
+            | ActionRequest::Analyze(target)
+            | ActionRequest::Hijack(target) => {
+                let Some(wreck) = self.world.wreck_of(target) else {
+                    self.finish_action(id, Err("wreck race: target is not a wreck".into()));
+                    return;
+                };
+                let wpos = self.world.wrecks[&wreck].data.pos;
+                if pos.chebyshev(wpos) > 1 {
+                    self.finish_action(id, Err("wreck race: out of range".into()));
+                    return;
+                }
+                let (kind, ticks) = match request {
+                    ActionRequest::Salvage(_) => {
+                        (crate::world::RaceKind::Salvage, self.tuning.salvage_ticks)
+                    }
+                    ActionRequest::Analyze(_) => {
+                        // Your own wrecks yield you nothing (Q76).
+                        if self.world.wrecks[&wreck].data.faction
+                            == self.world.bots[&id].data.faction
+                        {
+                            self.finish_action(
+                                id,
+                                Err("analyze: your own wrecks yield nothing".into()),
                             );
-                            let bot = self.world.bot_mut(id);
-                            bot.data.action = Some(Action::Mine { node, ticks_left });
+                            return;
                         }
-                        None => self.finish_action(id, Err("mine: no ore in range".into())),
+                        (crate::world::RaceKind::Analyze, self.tuning.analyze_ticks)
                     }
+                    _ => (crate::world::RaceKind::Hijack, self.tuning.hijack_ticks),
+                };
+                let bot = self.world.bot_mut(id);
+                bot.data.action =
+                    Some(Action::Race { wreck, kind, ticks_left: ticks.max(1) });
+            }
+            ActionRequest::Recover(target) => {
+                let is_box = self.world.black_boxes.iter().any(|bb| bb.entity == target);
+                let Some(tpos) = self.world.entity_pos(target).filter(|_| is_box) else {
+                    self.finish_action(id, Err("recover: no black box there".into()));
+                    return;
+                };
+                if pos.chebyshev(tpos) > 1 {
+                    self.finish_action(id, Err("recover: out of range".into()));
+                    return;
                 }
-                ActionRequest::Attack(target) => {
-                    if self.world.entity_pos(target).is_none() {
-                        self.finish_action(id, Err("attack: no such target".into()));
-                        return;
-                    }
-                    let bot = self.world.bot_mut(id);
-                    bot.data.action = Some(Action::Attack { target, ticks_left: 1 });
+                let bot = self.world.bot_mut(id);
+                bot.data.action = Some(Action::Recover { target, ticks_left: 1 });
+            }
+            ActionRequest::Guard { target, escort } => {
+                if self.world.entity_pos(target).is_none() {
+                    self.finish_action(id, Err("guard: no such target".into()));
+                    return;
                 }
-                ActionRequest::Wait(ticks) => {
-                    bot.data.action = Some(Action::Wait { ticks_left: ticks });
-                }
-                ActionRequest::Build(blueprint) => {
-                    bot.data.action = Some(Action::Build { blueprint });
-                }
-                // --- the wreck race + guard duty (M10) ---
-                ActionRequest::Repair(target) => {
-                    let Some(tpos) = self.world.entity_pos(target) else {
-                        self.finish_action(id, Err("repair: no such target".into()));
-                        return;
-                    };
-                    if pos.chebyshev(tpos) > 1 {
-                        self.finish_action(id, Err("repair: target out of range".into()));
-                        return;
-                    }
-                    let bot = self.world.bot_mut(id);
-                    bot.data.action = Some(Action::Repair { target, done_deci: 0 });
-                }
-                ActionRequest::Salvage(target)
-                | ActionRequest::Analyze(target)
-                | ActionRequest::Hijack(target) => {
-                    let Some(wreck) = self.world.wreck_of(target) else {
-                        self.finish_action(id, Err("wreck race: target is not a wreck".into()));
-                        return;
-                    };
-                    let wpos = self.world.wrecks[&wreck].data.pos;
-                    if pos.chebyshev(wpos) > 1 {
-                        self.finish_action(id, Err("wreck race: out of range".into()));
-                        return;
-                    }
-                    let (kind, ticks) = match request {
-                        ActionRequest::Salvage(_) => {
-                            (crate::world::RaceKind::Salvage, self.tuning.salvage_ticks)
-                        }
-                        ActionRequest::Analyze(_) => {
-                            // Your own wrecks yield you nothing (Q76).
-                            if self.world.wrecks[&wreck].data.faction
-                                == self.world.bots[&id].data.faction
-                            {
-                                self.finish_action(
-                                    id,
-                                    Err("analyze: your own wrecks yield nothing".into()),
-                                );
-                                return;
-                            }
-                            (crate::world::RaceKind::Analyze, self.tuning.analyze_ticks)
-                        }
-                        _ => (crate::world::RaceKind::Hijack, self.tuning.hijack_ticks),
-                    };
-                    let bot = self.world.bot_mut(id);
-                    bot.data.action =
-                        Some(Action::Race { wreck, kind, ticks_left: ticks.max(1) });
-                }
-                ActionRequest::Recover(target) => {
-                    let is_box = self.world.black_boxes.iter().any(|bb| bb.entity == target);
-                    let Some(tpos) = self.world.entity_pos(target).filter(|_| is_box) else {
-                        self.finish_action(id, Err("recover: no black box there".into()));
-                        return;
-                    };
-                    if pos.chebyshev(tpos) > 1 {
-                        self.finish_action(id, Err("recover: out of range".into()));
-                        return;
-                    }
-                    let bot = self.world.bot_mut(id);
-                    bot.data.action = Some(Action::Recover { target, ticks_left: 1 });
-                }
-                ActionRequest::Guard { target, escort } => {
-                    if self.world.entity_pos(target).is_none() {
-                        self.finish_action(id, Err("guard: no such target".into()));
-                        return;
-                    }
-                    let bot = self.world.bot_mut(id);
-                    bot.data.action =
-                        Some(Action::Guard { target, escort, step_wait: 0, cooldown: 0 });
-                }
-                ActionRequest::Channel { op, ch, namespace, timeout } => {
-                    // The rendezvous block (M11): parked here; the settle
-                    // pairs participants. Standing IN Corruption still
-                    // blocks — the jam means nobody can reach you, and
-                    // your timeout is your way out.
-                    bot.data.action = Some(Action::Channel {
-                        op,
-                        ch,
-                        namespace,
-                        waited: 0,
-                        timeout,
-                        delivered: None,
-                    });
-                }
-                ActionRequest::Search => self.start_search(id),
-                ActionRequest::Study => self.start_study(id),
-                ActionRequest::Wander => {
-                    // A seeded random walk leg: a random passable free
-                    // tile within the leg length; unreachable picks are a
-                    // completed (empty) leg, not a fault.
-                    let leg = self.tuning.wander_leg as i32;
-                    let mut candidates: Vec<TilePos> = Vec::new();
-                    for dy in -leg..=leg {
-                        for dx in -leg..=leg {
-                            let t = TilePos::new(pos.x + dx, pos.y + dy);
-                            if t != pos
-                                && self
-                                    .world
-                                    .grid
-                                    .get(t)
-                                    .is_some_and(|k| k.passable())
-                                && !self.world.structure_at(t)
-                                && !self.world.tile_occupied(t, id)
-                            {
-                                candidates.push(t);
-                            }
+                let bot = self.world.bot_mut(id);
+                bot.data.action =
+                    Some(Action::Guard { target, escort, step_wait: 0, cooldown: 0 });
+            }
+            ActionRequest::Channel { op, ch, namespace, timeout } => {
+                // The rendezvous block (M11): parked here; the settle
+                // pairs participants. Standing IN Corruption still
+                // blocks — the jam means nobody can reach you, and
+                // your timeout is your way out.
+                bot.data.action = Some(Action::Channel {
+                    op,
+                    ch,
+                    namespace,
+                    waited: 0,
+                    timeout,
+                    delivered: None,
+                });
+            }
+            ActionRequest::Search => self.start_search(id),
+            ActionRequest::Study => self.start_study(id),
+            ActionRequest::Wander => {
+                // A seeded random walk leg: a random passable free
+                // tile within the leg length; unreachable picks are a
+                // completed (empty) leg, not a fault.
+                let leg = self.tuning.wander_leg as i32;
+                let mut candidates: Vec<TilePos> = Vec::new();
+                for dy in -leg..=leg {
+                    for dx in -leg..=leg {
+                        let t = TilePos::new(pos.x + dx, pos.y + dy);
+                        if t != pos
+                            && self
+                                .world
+                                .grid
+                                .get(t)
+                                .is_some_and(|k| k.passable())
+                            && !self.world.structure_at(t)
+                            && !self.world.tile_occupied(t, id)
+                        {
+                            candidates.push(t);
                         }
                     }
-                    if candidates.is_empty() {
-                        self.finish_action(id, Ok(Value::Unit));
-                        return;
-                    }
-                    let pick = (crate::world::next_rand(&mut self.world.rng.wander)
-                        % candidates.len() as u64) as usize;
-                    self.walk_to_tile(id, candidates[pick], false);
                 }
-                ActionRequest::Explore => {
-                    // The smart explorer (Q79): a random CURRENTLY-FOGGED
-                    // passable tile within the radius; walk there, then
-                    // drop into the scouting stance (survey_after_move).
-                    let radius = self.tuning.explore_radius as i32;
-                    let faction = self.world.bots[&id].data.faction;
-                    let mut candidates: Vec<TilePos> = Vec::new();
-                    for dy in -radius..=radius {
-                        for dx in -radius..=radius {
-                            let t = TilePos::new(pos.x + dx, pos.y + dy);
-                            if t != pos
-                                && self
-                                    .world
-                                    .grid
-                                    .get(t)
-                                    .is_some_and(|k| k.passable())
-                                && !self.world.structure_at(t)
-                                && !self.world.tile_occupied(t, id)
-                                && !self.tile_visible(faction, t)
-                            {
-                                candidates.push(t);
-                            }
-                        }
-                    }
-                    if candidates.is_empty() {
-                        // Nothing fogged in reach: explore degrades to a
-                        // completed no-op (the map is known here).
-                        self.finish_action(id, Ok(Value::Unit));
-                        return;
-                    }
-                    let pick = (crate::world::next_rand(&mut self.world.rng.explore)
-                        % candidates.len() as u64) as usize;
-                    self.walk_to_tile(id, candidates[pick], true);
+                if candidates.is_empty() {
+                    self.finish_action(id, Ok(Value::Unit));
+                    return;
                 }
-                ActionRequest::Deposit { fault_on_fail } => {
-                    // Generalized acceptor (docs/03): an adjacent depot
-                    // takes everything into colony stock; an adjacent
-                    // structure takes only what it FEEDS on — recipe
-                    // inputs, Generator fuel, Station coolant. Depots
-                    // first, then the lowest-id accepting structure.
-                    let faction = bot.data.faction;
-                    let carrying = bot.data.cargo.clone();
-                    let empty = bot.data.cargo_total() == 0;
-                    let depot = self
-                        .world
-                        .depots
-                        .iter()
-                        .filter(|(_, d)| pos.chebyshev(d.pos) <= 1)
-                        .map(|(did, _)| *did)
-                        .next();
-                    let refinery = self
-                        .world
-                        .structures
-                        .iter()
-                        .filter(|(_, st)| {
-                            st.faction == faction
-                                && pos.chebyshev(st.pos) <= 1
-                                && st.accepted_feed().iter().any(|k| carrying.contains_key(k))
-                        })
-                        .map(|(sid, _)| *sid)
-                        .next();
-                    // Feral logistics (M12, docs/04): a Harvester's nest
-                    // IS its depot — the whole manifest feeds the nest's
-                    // print stock.
-                    let nest = (faction == crate::world::FERAL_FACTION)
-                        .then(|| {
-                            self.world
-                                .nests
-                                .iter()
-                                .filter(|(_, n)| {
-                                    n.state == crate::world::NestState::Active
-                                        && pos.chebyshev(n.pos) <= 1
-                                })
-                                .map(|(nid, _)| *nid)
-                                .next()
-                        })
-                        .flatten();
-                    let target = nest.or(depot).or(refinery);
-                    match target {
-                        _ if empty => {
-                            let outcome = if fault_on_fail {
-                                Err("deposit: no cargo".into())
-                            } else {
-                                Ok(Value::Bool(false))
-                            };
-                            self.finish_action(id, outcome);
+                let pick = (crate::world::next_rand(&mut self.world.rng.wander)
+                    % candidates.len() as u64) as usize;
+                self.walk_to_tile(id, candidates[pick], false);
+            }
+            ActionRequest::Explore => {
+                // The smart explorer (Q79): a random CURRENTLY-FOGGED
+                // passable tile within the radius; walk there, then
+                // drop into the scouting stance (survey_after_move).
+                let radius = self.tuning.explore_radius as i32;
+                let faction = self.world.bots[&id].data.faction;
+                let mut candidates: Vec<TilePos> = Vec::new();
+                for dy in -radius..=radius {
+                    for dx in -radius..=radius {
+                        let t = TilePos::new(pos.x + dx, pos.y + dy);
+                        if t != pos
+                            && self
+                                .world
+                                .grid
+                                .get(t)
+                                .is_some_and(|k| k.passable())
+                            && !self.world.structure_at(t)
+                            && !self.world.tile_occupied(t, id)
+                            && !self.tile_visible(faction, t)
+                        {
+                            candidates.push(t);
                         }
-                        Some(target) => {
-                            bot.data.action = Some(Action::Deposit {
-                                depot: target,
-                                ticks_left: 1,
-                                fault_on_fail,
-                            });
-                        }
-                        None => {
-                            let outcome = if fault_on_fail {
-                                Err("deposit: no acceptor in range".into())
-                            } else {
-                                Ok(Value::Bool(false))
-                            };
-                            self.finish_action(id, outcome);
-                        }
+                    }
+                }
+                if candidates.is_empty() {
+                    // Nothing fogged in reach: explore degrades to a
+                    // completed no-op (the map is known here).
+                    self.finish_action(id, Ok(Value::Unit));
+                    return;
+                }
+                let pick = (crate::world::next_rand(&mut self.world.rng.explore)
+                    % candidates.len() as u64) as usize;
+                self.walk_to_tile(id, candidates[pick], true);
+            }
+            ActionRequest::Deposit { fault_on_fail } => {
+                // Generalized acceptor (docs/03): an adjacent depot
+                // takes everything into colony stock; an adjacent
+                // structure takes only what it FEEDS on — recipe
+                // inputs, Generator fuel, Station coolant. Depots
+                // first, then the lowest-id accepting structure.
+                let faction = bot.data.faction;
+                let carrying = bot.data.cargo.clone();
+                let empty = bot.data.cargo_total() == 0;
+                let depot = self
+                    .world
+                    .depots
+                    .iter()
+                    .filter(|(_, d)| pos.chebyshev(d.pos) <= 1)
+                    .map(|(did, _)| *did)
+                    .next();
+                let refinery = self
+                    .world
+                    .structures
+                    .iter()
+                    .filter(|(_, st)| {
+                        st.faction == faction
+                            && pos.chebyshev(st.pos) <= 1
+                            && st.accepted_feed().iter().any(|k| carrying.contains_key(k))
+                    })
+                    .map(|(sid, _)| *sid)
+                    .next();
+                // Feral logistics (M12, docs/04): a Harvester's nest
+                // IS its depot — the whole manifest feeds the nest's
+                // print stock.
+                let nest = (faction == crate::world::FERAL_FACTION)
+                    .then(|| {
+                        self.world
+                            .nests
+                            .iter()
+                            .filter(|(_, n)| {
+                                n.state == crate::world::NestState::Active
+                                    && pos.chebyshev(n.pos) <= 1
+                            })
+                            .map(|(nid, _)| *nid)
+                            .next()
+                    })
+                    .flatten();
+                let target = nest.or(depot).or(refinery);
+                match target {
+                    _ if empty => {
+                        let outcome = if fault_on_fail {
+                            Err("deposit: no cargo".into())
+                        } else {
+                            Ok(Value::Bool(false))
+                        };
+                        self.finish_action(id, outcome);
+                    }
+                    Some(target) => {
+                        bot.data.action = Some(Action::Deposit {
+                            depot: target,
+                            ticks_left: 1,
+                            fault_on_fail,
+                        });
+                    }
+                    None => {
+                        let outcome = if fault_on_fail {
+                            Err("deposit: no acceptor in range".into())
+                        } else {
+                            Ok(Value::Bool(false))
+                        };
+                        self.finish_action(id, outcome);
                     }
                 }
             }
         }
+    }
 
     /// Advance this bot's in-flight `Action` by one tick. Entered when there is
     /// no fresh request (a freshly-started action first advances next tick).

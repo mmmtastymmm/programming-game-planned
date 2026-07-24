@@ -363,8 +363,6 @@ pub(crate) fn animate_terrain(
     }
 }
 
-/// Diff sim state into persistent view entities.
-#[allow(clippy::too_many_arguments)]
 /// Drop index entries whose sim entity is gone, despawning the render entity.
 /// Pairs the presence test with the despawn in one place so a spawn loop and
 /// its cleanup can't drift into a leaked or ghost mesh.
@@ -383,6 +381,8 @@ fn retain_despawn<K>(
     });
 }
 
+/// Diff sim state into persistent view entities.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn sync_view(
     mut commands: Commands,
     game: NonSend<GameSim>,

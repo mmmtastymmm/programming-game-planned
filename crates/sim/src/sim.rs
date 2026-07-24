@@ -2432,6 +2432,12 @@ impl Sim {
         // Cached: re-walking the map every tick made phase 9 O(map). Kept
         // fresh by World::set_tile on the rare terrain mutation.
         h.write_u64(w.terrain_hash);
+        // Allocation counters: real lockstep state (see alloc_counters) — a
+        // diverged counter must trip the alarm now, not when the next
+        // allocation mints different ids hundreds of ticks later.
+        let (next_entity, next_bot) = w.alloc_counters();
+        h.write_u64(next_entity);
+        h.write_u32(next_bot);
         // Scree wear is real divergent state (M8, Q40): two peers with a
         // half-worn tile must agree before the collapse, not just after.
         h.write_u32(w.pending_recalls.len() as u32);
@@ -2508,6 +2514,9 @@ impl Sim {
                 h.write_u32(*deci);
             }
             h.write_u8(st.recipe.map(|r| r + 1).unwrap_or(0));
+            // Flag + value, not unwrap_or(0): a 0-tick batch is reachable
+            // (tuning) and must not alias the idle (None) state.
+            h.write_u8(st.batch.is_some() as u8);
             h.write_u32(st.batch.unwrap_or(0));
             match &st.pad {
                 Some(job) => {
@@ -2630,6 +2639,7 @@ impl Sim {
                     h.write_u32(r.priority);
                 }
             }
+            h.write_u8(printer.job.is_some() as u8);
             h.write_u32(printer.job.unwrap_or(0));
         }
         // overlays and paint share an (i32, i32, u8) element layout, so an
@@ -2761,6 +2771,13 @@ impl Sim {
         h.write_u8(w.harm_enabled as u8);
         h.write_u64(w.vote_cooldown_ticks);
         h.write_u64(w.vote_window_ticks);
+        h.write_u8(w.dev_all_unlocks as u8);
+        h.write_u8(w.dev_free_power as u8);
+        h.write_u32(w.quirk_permille);
+        // Presence flag first (injectivity): without it a None-vote peer's
+        // stream continues straight into the black-box bytes and can alias a
+        // Some-vote peer's.
+        h.write_u8(w.pending_vote.is_some() as u8);
         if let Some(vote) = &w.pending_vote {
             let crate::sim::Proposal::SetSpeed(permille) = vote.proposal;
             h.write_u32(permille);

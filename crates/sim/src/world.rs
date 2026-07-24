@@ -1542,6 +1542,14 @@ impl World {
         id
     }
 
+    /// The allocation counters, for the lockstep state hash. They are genuine
+    /// divergent state: once the highest-id entity/bot dies they're no longer
+    /// derivable from any live collection, and a diverged counter would
+    /// otherwise stay invisible until the next allocation mints different ids.
+    pub(crate) fn alloc_counters(&self) -> (u64, u32) {
+        (self.next_entity, self.next_bot)
+    }
+
     pub fn alloc_bot_id(&mut self) -> BotId {
         let id = BotId(self.next_bot);
         self.next_bot += 1;

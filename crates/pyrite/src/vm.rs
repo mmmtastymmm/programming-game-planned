@@ -1468,9 +1468,14 @@ impl Vm {
                     // range(i64::MIN, i64::MAX)) is treated as over-cap rather
                     // than wrapping negative and slipping past the guard into a
                     // ~1e19-element allocation that would OOM every peer.
+                    // Reversed bounds (hi <= lo) are an EMPTY range — never
+                    // over-cap, even when the span overflows negatively — and
+                    // positive spans compare in u64 so an "effectively
+                    // uncapped" range_cap above i64::MAX can't wrap negative
+                    // and fault every call.
                     let over_cap = match hi.checked_sub(lo) {
-                        Some(span) => span > costs.range_cap as i64,
-                        None => true,
+                        Some(span) => span > 0 && span as u64 > costs.range_cap,
+                        None => hi > lo,
                     };
                     if over_cap {
                         self.fault(

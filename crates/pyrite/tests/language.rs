@@ -1416,6 +1416,19 @@ halt()
     vm.run(&mut host, &costs);
     let dump = host.calls.iter().find(|(n, _)| n == "upload_crash_dump").expect("must fault");
     assert!(matches!(&dump.1[0], Value::Str(s) if s.contains("range too large")));
+
+    // Reversed bounds are an EMPTY range even at overflow extremes — never a
+    // fault (matching plain reversed ranges like range(5, 0)).
+    let (mut vm, mut host, costs) =
+        vm_for("log(len(range(9223372036854775806, -9223372036854775807)))\nhalt()\n");
+    vm.grant(1000, &costs);
+    vm.run(&mut host, &costs);
+    assert!(
+        !host.calls.iter().any(|(n, _)| n == "upload_crash_dump"),
+        "reversed extreme bounds must not fault"
+    );
+    let logged = host.calls.iter().find(|(n, _)| n == "log").expect("log ran");
+    assert_eq!(logged.1[0], Value::Int(0), "reversed range is empty");
 }
 
 /// Mutating a temporary is a fault, not a silent no-op — containers are

@@ -1,6 +1,6 @@
 /target
 
-# Crash core dumps (a debugger/OS may drop these next to the crate on a crash).
-core
-core.*
-*.core
+# Linux crash core dumps (kernel core_pattern core.%e.%p.%h.%t). Deliberately
+# narrower than a bare `core`/`core.*`, which would silently swallow a future
+# core.rs module or core/ directory.
+core.*.[0-9]*
