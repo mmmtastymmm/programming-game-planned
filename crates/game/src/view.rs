@@ -365,6 +365,24 @@ pub(crate) fn animate_terrain(
 
 /// Diff sim state into persistent view entities.
 #[allow(clippy::too_many_arguments)]
+/// Drop index entries whose sim entity is gone, despawning the render entity.
+/// Pairs the presence test with the despawn in one place so a spawn loop and
+/// its cleanup can't drift into a leaked or ghost mesh.
+fn retain_despawn<K>(
+    commands: &mut Commands,
+    index: &mut HashMap<K, Entity>,
+    present: impl Fn(&K) -> bool,
+) {
+    index.retain(|k, e| {
+        if present(k) {
+            true
+        } else {
+            commands.entity(*e).despawn();
+            false
+        }
+    });
+}
+
 pub(crate) fn sync_view(
     mut commands: Commands,
     game: NonSend<GameSim>,
@@ -738,13 +756,8 @@ pub(crate) fn sync_view(
         index.blueprints.insert(id.0, entity);
         index.blueprint_fills.insert(id.0, fill_entity);
     }
-    index.blueprints.retain(|id, entity| {
-        if world.blueprints.contains_key(&sim::EntityId(*id)) {
-            true
-        } else {
-            commands.entity(*entity).despawn();
-            false
-        }
+    retain_despawn(&mut commands, &mut index.blueprints, |id| {
+        world.blueprints.contains_key(&sim::EntityId(*id))
     });
     index
         .blueprint_fills
@@ -753,13 +766,8 @@ pub(crate) fn sync_view(
     // Finished bridges: baked plank tiles over the water. (Direction
     // arrows are an overlay layer now — see below.) Demolish (M8) can
     // return a bridge to water, so planks are tracked and despawned.
-    index.bridges.retain(|&(x, y), entity| {
-        if world.grid.get(TilePos::new(x, y)) == Some(sim::TileKind::Bridge) {
-            true
-        } else {
-            commands.entity(*entity).despawn();
-            false
-        }
+    retain_despawn(&mut commands, &mut index.bridges, |&(x, y)| {
+        world.grid.get(TilePos::new(x, y)) == Some(sim::TileKind::Bridge)
     });
     for y in 0..world.grid.height {
         for x in 0..world.grid.width {
@@ -858,13 +866,8 @@ pub(crate) fn sync_view(
             e.insert(entity);
         }
     }
-    index.wrecks.retain(|id, entity| {
-        if world.wrecks.contains_key(&sim::BotId(*id)) {
-            true
-        } else {
-            commands.entity(*entity).despawn();
-            false
-        }
+    retain_despawn(&mut commands, &mut index.wrecks, |id| {
+        world.wrecks.contains_key(&sim::BotId(*id))
     });
 
     // Black boxes: an explosion flash on first sight, then the small dark
@@ -889,13 +892,8 @@ pub(crate) fn sync_view(
             e.insert(cube);
         }
     }
-    index.black_boxes.retain(|id, entity| {
-        if world.black_boxes.iter().any(|bb| bb.entity.0 == *id) {
-            true
-        } else {
-            commands.entity(*entity).despawn();
-            false
-        }
+    retain_despawn(&mut commands, &mut index.black_boxes, |id| {
+        world.black_boxes.iter().any(|bb| bb.entity.0 == *id)
     });
 }
 
