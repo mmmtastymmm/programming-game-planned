@@ -23,7 +23,6 @@ impl Sim {
     /// Phase 4 for one bot: start its requested action or advance the
     /// in-flight one; on completion, resume the VM with the result.
     pub(crate) fn resolve_bot(&mut self, id: BotId) {
-        let tick = self.world.tick;
         let Some(bot) = self.world.bots.get_mut(&id) else { return };
         if bot.data.dying {
             return;
@@ -35,10 +34,25 @@ impl Sim {
             }
             return;
         }
+        // A freshly requested action starts this tick (and first advances on
+        // the next); otherwise advance the in-flight one. The two phases are
+        // disjoint, so dispatch to exactly one.
+        let requested = bot.data.requested.is_some();
+        if requested {
+            self.start_requested_action(id);
+        } else {
+            self.advance_action(id);
+        }
+    }
 
-        // Start a freshly requested action.
-        if let Some(request) = bot.data.requested.take() {
-            let pos = bot.data.pos;
+    /// Turn this bot's pending `ActionRequest` into an in-flight `Action` (or
+    /// finish/fault it immediately). Entered only when `requested.is_some()`;
+    /// the started action first advances on the NEXT tick, so this never falls
+    /// through to [`Self::advance_action`].
+    fn start_requested_action(&mut self, id: BotId) {
+        let Some(bot) = self.world.bots.get_mut(&id) else { return };
+        let Some(request) = bot.data.requested.take() else { return };
+        let pos = bot.data.pos;
             match request {
                 ActionRequest::MoveTo(target) => {
                     let Some(target_pos) = self.world.entity_pos(target) else {
@@ -350,9 +364,13 @@ impl Sim {
                     }
                 }
             }
-            return;
         }
 
+    /// Advance this bot's in-flight `Action` by one tick. Entered when there is
+    /// no fresh request (a freshly-started action first advances next tick).
+    fn advance_action(&mut self, id: BotId) {
+        let tick = self.world.tick;
+        let Some(bot) = self.world.bots.get_mut(&id) else { return };
         // Advance an in-flight action.
         let Some(action) = bot.data.action.take() else { return };
         match action {
