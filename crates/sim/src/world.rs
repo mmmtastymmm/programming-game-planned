@@ -1346,6 +1346,19 @@ pub fn next_rand(state: &mut u64) -> u64 {
 }
 
 impl World {
+    /// The bot with `id`. Panics if absent — every caller holds an id it just
+    /// obtained from the world (a live key, `alloc_bot_id`, a scan result), so
+    /// a miss is a sim bug, not player input. Centralizes the lookup that was
+    /// hand-spelled `bots.get(&id).expect("bot exists")` at ~50 sites.
+    pub fn bot(&self, id: BotId) -> &Bot {
+        self.bots.get(&id).expect("bot exists")
+    }
+
+    /// Mutable [`World::bot`].
+    pub fn bot_mut(&mut self, id: BotId) -> &mut Bot {
+        self.bots.get_mut(&id).expect("bot exists")
+    }
+
     pub fn from_spec(spec: &MapSpec) -> Self {
         // Terrain painting is shared with MapSpec::validate (map.rs) — the
         // painting order lives in one place. Blight-Core Corruption is

@@ -1456,7 +1456,15 @@ impl Vm {
                         self.fault(faults::ARITY, "range() takes one or two int arguments".into(), host, costs);
                         return;
                     };
-                    if hi - lo > costs.range_cap as i64 {
+                    // `checked_sub` so a span that overflows i64 (e.g.
+                    // range(i64::MIN, i64::MAX)) is treated as over-cap rather
+                    // than wrapping negative and slipping past the guard into a
+                    // ~1e19-element allocation that would OOM every peer.
+                    let over_cap = match hi.checked_sub(lo) {
+                        Some(span) => span > costs.range_cap as i64,
+                        None => true,
+                    };
+                    if over_cap {
                         self.fault(
                             faults::RANGE,
                             format!("range too large (cap {})", costs.range_cap),

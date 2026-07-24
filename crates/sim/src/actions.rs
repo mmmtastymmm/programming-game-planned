@@ -85,7 +85,7 @@ impl Sim {
                                 path[0],
                             )
                             .expect("path tiles are passable");
-                            let bot = self.world.bots.get_mut(&id).expect("bot exists");
+                            let bot = self.world.bot_mut(id);
                             bot.data.action =
                                 Some(Action::Move { path, ticks_left: first_cost, goals });
                         }
@@ -109,7 +109,7 @@ impl Sim {
                                 &self.world.bots[&id].data,
                                 self.tuning.mine_swing_ticks,
                             );
-                            let bot = self.world.bots.get_mut(&id).expect("bot exists");
+                            let bot = self.world.bot_mut(id);
                             bot.data.action = Some(Action::Mine { node, ticks_left });
                         }
                         None => self.finish_action(id, Err("mine: no ore in range".into())),
@@ -120,7 +120,7 @@ impl Sim {
                         self.finish_action(id, Err("attack: no such target".into()));
                         return;
                     }
-                    let bot = self.world.bots.get_mut(&id).expect("bot exists");
+                    let bot = self.world.bot_mut(id);
                     bot.data.action = Some(Action::Attack { target, ticks_left: 1 });
                 }
                 ActionRequest::Wait(ticks) => {
@@ -139,7 +139,7 @@ impl Sim {
                         self.finish_action(id, Err("repair: target out of range".into()));
                         return;
                     }
-                    let bot = self.world.bots.get_mut(&id).expect("bot exists");
+                    let bot = self.world.bot_mut(id);
                     bot.data.action = Some(Action::Repair { target, done_deci: 0 });
                 }
                 ActionRequest::Salvage(target)
@@ -173,7 +173,7 @@ impl Sim {
                         }
                         _ => (crate::world::RaceKind::Hijack, self.tuning.hijack_ticks),
                     };
-                    let bot = self.world.bots.get_mut(&id).expect("bot exists");
+                    let bot = self.world.bot_mut(id);
                     bot.data.action =
                         Some(Action::Race { wreck, kind, ticks_left: ticks.max(1) });
                 }
@@ -187,7 +187,7 @@ impl Sim {
                         self.finish_action(id, Err("recover: out of range".into()));
                         return;
                     }
-                    let bot = self.world.bots.get_mut(&id).expect("bot exists");
+                    let bot = self.world.bot_mut(id);
                     bot.data.action = Some(Action::Recover { target, ticks_left: 1 });
                 }
                 ActionRequest::Guard { target, escort } => {
@@ -195,7 +195,7 @@ impl Sim {
                         self.finish_action(id, Err("guard: no such target".into()));
                         return;
                     }
-                    let bot = self.world.bots.get_mut(&id).expect("bot exists");
+                    let bot = self.world.bot_mut(id);
                     bot.data.action =
                         Some(Action::Guard { target, escort, step_wait: 0, cooldown: 0 });
                 }
@@ -389,7 +389,7 @@ impl Sim {
                 if self.world.tile_occupied(entered, id) || self.world.structure_at(entered) {
                     let dodges = self.sidestep_candidates(id, from, entered, &goals);
                     if dodges.is_empty() {
-                        let bot = self.world.bots.get_mut(&id).expect("bot exists");
+                        let bot = self.world.bot_mut(id);
                         bot.data.action = Some(Action::Move { path, ticks_left: 1, goals });
                         self.bump_both(id, entered, true);
                     } else {
@@ -403,7 +403,7 @@ impl Sim {
                             step,
                         )
                         .expect("candidates are passable");
-                        let bot = self.world.bots.get_mut(&id).expect("bot exists");
+                        let bot = self.world.bot_mut(id);
                         // Single-step path; landing off-route triggers a
                         // re-plan (see the empty-path branch below).
                         bot.data.action =
@@ -430,7 +430,7 @@ impl Sim {
                             target,
                         )
                         .expect("slide targets are passable");
-                        let bot = self.world.bots.get_mut(&id).expect("bot exists");
+                        let bot = self.world.bot_mut(id);
                         // Single-step override; landing off-route triggers
                         // the same re-plan as a dodge (empty-path branch).
                         bot.data.action =
@@ -456,7 +456,7 @@ impl Sim {
                         path[0],
                     ) {
                         Some(next_cost) => {
-                            let bot = self.world.bots.get_mut(&id).expect("bot exists");
+                            let bot = self.world.bot_mut(id);
                             bot.data.action =
                                 Some(Action::Move { path, ticks_left: next_cost, goals });
                         }
@@ -493,7 +493,7 @@ impl Sim {
                 let base = ctx
                     .mine_yield_for(&self.world.bots[&id].data, self.tuning.mine_yield_deci);
                 let swing = base.min(self.world.nodes[&node].amount);
-                let bot = self.world.bots.get_mut(&id).expect("bot exists");
+                let bot = self.world.bot_mut(id);
                 let loaded = bot.data.cargo_add(kind, swing, cap);
                 self.world.nodes.get_mut(&node).expect("checked above").amount -= loaded;
                 // Mining income: 1 XP/unit = 1 deci-XP per deci-unit.
@@ -735,7 +735,7 @@ impl Sim {
                     }
                     self.finish_action(id, Ok(Value::Unit));
                 } else {
-                    let bot = self.world.bots.get_mut(&id).expect("bot exists");
+                    let bot = self.world.bot_mut(id);
                     bot.data.action = Some(Action::Build { blueprint });
                 }
             }
@@ -798,7 +798,7 @@ impl Sim {
                     if done_deci >= self.tuning.field_repair_deci {
                         if !self.rescue_wreck(wreck) {
                             // Tile blocked: hold at full progress.
-                            let bot = self.world.bots.get_mut(&id).expect("bot exists");
+                            let bot = self.world.bot_mut(id);
                             bot.data.action = Some(Action::Repair {
                                 target,
                                 done_deci: self.tuning.field_repair_deci,
@@ -807,7 +807,7 @@ impl Sim {
                         }
                         self.finish_action(id, Ok(Value::Unit));
                     } else {
-                        let bot = self.world.bots.get_mut(&id).expect("bot exists");
+                        let bot = self.world.bot_mut(id);
                         bot.data.action = Some(Action::Repair { target, done_deci });
                     }
                 } else {
@@ -845,7 +845,7 @@ impl Sim {
                             if full {
                                 self.finish_action(id, Ok(Value::Unit));
                             } else {
-                                let bot = self.world.bots.get_mut(&id).expect("bot exists");
+                                let bot = self.world.bot_mut(id);
                                 bot.data.action = Some(Action::Repair { target, done_deci });
                             }
                         }
@@ -885,7 +885,7 @@ impl Sim {
                         } else {
                             // No working remainder printer / blocked tile:
                             // hold at the threshold and retry.
-                            let bot = self.world.bots.get_mut(&id).expect("bot exists");
+                            let bot = self.world.bot_mut(id);
                             bot.data.action =
                                 Some(Action::Race { wreck, kind, ticks_left: 1 });
                         }
@@ -992,7 +992,7 @@ impl Sim {
                         }
                     }
                 }
-                let bot = self.world.bots.get_mut(&id).expect("bot exists");
+                let bot = self.world.bot_mut(id);
                 bot.data.action = Some(Action::Guard { target, escort, step_wait, cooldown });
             }
             Action::Channel { op, ch, namespace, waited, timeout, delivered } => {
@@ -1060,7 +1060,7 @@ impl Sim {
                     self.finish_action(id, Ok(Value::Unit));
                 } else {
                     let interval = self.tuning.search_ring_ticks.max(1);
-                    let bot = self.world.bots.get_mut(&id).expect("bot exists");
+                    let bot = self.world.bot_mut(id);
                     bot.data.action =
                         Some(Action::Search { reach, current, ticks_left: interval });
                 }
@@ -1113,7 +1113,7 @@ impl Sim {
                     // Nest feed (M12): everything aboard becomes print
                     // stock. No colony-stock or milestone bookkeeping —
                     // the Feral economy is the nest's own.
-                    let bot = self.world.bots.get_mut(&id).expect("bot exists");
+                    let bot = self.world.bot_mut(id);
                     let manifest = std::mem::take(&mut bot.data.cargo);
                     total = manifest.values().sum();
                     bot.data.withdrawn_aboard = 0;
@@ -1126,7 +1126,7 @@ impl Sim {
                     // production logistics, not delivery (and counting it
                     // would double-pay a mine→smelt→deliver chain).
                     let inputs = self.world.structures[&depot].accepted_feed();
-                    let bot = self.world.bots.get_mut(&id).expect("bot exists");
+                    let bot = self.world.bot_mut(id);
                     let mut moved: Vec<(crate::resources::Resource, u32)> = Vec::new();
                     for kind in inputs {
                         let deci = bot.data.cargo_remove(kind, u32::MAX);
@@ -1141,7 +1141,7 @@ impl Sim {
                     }
                     // The feed may have carried stock-withdrawn cargo out:
                     // provenance never exceeds what's still aboard.
-                    let bot = self.world.bots.get_mut(&id).expect("bot exists");
+                    let bot = self.world.bot_mut(id);
                     bot.data.withdrawn_aboard =
                         bot.data.withdrawn_aboard.min(bot.data.cargo_total());
                 } else if self.world.depots.contains_key(&depot) {
@@ -1150,7 +1150,7 @@ impl Sim {
                     // Milestone credit excludes the stock-withdrawn share
                     // (cargo provenance): recycling stock is zero NET
                     // delivery, but it can never suppress real income.
-                    let bot = self.world.bots.get_mut(&id).expect("bot exists");
+                    let bot = self.world.bot_mut(id);
                     let manifest = std::mem::take(&mut bot.data.cargo);
                     total = manifest.values().sum();
                     let recycled = bot.data.withdrawn_aboard.min(total);
@@ -1175,7 +1175,7 @@ impl Sim {
                 // Hauling income is CARGO-DISTANCE DELIVERED (docs/02):
                 // the accumulator filled per loaded tile pays out here.
                 if total > 0 {
-                    let bot = self.world.bots.get_mut(&id).expect("bot exists");
+                    let bot = self.world.bot_mut(id);
                     let earned = std::mem::take(&mut bot.data.haul_accum);
                     if earned > 0 {
                         self.world.pending_xp.push((id, XpTrack::Hauling, earned));
@@ -1225,7 +1225,7 @@ impl Sim {
         let mut goals = BTreeSet::new();
         goals.insert(tile);
         if survey {
-            self.world.bots.get_mut(&id).expect("bot exists").data.survey_after_move = true;
+            self.world.bot_mut(id).data.survey_after_move = true;
         }
         self.replan_move(id, goals);
     }
@@ -1244,7 +1244,7 @@ impl Sim {
             return;
         }
         let interval = self.tuning.search_ring_ticks;
-        let bot = self.world.bots.get_mut(&id).expect("bot exists");
+        let bot = self.world.bot_mut(id);
         bot.data.action =
             Some(Action::Search { reach, current: seeing, ticks_left: interval.max(1) });
     }
@@ -1267,7 +1267,7 @@ impl Sim {
                 .finish_action(id, Err("study: no Template Cache in range".into())),
             Some(cache) => {
                 let ticks = self.tuning.study_ticks.max(1);
-                self.world.bots.get_mut(&id).expect("bot exists").data.action =
+                self.world.bot_mut(id).data.action =
                     Some(Action::Study { cache, ticks_left: ticks });
             }
         }
@@ -1277,7 +1277,7 @@ impl Sim {
     /// everyone else simply resolves.
     pub(crate) fn complete_move(&mut self, id: BotId) {
         let chained = {
-            let bot = self.world.bots.get_mut(&id).expect("bot exists");
+            let bot = self.world.bot_mut(id);
             std::mem::take(&mut bot.data.survey_after_move)
         };
         if chained {
@@ -1292,7 +1292,7 @@ impl Sim {
     /// = one deci-XP per unit-tile) — paid out at delivery.
     pub(crate) fn credit_travel(&mut self, id: BotId) {
         self.world.pending_xp.push((id, XpTrack::Mileage, self.xp.mileage_deci_per_tile));
-        let bot = self.world.bots.get_mut(&id).expect("bot exists");
+        let bot = self.world.bot_mut(id);
         // Hauling income is DELIVERED production only (docs/02): accrue on the
         // MINED share of the load, never stock withdrawn from the colony and
         // cycled back (`withdrawn_aboard` is that recycled share). Without
@@ -1441,7 +1441,7 @@ impl Sim {
             let from = self.world.bots[&id].data.pos;
             if !edge_allowed(&self.world.grid, &self.world.overlays, from, entered) {
                 recall.ticks_left = 1;
-                self.world.bots.get_mut(&id).expect("bot exists").data.recall = Some(recall);
+                self.world.bot_mut(id).data.recall = Some(recall);
                 self.replan_after_bump(id);
                 return;
             }
@@ -1449,7 +1449,7 @@ impl Sim {
             // mid-route blocks the step (the post-bump replan threads
             // around it).
             if self.world.tile_occupied(entered, id) || self.world.structure_at(entered) {
-                let bot = self.world.bots.get_mut(&id).expect("bot exists");
+                let bot = self.world.bot_mut(id);
                 recall.ticks_left = 1;
                 bot.data.recall = Some(recall);
                 self.bump_both(id, entered, false);
@@ -1474,7 +1474,7 @@ impl Sim {
                     )
                     .expect("slide targets are passable");
                     recall.path = vec![target];
-                    self.world.bots.get_mut(&id).expect("bot exists").data.recall =
+                    self.world.bot_mut(id).data.recall =
                         Some(recall);
                     return;
                 }
@@ -1493,7 +1493,7 @@ impl Sim {
             // Stand on the arrival tile for one tick even when the path is
             // done — the walk's last step must be observable (the printer
             // starts its work next tick, not mid-stride).
-            self.world.bots.get_mut(&id).expect("bot exists").data.recall = Some(recall);
+            self.world.bot_mut(id).data.recall = Some(recall);
             return;
         }
         // Arrived at the home printer — unless an ice slide carried the
@@ -1506,7 +1506,7 @@ impl Sim {
             .get(&recall.home)
             .is_none_or(|p| (p.pos.x - pos.x).abs() + (p.pos.y - pos.y).abs() == 1);
         if !at_doorstep {
-            self.world.bots.get_mut(&id).expect("bot exists").data.recall = Some(recall);
+            self.world.bot_mut(id).data.recall = Some(recall);
             self.replan_after_bump(id);
             return;
         }
@@ -1515,7 +1515,7 @@ impl Sim {
                 if !self.recolor_bot(id, dest) {
                     // No free tile beside the destination yet: hold here,
                     // recall intact, and retry next tick.
-                    let bot = self.world.bots.get_mut(&id).expect("bot exists");
+                    let bot = self.world.bot_mut(id);
                     bot.data.recall = Some(recall);
                 }
             }

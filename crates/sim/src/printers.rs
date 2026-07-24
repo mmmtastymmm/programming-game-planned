@@ -127,7 +127,7 @@ impl Sim {
         // the Boot track).
         let boot = self.ctx()
             .boot_ticks_for(&self.world.bots[&id].data, self.tuning.boot_ticks);
-        let bot = self.world.bots.get_mut(&id).expect("bot exists");
+        let bot = self.world.bot_mut(id);
         bot.data.color = color;
         bot.data.recall = None;
         bot.data.booting = Some(boot);
@@ -905,7 +905,7 @@ impl Sim {
         if self.raise_signal(id, pyrite::Signal::Recall) != pyrite::RaiseOutcome::Handled {
             return false;
         }
-        let bot = self.world.bots.get_mut(&id).expect("bot exists");
+        let bot = self.world.bot_mut(id);
         bot.data.recall = Some(Recall { path, ticks_left, home, purpose });
         true
     }

@@ -326,7 +326,7 @@ impl pyrite::Host for BotHost<'_> {
     fn call(&mut self, name: &str, args: &[Value], ctx: CallCtx<'_>) -> HostCall {
         let tick = self.world.tick;
         let bot_id = self.bot;
-        let bot_pos = self.world.bots.get(&bot_id).expect("bot exists").data.pos;
+        let bot_pos = self.world.bot(bot_id).data.pos;
         match name {
             // --- instant queries ---
             // Generic fallible query: closest(kind) -> Result.Ok(entity) / Result.Err(msg).
@@ -445,10 +445,18 @@ impl pyrite::Host for BotHost<'_> {
             }
             "wait" => match args {
                 [Value::Int(0)] => HostCall::Ready(Value::Unit), // waiting 0 is free
-                [Value::Int(n)] if *n > 0 => self.request(ActionRequest::Wait(*n as u32)),
-                [Value::Int(_)] => HostCall::Fault(Fault::new(
+                // Range-checked before the u32 cast — a bare `as u32` would
+                // silently wrap wait(2^32) to Wait(0), so the bot never waits.
+                [Value::Int(n)] if (1..=u32::MAX as i64).contains(n) => {
+                    self.request(ActionRequest::Wait(*n as u32))
+                }
+                [Value::Int(n)] if *n < 0 => HostCall::Fault(Fault::new(
                     faults::TYPE,
                     "wait requires a non-negative tick count",
+                )),
+                [Value::Int(_)] => HostCall::Fault(Fault::new(
+                    faults::RANGE,
+                    "wait tick count out of range",
                 )),
                 _ => HostCall::Fault(Fault::new(faults::TYPE, "wait takes 1 integer argument")),
             },
@@ -550,7 +558,7 @@ impl pyrite::Host for BotHost<'_> {
                     }
                 }
                 if got > 0 {
-                    let bot = self.world.bots.get_mut(&bot_id).expect("bot exists");
+                    let bot = self.world.bot_mut(bot_id);
                     let loaded = bot.data.cargo_add(kind, got, u32::MAX);
                     debug_assert_eq!(loaded, got, "space was pre-checked");
                 }
@@ -674,7 +682,7 @@ impl pyrite::Host for BotHost<'_> {
                 // Spill the manifest onto the bot's own tile as nodes —
                 // mine() recovers it (deterministic: no scatter for the
                 // deliberate drop; death spills keep their RNG scatter).
-                let data = &mut self.world.bots.get_mut(&bot_id).expect("bot exists").data;
+                let data = &mut self.world.bot_mut(bot_id).data;
                 // The dropped cargo takes its stock provenance AND its
                 // undelivered hauling distance with it (docs/02: income is
                 // cargo-distance DELIVERED; mining it back re-earns).
@@ -919,7 +927,7 @@ impl pyrite::Host for BotHost<'_> {
                     self.ctx.quirks,
                 );
                 if (level as i64) >= min_level {
-                    let data = &mut self.world.bots.get_mut(&bot_id).expect("bot exists").data;
+                    let data = &mut self.world.bot_mut(bot_id).data;
                     // The ring cap is a hardware stat (stats floor +
                     // Memory banks), not a global const (M5).
                     let cap = data.log_cap as usize;
@@ -932,7 +940,7 @@ impl pyrite::Host for BotHost<'_> {
                 HostCall::Ready(Value::Unit)
             }
             "upload_log" => {
-                let bot = self.world.bots.get_mut(&bot_id).expect("bot exists");
+                let bot = self.world.bot_mut(bot_id);
                 let faction = bot.data.faction;
                 let logs = std::mem::take(&mut bot.data.log_buf);
                 // Only touch the cloud when there's something to file — an
@@ -974,7 +982,7 @@ impl pyrite::Host for BotHost<'_> {
                             ),
                         ));
                     }
-                    let bot = self.world.bots.get_mut(&bot_id).expect("bot exists");
+                    let bot = self.world.bot_mut(bot_id);
                     bot.data.env.insert(key.clone(), *value);
                     HostCall::Ready(Value::Unit)
                 }
@@ -1026,7 +1034,7 @@ impl pyrite::Host for BotHost<'_> {
 
             // --- lifecycle (forced calls are ordinary functions) ---
             "become_disabled" => {
-                let bot = self.world.bots.get_mut(&bot_id).expect("bot exists");
+                let bot = self.world.bot_mut(bot_id);
                 bot.data.dying = true;
                 // Dying bots stop blocking: out of the occupancy index the
                 // moment the flag is set (wrecks don't block).

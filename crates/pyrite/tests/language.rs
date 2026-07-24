@@ -1407,6 +1407,15 @@ halt()
     vm.run(&mut host, &costs);
     let dump = host.calls.iter().find(|(n, _)| n == "upload_crash_dump").expect("must fault");
     assert!(matches!(&dump.1[0], Value::Str(s) if s.contains("range too large")));
+
+    // A two-arg span that overflows i64 must fault like any over-cap range,
+    // not panic (debug) or wrap negative and OOM (release) — a player program
+    // taking down every lockstep peer.
+    let (mut vm, mut host, costs) = vm_for("range(-5000000000000000000, 5000000000000000000)\n");
+    vm.grant(1000, &costs);
+    vm.run(&mut host, &costs);
+    let dump = host.calls.iter().find(|(n, _)| n == "upload_crash_dump").expect("must fault");
+    assert!(matches!(&dump.1[0], Value::Str(s) if s.contains("range too large")));
 }
 
 /// Mutating a temporary is a fault, not a silent no-op — containers are

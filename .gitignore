@@ -1,1 +1,6 @@
 /target
+
+# Crash core dumps (a debugger/OS may drop these next to the crate on a crash).
+core
+core.*
+*.core

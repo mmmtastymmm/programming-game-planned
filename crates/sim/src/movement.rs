@@ -123,7 +123,7 @@ impl Sim {
                     path[0],
                 )
                 .expect("path tiles are passable");
-                let bot = self.world.bots.get_mut(&id).expect("bot exists");
+                let bot = self.world.bot_mut(id);
                 bot.data.action = Some(Action::Move { path, ticks_left: first_cost, goals });
             }
             None => self.finish_action(id, Err("move_to: unreachable".into())),
@@ -155,7 +155,7 @@ impl Sim {
                         path[0],
                     )
                     .expect("path tiles are passable");
-                    let bot = self.world.bots.get_mut(&id).expect("bot exists");
+                    let bot = self.world.bot_mut(id);
                     bot.data.action =
                         Some(Action::Move { path, ticks_left: first_cost, goals });
                 }
@@ -195,7 +195,7 @@ impl Sim {
                         .unwrap_or(1)
                     })
                     .unwrap_or(0);
-                let bot = self.world.bots.get_mut(&id).expect("bot exists");
+                let bot = self.world.bot_mut(id);
                 if let Some(recall) = bot.data.recall.as_mut() {
                     recall.path = path;
                     recall.ticks_left = ticks_left;
