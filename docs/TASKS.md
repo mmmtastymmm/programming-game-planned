@@ -937,8 +937,15 @@ out-of-range quirk to trigger it (guarded by the setenv-range test exercising th
       2026-07-26 (Q97): painting became blueprint-flow LABOR while overlays stay
       instant signage, so the two commands are correctly distinct; 07's list updated.
 - [x] `RepairPrinter` re-priced in Data (~60) once Data exists (M4). [sim] *(with M4)*
-- [ ] Tuning values to spec first-pass numbers: fault_damage 5→2, boot_ticks 2→~20,
-      print_ticks 5→~100 (in the M0 data files). ⚠HASH
+- [x] `fault_damage` 5→2 — the spec figure (Q84's manifest), landed with Q109: at 5 any
+      crash-loop killed a stock bot in ~25 s. ⚠HASH (golden regenerated).
+- [ ] Remaining tuning-to-spec numbers: boot_ticks 2→~20, print_ticks 5→~100 (M0 data
+      files) — a pacing pass that deserves its own session. ⚠HASH
+- [ ] **`try_move_to()`** (Q109, backlogged) — the fault-free mover, joining
+      `try_deposit`/`try_withdraw`/`try_send`: returns `False` instead of faulting when no
+      route exists (paint-blocked, walled off, or demolished bridge). The right answer for
+      programs that want robustness; deliberately NOT the only mitigation, since it is
+      opt-in. [pyrite][sim]
 - [x] Snow tile comment cites superseded Q67 — re-pointed at Q78 (map.rs + scene.rs,
       2026-07-26). [game]
 - [x] Thought-cloud states to the doc's list (normal/boot/handler/searching/low-health/abort)

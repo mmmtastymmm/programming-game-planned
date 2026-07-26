@@ -50,7 +50,11 @@ Tuning(
     bridge_cost_stone: 30,
     bridge_build_ticks: 20,
     overlay_cost_stone: 10,
-    fault_damage: 5,
+    // Q109 (2026-07-26): the spec figure (Q84's manifest). At 5 any
+    // crash-loop killed a 40-hp bot in ~25 s, which is what made enemy
+    // paint a one-stroke colony-killer; at 2 the same spiral takes ~60 s
+    // — long enough to read the crash dumps and respond.
+    fault_damage: 2,
     regen_interval_ticks: 1000,
     regen_amount: 1,
     // The Damaged line (% of max hp): hurt fires below it, re-arms above
