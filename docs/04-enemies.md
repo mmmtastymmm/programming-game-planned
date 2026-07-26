@@ -31,17 +31,20 @@ Each archetype = chassis + program. Programs shown are their *actual* shipped so
 ```python
 wander()
 wander()
+wait(3)
 if exists(enemy):
+    move_to(closest(enemy).expect())
     attack(closest(enemy).expect())
 ```
 
-Harmless in ones. Exists so the first program a player ever reads is trivially comprehensible.
+Harmless in ones. Exists so the first program a player ever reads is trivially comprehensible. The `move_to` before the swing is load-bearing (Q108): `attack()` on a non-adjacent target faults, so without it the Drone crash-loops the moment it *sees* an enemy — and the first program a player reads must not teach a bug they would copy. The `wait(3)` gives the Magician's mutation an integer literal to bite on.
 
 ### Stinger (threat 2) — teaches conditionals
 
 ```python
 if health_low():
     move_to(home)
+    wait(8)
 if exists(enemy):
     move_to(closest(enemy).expect())
     attack(closest(enemy).expect())

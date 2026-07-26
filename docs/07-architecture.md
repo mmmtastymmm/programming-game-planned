@@ -59,7 +59,7 @@ Within each phase, iterate entities in **stable ID order** — never hash-map or
 - **Deploys re-allocate in the economy phase** of their own tick ("immediate" = this tick's phase 8, not phase 1). Corruption spread is an economy-phase counter system — no RNG. Wrecks have **HP** (~25% of the bot's max, tuning) so the damage phase can resolve hits on them; countdown decrements live in phase 6.
 - **RNG streams, enumerated** (the CLAUDE.md rule's inventory): `rng.combat`, `rng.wander`, `rng.explore`, `rng.sidestep`, `rng.quirk_roll`, `rng.feral_mutation`, and `rng.program` — the `rng(n)` builtin draws from a **per-bot stream seeded by (match seed, entity ID)**, so identical programs desync deterministically, which is the builtin's whole job.
 - **Quirk scratch state** (Branch Predictor's last-branch memory, the deterministic counters of GC Pause / Heisenbug / Off-by-One / Cold Start / Crypto Miner, Eventual Consistency's one-*additional*-tick perception snapshot) is declared **sim state**: serialized, hashed, cleared on restart like variables, persistent across recolor and rescue.
-- **UnlockSets** ship in the match-start data (every peer validates every player's deploys identically); `Research` Commands mutate them in lockstep order. **Runtime alliances** (`SetAlliance`) share vision, ears, and channels — **never decryption** (decryption stays per-faction forever; no merge on ally, nothing to unwind on divorce). Granted vision **feeds allied bots' queries** — the grant is a sim-level perception union, not a UI overlay.
+- **UnlockSets** ship in the match-start data (every peer validates every player's deploys identically); `Research` Commands mutate them in lockstep order. **Runtime alliances** (`SetAlliance`) share vision, ears, channels, and **decryption progress from the alliance forward** (Q107, 2026-07-26 — this line previously read "never decryption", contradicting docs/08's "shared color-decryption intel"; docs/08 is the ruling one). **Never retroactively**: pre-alliance levels are not merged, because decryption is permanent and monotonic, so a merge-on-formation would let a faction ally for one tick, absorb everything a partner ever learned, and divorce — decryption laundering. Forward-only pooling has no such hole: allies must actually stay allied and salvage together, and a divorce leaves nothing to unwind. Granted vision **feeds allied bots' queries** — the grant is a sim-level perception union, not a UI overlay.
 
 
 ## Pyrite VM
@@ -97,7 +97,7 @@ Structure:       StructureKind, Hp, Buffers, TilePos, Faction
 Tile map:        dense Grid<TileKind> world field + spatial index (bots per tile)
 Programs:        ProgramLibrary table — source + AST, shared/refcounted
                  (100 bots on one program share one AST)
-Commands:        DeployProgram, QueuePrint(loadout), PlaceBlueprint
+Commands:        DeployProgram, QueuePrint(faction), PlaceBlueprint
                  (structures, terraform, repairs), EditPrinterRules
                  (targets, keys, directions, priority, check interval),
                  QueueUpgrade(bot, catalog item — the program must bring

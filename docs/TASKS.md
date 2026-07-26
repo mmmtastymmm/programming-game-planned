@@ -24,7 +24,8 @@ marked ∥ can proceed in parallel once their prerequisites land.
 [QUESTIONS.md](QUESTIONS.md) — genuine judgment calls are now **Q98–Q108** (Pump/water source,
 Barricade HP, inert Coprocessor/Backup Core, overlay layering, phase-4 inner order, creep,
 QueuePrint loadout, labor/tool-gating consistency, the Data Exchange, alliance decryption
-merge, Feral archetype sources); first-pass **numbers** joined the playtest-tuning bucket
+merge, Feral archetype sources) — **all of which were answered the same day**; first-pass
+**numbers** joined the playtest-tuning bucket
 there; markers answered by later rulings (Q88/Q89/Q90, M13's Non-PvP gate, the 2026-07-16b
 hash coverage, Blueprint.faction) are historical. The markers stay in place below as landing
 records — QUESTIONS.md is the live registry.
@@ -1069,6 +1070,20 @@ written-up quirks are unbuildable. ⚠HASH.
       `grant_centi`. [pyrite][sim]
 - [ ] **Editor shows EFFECTIVE per-line costs** for the selected bot's tile (docs/05 promises
       it; `analysis::line_costs` paints base costs today). [game]
+
+## Small decided-but-unbuilt items (from the 2026-07-26 sweep)
+
+- [ ] **Data Exchange** (Q106) — `ExchangeResources { faction, data, kind }`-style Command at a
+      built Research Archive: flat rate table in data (Chips-favored, Gold densest per unit),
+      no scarcity scaling. Data's only other sinks are finite research + printer repair, so
+      this is what keeps Data worth earning late. [sim][game]
+- [ ] **Feral sources: doc/code now agree** (Q108) — no code change; `feral.rs`'s
+      "NEEDS DISCUSSION / flagged in TASKS.md" comment can drop its flag, since docs/04 was
+      updated to the shipped sources. [sim]
+- [x] **`QueuePrint(loadout)`** (Q104) — parameter deleted from docs/07; the shipped
+      per-faction counter was always the whole feature. No code change.
+- [x] **Alliance decryption** (Q107) — shipped forward-only pooling ratified; docs/07's
+      "never decryption" line corrected. No code change.
 
 ## Verb-layer index (every spec'd builtin → its milestone)
 

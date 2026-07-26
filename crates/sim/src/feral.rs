@@ -51,7 +51,11 @@ impl Archetype {
     /// The shipped source, in CURRENT builtins (docs/04's listings,
     /// adjusted: a `move_to` precedes each `attack` so the swing is in
     /// range, and the Harvester guards on `exists(ore)` instead of
-    /// crash-looping on an empty map — flagged in TASKS.md).
+    /// crash-looping on an empty map — RATIFIED 2026-07-26 by Q108, and
+    /// docs/04 now carries these sources: a non-adjacent `attack()`
+    /// faults, so the doc's older four-line Drone crash-looped whenever
+    /// it merely SAW an enemy, and the first program a player reads must
+    /// not teach a bug they would copy).
     pub fn source(self) -> &'static str {
         match self {
             Archetype::Drone => "\
