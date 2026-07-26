@@ -1005,31 +1005,31 @@ out-of-range quirk to trigger it (guarded by the setenv-range test exercising th
       the enum, so the path already exists). First-pass HP scaled to the 20-Stone price.
       [sim][game] ⚠HASH
 
-## M16 — Capability slots & construction by labor (Q105) — NOT STARTED
+## M16 — Capability slots & construction by labor (Q105) ✅ COMPLETE (2026-07-26)
 
 The tool layer docs/02–03 describe was never built: no verb checks a tool, the module
 catalog holds `optics` + the inert `backup_core`, printed bots get no modules, and
 `Resource::tool_tier()` is dead data. Q105 replaces generic module slots with per-capability
 slots. Milestone-sized; ⚠HASH throughout.
 
-- [ ] **Capability slots on the chassis** — `BotData.modules: Vec<u8>` retires; four permanent
+- [x] **Capability slots on the chassis** — `BotData.modules: Vec<u8>` retires; four permanent
       capabilities (Mining, Building, Combat, Optics), each `{ tier: u8, }` with **base tier 1**,
       hashed. `stats.module_slots`, `xp.slot_milestones` ([1000, 3000]) and `SelectKey::ModuleSlots`
       are cut with Q66's generic slots. [sim]
-- [ ] **Tier enforcement** — `mine()` checks the bot's Mining tier against
+- [x] **Tier enforcement** — `mine()` checks the bot's Mining tier against
       `Resource::tool_tier()` (the dead data goes live; a too-low tier faults with a typed id).
       Build/Combat/Optics tiers feed build rate, `attack_damage`, and sensor range through the
       existing pipeline; Optics module effect becomes optics tier. [sim]
-- [ ] **Tier purchase at the Upgrade Station** — capabilities join the catalog beside compute
+- [x] **Tier purchase at the Upgrade Station** — capabilities join the catalog beside compute
       (pad, queue, payment-at-mount, coolant all reused); docs/03's Fabricator-makes /
       Station-swaps split folds into the one pad. Prices follow Q72's ladder rule (tier N+1
       prices only in materials mineable at tier ≤ N). [sim][game]
-- [ ] **Tier scaling replaces a reset branch** — a capability's level thresholds AND its XP
+- [x] **Tier scaling replaces a reset branch** — a capability's level thresholds AND its XP
       gain both multiply by `M^(tier-1)` (`tier_xp_scale`, tuning, ~100). The curve is
       cumulative 100/300/600/1000/1500, so any M > 15 drops a maxed tier-1 bot below the new
       L1 — an effective reset with no reset code — while equal gain scaling keeps re-climbing
       at the same real work. Nothing decreases, so no `lifetime_xp` counter is needed. [sim]
-- [ ] **Fix the four places the scale leaks** — every `xp_total()` consumer was audited:
+- [x] **Fix the four places the scale leaks** — every `xp_total()` consumer was audited:
       (1) **quirk manifestation** moves to the **Age** track (at tier 2 a bot crosses 300/900
       in ~9 units of ore, popping quirks instantly); (2) **the wreck self-destruct countdown**
       moves to Age too — `base + (xp_total/1000) × per_100xp` would run to HOURS at tier 3, so
@@ -1038,22 +1038,22 @@ slots. Milestone-sized; ⚠HASH throughout.
       (4) `SelectKey::TotalXp` and the scrap valve keep tier-weighted totals — ratified as
       intended, the colony eats its least-invested machine. Retune `quirks.ron manifest_at`
       and `wreck_countdown_per_100xp_ticks` against Age's rate (1 deci/tick). [sim] ⚠HASH
-- [ ] **Processor capability + Processing track (Q100)** — cycles-per-tick becomes the fifth
+- [x] **Processor capability + Processing track (Q100)** — cycles-per-tick becomes the fifth
       capability (tier bought, level earned); a twelfth `XpTrack::Processing` is credited for
       operations executed (⚠ storage migration — `XpTrack::ALL` was sized 11 "so storage never
       migrates again"). Retire the Coprocessor catalog entry and the `ModuleEffect` for it;
       docs/01's "actions block" is now unconditional. Watch the deliberate feedback loop
       (cycles → ops → XP → cycles), bounded by the L5 cap, the quadratic curve, and tier
       scaling. [sim][pyrite]
-- [ ] **Backup Core (Q100)** — a flat, late, Gold-Chip Station buy that preserves every
-      capability TIER into the reprint and wipes all XP; it preserves itself, so it re-arms
-      once bought. **OPEN DETAIL:** how the tiers travel from the destroyed bot to the
+- [ ] **Backup Core (Q100)** — the catalog entry and its effect flag exist; the PRESERVATION
+      itself is still unbuilt (nothing yet carries tiers into a reprint or wipes XP).
+      **OPEN DETAIL:** how the tiers travel from the destroyed bot to the
       reprint — a reprint is a fresh print with an allocation-chosen color and has no channel
       to a dead bot. Candidates: an automatic per-faction banked loadout the next print
       consumes (frictionless), or the **Black Box** as carrier (it already drops on every
       destruction and `recover_black_box()` already exists — makes a veteran's hardware a
       physical object worth holding ground for, and deniable to the enemy). [sim]
-- [ ] **Structures are built by labor** — `PlaceStructure` becomes a blueprint designation
+- [x] **Structures are built by labor** — `PlaceStructure` becomes a blueprint designation
       serviced by `build()` (the Q97 paint flow generalizes); every structure incl. Q98's Pump.
       Nest claim/raze likewise want a bot on site (docs/04). [sim][game]
 
@@ -1102,16 +1102,16 @@ written-up quirks are unbuildable. ⚠HASH.
       `region(tile(base + largest cost-raising per-bot delta))`, not overlays alone. Validating
       overlays only leaves quirked bots outside the certified invariant and freeze-forever
       reachable for them. [pyrite][sim]
-- [ ] **Q105-R1** — load-time assert that each capability tier's grant ≥ the L5 bonus of the
+- [x] **Q105-R1** — load-time assert that each capability tier's grant ≥ the L5 bonus of the
       tier below, so a bought upgrade is never a net downgrade of the stat it buys (Optics
       tier 2 must not leave a Scouting-L5 scout seeing less). [sim]
-- [ ] **Q105-R2** — `Building tier ≥ 2` gates field repair (wreck rescue), `hijack`, and nest
+- [x] **Q105-R2** — `Building tier ≥ 2` gates field repair (wreck rescue), `hijack`, and nest
       claim/raze; base tier 1 covers `build()` and structure `repair()`. Base weapon damage
       comes from Combat tier 1. Replaces the deleted build-tool gate. [sim]
-- [ ] **Q105-R3** — the scrap valve and `SelectKey::TotalXp` rank by INVESTMENT (lifetime XP +
+- [x] **Q105-R3** — the scrap valve and `SelectKey::TotalXp` rank by INVESTMENT (lifetime XP +
       bought tier value), not raw XP: a Backup-Core reprint has tier-4 hardware and 0 XP and
       must never be selected as the fleet's cheapest machine. [sim]
-- [ ] **Processing track** — the twelfth track needs its income (first pass: 1 per 10 ops
+- [x] **Processing track** — the twelfth track needs its income (first pass: 1 per 10 ops
       executed), its perk magnitudes, and a slot in the phase-7 settlement order; Learning's
       10% must read the UNSCALED award. [sim]
 
