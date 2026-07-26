@@ -64,3 +64,64 @@ fn feral_mutation_wander_and_explore_streams_are_deterministic() {
         "the Magician nest must have printed ferals (got {ferals_a})"
     );
 }
+
+/// Q102: phase 4 resolves in three passes (move → combat → work), so
+/// **combat sees a settled world** — whether a fleeing bot escapes a
+/// swing is a rule, not a function of entity id.
+///
+/// The probe runs one fight twice, swapping only SPAWN ORDER (which is
+/// what entity id is), across a sweep of head-start delays so the
+/// decisive alignment — a swing landing on the very tick the victim's
+/// traverse completes — is covered without hand-timing it. Under the old
+/// one-bot-at-a-time loop `delay = 0` disagreed outright: attacker-first
+/// landed the hit (victim 90 hp), victim-first let the escape work
+/// (100 hp). Verified to fail against that code.
+#[test]
+fn combat_outcome_does_not_depend_on_spawn_order() {
+    /// Victim HP per tick for a chase where it walks away while the
+    /// attacker swings; `attacker_first` flips which bot gets the lower
+    /// entity id, `delay` slides the victim's departure.
+    fn fight(attacker_first: bool, delay: u32) -> Vec<i64> {
+        let mut spec = MapSpec::empty(20, 3);
+        spec.depots.push((TilePos::new(18, 1), 1)); // something to run at
+        let mut sim = Sim::new(&spec);
+        sim.stats.move_rate_deci = 10; // 1 tick/tile: keep the chase tight
+        let flee = format!("wait({delay})\nmove_to(closest(depot).expect())\nwait(500)\n");
+        let hunt = "attack(closest(enemy).expect())\nwait(500)\n"; // one swing
+        let mut spawn = |sim: &mut Sim, pos: TilePos, faction: u8, src: &str| {
+            sim.apply(&Command::SpawnBot {
+                pos,
+                source: src.into(),
+                cpu: 4,
+                cargo_cap: 2,
+                faction,
+                hp: 100,
+                color: Color::GREEN,
+            })
+            .unwrap()
+            .unwrap()
+        };
+        let victim = if attacker_first {
+            spawn(&mut sim, TilePos::new(1, 1), 0, hunt);
+            spawn(&mut sim, TilePos::new(2, 1), 1, &flee)
+        } else {
+            let v = spawn(&mut sim, TilePos::new(2, 1), 1, &flee);
+            spawn(&mut sim, TilePos::new(1, 1), 0, hunt);
+            v
+        };
+        (0..25)
+            .map(|_| {
+                sim.step();
+                sim.world.bots.get(&victim).map(|b| b.data.hp).unwrap_or(-1)
+            })
+            .collect()
+    }
+    for delay in 0..10 {
+        assert_eq!(
+            fight(true, delay),
+            fight(false, delay),
+            "delay {delay}: the same fight must resolve the same way \
+             whichever bot was printed first"
+        );
+    }
+}

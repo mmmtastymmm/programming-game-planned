@@ -19,7 +19,55 @@ fn mend(hp: &mut i64, max_hp: i64, rate: u32) -> (i64, bool) {
     (mended, *hp == max_hp)
 }
 
+/// Phase 4's three sub-passes (docs/07: "resolve actions — move →
+/// combat → mine/build", Q102). Splitting by ACTION KIND rather than
+/// resolving each bot end-to-end is what makes combat see a **settled**
+/// world: every mover has finished stepping before the first swing
+/// range-checks, so whether a fleeing bot escapes is a rule, not a
+/// function of entity id.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Phase4Pass {
+    /// Program walks, bump-freeze tick-down and its replan, and the
+    /// engine-driven walks (recall) — everything that changes a position.
+    Move,
+    /// Swings and the fighting stances.
+    Combat,
+    /// Everything else: mine, build, deposit, the wreck race, study,
+    /// search, waits, channel ops.
+    Work,
+}
+
 impl Sim {
+    /// Which pass owns this bot THIS tick, decided from what it is doing
+    /// at phase-4 entry. Classification is snapshotted before any pass
+    /// runs (see `Sim::resolve_actions`): finishing an action resumes the
+    /// VM immediately, so a bot that completes its move in the Move pass
+    /// may already hold a fresh request — it must not be picked up again
+    /// by a later pass and act twice in one tick.
+    pub(crate) fn phase4_pass(&self, id: BotId) -> Phase4Pass {
+        let Some(bot) = self.world.bots.get(&id) else { return Phase4Pass::Work };
+        if bot.data.bump_frozen > 0 {
+            // The stun ticks down and thaws into a replan: movement.
+            return Phase4Pass::Move;
+        }
+        // A request starting this tick classifies by what it will become;
+        // otherwise the in-flight action speaks for itself.
+        if let Some(req) = &bot.data.requested {
+            return match req {
+                ActionRequest::MoveTo { .. }
+                | ActionRequest::Wander { .. }
+                | ActionRequest::Explore { .. } => Phase4Pass::Move,
+                ActionRequest::Attack(_) | ActionRequest::Guard { .. } => Phase4Pass::Combat,
+                _ => Phase4Pass::Work,
+            };
+        }
+        match &bot.data.action {
+            Some(Action::Move { .. }) => Phase4Pass::Move,
+            Some(Action::Attack { .. }) | Some(Action::Guard { .. }) => Phase4Pass::Combat,
+            _ => Phase4Pass::Work,
+        }
+    }
+
     /// Phase 4 for one bot: start its requested action or advance the
     /// in-flight one; on completion, resume the VM with the result.
     pub(crate) fn resolve_bot(&mut self, id: BotId) {

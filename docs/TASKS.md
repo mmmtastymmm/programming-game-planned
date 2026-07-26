@@ -127,14 +127,19 @@ full charges + centicycles + wrap-surviving variables move every replay hash at 
       `tile_occupied`, the bump blocker lookup, and both replan obstacle sets read the index
       (`occupied_tiles`). [sim] (S)
 
-*Audit follow-ups (2026-07-15 M1–M4 verification) — swept 2026-07-26: the first two are now
-**Q102**; the hash-shallowness was fixed by the 2026-07-16b review (`hash_bot_data` covers
-all in-flight state):*
-- *Phase-4 sub-order*: docs/07 says "resolve actions (move → combat → mine/build)"; the code
-  resolves PER BOT in id order (deterministic, but a lower-id attacker range-checks a
-  higher-id mover pre-move while the reverse pairing sees post-move). Reconcile doc or code.
+*Audit follow-ups (2026-07-15 M1–M4 verification) — swept 2026-07-26: the sub-order is FIXED
+(Q102 first half, below); inline structure damage is Q102's open second half; the
+hash-shallowness was fixed by the 2026-07-16b review (`hash_bot_data` covers all in-flight
+state):*
+- [x] *Phase-4 sub-order* — **done 2026-07-26 (Q102)**: phase 4 runs docs/07's three passes
+  (move → combat → work; engine walks ride the move pass; pass classification snapshotted at
+  phase entry so no bot acts twice). Combat now sees a settled world — a measured artifact
+  (same fight, 90 hp attacker-first vs 100 hp victim-first) is gone, guarded by
+  `combat_outcome_does_not_depend_on_spawn_order`. ⚠HASH, golden regenerated.
 - *Structure damage is still inline in phase 4* (`actions.rs` attack arm): only bot damage
-  rides `pending_damage` to phase 6. Deterministic, but contradicts "damage is a phase".
+  rides `pending_damage` to phase 6. Deterministic, but contradicts "damage is a phase" —
+  now tracked as **Q102's second half** (the three-pass split removed the mid-phase-movement
+  symptom; simultaneous-kill credit by id remains). Q99's barricades inherit this path.
 - *Phase-9 hash is shallow on in-flight state*: `bot.data.requested`, `bot.data.action`
   (path/ticks/goals) and the recall path aren't hashed — a peer divergence there stays
   invisible until a position changes. (Shallow VM hashing is already a known TODO.)

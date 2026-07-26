@@ -1855,21 +1855,50 @@ impl Sim {
             self.after_vm(id, vm, outcome);
         }
 
-        // --- phases 3+4: collect issued actions, resolve them PER BOT in
-        // stable id order (each bot advances whatever action it has — the
-        // move → combat → mine/build sub-order of docs/07 is not split out;
-        // flagged in TASKS.md for reconciliation), then the engine-driven
-        // walks (boot countdowns, recall walks). Damage and signals these
-        // produce are QUEUED for phase 6, not applied inline. ---
-        for id in ids.iter().copied() {
-            self.resolve_bot(id);
+        // --- phases 3+4: collect issued actions, then resolve them in
+        // docs/07's three sub-passes — move → combat → mine/build (Q102).
+        // Each pass walks bots in stable id order, so resolution stays
+        // deterministic; what the split buys is that COMBAT SEES A SETTLED
+        // WORLD. Under the old one-bot-at-a-time loop, an attacker with a
+        // lower entity id range-checked its victim before that victim's
+        // traverse completed and a higher-id attacker checked after — the
+        // same escape attempt succeeded or failed on print order. Now
+        // every mover has finished stepping before the first swing looks.
+        // (Intra-pass order is still id order: movers resolve against each
+        // other one at a time, as before. True simultaneity would need an
+        // intent-collection model and is out of scope.) Damage and signals
+        // these produce are QUEUED for phase 6, not applied inline. ---
+        //
+        // Classification is snapshotted BEFORE any pass runs: finishing an
+        // action resumes the VM inline, so a bot that completes its move
+        // in the Move pass can already hold a fresh request — without the
+        // snapshot a later pass would start it and the bot would act twice
+        // in one tick.
+        let passes: Vec<(BotId, crate::actions::Phase4Pass)> =
+            ids.iter().map(|&id| (id, self.phase4_pass(id))).collect();
+        for pass in [
+            crate::actions::Phase4Pass::Move,
+            crate::actions::Phase4Pass::Combat,
+            crate::actions::Phase4Pass::Work,
+        ] {
+            for &(id, bot_pass) in &passes {
+                if bot_pass == pass {
+                    self.resolve_bot(id);
+                }
+            }
+            // The engine-driven walks (boot countdowns, recall walks) are
+            // movement too — they ride the Move pass so an engine-walking
+            // bot is settled before combat looks at it, exactly like a
+            // program-driven mover.
+            if pass == crate::actions::Phase4Pass::Move {
+                for id in ids.iter().copied() {
+                    self.advance_engine(id);
+                }
+            }
         }
         // Phase 4b (M11): the channel rendezvous settle — after every bot
         // resolved, so fresh blocks participate this very tick.
         self.settle_channels();
-        for id in ids.iter().copied() {
-            self.advance_engine(id);
-        }
 
         // --- phase 5: perception recompute, then episode settlement
         // (split so seed passes never advance re-arm counters) ---
