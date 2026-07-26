@@ -222,4 +222,7 @@ Map size scales with player count: each player gets a rim **wedge of roughly con
 ## Open Questions
 
 - Corruption spread/re-corruption rates, source radii, and cleanse speed — pure tuning, needs the prototype.
+- **Q99** ([QUESTIONS.md](QUESTIONS.md)): Barricades — this doc says "has HP, attackable"; the code ships them Demolish-only. Ratify one.
+- **Q101** ([QUESTIONS.md](QUESTIONS.md)): biome cost-overlay layering — the overlay table above (Static Wastes, Loop Desert, Overclock Field) is unimplementable until overlays get a real composition design (only Corruption's flat +1/op shipped).
+- **Q103** ([QUESTIONS.md](QUESTIONS.md)): creep — emergent (this doc) vs the `creep` verb the index promises; one of them goes.
 - *(The paint-routing series Q95–Q97 is fully answered as of 2026-07-26 — per-call `only=`/`avoid=` args, `unpainted` a named color, forbidden = impassable-like-water, args free with the verbs, paint global and applied by blueprint-flow labor; see Tile Composition and [01-language.md](01-language.md).)*

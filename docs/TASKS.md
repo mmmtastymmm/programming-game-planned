@@ -20,6 +20,15 @@ make every one of them pay the explain-your-hash-change toll the docs prescribe
 Milestones are dependency-ordered. Within a milestone, tasks are roughly sequenced. Milestones
 marked ∥ can proceed in parallel once their prerequisites land.
 
+**2026-07-26 sweep:** the *NEEDS DISCUSSION* markers below were audited and promoted into
+[QUESTIONS.md](QUESTIONS.md) — genuine judgment calls are now **Q98–Q108** (Pump/water source,
+Barricade HP, inert Coprocessor/Backup Core, overlay layering, phase-4 inner order, creep,
+QueuePrint loadout, labor/tool-gating consistency, the Data Exchange, alliance decryption
+merge, Feral archetype sources); first-pass **numbers** joined the playtest-tuning bucket
+there; markers answered by later rulings (Q88/Q89/Q90, M13's Non-PvP gate, the 2026-07-16b
+hash coverage, Blueprint.faction) are historical. The markers stay in place below as landing
+records — QUESTIONS.md is the live registry.
+
 ---
 
 ## M0 — Test & data groundwork ✅ COMPLETE (2026-07-15)
@@ -118,7 +127,9 @@ full charges + centicycles + wrap-surviving variables move every replay hash at 
       `tile_occupied`, the bump blocker lookup, and both replan obstacle sets read the index
       (`occupied_tiles`). [sim] (S)
 
-*Audit follow-ups (2026-07-15 M1–M4 verification), NEEDS DISCUSSION:*
+*Audit follow-ups (2026-07-15 M1–M4 verification) — swept 2026-07-26: the first two are now
+**Q102**; the hash-shallowness was fixed by the 2026-07-16b review (`hash_bot_data` covers
+all in-flight state):*
 - *Phase-4 sub-order*: docs/07 says "resolve actions (move → combat → mine/build)"; the code
   resolves PER BOT in id order (deterministic, but a lower-id attacker range-checks a
   higher-id mover pre-move while the reverse pairing sees post-move). Reconcile doc or code.
