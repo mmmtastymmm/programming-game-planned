@@ -150,6 +150,7 @@ impl Default for Stats {
             .expect("data/stats.ron parses (unknown fields are errors)");
         assert!(stats.hp > 0, "stats: hp must be > 0");
         assert!(stats.cpu_centi > 0, "stats: cpu_centi must be > 0");
+
         assert!(stats.move_rate_deci > 0, "stats: move_rate_deci must be > 0");
         assert!(stats.damaged_penalty_pct < 100 && stats.brownout_penalty_pct < 100,
             "stats: penalties must leave something");
@@ -169,6 +170,32 @@ impl Default for Stats {
 }
 
 impl Stats {
+    /// Q105-R1: a tier's own grant must DOMINATE the level bonus its
+    /// purchase resets, or buying an upgrade would leave a maxed bot
+    /// WORSE at the very stat it paid for — a Scouting-L5 scout that buys
+    /// Optics tier 2 must not end up seeing less than before. The
+    /// tier/level split gives Mining a distinct *reach* (resource tiers),
+    /// but Optics, Combat and Building all grant the same stat their
+    /// level does, so this is a real trap rather than a theoretical one.
+    /// Checked at load because both sides are data.
+    pub fn validate_against_xp(&self, xp: &crate::xp::XpConfig) {
+        let cap = xp.level_cap as u64;
+        assert!(
+            self.tier_sensors as u64 >= cap * xp.scouting_sensors_per_level as u64,
+            "stats: Optics tier grant ({}) must clear the Scouting L{cap} bonus ({}) — Q105-R1",
+            self.tier_sensors,
+            cap * xp.scouting_sensors_per_level as u64,
+        );
+        assert!(
+            self.tier_damage_pct as u64 >= cap * xp.combat_damage_pct as u64,
+            "stats: Combat tier grant must clear the Combat L{cap} bonus — Q105-R1",
+        );
+        assert!(
+            self.tier_build_pct as u64 >= cap * xp.building_speed_pct as u64,
+            "stats: Building tier grant must clear the Building L{cap} bonus — Q105-R1",
+        );
+    }
+
     pub fn upgrade(&self, name: &str) -> Option<(u8, &UpgradeSpec)> {
         self.upgrades.iter().enumerate().find(|(_, u)| u.name == name).map(|(i, u)| (i as u8, u))
     }
@@ -330,9 +357,15 @@ impl StatCtx<'_> {
     /// Attack damage: base (tuning) → XP (Combat +5%/level) → quirks
     /// (DamagePct), gains floor.
     pub fn attack_damage_for(&self, data: &BotData, base: i64) -> i64 {
+        // Q105: the bought Combat TIER and the earned Combat LEVEL both
+        // raise damage. Q105-R1 keeps the tier's grant above the L5 bonus
+        // it resets, so arming up is never a net downgrade. (Base weapon
+        // damage now comes from Combat tier 1 — weapon modules died with
+        // the generic slots.)
+        let tiers = (data.tier(crate::world::Capability::Combat) as u32).saturating_sub(1);
         let mut pct = 100i64
-            + (self.level(data, crate::world::XpTrack::Combat) * self.xp.combat_damage_pct)
-                as i64;
+            + (self.level(data, crate::world::XpTrack::Combat) * self.xp.combat_damage_pct) as i64
+            + (tiers * self.stats.tier_damage_pct) as i64;
         for effect in self.quirks.effects_of(data) {
             if let crate::quirks::QuirkEffect::DamagePct(p) = effect {
                 pct += p as i64;
@@ -343,8 +376,10 @@ impl StatCtx<'_> {
 
     /// Build rate in deci-progress per tick: Building +10%/level.
     pub fn build_rate_for(&self, data: &BotData) -> u32 {
+        let tiers = (data.tier(crate::world::Capability::Building) as u32).saturating_sub(1);
         let pct = 100
-            + self.level(data, crate::world::XpTrack::Building) * self.xp.building_speed_pct;
+            + self.level(data, crate::world::XpTrack::Building) * self.xp.building_speed_pct
+            + tiers * self.stats.tier_build_pct;
         ((crate::resources::DECI as u64 * pct as u64) / 100).max(1) as u32
     }
 
@@ -449,7 +484,14 @@ pub fn cpu_centi(
             v = c as i64;
         }
     }
-    // XP: no track grows raw cycles (compute is bought, docs/02).
+    // Q100: the Processor capability. The bought TIER adds cycles and
+    // the earned Processing LEVEL adds more — compute is the one stat
+    // that used to be purely bought, and now sharpens with use too.
+    let ptier = (data.tier(crate::world::Capability::Processor) as u64).saturating_sub(1);
+    v += (ptier * ctx.stats.tier_cpu_centi) as i64;
+    v += (ctx.capability_level(data, crate::world::Capability::Processor) as u64
+        * ctx.stats.tier_cpu_centi
+        / 2) as i64;
     // quirks: flat centicycle deltas (Overclocked, `unsafe` Block…), and
     // Energy Star softens the brownout percent below.
     let mut brownout_pct = ctx.stats.brownout_penalty_pct;

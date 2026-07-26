@@ -1062,6 +1062,11 @@ impl Sim {
         if spec.settings.ferals {
             sim.build_nests(spec);
         }
+        // Cross-file data invariants (both sides are data, so they are
+        // checked once at load and fail loudly): Q105-R1 requires a
+        // capability tier's grant to dominate the levels its purchase
+        // resets, or buying an upgrade could make a maxed bot worse.
+        sim.stats.validate_against_xp(&sim.xp);
         // Phase-0 perception seed (docs/07, round 4): tick 1's queries have
         // a "previous tick" to read, so the pre-deployed starter program
         // works from its first operation. A stub until M7, like phase 5.

@@ -162,11 +162,22 @@ impl Sim {
                 }
             }
             ActionRequest::Mine => {
+                // Q105 makes docs/03's tier ladder real at last: a bot
+                // works a node only if its bought MINING TIER reaches the
+                // resource's tier (Wood/Stone/Sand 0, Iron/Coal 1,
+                // Copper/Tin 2, Silver/Gold 3, Crystal 4). Base tier 1
+                // covers the whole start zone, so the opening never
+                // stalls; Copper needs the first upgrade, which is also
+                // where mapgen's midfield band begins.
+                let mining = self.world.bots[&id].data.tier(crate::world::Capability::Mining);
+                let reachable = |n: &crate::world::ResourceNode| {
+                    n.kind.tool_tier().is_none_or(|t| t <= mining)
+                };
                 let node = self
                     .world
                     .nodes
                     .iter()
-                    .filter(|(_, n)| n.amount > 0 && pos.chebyshev(n.pos) <= 1)
+                    .filter(|(_, n)| n.amount > 0 && pos.chebyshev(n.pos) <= 1 && reachable(n))
                     .map(|(nid, _)| *nid)
                     .next();
                 match node {
@@ -179,7 +190,10 @@ impl Sim {
                         let bot = self.world.bot_mut(id);
                         bot.data.action = Some(Action::Mine { node, ticks_left });
                     }
-                    None => self.finish_action(id, Err("mine: no ore in range".into())),
+                    None => self.finish_action(
+                        id,
+                        Err("mine: no workable ore in range (check the Mining tier)".into()),
+                    ),
                 }
             }
             ActionRequest::Attack(target) => {

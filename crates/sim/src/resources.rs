@@ -95,8 +95,10 @@ impl Resource {
         (self as usize) <= (Resource::Crystal as usize)
     }
 
-    /// Harvest tool tier (docs/03; enforcement lands with M5's tool
-    /// modules — recorded now so the data is in place).
+    /// Harvest tier (docs/03's ladder: "chop, dig, electrify, get rich,
+    /// get brave"). ENFORCED since M16 — `mine()` works a node only if
+    /// the bot's Mining capability tier reaches this (Q105). `None` means
+    /// the resource is not mined at all (Water is pumped).
     pub fn tool_tier(self) -> Option<u8> {
         match self {
             Resource::Wood | Resource::Stone | Resource::Sand => Some(0),

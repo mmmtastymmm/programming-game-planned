@@ -464,6 +464,11 @@ fn crystal_field_mines_and_the_chips_recipe_runs() {
         TilePos::new(1, 2),
         "move_to(closest(crystal).expect())\nmine()\nmine()\nmine()\nwait(100000)\n",
     );
+    // Crystal is tier 4 — "get brave", the top of docs/03's ladder — so
+    // this bot needs the drill for it (Q105). The economy under test is
+    // the Crystal→Chips loop, not the tier gate (covered separately).
+    sim.world.bots.get_mut(&miner).unwrap().data.tiers
+        [sim::world::Capability::Mining.idx()] = 4;
     for _ in 0..200 {
         sim.step();
     }
@@ -502,4 +507,38 @@ fn crystal_field_mines_and_the_chips_recipe_runs() {
     }
     let chips = sim.world.bots[&miner].data.cargo.get(&Resource::Chips).copied().unwrap_or(0);
     assert!(chips > 0, "the chips recipe produced withdrawable Chips (got {chips} deci)");
+}
+
+/// Q105: the Mining capability TIER is what makes docs/03's ladder real —
+/// "chop, dig, electrify, get rich, get brave". Base tier 1 works the
+/// whole start zone (Wood/Stone/Sand at tier 0, Iron/Coal at 1), and
+/// Copper at tier 2 is the first thing a colony must buy its way into —
+/// which is also where mapgen's midfield band begins.
+#[test]
+fn mining_tier_gates_which_veins_a_bot_can_work() {
+    use sim::world::Capability;
+    let mut spec = MapSpec::empty(8, 5);
+    spec.resource_tiles.push((TilePos::new(3, 2), sim::map::TileKind::CopperVein));
+    let mut sim = Sim::new(&spec);
+    let bot = spawn(&mut sim, TilePos::new(2, 2), "mine()\nwait(200)\n");
+    assert_eq!(sim.world.bots[&bot].data.tier(Capability::Mining), 1, "base tier");
+
+    for _ in 0..40 {
+        sim.step();
+    }
+    assert_eq!(
+        sim.world.bots[&bot].data.cargo_total(),
+        0,
+        "a tier-1 drill cannot bite Copper (tier 2)"
+    );
+
+    // Buy the tier: the same vein is now workable.
+    sim.world.bots.get_mut(&bot).unwrap().data.tiers[Capability::Mining.idx()] = 2;
+    for _ in 0..60 {
+        sim.step();
+    }
+    assert!(
+        sim.world.bots[&bot].data.cargo_total() > 0,
+        "tier 2 opens Copper — the ladder is the arc of the colony"
+    );
 }
