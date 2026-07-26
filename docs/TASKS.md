@@ -1045,6 +1045,31 @@ slots. Milestone-sized; ⚠HASH throughout.
       serviced by `build()` (the Q97 paint flow generalizes); every structure incl. Q98's Pump.
       Nest claim/raze likewise want a bot on site (docs/04). [sim][game]
 
+## M17 — The overlay pipeline (Q101) — NOT STARTED
+
+One flat `cost_overlay_centi` is the whole system today, so docs/05's overlay table and five
+written-up quirks are unbuildable. ⚠HASH.
+
+- [ ] **Rules, not a flat surcharge** — a `CostOverlay` = one rule per key (delta and/or
+      multiplier) over `CostTable`'s named op classes + builtin names; `Vm::charged` resolves
+      `floor₁(region(tile(base + Σ per-bot deltas)))`. Per-bot deltas FIRST — terrain amplifies
+      quirks by design. Specific row beats general within a layer. [pyrite][sim]
+- [ ] **Per-bot overlays** — unblocks the five queued quirks (Tail-Call Optimized, Kernel
+      Bypass, Dial-Up, Telemetry Enabled, Eventual Consistency) and Q75's perk slot (Scouting
+      L3's Corruption exemption becomes an ordinary per-bot rule). [sim]
+- [ ] **Regions** — `MapSpec` gains region definitions + a per-tile region index (parallel to
+      the terrain grid: deterministic, O(1), hashed with the map, never per tick). Authored
+      biomes (Static Wastes, Loop Desert, Overclock Field) and **boss biomes** live here.
+      Corruption's tax stays TILE-based — a region-scoped tax would vanish with its Blight
+      Core and make Cleanse pointless. [sim]
+- [ ] **Forced charges become taxable** — drop M8's exemption; debt (Q75) makes it safe, and
+      Overclock Field's ×2 crash dump needs it. [pyrite]
+- [ ] **`bank_cap` → flat ceiling (~100 cycles) + load-time validation** that no overlay pushes
+      a non-forced op above it; delete the per-tile derivation and the overlay-margin term in
+      `grant_centi`. [pyrite][sim]
+- [ ] **Editor shows EFFECTIVE per-line costs** for the selected bot's tile (docs/05 promises
+      it; `analysis::line_costs` paints base costs today). [game]
+
 ## Verb-layer index (every spec'd builtin → its milestone)
 
 | Verb | Milestone | | Verb | Milestone |

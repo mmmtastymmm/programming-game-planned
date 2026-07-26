@@ -39,7 +39,13 @@ The Pyrite cycle-cost table is data with **per-biome overlays** ([01-language.md
 | Loop Desert | loop iteration ×3 | punishes iteration-heavy code, rewards unrolled/flat code |
 | Overclock Field | all ops −1 (min 1), crash-dump cost ×2 | rewards bold code, makes bugs expensive |
 
-Map authors pick overlays per biome; the editor shows *effective* per-line costs for the tile the selected bot stands on. Overlays may raise costs freely — `bank_cap` derives per bot per tile from the max effective op cost (Q75/Q82), so no overlay or quirk can strand a saving-up bot — and no overlay or quirk can push an op below **1 cycle** (the global floor). An overlay defines **one effective value per key** (rows like "all ops −1" are shorthand for the generated table — no stacking ambiguity: Overclock's crash dump is exactly 50).
+Overlays live on **authored regions** (Q101, 2026-07-26) — arbitrary areas the map defines, not tile kinds — which is what lets a biome have any shape and makes regions the natural home for **boss biomes**: a punishing zone around a boss, unrelated to the ground beneath it. Corruption is the exception that proves the rule: its tax stays **tile-based**, because the creep spreads tile by tile and killing a Blight Core must leave taxed ground behind (a region-scoped tax would die with the core and strip Cleanse of its purpose). The editor shows *effective* per-line costs for the tile the selected bot stands on.
+
+Effective cost resolves in **three layers**, machine outward:
+
+    floor₁( region_rule( tile_rule( base + Σ per-bot deltas ) ) )
+
+Per-bot deltas (quirks, perks) apply **first, so terrain amplifies them**: Dial-Up (`send` +1) inside Static Wastes (`send` ×3) pays `(3+1)×3 = 12`, not `9+1`. A loud radio is *worse* in a jamming field — quirks get more dramatic under hostile ground rather than merely additive. **Each layer defines one RULE per key** (a specific row beats a general one — Overclock's crash-dump row wins over its all-ops row), so stacking is never ambiguous; only the bot standing there varies the result. No overlay or quirk can push an op below **1 cycle** (the global floor), and **forced charges are taxable** (Overclock's doubled crash dump works as written): they are charged as debt, so no overlay can strand a bot by making dying expensive. `bank_cap` is a flat generous ceiling validated at load — no overlay may push a non-forced op above it — which keeps Q75/Q82's "freeze-forever is impossible" guarantee as a checked invariant instead of per-tick arithmetic.
 
 ## Terraforming (build & deconstruct)
 
