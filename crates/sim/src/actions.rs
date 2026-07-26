@@ -626,21 +626,21 @@ impl Sim {
                     self.finish_action(id, Err("attack: harm disabled on this server".into()));
                     return;
                 }
-                if let Some(st) = self.world.structures.get_mut(&target) {
+                // Every attackable mass QUEUES its hit for the phase-6
+                // settle (Q102) — hp changes, XP crediting, and
+                // destruction all belong to the damage phase, so two
+                // swings landing on one target in the same tick resolve
+                // by rule instead of by entity id.
+                if let Some(st) = self.world.structures.get(&target) {
                     if pos.chebyshev(st.pos) > 1 {
                         self.finish_action(id, Err("attack: target out of range".into()));
                         return;
                     }
-                    // Combat XP pays for damage DEALT, clamped to the hp
-                    // actually removed (review 2026-07-17: an over-kill
-                    // swing must not over-credit — matches the nest rule).
-                    let dealt = damage.max(0).min(st.hp);
-                    st.hp -= dealt;
-                    let felled = st.hp == 0;
-                    if felled {
-                        self.world.structures.remove(&target);
-                    }
-                    self.world.pending_xp.push((id, XpTrack::Combat, dealt as u64));
+                    self.queue_damage_to(
+                        crate::world::DamageTarget::Structure(target),
+                        damage,
+                        Some((id, attacker)),
+                    );
                     self.finish_action(id, Ok(Value::Unit));
                     return;
                 }
@@ -653,50 +653,32 @@ impl Sim {
                         self.finish_action(id, Err("attack: target out of range".into()));
                         return;
                     }
-                    let nest = self.world.nests.get_mut(&target).expect("checked");
-                    // XP pays for damage DEALT: a Defeated site sits at 0
-                    // hp forever, so swinging at it must mint nothing
-                    // (review 2026-07-16: the unconditional grant was an
-                    // unbounded Combat XP farm).
-                    let dealt = damage.max(0).min(nest.hp);
-                    nest.hp -= dealt;
-                    let mut lost_owner = None;
-                    if nest.hp == 0 && nest.state != crate::world::NestState::Defeated {
-                        // A claimed nest beaten down is a lost nest (Q87): its
-                        // former owner's bound printer must go Dormant, same as
-                        // a Feral reclaim — not just Feral reclaims.
-                        if let crate::world::NestState::Claimed(owner) = nest.state {
-                            lost_owner = Some(owner);
-                        }
-                        nest.state = crate::world::NestState::Defeated;
-                        nest.job = None;
-                    }
-                    if dealt > 0 {
-                        self.world.pending_xp.push((id, XpTrack::Combat, dealt as u64));
-                    }
-                    if let Some(owner) = lost_owner {
-                        self.reconcile_dormancy(owner);
-                    }
+                    // XP pays for damage DEALT and the Defeated
+                    // transition (with Q87's dormancy reconcile) lands in
+                    // the settle: a Defeated site sits at 0 hp forever, so
+                    // swinging at it mints nothing (review 2026-07-16 —
+                    // the unconditional grant was an unbounded XP farm).
+                    self.queue_damage_to(
+                        crate::world::DamageTarget::Nest(target),
+                        damage,
+                        Some((id, attacker)),
+                    );
                     self.finish_action(id, Ok(Value::Unit));
                     return;
                 }
                 // Blight Cores are attackable like structures (M8-C):
                 // direct damage, no signals. Killing one stops the spread;
                 // the creep it made stays until cleansed.
-                if let Some(core) = self.world.blight_cores.get_mut(&target) {
+                if let Some(core) = self.world.blight_cores.get(&target) {
                     if pos.chebyshev(core.pos) > 1 {
                         self.finish_action(id, Err("attack: target out of range".into()));
                         return;
                     }
-                    // XP pays for HP actually removed, clamped like the
-                    // structure/nest/wreck paths — an over-kill swing on a
-                    // low-HP Core must not over-credit Combat XP.
-                    let dealt = damage.max(0).min(core.hp);
-                    core.hp -= dealt;
-                    if core.hp == 0 {
-                        self.world.blight_cores.remove(&target);
-                    }
-                    self.world.pending_xp.push((id, XpTrack::Combat, dealt as u64));
+                    self.queue_damage_to(
+                        crate::world::DamageTarget::Blight(target),
+                        damage,
+                        Some((id, attacker)),
+                    );
                     self.finish_action(id, Ok(Value::Unit));
                     return;
                 }
@@ -709,15 +691,11 @@ impl Sim {
                         self.finish_action(id, Err("attack: target out of range".into()));
                         return;
                     }
-                    let w = self.world.wrecks.get_mut(&wreck).expect("checked");
-                    // XP for damage DEALT, clamped to the hull removed.
-                    let dealt = damage.max(0).min(w.hp);
-                    w.hp -= dealt;
-                    let felled = w.hp == 0;
-                    if felled {
-                        self.destroy_wreck(wreck, "destroyed by attack");
-                    }
-                    self.world.pending_xp.push((id, XpTrack::Combat, dealt as u64));
+                    self.queue_damage_to(
+                        crate::world::DamageTarget::Wreck(wreck),
+                        damage,
+                        Some((id, attacker)),
+                    );
                     self.finish_action(id, Ok(Value::Unit));
                     return;
                 }

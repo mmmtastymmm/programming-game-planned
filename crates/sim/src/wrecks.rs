@@ -29,7 +29,6 @@ impl Sim {
                 exploding.insert(id);
             }
         }
-        let mut destroyed_by_blast: BTreeSet<BotId> = BTreeSet::new();
         for id in &exploding {
             let (pos, max_hp) = {
                 let w = &self.world.wrecks[id];
@@ -48,8 +47,9 @@ impl Sim {
             for v in victims {
                 self.queue_damage(v, damage, None);
             }
-            // Structures fall inline (their damage stays inline pre-M10 —
-            // the TASKS.md phase-4 divergence note covers this too).
+            // Structures ride the same queue as bots (Q102): the blast is
+            // damage, and damage is a phase — `tick_wrecks` runs just
+            // before the settle, so these land this very tick.
             let st_ids: Vec<EntityId> = self
                 .world
                 .structures
@@ -58,13 +58,11 @@ impl Sim {
                 .map(|(sid, _)| *sid)
                 .collect();
             for sid in st_ids {
-                let st = self.world.structures.get_mut(&sid).expect("collected");
-                st.hp = (st.hp - damage).max(0);
-                if st.hp == 0 {
-                    self.world.structures.remove(&sid);
-                }
+                self.queue_damage_to(crate::world::DamageTarget::Structure(sid), damage, None);
             }
             // Other wrecks: hull damage only — never a chain detonation.
+            // Untagged (no culprit), which is also what tells the settle
+            // to file the black box under "caught in a blast".
             let hit: Vec<BotId> = self
                 .world
                 .wrecks
@@ -75,18 +73,11 @@ impl Sim {
                 .map(|(wid, _)| *wid)
                 .collect();
             for h in hit {
-                let w = self.world.wrecks.get_mut(&h).expect("collected");
-                w.hp = (w.hp - damage).max(0);
-                if w.hp == 0 {
-                    destroyed_by_blast.insert(h);
-                }
+                self.queue_damage_to(crate::world::DamageTarget::Wreck(h), damage, None);
             }
         }
         for id in exploding {
             self.destroy_wreck(id, "self-destruct countdown expired");
-        }
-        for id in destroyed_by_blast {
-            self.destroy_wreck(id, "caught in a blast (no chain — destroyed, not detonated)");
         }
     }
 

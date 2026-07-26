@@ -136,10 +136,13 @@ state):*
   phase entry so no bot acts twice). Combat now sees a settled world — a measured artifact
   (same fight, 90 hp attacker-first vs 100 hp victim-first) is gone, guarded by
   `combat_outcome_does_not_depend_on_spawn_order`. ⚠HASH, golden regenerated.
-- *Structure damage is still inline in phase 4* (`actions.rs` attack arm): only bot damage
-  rides `pending_damage` to phase 6. Deterministic, but contradicts "damage is a phase" —
-  now tracked as **Q102's second half** (the three-pass split removed the mid-phase-movement
-  symptom; simultaneous-kill credit by id remains). Q99's barricades inherit this path.
+- [x] *Structure damage inline in phase 4* — **done 2026-07-26 (Q102, second half)**:
+  `PendingDamage` carries a `DamageTarget` (bot / structure / nest / blight / wreck), so one
+  phase-6 settle owns every hp change, XP credit, and destruction (deferred to the end of the
+  drain). Two blows on one mass in a tick no longer fault the higher-id attacker — measured
+  before the fix (1 fault + 5-hp chip), guarded by
+  `a_felled_structure_does_not_punish_the_other_attacker`, verified against the old code.
+  Golden unchanged (the fixture exercises none of the touched paths).
 - *Phase-9 hash is shallow on in-flight state*: `bot.data.requested`, `bot.data.action`
   (path/ticks/goals) and the recall path aren't hashed — a peer divergence there stays
   invisible until a position changes. (Shallow VM hashing is already a known TODO.)
@@ -985,8 +988,8 @@ out-of-range quirk to trigger it (guarded by the setenv-range test exercising th
       Demolish path, ground stack stays cleared); built by the existing Barricade blueprint;
       a `barricade` kind constant joins `KINDS` + `find_kind` (perception-gated like
       structures, unlike `blight`); `attack()`'s victim lookup and the damage settle learn
-      the new registry — route the damage through `pending_damage`/phase 6 rather than
-      inline (see Q102). First-pass HP scaled to the 20-Stone price, in tuning.
+      the new registry — add a `DamageTarget::Barricade` variant (Q102's second half landed
+      the enum, so the path already exists). First-pass HP scaled to the 20-Stone price.
       [sim][game] ⚠HASH
 
 ## Verb-layer index (every spec'd builtin → its milestone)

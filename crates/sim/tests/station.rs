@@ -4,7 +4,7 @@
 use sim::map::MapSpec;
 use sim::resources::Resource;
 use sim::sim::{Command, Sim};
-use sim::world::{Color, StructureKind};
+use sim::world::{DamageTarget, Color, StructureKind};
 use sim::TilePos;
 
 const STATION_POS: TilePos = TilePos { x: 4, y: 2 };
@@ -133,7 +133,7 @@ fn pad_pull_skips_mid_template_bots() {
     // (Cheap deterministic stand-in: bump_frozen also blocks nothing here —
     // the honest signal is vm phase, so drive damage.)
     sim.world.bots.get_mut(&templated).unwrap().data.hp = 100;
-    sim.world.pending_damage.push((templated, 60, None));
+    sim.world.pending_damage.push((DamageTarget::Bot(templated), 60, None));
     let mut was_pulled_mid_template = false;
     for _ in 0..12 {
         sim.step();

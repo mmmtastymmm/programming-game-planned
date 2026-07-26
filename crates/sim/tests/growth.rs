@@ -4,7 +4,7 @@
 
 use sim::map::MapSpec;
 use sim::sim::{Command, Sim};
-use sim::world::{Color, XpTrack};
+use sim::world::{DamageTarget, Color, XpTrack};
 use sim::TilePos;
 
 fn spawn(sim: &mut Sim, pos: TilePos, source: &str) -> sim::BotId {
@@ -134,7 +134,7 @@ fn flinches_train_only_from_hostile_sources() {
         })
         .unwrap()
         .unwrap();
-    sim.world.pending_damage.push((victim, 60, Some((enemy, 1))));
+    sim.world.pending_damage.push((DamageTarget::Bot(victim), 60, Some((enemy, 1))));
     for _ in 0..30 {
         sim.step();
     }
@@ -145,7 +145,7 @@ fn flinches_train_only_from_hostile_sources() {
     );
     // Self-inflicted (no attacker tag): the flinch happens, no XP.
     let loner = spawn(&mut sim, TilePos::new(5, 1), "wait(600)\n");
-    sim.world.pending_damage.push((loner, 60, None));
+    sim.world.pending_damage.push((DamageTarget::Bot(loner), 60, None));
     for _ in 0..30 {
         sim.step();
     }

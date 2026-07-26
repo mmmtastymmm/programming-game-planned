@@ -1,7 +1,7 @@
 //! Damage, signals, and destruction.
 
 use crate::sim::Sim;
-use crate::world::BotId;
+use crate::world::{BotId, DamageTarget};
 use pyrite::{RaiseOutcome, Signal};
 
 impl Sim {
@@ -23,7 +23,74 @@ impl Sim {
         amount: i64,
         attacker: Option<(BotId, u8)>,
     ) {
-        self.world.pending_damage.push((id, amount, attacker));
+        self.queue_damage_to(DamageTarget::Bot(id), amount, attacker);
+    }
+
+    /// Queue a hit on any attackable mass (Q102): structures, nests,
+    /// Blight Cores, and wreck hulls settle in phase 6 alongside bots
+    /// instead of losing hp inline wherever the blow was struck.
+    pub(crate) fn queue_damage_to(
+        &mut self,
+        target: DamageTarget,
+        amount: i64,
+        attacker: Option<(BotId, u8)>,
+    ) {
+        self.world.pending_damage.push((target, amount, attacker));
+    }
+
+    /// Credit Combat XP for hp ACTUALLY removed (docs/02: 1 XP per 10
+    /// damage — deci-XP, so 1 per hp). Shared by every target kind, so an
+    /// overkill blow or a same-tick gank can never out-credit the hp the
+    /// target could absorb.
+    fn credit_combat_xp(&mut self, attacker: Option<(BotId, u8)>, dealt: i64) {
+        if let Some((attacker_bot, _)) = attacker
+            && dealt > 0
+        {
+            self.world.pending_xp.push((
+                attacker_bot,
+                crate::world::XpTrack::Combat,
+                dealt as u64,
+            ));
+        }
+    }
+
+    /// Phase 6a for a non-bot target: subtract the clamped hit, credit
+    /// its XP, and report whether this blow was the one that finished the
+    /// mass off (so destruction runs once, after the whole queue drains —
+    /// mirroring bots, whose `dying` flag is set at dispatch).
+    fn settle_mass_damage(
+        &mut self,
+        target: DamageTarget,
+        amount: i64,
+        attacker: Option<(BotId, u8)>,
+    ) -> bool {
+        let hp = match target {
+            DamageTarget::Bot(_) => return false,
+            DamageTarget::Structure(e) => self.world.structures.get(&e).map(|s| s.hp),
+            DamageTarget::Nest(e) => self.world.nests.get(&e).map(|n| n.hp),
+            DamageTarget::Blight(e) => self.world.blight_cores.get(&e).map(|c| c.hp),
+            DamageTarget::Wreck(w) => self.world.wrecks.get(&w).map(|w| w.hp),
+        };
+        // Already gone (destroyed earlier in this very drain, or removed
+        // by another system this tick): the blow lands on nothing.
+        let Some(hp) = hp else { return false };
+        let dealt = amount.max(0).min(hp);
+        let now = hp - dealt;
+        match target {
+            DamageTarget::Bot(_) => unreachable!("bots settle on their own path"),
+            DamageTarget::Structure(e) => {
+                self.world.structures.get_mut(&e).expect("checked").hp = now;
+            }
+            DamageTarget::Nest(e) => self.world.nests.get_mut(&e).expect("checked").hp = now,
+            DamageTarget::Blight(e) => {
+                self.world.blight_cores.get_mut(&e).expect("checked").hp = now;
+            }
+            DamageTarget::Wreck(w) => self.world.wrecks.get_mut(&w).expect("checked").hp = now,
+        }
+        self.credit_combat_xp(attacker, dealt);
+        // Only the transition to 0 finishes it — a second same-tick blow
+        // on an already-emptied mass deals nothing and finishes nothing.
+        hp > 0 && now == 0
     }
 
     /// Phase 6a: drain the damage queue in arrival order (phases queue in
@@ -32,7 +99,21 @@ impl Sim {
     /// dispatch resolves co-arrivals by severity (Q81).
     pub(crate) fn settle_damage(&mut self) {
         let events = std::mem::take(&mut self.world.pending_damage);
-        for (id, amount, attacker) in events {
+        // Non-bot masses that this drain emptied. Destruction is deferred
+        // to the end so every event in the tick resolves against the same
+        // world — the same discipline bots get, where hp hits 0 here but
+        // `dying` (and the wreck) land at dispatch.
+        let mut finished: Vec<(DamageTarget, Option<(BotId, u8)>)> = Vec::new();
+        for (target, amount, attacker) in events {
+            let id = match target {
+                DamageTarget::Bot(id) => id,
+                mass => {
+                    if self.settle_mass_damage(mass, amount, attacker) {
+                        finished.push((mass, attacker));
+                    }
+                    continue;
+                }
+            };
             let Some(bot) = self.world.bots.get_mut(&id) else { continue };
             if bot.data.dying {
                 continue; // effectively a wreck already
@@ -105,6 +186,50 @@ impl Sim {
             if !bot.data.hurt_fired && hp * 100 < max_hp * line {
                 self.world.bots.get_mut(&id).expect("checked").data.hurt_fired = true;
                 self.world.pending_signals.push((id, Signal::Hurt, source));
+            }
+        }
+        // Destruction, once per emptied mass, after the whole drain.
+        for (target, attacker) in finished {
+            match target {
+                DamageTarget::Bot(_) => {}
+                DamageTarget::Structure(e) => {
+                    self.world.structures.remove(&e);
+                }
+                DamageTarget::Blight(e) => {
+                    // Killing a Core stops the spread; the creep it made
+                    // stays until cleansed (docs/05).
+                    self.world.blight_cores.remove(&e);
+                }
+                DamageTarget::Wreck(w) => {
+                    // Attack vs. blast keeps its own black-box cause: only
+                    // blasts arrive untagged (docs/02 — no chain: a
+                    // blast-hit wreck is destroyed, never detonated).
+                    let cause = if attacker.is_some() {
+                        "destroyed by attack"
+                    } else {
+                        "caught in a blast (no chain — destroyed, not detonated)"
+                    };
+                    self.destroy_wreck(w, cause);
+                }
+                DamageTarget::Nest(e) => {
+                    // A beaten nest is never removed: it goes DEFEATED,
+                    // awaiting the raze-or-claim choice (docs/04). A
+                    // CLAIMED nest lost this way dormant-izes its bound
+                    // printer, exactly like a Feral reclaim (Q87).
+                    let mut lost_owner = None;
+                    if let Some(nest) = self.world.nests.get_mut(&e)
+                        && nest.state != crate::world::NestState::Defeated
+                    {
+                        if let crate::world::NestState::Claimed(owner) = nest.state {
+                            lost_owner = Some(owner);
+                        }
+                        nest.state = crate::world::NestState::Defeated;
+                        nest.job = None;
+                    }
+                    if let Some(owner) = lost_owner {
+                        self.reconcile_dormancy(owner);
+                    }
+                }
             }
         }
     }

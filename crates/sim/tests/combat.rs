@@ -389,3 +389,57 @@ fn simultaneous_gank_credits_one_kill_bonus() {
     // And the first-kill Data lands once for the shared faction.
     assert!(sim.world.first_kill_done.contains(&1), "first kill recorded for faction 1");
 }
+
+/// Q102 (second half): every attackable mass settles its damage in
+/// phase 6, like bots — not inline wherever the blow was struck.
+///
+/// Two bots swing at a 1-hp enemy structure in the same tick. Under the
+/// old inline path the lower-id bot felled it and REMOVED it mid-phase,
+/// so the higher-id bot's swing found nothing and took a fault: a crash
+/// dump, an error-template entry, and a chassis chip (measured: 1 fault,
+/// 95 hp) for a swing that was legal when it committed. Two bots ganking
+/// a *bot* never suffered that, because bot damage already queued.
+#[test]
+fn a_felled_structure_does_not_punish_the_other_attacker() {
+    use sim::world::{Structure, StructureKind, XpTrack};
+    use std::collections::BTreeMap;
+
+    let mut sim = Sim::new(&MapSpec::empty(10, 5));
+    let site = TilePos::new(4, 2);
+    let eid = sim.world.alloc_entity();
+    sim.world.structures.insert(
+        eid,
+        Structure {
+            kind: StructureKind::Smelter,
+            faction: 1,
+            pos: site,
+            hp: 1, // one swing fells it
+            max_hp: 40,
+            input: BTreeMap::new(),
+            output: BTreeMap::new(),
+            recipe: None,
+            batch: None,
+            pad: None,
+        },
+    );
+    let hunt = "attack(closest(smelter).expect())\nwait(500)\n";
+    let a = spawn(&mut sim, TilePos::new(3, 2), hunt, 0, 100);
+    let b = spawn(&mut sim, TilePos::new(5, 2), hunt, 0, 100);
+    for _ in 0..6 {
+        sim.step();
+    }
+    assert!(sim.world.structures.is_empty(), "the smelter still falls");
+    for (name, id) in [("first swinger", a), ("second swinger", b)] {
+        let bot = &sim.world.bots[&id];
+        assert_eq!(
+            bot.vm.as_ref().map(|v| v.fault_count()),
+            Some(0),
+            "{name} must not fault: the target was alive when the swing committed"
+        );
+        assert_eq!(bot.data.hp, 100, "{name} must not take a fault chip");
+    }
+    // XP is still paid for hp ACTUALLY removed — exactly one bot's worth
+    // of the single hp that existed, never doubled.
+    let credited: u64 = [a, b].iter().map(|id| sim.world.bots[id].data.xp(XpTrack::Combat)).sum();
+    assert_eq!(credited, 1, "one hp removed pays exactly one deci-XP, once");
+}

@@ -1087,9 +1087,25 @@ pub struct ArchiveEntry {
     pub text: String,
 }
 
+/// What a queued hit lands on (Q102). Damage is a PHASE, not an inline
+/// side effect of whichever system landed the blow (docs/07) — that has
+/// to hold for every attackable mass, not just bots, or the things that
+/// aren't bots resolve simultaneous hits by entity id instead of by rule.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum DamageTarget {
+    Bot(BotId),
+    Structure(EntityId),
+    /// A Feral nest: 0 hp makes it Defeated, it is never removed.
+    Nest(EntityId),
+    Blight(EntityId),
+    /// A wreck hull: 0 hp destroys it (black box, never a chain blast).
+    Wreck(BotId),
+}
+
 /// One queued hit: `(victim, amount, attacker)`, where the attacker is
-/// `(bot, faction)` and absent for engine damage with no culprit.
-pub type PendingDamage = (BotId, i64, Option<(BotId, u8)>);
+/// `(bot, faction)` and absent for engine damage with no culprit (a
+/// blast, a fault chip, rust).
+pub type PendingDamage = (DamageTarget, i64, Option<(BotId, u8)>);
 
 #[derive(Debug)]
 pub struct World {
