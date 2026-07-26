@@ -963,6 +963,27 @@ out-of-range quirk to trigger it (guarded by the setenv-range test exercising th
       `recompute_fog` now just reads both — the view-side eye mirror is gone.
       *(Done 2026-07-26; `seen_tiles_are_durable_sim_state` guards it.)* [sim+game] ⚠HASH
 
+## Decided-but-unbuilt (design ruled, implementation pending)
+
+- [ ] **The Pump** (Q98, 2026-07-26) — the water source the Upgrade Station's coolant needs.
+      Two tiles: intake in any Water tile + pump house on orthogonally adjacent walkable
+      ground. `Structure` gains an optional second tile (`intake: Option<TilePos>`), NOT a
+      general footprint system; `structure_at`/A*-blocked sets/spawn guards cover both tiles;
+      `PlaceStructure` validates the (walkable house, water intake, orthogonal) triple and
+      takes an intake side; extraction ticks Water into the house's output buffer (rate + cap
+      in `upkeep.ron`/`tuning.ron`); adjacency to either tile counts for damage; the house
+      carries the one seeing circle and the entity position. Game: two meshes.
+      [sim][game] ⚠HASH
+- [ ] **Barricade HP** (Q99, 2026-07-26) — walls become targets. Blight-Core-shaped:
+      `world.barricades: BTreeMap<EntityId, Barricade { pos, hp }>` (hashed), tile stays
+      `TileKind::Barricade` for passability/LoS, 0 HP reverts the tile to Plains (the
+      Demolish path, ground stack stays cleared); built by the existing Barricade blueprint;
+      a `barricade` kind constant joins `KINDS` + `find_kind` (perception-gated like
+      structures, unlike `blight`); `attack()`'s victim lookup and the damage settle learn
+      the new registry — route the damage through `pending_damage`/phase 6 rather than
+      inline (see Q102). First-pass HP scaled to the 20-Stone price, in tuning.
+      [sim][game] ⚠HASH
+
 ## Verb-layer index (every spec'd builtin → its milestone)
 
 | Verb | Milestone | | Verb | Milestone |
