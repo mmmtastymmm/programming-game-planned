@@ -301,7 +301,7 @@ pub(crate) fn tile_top_xyz(world: &sim::World, pos: TilePos, y: f32) -> Vec3 {
 /// One entity of the terrain slab layer — despawned wholesale and
 /// rebuilt by [`resync_terrain`] when the map changes (M8).
 #[derive(Component)]
-pub(crate) struct TerrainTile(i32, i32);
+pub(crate) struct TerrainTile(pub(crate) i32, pub(crate) i32);
 
 /// Spawn the full terrain slab layer (base slabs + edge/corner overlay
 /// art). Called at startup and again on every terrain change.
@@ -636,7 +636,9 @@ pub(crate) fn resync_terrain(
     mut commands: Commands,
     game: NonSend<GameSim>,
     palette: Res<Palette>,
+    fog: Res<crate::fog::FogState>,
     mut last: Local<Option<(u64, sim::map::Grid)>>,
+    mut pending: Local<std::collections::HashSet<(i32, i32)>>,
     tiles: Query<(Entity, &TerrainTile)>,
 ) {
     let world = &game.0.world;
@@ -646,32 +648,51 @@ pub(crate) fn resync_terrain(
         *last = Some((hash, world.grid.clone()));
         return;
     };
-    if *last_hash == hash {
-        return;
-    }
-    *last_hash = hash;
-
-    // Changed tiles, dilated one step (masks look at neighbors).
     let mut rebuild: std::collections::HashSet<(i32, i32)> = std::collections::HashSet::new();
-    for y in 0..world.grid.height {
-        for x in 0..world.grid.width {
-            let pos = TilePos::new(x, y);
-            if prev.get(pos) == world.grid.get(pos) {
-                continue;
-            }
-            for dy in -1..=1 {
-                for dx in -1..=1 {
-                    let (nx, ny) = (x + dx, y + dy);
-                    if nx >= 0 && ny >= 0 && nx < world.grid.width && ny < world.grid.height {
-                        rebuild.insert((nx, ny));
+    if *last_hash != hash {
+        *last_hash = hash;
+        // Changed tiles, dilated one step (masks look at neighbors). Q92
+        // snapshot: only WATCHED tiles rebuild now — a tile that changed
+        // under fog keeps its last-seen art (dimmed by shade_terrain) and
+        // is parked in `pending` until the viewer next looks at it.
+        for y in 0..world.grid.height {
+            for x in 0..world.grid.width {
+                let pos = TilePos::new(x, y);
+                if prev.get(pos) == world.grid.get(pos) {
+                    continue;
+                }
+                for dy in -1..=1 {
+                    for dx in -1..=1 {
+                        let (nx, ny) = (x + dx, y + dy);
+                        if nx >= 0 && ny >= 0 && nx < world.grid.width && ny < world.grid.height
+                        {
+                            if fog.watching(TilePos::new(nx, ny)) {
+                                rebuild.insert((nx, ny));
+                            } else {
+                                pending.insert((nx, ny));
+                            }
+                        }
                     }
                 }
             }
         }
+        *prev = world.grid.clone();
     }
-    *prev = world.grid.clone();
+    // Deferred tiles rebuild the moment the viewer looks (runs every frame
+    // — `pending` is empty except after an unseen terrain change).
+    if !pending.is_empty() {
+        let revealed: Vec<(i32, i32)> = pending
+            .iter()
+            .copied()
+            .filter(|&(x, y)| fog.watching(TilePos::new(x, y)))
+            .collect();
+        for t in revealed {
+            pending.remove(&t);
+            rebuild.insert(t);
+        }
+    }
     if rebuild.is_empty() {
-        return; // hash moved without a kind change (can't happen today)
+        return;
     }
     for (entity, tile) in &tiles {
         if rebuild.contains(&(tile.0, tile.1)) {
@@ -1104,14 +1125,7 @@ pub(crate) fn setup_scene(
 
     spawn_terrain(&mut commands, &palette, world);
 
-    // Depots: low wooden crates.
-    for depot in world.depots.values() {
-        commands.spawn((
-            Mesh3d(palette.crate_box.clone()),
-            MeshMaterial3d(palette.crate_mat.clone()),
-            Transform::from_translation(tile_top_xyz(world, depot.pos, 0.15)),
-        ));
-    }
+    // Depots spawn in sync_view (tracked in ViewIndex so fog can gate them).
 
     // Lighting: bright ambient + warm sun with shadows.
     // 0.18 split ambient light: AmbientLight is now a per-camera component,

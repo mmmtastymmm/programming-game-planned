@@ -93,8 +93,12 @@ pub(crate) struct Disassembling {
 pub(crate) struct ViewIndex {
     pub(crate) bots: HashMap<u32, Entity>,
     pub(crate) ore: HashMap<u64, Entity>,
-    pub(crate) wrecks: HashMap<u32, Entity>,
-    pub(crate) black_boxes: HashMap<u64, Entity>,
+    /// Q92 snapshot classes store their tile so a vanished object can
+    /// linger as a ghost until the viewer actually looks at where it was
+    /// (even your own wreck disappearing unseen is enemy intel).
+    pub(crate) depots: HashMap<u64, (Entity, TilePos)>,
+    pub(crate) wrecks: HashMap<u32, (Entity, TilePos)>,
+    pub(crate) black_boxes: HashMap<u64, (Entity, TilePos)>,
     pub(crate) printers: HashMap<u64, (Entity, PrinterState)>,
     pub(crate) blueprints: HashMap<u64, Entity>,
     pub(crate) bridges: HashMap<(i32, i32), Entity>,
@@ -222,6 +226,7 @@ pub(crate) fn animate_job_cubes(
     time: Res<Time>,
     game: NonSend<GameSim>,
     index: Res<ViewIndex>,
+    fog: Res<crate::fog::FogState>,
     children: Query<&Children>,
     mut cubes: Query<(&mut Transform, &mut Visibility), With<JobCube>>,
 ) {
@@ -229,19 +234,22 @@ pub(crate) fn animate_job_cubes(
     let total = game.0.tuning.print_ticks as f32;
     for (id, printer) in &world.printers {
         let Some(&(entity, _)) = index.printers.get(&id.0) else { continue };
+        // Q92: job state is live intel — no cube over a memory-tile ghost.
+        let watched =
+            printer.faction == crate::fog::VIEWER || fog.watching(printer.pos);
         let Ok(kids) = children.get(entity) else { continue };
         for kid in kids {
             let Ok((mut transform, mut vis)) = cubes.get_mut(*kid) else { continue };
             match printer.job {
-                Some(ticks_left) => {
-                    *vis = Visibility::Visible;
+                Some(ticks_left) if watched => {
+                    *vis = Visibility::Inherited; // not Visible: respects fog-hidden parent
                     let grown = 1.0 - ticks_left as f32 / total;
                     transform.scale = Vec3::splat(0.1 + 0.9 * grown);
                     transform.translation.y =
                         1.1 + (time.elapsed_secs() * 2.0).sin() * 0.1;
                     transform.rotate_y(0.8 * time.delta_secs());
                 }
-                None => *vis = Visibility::Hidden,
+                _ => *vis = Visibility::Hidden,
             }
         }
     }
@@ -387,6 +395,7 @@ pub(crate) fn sync_view(
     mut commands: Commands,
     game: NonSend<GameSim>,
     palette: Res<Palette>,
+    fog: Res<crate::fog::FogState>,
     mut index: ResMut<ViewIndex>,
     mut transforms: Query<&mut Transform>,
     children: Query<&Children>,
@@ -394,14 +403,18 @@ pub(crate) fn sync_view(
 ) {
     let world = &game.0.world;
 
-    // Printers: respawn view on state flips (repair!).
+    // Printers: respawn view on state flips (repair!). Q92 snapshot: an
+    // enemy printer's view only spawns or changes state while its tile is
+    // watched — an unseen flip renders when the viewer next looks.
     for (id, printer) in &world.printers {
+        let watched =
+            printer.faction == crate::fog::VIEWER || fog.watching(printer.pos);
         let needs_spawn = match index.printers.get(&id.0) {
-            Some((entity, state)) if *state != printer.state => {
+            Some((entity, state)) if *state != printer.state && watched => {
                 commands.entity(*entity).despawn();
                 true
             }
-            None => true,
+            None => watched,
             _ => false,
         };
         if needs_spawn {
@@ -478,45 +491,90 @@ pub(crate) fn sync_view(
         }
     }
 
+    // Depots: low wooden crates (tracked so fog can gate them). Q92
+    // snapshot: an enemy depot enters the view when first watched and, if
+    // it dies unseen, lingers as a ghost until the viewer looks again.
+    for (id, depot) in &world.depots {
+        if index.depots.contains_key(&id.0) {
+            continue;
+        }
+        if depot.faction != crate::fog::VIEWER && !fog.watching(depot.pos) {
+            continue;
+        }
+        let entity = commands
+            .spawn((
+                Mesh3d(palette.crate_box.clone()),
+                MeshMaterial3d(palette.crate_mat.clone()),
+                Transform::from_translation(tile_top_xyz(world, depot.pos, 0.15)),
+            ))
+            .id();
+        index.depots.insert(id.0, (entity, depot.pos));
+    }
+    {
+        let commands = &mut commands;
+        index.depots.retain(|id, (entity, pos)| {
+            if world.depots.contains_key(&sim::EntityId(*id)) {
+                true
+            } else if fog.watching(*pos) {
+                commands.entity(*entity).despawn();
+                false
+            } else {
+                true // vanished unseen — the memory keeps it (Q92)
+            }
+        });
+    }
+
     // Nodes: spinning gems, scaled by remaining amount (typed tints
     // land with the M4 game pass; gold gem stands in for all kinds).
+    // Q70 + Q92: a gem exists to the viewer once DISCOVERED (permanent
+    // map knowledge, seeded into fog.known by recompute_fog), and then
+    // renders from memory — scale and exhaustion update only while the
+    // tile is watched. You learn your vein ran dry when you look.
     for (id, node) in &world.nodes {
-        if node.amount == 0 {
-            if let Some(entity) = index.ore.remove(&id.0) {
-                commands.entity(entity).despawn();
-            }
-            continue;
-        }
-        // Fog of war (M7, docs/05): a node exists to the viewer only once
-        // faction 0 has DISCOVERED it — the greyed snapshot then keeps it.
-        let discovered =
-            world.known_nodes.get(&0).is_some_and(|known| known.contains_key(id));
-        if !discovered {
-            if let Some(&entity) = index.ore.get(&id.0) {
-                commands.entity(entity).insert(Visibility::Hidden);
-            }
-            continue;
-        }
-        let scale = Vec3::splat(0.6 + 0.8 * (node.amount as f32 / 60.0).min(1.0));
+        let known_entry =
+            world.known_nodes.get(&crate::fog::VIEWER).and_then(|k| k.get(id));
+        let watched = fog.watching(node.pos);
         match index.ore.get(&id.0) {
             Some(&entity) => {
-                commands.entity(entity).insert(Visibility::Inherited);
-                if let Ok(mut transform) = transforms.get_mut(entity) {
-                    transform.scale = scale;
+                if watched {
+                    if node.amount == 0 {
+                        // Observed exhausted: only now does it leave.
+                        commands.entity(entity).despawn();
+                        index.ore.remove(&id.0);
+                        continue;
+                    }
+                    if let Ok(mut transform) = transforms.get_mut(entity) {
+                        transform.scale =
+                            Vec3::splat(0.6 + 0.8 * (node.amount as f32 / 60.0).min(1.0));
+                    }
                 }
+                // Unwatched: frozen at the last-seen scale (Q92).
             }
             None => {
-                let entity = commands
-                    .spawn((
-                        Mesh3d(palette.gem.clone()),
-                        MeshMaterial3d(palette.ore_mat.clone()),
-                        Transform::from_translation(tile_top_xyz(world, node.pos, 0.35))
-                            .with_rotation(Quat::from_rotation_z(std::f32::consts::FRAC_PI_4))
-                            .with_scale(scale),
-                        Spinner(1.5),
-                    ))
-                    .id();
-                index.ore.insert(id.0, entity);
+                // Spawn on discovery (or from seeded map knowledge after a
+                // fast-forward/reload) — never a vein already observed
+                // exhausted. The current amount is the only scale source;
+                // for a seeded ghost it's a best guess, immediately frozen.
+                let discovered = known_entry.is_some_and(|k| !k.exhausted)
+                    && (crate::screenshot_hides_fog()
+                        || fog.known.contains(&(node.pos.x, node.pos.y)));
+                if discovered {
+                    let scale =
+                        Vec3::splat(0.6 + 0.8 * (node.amount as f32 / 60.0).min(1.0));
+                    let entity = commands
+                        .spawn((
+                            Mesh3d(palette.gem.clone()),
+                            MeshMaterial3d(palette.ore_mat.clone()),
+                            Transform::from_translation(tile_top_xyz(world, node.pos, 0.35))
+                                .with_rotation(
+                                    Quat::from_rotation_z(std::f32::consts::FRAC_PI_4),
+                                )
+                                .with_scale(scale),
+                            Spinner(1.5),
+                        ))
+                        .id();
+                    index.ore.insert(id.0, entity);
+                }
             }
         }
     }
@@ -547,8 +605,10 @@ pub(crate) fn sync_view(
             if let Ok(kids) = children.get(entity) {
                 for kid in kids {
                     if let Ok((slot, mut vis)) = slots.get_mut(*kid) {
+                        // Inherited, not Visible: a forced-Visible child
+                        // would punch through a fog-hidden parent.
                         *vis = if bot.data.cargo_total() > slot.0 * sim::resources::DECI {
-                            Visibility::Visible
+                            Visibility::Inherited
                         } else {
                             Visibility::Hidden
                         };
@@ -568,6 +628,10 @@ pub(crate) fn sync_view(
                 Mesh3d(palette.bot_cube.clone()),
                 MeshMaterial3d(palette.bot_tex_mats[&bot.data.color.0.min(8)].clone()),
                 Transform::from_translation(start),
+                // Spawn already fog-gated: defaulting to visible and hiding
+                // on the next pass flashed unseen enemies for one frame
+                // (review 2026-07-25).
+                if viewer_sees { Visibility::Inherited } else { Visibility::Hidden },
                 Pose {
                     prev: start,
                     curr: start,
@@ -717,6 +781,10 @@ pub(crate) fn sync_view(
     index.bot_recalling.retain(|id| seen.contains(id));
 
     // Blueprints: glowing ghost slabs with a billboarded progress bar.
+    // NOT snapshot-gated (Q92): sim blueprints carry no faction field yet,
+    // and every current blueprint is viewer-placed — hiding your own
+    // placement until a bot walks over would read as a lost click. Enemy
+    // blueprint gating needs the sim field first.
     for (id, bp) in &world.blueprints {
         if index.blueprints.contains_key(&id.0) {
             continue;
@@ -765,9 +833,12 @@ pub(crate) fn sync_view(
 
     // Finished bridges: baked plank tiles over the water. (Direction
     // arrows are an overlay layer now — see below.) Demolish (M8) can
-    // return a bridge to water, so planks are tracked and despawned.
+    // return a bridge to water, so planks are tracked and despawned —
+    // but only while watched (Q92): a bridge built or demolished unseen
+    // appears/disappears when the viewer next looks.
     retain_despawn(&mut commands, &mut index.bridges, |&(x, y)| {
-        world.grid.get(TilePos::new(x, y)) == Some(sim::TileKind::Bridge)
+        let pos = TilePos::new(x, y);
+        world.grid.get(pos) == Some(sim::TileKind::Bridge) || !fog.watching(pos)
     });
     for y in 0..world.grid.height {
         for x in 0..world.grid.width {
@@ -775,7 +846,7 @@ pub(crate) fn sync_view(
             if world.grid.get(pos) != Some(sim::TileKind::Bridge) {
                 continue;
             }
-            if index.bridges.contains_key(&(x, y)) {
+            if index.bridges.contains_key(&(x, y)) || !fog.watching(pos) {
                 continue;
             }
             let entity = commands
@@ -791,7 +862,11 @@ pub(crate) fn sync_view(
 
     // Overlay layer: the baked arrow tile (east-pointing art), spun to the
     // arrow's direction, floated just above whatever terrain is beneath.
+    // Q92: arrows placed, re-pointed, or removed unseen wait for a look.
     for (pos, overlay) in &world.overlays {
+        if !fog.watching(*pos) {
+            continue;
+        }
         let key = (pos.x, pos.y);
         if let Some((entity, kind)) = index.overlays.get(&key) {
             if kind == overlay {
@@ -814,7 +889,8 @@ pub(crate) fn sync_view(
         index.overlays.insert(key, (entity, *overlay));
     }
     index.overlays.retain(|key, (entity, _)| {
-        if world.overlays.contains_key(&TilePos::new(key.0, key.1)) {
+        let pos = TilePos::new(key.0, key.1);
+        if world.overlays.contains_key(&pos) || !fog.watching(pos) {
             true
         } else {
             commands.entity(*entity).despawn();
@@ -852,49 +928,89 @@ pub(crate) fn sync_view(
     });
 
     // Wrecks: charred dead-bot slabs. M10 made wreck removal routine
-    // (salvage/analyze/hijack/rescue/attack/blast), so stale slabs are
-    // despawned and a re-wrecked bot re-renders at its new tile.
+    // (salvage/analyze/hijack/rescue/attack/blast). Q92 snapshot: an enemy
+    // wreck enters the view when watched (own wrecks always — your cloud
+    // knows your dead) and a removal or re-wreck applies when the viewer
+    // looks at where it lands.
     for (id, wreck) in &world.wrecks {
-        if let std::collections::hash_map::Entry::Vacant(e) = index.wrecks.entry(id.0) {
-            let entity = commands
-                .spawn((
-                    Mesh3d(palette.pad_slab.clone()),
-                    MeshMaterial3d(palette.wreck_tex_mat.clone()),
-                    Transform::from_translation(tile_top_xyz(world, wreck.pos(), 0.07)),
-                ))
-                .id();
-            e.insert(entity);
+        let own = wreck.data.faction == crate::fog::VIEWER;
+        if let Some(&(entity, pos)) = index.wrecks.get(&id.0) {
+            // Re-wreck at a new tile: move the slab once the new site is
+            // seen (the old ghost goes with it — one entity per bot).
+            if pos != wreck.pos() && (own || fog.watching(wreck.pos())) {
+                commands.entity(entity).despawn();
+                index.wrecks.remove(&id.0);
+            } else {
+                continue;
+            }
         }
+        if !own && !fog.watching(wreck.pos()) {
+            continue;
+        }
+        let entity = commands
+            .spawn((
+                Mesh3d(palette.pad_slab.clone()),
+                MeshMaterial3d(palette.wreck_tex_mat.clone()),
+                Transform::from_translation(tile_top_xyz(world, wreck.pos(), 0.07)),
+            ))
+            .id();
+        index.wrecks.insert(id.0, (entity, wreck.pos()));
     }
-    retain_despawn(&mut commands, &mut index.wrecks, |id| {
-        world.wrecks.contains_key(&sim::BotId(*id))
-    });
+    {
+        let commands = &mut commands;
+        index.wrecks.retain(|id, (entity, pos)| {
+            if world.wrecks.contains_key(&sim::BotId(*id)) {
+                true
+            } else if fog.watching(*pos) {
+                commands.entity(*entity).despawn();
+                false
+            } else {
+                true // salvaged unseen — the memory keeps the slab (Q92)
+            }
+        });
+    }
 
     // Black boxes: an explosion flash on first sight, then the small dark
     // cube remains until the box is recovered (keyed by entity id —
     // recover_black_box removes mid-Vec, so a spawn cursor goes stale).
+    // Q92 snapshot: the box enters the view when its tile is watched, and
+    // the flash plays only if the death is actually fresh — a box found
+    // ticks later is archaeology, not an event. A recovery unseen leaves
+    // a ghost cube until the viewer looks.
     for bb in &world.black_boxes {
-        if let std::collections::hash_map::Entry::Vacant(e) = index.black_boxes.entry(bb.entity.0)
-        {
+        if index.black_boxes.contains_key(&bb.entity.0) || !fog.watching(bb.pos) {
+            continue;
+        }
+        if world.tick.saturating_sub(bb.tick) < 10 {
             commands.spawn((
                 Explosion { age: 0.0 },
                 Mesh3d(palette.explode_cube.clone()),
                 MeshMaterial3d(palette.explode_mat.clone()),
                 Transform::from_translation(tile_top_xyz(world, bb.pos, 0.5)),
             ));
-            let cube = commands
-                .spawn((
-                    Mesh3d(palette.nose_cube.clone()),
-                    MeshMaterial3d(palette.black_mat.clone()),
-                    Transform::from_translation(tile_top_xyz(world, bb.pos, 0.12)),
-                ))
-                .id();
-            e.insert(cube);
         }
+        let cube = commands
+            .spawn((
+                Mesh3d(palette.nose_cube.clone()),
+                MeshMaterial3d(palette.black_mat.clone()),
+                Transform::from_translation(tile_top_xyz(world, bb.pos, 0.12)),
+            ))
+            .id();
+        index.black_boxes.insert(bb.entity.0, (cube, bb.pos));
     }
-    retain_despawn(&mut commands, &mut index.black_boxes, |id| {
-        world.black_boxes.iter().any(|bb| bb.entity.0 == *id)
-    });
+    {
+        let commands = &mut commands;
+        index.black_boxes.retain(|id, (entity, pos)| {
+            if world.black_boxes.iter().any(|bb| bb.entity.0 == *id) {
+                true
+            } else if fog.watching(*pos) {
+                commands.entity(*entity).despawn();
+                false
+            } else {
+                true // recovered unseen — the memory keeps the cube (Q92)
+            }
+        });
+    }
 }
 
 /// Grow each progress fill (left-anchored): blueprints always show their
@@ -902,6 +1018,7 @@ pub(crate) fn sync_view(
 pub(crate) fn update_progress_bars(
     game: NonSend<GameSim>,
     index: Res<ViewIndex>,
+    fog: Res<crate::fog::FogState>,
     mut fills: Query<&mut Transform, With<ProgressFill>>,
     mut roots: Query<&mut Visibility, With<BillboardBar>>,
 ) {
@@ -919,14 +1036,17 @@ pub(crate) fn update_progress_bars(
     for (id, printer) in &game.0.world.printers {
         let Some(&(root, fill)) = index.printer_fills.get(&id.0) else { continue };
         let Ok(mut visibility) = roots.get_mut(root) else { continue };
+        // Q92: print progress is live intel — no bar over a memory-tile ghost.
+        let watched =
+            printer.faction == crate::fog::VIEWER || fog.watching(printer.pos);
         match printer.job {
-            Some(ticks_left) => {
-                *visibility = Visibility::Visible;
+            Some(ticks_left) if watched => {
+                *visibility = Visibility::Inherited; // respects fog-hidden parent
                 if let Ok(mut transform) = fills.get_mut(fill) {
                     set_fill(&mut transform, 1.0 - ticks_left as f32 / total);
                 }
             }
-            None => *visibility = Visibility::Hidden,
+            _ => *visibility = Visibility::Hidden,
         }
     }
 }
@@ -960,7 +1080,7 @@ pub(crate) fn update_health_bars(
         let p = (bot.data.hp as f32 / bot.data.max_hp as f32).clamp(0.0, 1.0);
         // ~3 s at 10 Hz; permanent while below half (Damaged).
         let recent = pose.hp_age < 30 || bot.data.hp * 2 < bot.data.max_hp;
-        *visibility = if recent { Visibility::Visible } else { Visibility::Hidden };
+        *visibility = if recent { Visibility::Inherited } else { Visibility::Hidden };
         if let Ok((mut transform, mut ghost)) = trails.get_mut(trail) {
             if recent {
                 // Ghost drains toward the real fraction; heals snap it up.
@@ -1018,7 +1138,7 @@ pub(crate) fn update_cycle_bars(
             *visibility = Visibility::Hidden;
             continue;
         };
-        *visibility = Visibility::Visible;
+        *visibility = Visibility::Inherited; // respects fog-hidden parent
         let p = if cost > 0 { (budget as f32 / cost as f32).clamp(0.0, 1.0) } else { 0.0 };
         if let Ok((mut transform, mut material)) = fills.get_mut(fill) {
             // Left-anchored within the 0.9-wide mesh scaled by 0.7, matching
@@ -1083,7 +1203,7 @@ pub(crate) fn update_scribbles(
         if let Some(mood) = mood {
             let frames = &palette.scribble_mats[mood];
             let frame = ((t * 8.0) as usize) % frames.len();
-            *visibility = Visibility::Visible;
+            *visibility = Visibility::Inherited; // respects fog-hidden parent
             if material.0 != frames[frame] {
                 material.0 = frames[frame].clone();
             }

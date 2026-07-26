@@ -920,6 +920,15 @@ out-of-range quirk to trigger it (guarded by the setenv-range test exercising th
 - [x] Thought-cloud states to the doc's list (normal/boot/handler/searching/low-health/abort)
       switched on VM run state rather than view-derived flags. [game] *(with M3; searching
       lands with M7's stance)*
+- [x] Fog view, Q70 gem gate: a gem on a memory tile must hold its last-observed scale and
+      existence — today its scale tracks the live amount and it despawns at 0 under fog,
+      leaking amounts the docs say are live-only-when-seen. [game] *(with Q92's strict
+      snapshot, 2026-07-25)*
+- [ ] Sim: `Blueprint` gains a `faction` field so the view can snapshot-gate enemy
+      blueprints (Q92 exempts them until then). [sim] ⚠HASH
+- [ ] Fog view: replace `gate_fogged_views`' hand-enumerated object registries with a
+      `FogGated { pos, dims }` component attached at spawn in `sync_view`, so new spawn
+      paths can't silently skip fog gating (2026-07-25 review). [game]
 
 ## Verb-layer index (every spec'd builtin → its milestone)
 

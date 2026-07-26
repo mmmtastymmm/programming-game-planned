@@ -97,7 +97,14 @@ fn main() {
         )
         .add_systems(
             Update,
-            (scene::resync_terrain, fog::recompute_fog, fog::apply_fog, fog::pulse_blips)
+            (
+                scene::resync_terrain,
+                fog::recompute_fog,
+                fog::apply_fog,
+                fog::shade_terrain,
+                fog::gate_fogged_views,
+                fog::pulse_blips,
+            )
                 .chain()
                 .after(view::animate_terrain),
         )
@@ -118,6 +125,17 @@ pub(crate) fn screenshot_path() -> Option<String> {
     } else {
         None
     }
+}
+
+/// Dev captures normally strip fog so the raw map can be eyeballed;
+/// `SCREENSHOT_FOG=1` keeps the fog systems live so the fog itself can be
+/// captured. Same dev-only gating as [`screenshot_path`]. Off-values
+/// (`0`/`false`/empty — e.g. a stale export) mean OFF, not "present".
+pub(crate) fn screenshot_hides_fog() -> bool {
+    let keep_fog = std::env::var("SCREENSHOT_FOG").is_ok_and(|v| {
+        !v.is_empty() && v != "0" && !v.eq_ignore_ascii_case("false")
+    });
+    screenshot_path().is_some() && !keep_fog
 }
 
 /// Dev tool: if `SCREENSHOT_PATH` is set (dev builds only), capture the primary
@@ -204,6 +222,24 @@ fn setup_sim(world: &mut World) {
         },
         Err(_) => scene::build_colony(),
     };
+    let mut sim = sim;
+    // Dev tool (debug builds only, like SCREENSHOT_PATH): fast-forward the
+    // sim before the first frame, so a capture can eyeball later game
+    // states — e.g. fog memory tiles only exist once bots have seen ground
+    // and then left it.
+    if cfg!(debug_assertions)
+        && let Ok(raw) = std::env::var("PRESTEP_TICKS")
+    {
+        match raw.parse::<u32>() {
+            Ok(n) => {
+                warn!("PRESTEP_TICKS set — fast-forwarding the sim {n} ticks before frame 1");
+                for _ in 0..n {
+                    sim.step();
+                }
+            }
+            Err(_) => warn!("PRESTEP_TICKS='{raw}' is not a u32 — ignored"),
+        }
+    }
     world.insert_non_send(GameSim(sim));
 }
 
