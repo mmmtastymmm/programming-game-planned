@@ -1196,65 +1196,75 @@ pub(crate) fn editor_ui(root: &mut egui::Ui, game: &mut GameSim, editor: &mut Ed
                 ui.separator();
             }
 
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                // right_to_left: first added is rightmost.
-                ui.small("Space pauses");
-                ui.separator();
-                for (label, mult) in
-                    [("4×", 4.0f32), ("2×", 2.0), ("1×", 1.0), ("½×", 0.5), ("¼×", 0.25)]
-                {
-                    if ui.selectable_label((editor.speed - mult).abs() < 0.01, label).clicked() {
-                        editor.speed = mult;
-                    }
-                }
-                ui.separator();
-                let pause_label = if editor.paused { "▶ resume" } else { "⏸ pause" };
-                if ui.selectable_label(editor.paused, pause_label).clicked() {
-                    editor.paused = !editor.paused;
-                }
-                // Debug stepping, paused only (right_to_left: these land
-                // left of the pause button).
-                if editor.paused {
-                    if ui.button("⏭ tick").on_hover_text("advance one sim tick").clicked() {
-                        game.0.step();
-                    }
-                    let target = editor.selected_bot;
-                    let step_line = ui
-                        .add_enabled(target.is_some(), egui::Button::new("⏭ line"))
-                        .on_hover_text(
-                            "run until the inspected bot's line changes or an \
-                             interrupt fires (handler entry/exit, init ritual, \
-                             boot, recall)",
-                        );
-                    if step_line.clicked()
-                        && let Some(id) = target
+            // Stable id scope: the counters to the left add and remove
+            // widgets as stock kinds cross zero, which would otherwise
+            // reseed every auto id in this block on each change — the
+            // controls sit at fixed pixels, so egui sees the same rect
+            // wearing a new id and warns ("widget rect changed id
+            // between passes"), and hover/click state would drop for a
+            // frame. A salted id pins the block to the panel, not to
+            // however many labels happen to precede it.
+            ui.push_id("time_controls", |ui| {
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    // right_to_left: first added is rightmost.
+                    ui.small("Space pauses");
+                    ui.separator();
+                    for (label, mult) in
+                        [("4×", 4.0f32), ("2×", 2.0), ("1×", 1.0), ("½×", 0.5), ("¼×", 0.25)]
                     {
-                        let bot_id = sim::world::BotId(id);
-                        // Break on ANY observable execution-state change:
-                        // line, fault, handler entry/exit, the init ritual
-                        // starting or finishing, boot, recall. Interrupts
-                        // are breakpoints — stepping never skips a flinch.
-                        let probe = |game: &GameSim| {
-                            game.0.world.bots.get(&bot_id).map(|b| {
-                                (
-                                    b.vm.as_ref().map(|vm| (vm.current_line(), vm.fault_count())),
-                                    b.handler_name(),
-                                    b.in_handler_init(),
-                                    b.data.booting.is_some(),
-                                    b.data.recall.is_some(),
-                                )
-                            })
-                        };
-                        let before = probe(game);
-                        for _ in 0..300 {
+                        if ui.selectable_label((editor.speed - mult).abs() < 0.01, label).clicked() {
+                            editor.speed = mult;
+                        }
+                    }
+                    ui.separator();
+                    let pause_label = if editor.paused { "▶ resume" } else { "⏸ pause" };
+                    if ui.selectable_label(editor.paused, pause_label).clicked() {
+                        editor.paused = !editor.paused;
+                    }
+                    // Debug stepping, paused only (right_to_left: these land
+                    // left of the pause button).
+                    if editor.paused {
+                        if ui.button("⏭ tick").on_hover_text("advance one sim tick").clicked() {
                             game.0.step();
-                            let now = probe(game);
-                            if now != before || now.is_none() {
-                                break;
+                        }
+                        let target = editor.selected_bot;
+                        let step_line = ui
+                            .add_enabled(target.is_some(), egui::Button::new("⏭ line"))
+                            .on_hover_text(
+                                "run until the inspected bot's line changes or an \
+                                 interrupt fires (handler entry/exit, init ritual, \
+                                 boot, recall)",
+                            );
+                        if step_line.clicked()
+                            && let Some(id) = target
+                        {
+                            let bot_id = sim::world::BotId(id);
+                            // Break on ANY observable execution-state change:
+                            // line, fault, handler entry/exit, the init ritual
+                            // starting or finishing, boot, recall. Interrupts
+                            // are breakpoints — stepping never skips a flinch.
+                            let probe = |game: &GameSim| {
+                                game.0.world.bots.get(&bot_id).map(|b| {
+                                    (
+                                        b.vm.as_ref().map(|vm| (vm.current_line(), vm.fault_count())),
+                                        b.handler_name(),
+                                        b.in_handler_init(),
+                                        b.data.booting.is_some(),
+                                        b.data.recall.is_some(),
+                                    )
+                                })
+                            };
+                            let before = probe(game);
+                            for _ in 0..300 {
+                                game.0.step();
+                                let now = probe(game);
+                                if now != before || now.is_none() {
+                                    break;
+                                }
                             }
                         }
                     }
-                }
+                });
             });
         });
     });
