@@ -179,4 +179,8 @@ Tuning(
     road_build_ticks: 10,
     // Q97: painting is quick, material-free labor — the trip is the price.
     paint_ticks: 3,
+    // Q103 creep: much slower travel, much smaller audible footprint.
+    // First-pass — 3x the step time, heard 3 tiles closer.
+    creep_step_pct: 300,
+    creep_signature: 3,
 )

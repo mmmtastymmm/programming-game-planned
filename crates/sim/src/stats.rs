@@ -345,6 +345,9 @@ impl StatCtx<'_> {
     /// Movement-noise signature (M7, docs/05 Q54): 0 base; Hiding levels
     /// quiet it (−1/level); loud/quiet quirks join when their catalog
     /// entries land. Negative = must be approached to be heard.
+    /// The PASSIVE half of how loud a bot is: earned Hiding levels. The
+    /// per-tick effects — Q103's creep mode and Ford wading — are applied
+    /// by the perception pass, which knows the tick they happened on.
     pub fn signature_for(&self, data: &BotData) -> i64 {
         -(self.level(data, crate::world::XpTrack::Hiding) as i64)
     }
@@ -427,6 +430,7 @@ pub fn step_ticks(
     grid: &Grid,
     data: &BotData,
     tile: TilePos,
+    creep: bool,
 ) -> Option<u32> {
     let costs = &ctx.tuning.tile_costs;
     let mut cost_x2 = costs.edge_cost_x2(grid, data.pos, tile)? as i64;
@@ -463,6 +467,12 @@ pub fn step_ticks(
     // rate is ticks-per-tile, so worse = bigger; pessimistic ceil).
     if is_damaged(data) {
         rate += ceil_pct(rate, ctx.stats.damaged_penalty_pct);
+    }
+    // Creeping (Q103): picking your feet up costs time — the whole
+    // trade is slow travel for a small audible footprint (the signature
+    // cut rides `signature_for`).
+    if creep {
+        rate = rate * ctx.tuning.creep_step_pct as i64 / 100;
     }
     let rate = rate.max(1); // never below 1 stored unit
     // deci-rate × (×2 cost) → ticks: the divisor folds both scales.

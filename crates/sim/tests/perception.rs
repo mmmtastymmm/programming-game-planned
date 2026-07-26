@@ -204,3 +204,81 @@ fn seen_tiles_are_durable_sim_state() {
         "the live union is gone with the eyes"
     );
 }
+
+// ------------------------------------------------- creeping (Q103)
+
+/// Q103: `creep=True` is the ACTION half of stealth — the signature cut
+/// shrinks the radius at which a mover is audible at all, so a creeping
+/// bot can cross ground that would have given it away at full volume.
+/// This is what the old "move in bursts, freeze often" fiction could
+/// never deliver: pausing loses you to a *static* listener the first
+/// tick you move in range, because perception is a per-tick geometric
+/// check.
+///
+/// Geometry: listener at (0,1), mover walking the x=6 column. Chebyshev
+/// distance stays exactly 6 the whole way — outside the seeing circle
+/// (5, so sight never settles it) but inside normal hearing (5 × 150% =
+/// 7). Creeping cuts the signature by 3, so heard-at drops to 4.
+#[test]
+fn creeping_shrinks_the_audible_footprint() {
+    fn heard_while_crossing(creep: bool) -> bool {
+        let mut spec = MapSpec::empty(12, 9);
+        spec.depots.push((TilePos::new(6, 7), 0));
+        let mut sim = Sim::new(&spec);
+        sim.stats.move_rate_deci = 10;
+        let arg = if creep { "creep=True" } else { "creep=False" };
+        spawn(
+            &mut sim,
+            TilePos::new(6, 0),
+            &format!("move_to(closest(depot).expect(), {arg})\nwait(200)\n"),
+        );
+        // The listener: an enemy bot that only stands and watches.
+        let listener = sim
+            .apply(&Command::SpawnBot {
+                pos: TilePos::new(0, 1),
+                source: "wait(500)\n".into(),
+                cpu: 4,
+                cargo_cap: 4,
+                faction: 1,
+                hp: 100,
+                color: Color::GREEN,
+            })
+            .unwrap()
+            .unwrap();
+        let _ = listener;
+        (0..60).any(|_| {
+            sim.step();
+            sim.world.perception.get(&1).is_some_and(|p| !p.heard.is_empty())
+        })
+    }
+    assert!(heard_while_crossing(false), "a bot walking normally at 6 tiles is heard");
+    assert!(
+        !heard_while_crossing(true),
+        "creeping drops heard-at below the crossing distance — the same route, unheard"
+    );
+}
+
+/// The other half of the trade: creeping is much slower.
+#[test]
+fn creeping_costs_speed() {
+    fn tiles_covered(creep: bool) -> i32 {
+        let mut spec = MapSpec::empty(20, 3);
+        spec.depots.push((TilePos::new(18, 1), 0));
+        let mut sim = Sim::new(&spec);
+        sim.stats.move_rate_deci = 10;
+        let arg = if creep { "creep=True" } else { "creep=False" };
+        let bot = spawn(
+            &mut sim,
+            TilePos::new(1, 1),
+            &format!("move_to(closest(depot).expect(), {arg})\nwait(500)\n"),
+        );
+        for _ in 0..30 {
+            sim.step();
+        }
+        sim.world.bots[&bot].data.pos.x - 1
+    }
+    let walked = tiles_covered(false);
+    let crept = tiles_covered(true);
+    assert!(walked > 0 && crept > 0, "both make progress ({walked} vs {crept})");
+    assert!(crept < walked, "creeping is much slower: {crept} tiles vs {walked} walking");
+}

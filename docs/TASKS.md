@@ -364,9 +364,10 @@ hash: statline, XP map, quirk rolls, upkeep settlements).* ✅ CORE COMPLETE (20
 - [x] **Two-circle model** (Q74): chebyshev seeing (sensors stat, Optics/Scouting/quirks
       through the pipeline) + hearing (× `sense_factor_pct` tuning), movers-only hearing,
       supercover LoS (High Ground blocks unless the perceiver is elevated), signature offsets
-      heard-at distance, Snow mutes movement. *NEEDS DISCUSSION: `creep` — docs/05 calls
-      creeping EMERGENT (move, freeze, move), but the verb index lists `creep (stealth
-      move)`; no registry verb was invented. Ford quieting waits for M8's Ford tile.*
+      heard-at distance, Snow mutes movement. *RESOLVED 2026-07-26 (Q103): creeping is a
+      `creep=True` ARGUMENT on the pathing builtins (slower steps + a signature cut), not a
+      verb and not emergent — the emergent claim was inexpressible (blocking `move_to`, no
+      position literals) and wouldn't have beaten a static listener anyway. Ford quieting waits for M8's Ford tile.*
       [sim] (L) ⚠HASH
 - [x] **Queries perception-scoped**: seen ∪ heard ∪ map knowledge; heard-only contacts are
       position-only handles (property reads fault `err_unknown_contact`); stale handles
@@ -999,7 +1000,7 @@ out-of-range quirk to trigger it (guarded by the setenv-range test exercising th
 | `abort` ✅ | M3 | | `is_seen` | M7 |
 | `setenv`/`getenv` ✅ | M3 | | `search`/`wander`/`explore` | M7 |
 | `log(level=)` ✅ | M3 | | `path_blocked` | M7 |
-| `withdraw`/`try_withdraw` | M4 | | `creep` (stealth move) | M7 |
+| `withdraw`/`try_withdraw` | M4 | | `creep=` arg ✅ | Q103 |
 | `deposit`/`try_deposit` | M4 | | `repair`/`salvage`/`analyze` | M10 |
 | `cargo_count` | M4 | | `hijack`/`recover_black_box` | M10 |
 | `study` | M4 | | `guard`/`escort` | M10 |

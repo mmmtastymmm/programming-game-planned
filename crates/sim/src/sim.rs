@@ -139,6 +139,12 @@ pub struct Tuning {
     /// Q97: paint is labor — the quick, material-free service time of a
     /// paint designation.
     pub paint_ticks: u32,
+    /// Q103 creep mode: each step takes this percent of its normal time
+    /// (>100 = slower), and the creeping bot's signature drops by
+    /// `creep_signature` — slow travel bought with a small audible
+    /// footprint.
+    pub creep_step_pct: u32,
+    pub creep_signature: i64,
     // --- the wreck race (M10, docs/02) ---
     pub wreck_hp_pct: u32,
     pub wreck_countdown_base_ticks: u32,
@@ -362,7 +368,7 @@ fn hash_paint_filter(h: &mut Fnv1a, paint: &crate::world::PaintFilter) {
 fn hash_action(h: &mut Fnv1a, action: &crate::world::Action) {
     use crate::world::Action;
     match action {
-        Action::Move { path, ticks_left, goals, paint } => {
+        Action::Move { path, ticks_left, goals, paint, creep } => {
             h.write_u8(1);
             h.write_u32(path.len() as u32);
             for p in path {
@@ -376,6 +382,7 @@ fn hash_action(h: &mut Fnv1a, action: &crate::world::Action) {
                 h.write_i32(g.y);
             }
             hash_paint_filter(h, paint);
+            h.write_u8(*creep as u8);
         }
         Action::Mine { node, ticks_left } => {
             h.write_u8(2);
@@ -458,10 +465,11 @@ fn hash_action(h: &mut Fnv1a, action: &crate::world::Action) {
 fn hash_request(h: &mut Fnv1a, req: &crate::world::ActionRequest) {
     use crate::world::ActionRequest;
     match req {
-        ActionRequest::MoveTo { target, paint } => {
+        ActionRequest::MoveTo { target, paint, creep } => {
             h.write_u8(1);
             h.write_u64(target.0);
             hash_paint_filter(h, paint);
+            h.write_u8(*creep as u8);
         }
         ActionRequest::Mine => h.write_u8(2),
         ActionRequest::Deposit { fault_on_fail } => {
@@ -481,13 +489,15 @@ fn hash_request(h: &mut Fnv1a, req: &crate::world::ActionRequest) {
             h.write_u64(e.0);
         }
         ActionRequest::Search => h.write_u8(7),
-        ActionRequest::Wander { paint } => {
+        ActionRequest::Wander { paint, creep } => {
             h.write_u8(8);
             hash_paint_filter(h, paint);
+            h.write_u8(*creep as u8);
         }
-        ActionRequest::Explore { paint } => {
+        ActionRequest::Explore { paint, creep } => {
             h.write_u8(9);
             hash_paint_filter(h, paint);
+            h.write_u8(*creep as u8);
         }
         ActionRequest::Repair(e) => {
             h.write_u8(10);
@@ -1767,6 +1777,7 @@ impl Sim {
                     gain_carry: std::collections::BTreeMap::new(),
                     age_hp_levels: 0,
                     moved_tick: 0,
+                    crept_tick: 0,
                     episodes: std::collections::BTreeMap::new(),
                     countdown_carry: None,
                     latent_quirks,

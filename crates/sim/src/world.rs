@@ -429,8 +429,9 @@ impl Structure {
 /// An action a builtin asked for this tick; started in the resolve phase.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ActionRequest {
-    /// `paint` is the call's Q95 routing constraint (only=/avoid=).
-    MoveTo { target: EntityId, paint: PaintFilter },
+    /// `paint` is the call's Q95 routing constraint (only=/avoid=);
+    /// `creep` is Q103's stealth mode (slower steps, quieter bot).
+    MoveTo { target: EntityId, paint: PaintFilter, creep: bool },
     Mine,
     Deposit { fault_on_fail: bool },
     Attack(EntityId),
@@ -442,9 +443,9 @@ pub enum ActionRequest {
     /// radius, resolves at full reach.
     Search,
     /// A seeded random walk leg (rng.wander) — the dumb explorer.
-    Wander { paint: PaintFilter },
+    Wander { paint: PaintFilter, creep: bool },
     /// Pick a random fogged tile within ~15, walk there, survey it.
-    Explore { paint: PaintFilter },
+    Explore { paint: PaintFilter, creep: bool },
     /// Study an adjacent Template Cache (docs/06): root ~10s, then unlock its
     /// function block colony-wide.
     Study,
@@ -485,8 +486,16 @@ pub enum Action {
     /// `path[0]` is the next tile to enter; `ticks_left` is the remaining
     /// cost of entering it (Rubble takes 2, Plains 1). `goals` is kept so
     /// the route can be re-planned after a bump; `paint` is the Q95
-    /// routing constraint every replan runs under.
-    Move { path: Vec<TilePos>, ticks_left: u32, goals: BTreeSet<TilePos>, paint: PaintFilter },
+    /// routing constraint every replan runs under, and `creep` the Q103
+    /// stealth mode (slower steps, and the signature cut that makes a
+    /// creeping bot audible only from much closer).
+    Move {
+        path: Vec<TilePos>,
+        ticks_left: u32,
+        goals: BTreeSet<TilePos>,
+        paint: PaintFilter,
+        creep: bool,
+    },
     Mine { node: EntityId, ticks_left: u32 },
     /// `depot` is the acceptor picked at request time (a depot or a
     /// refinery); `fault_on_fail` carries the deposit/try_deposit choice
@@ -616,6 +625,13 @@ pub struct BotData {
     /// The tick this bot last entered a tile (M7: ONLY MOVING THINGS MAKE
     /// NOISE — hearing checks it against the current tick).
     pub moved_tick: u64,
+    /// The tick this bot last advanced a CREEPING traverse (Q103), the
+    /// stealth twin of `moved_tick`. A timestamp rather than a flag for
+    /// the same reason: the noise a bot made this tick has to outlive the
+    /// action that made it, or the arrival step — where the move finishes
+    /// and the action clears before perception runs — would announce a
+    /// bot that crept the whole way in.
+    pub crept_tick: u64,
     /// Open detection episodes (M7, docs/05): enemy faction → ticks since
     /// last seen-or-heard by that faction; the episode re-arms (closes)
     /// after the re-arm window fully unobserved. Opening one pays Hiding

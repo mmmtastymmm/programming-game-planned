@@ -220,6 +220,12 @@ impl Sim {
                 if self.world.grid.get(tpos) == Some(TileKind::Ford) {
                     signature -= self.tuning.ford_quiet;
                 }
+                // Creeping (Q103): the noise this bot made THIS tick was
+                // made carefully — checked by timestamp, so the arrival
+                // step (action already finished) stays quiet too.
+                if target.data.crept_tick == tick && tick > 0 {
+                    signature -= self.tuning.creep_signature;
+                }
                 for &(pos, _, hearing, elevated) in eyes {
                     let heard_at = (hearing as i64 + signature).max(1) as u32;
                     if pos.chebyshev(tpos) <= heard_at

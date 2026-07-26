@@ -94,6 +94,20 @@ fn paint_filter(
     })
 }
 
+/// Q103's `creep=` argument: the stealth movement mode. `None` (the
+/// default) and `False` both mean ordinary movement; `True` trades speed
+/// for a much smaller audible footprint.
+fn creep_flag(v: &Value, func: &str) -> Result<bool, Fault> {
+    match v {
+        Value::Enum(e) if e.enum_name == Value::OPTION_ENUM && e.variant == "None" => Ok(false),
+        Value::Bool(b) => Ok(*b),
+        other => Err(Fault::new(
+            faults::TYPE,
+            format!("{func}: creep= takes True or False, got {}", other.type_name()),
+        )),
+    }
+}
+
 /// Editor-facing doc lookup, backed by the function registry
 /// (`pyrite/data/builtins.ron`): signature, summary, and cost note all come
 /// from the same data the VM prices calls with, so hover docs can't go
@@ -453,9 +467,13 @@ impl pyrite::Host for BotHost<'_> {
                 // Stale handles fault (M7): a target neither ours, nor
                 // perceived, nor in map knowledge doesn't exist to us.
                 // `only=`/`avoid=` are the Q95 paint-routing args.
-                [Value::Entity(target), only, avoid] => {
+                [Value::Entity(target), only, avoid, creep] => {
                     let paint = match paint_filter(only, avoid, "move_to") {
                         Ok(p) => p,
+                        Err(f) => return HostCall::Fault(f),
+                    };
+                    let creep = match creep_flag(creep, "move_to") {
+                        Ok(c) => c,
                         Err(f) => return HostCall::Fault(f),
                     };
                     let entity = EntityId(*target);
@@ -489,9 +507,9 @@ impl pyrite::Host for BotHost<'_> {
                             "move_to: stale or unknown contact",
                         ));
                     }
-                    self.request(ActionRequest::MoveTo { target: entity, paint })
+                    self.request(ActionRequest::MoveTo { target: entity, paint, creep })
                 }
-                [other, _, _] => HostCall::Fault(Fault::new(
+                [other, _, _, _] => HostCall::Fault(Fault::new(
                     faults::TYPE,
                     format!("move_to requires an entity, got {}", other.type_name()),
                 )),
@@ -501,15 +519,19 @@ impl pyrite::Host for BotHost<'_> {
             // --- the exploration stances (M7) ---
             "search" => self.request(ActionRequest::Search),
             "wander" => match args {
-                [only, avoid] => match paint_filter(only, avoid, "wander") {
-                    Ok(paint) => self.request(ActionRequest::Wander { paint }),
+                [only, avoid, creep] => match paint_filter(only, avoid, "wander")
+                    .and_then(|paint| Ok((paint, creep_flag(creep, "wander")?)))
+                {
+                    Ok((paint, creep)) => self.request(ActionRequest::Wander { paint, creep }),
                     Err(f) => HostCall::Fault(f),
                 },
                 _ => HostCall::Fault(Fault::new(faults::ARITY, "wander takes no positional arguments")),
             },
             "explore" => match args {
-                [only, avoid] => match paint_filter(only, avoid, "explore") {
-                    Ok(paint) => self.request(ActionRequest::Explore { paint }),
+                [only, avoid, creep] => match paint_filter(only, avoid, "explore")
+                    .and_then(|paint| Ok((paint, creep_flag(creep, "explore")?)))
+                {
+                    Ok((paint, creep)) => self.request(ActionRequest::Explore { paint, creep }),
                     Err(f) => HostCall::Fault(f),
                 },
                 _ => HostCall::Fault(Fault::new(faults::ARITY, "explore takes no positional arguments")),

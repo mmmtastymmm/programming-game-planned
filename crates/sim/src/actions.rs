@@ -102,7 +102,7 @@ impl Sim {
         let Some(request) = bot.data.requested.take() else { return };
         let pos = bot.data.pos;
         match request {
-            ActionRequest::MoveTo { target, paint } => {
+            ActionRequest::MoveTo { target, paint, creep } => {
                 let Some(target_pos) = self.world.entity_pos(target) else {
                     self.finish_action(id, Err("move_to: no such entity".into()));
                     return;
@@ -147,11 +147,12 @@ impl Sim {
                             &self.world.grid,
                             &self.world.bots[&id].data,
                             path[0],
+                            creep,
                         )
                         .expect("path tiles are passable");
                         let bot = self.world.bot_mut(id);
                         bot.data.action =
-                            Some(Action::Move { path, ticks_left: first_cost, goals, paint });
+                            Some(Action::Move { path, ticks_left: first_cost, goals, paint, creep });
                     }
                     None => {
                         // Q96: paint-forbidden ground is unreachable
@@ -281,7 +282,7 @@ impl Sim {
             }
             ActionRequest::Search => self.start_search(id),
             ActionRequest::Study => self.start_study(id),
-            ActionRequest::Wander { paint } => {
+            ActionRequest::Wander { paint, creep } => {
                 // A seeded random walk leg: a random passable free
                 // tile within the leg length; unreachable picks are a
                 // completed (empty) leg, not a fault. The Q95 paint
@@ -311,9 +312,9 @@ impl Sim {
                 }
                 let pick = (crate::world::next_rand(&mut self.world.rng.wander)
                     % candidates.len() as u64) as usize;
-                self.walk_to_tile(id, candidates[pick], false, paint);
+                self.walk_to_tile(id, candidates[pick], false, paint, creep);
             }
-            ActionRequest::Explore { paint } => {
+            ActionRequest::Explore { paint, creep } => {
                 // The smart explorer (Q79): a random CURRENTLY-FOGGED
                 // passable tile within the radius; walk there, then
                 // drop into the scouting stance (survey_after_move).
@@ -347,7 +348,7 @@ impl Sim {
                 }
                 let pick = (crate::world::next_rand(&mut self.world.rng.explore)
                     % candidates.len() as u64) as usize;
-                self.walk_to_tile(id, candidates[pick], true, paint);
+                self.walk_to_tile(id, candidates[pick], true, paint, creep);
             }
             ActionRequest::Deposit { fault_on_fail } => {
                 // Generalized acceptor (docs/03): an adjacent depot
@@ -430,7 +431,7 @@ impl Sim {
         // Advance an in-flight action.
         let Some(action) = bot.data.action.take() else { return };
         match action {
-            Action::Move { mut path, ticks_left, goals, paint } => {
+            Action::Move { mut path, ticks_left, goals, paint, creep } => {
                 let ticks_left = ticks_left - 1;
                 if ticks_left > 0 {
                     // Advancing the traverse counts as moving for hearing
@@ -439,7 +440,10 @@ impl Sim {
                     // the tile changes, so a mover on Rubble/Ford stays
                     // audible the whole way.
                     bot.data.moved_tick = tick;
-                    bot.data.action = Some(Action::Move { path, ticks_left, goals, paint });
+                    if creep {
+                        bot.data.crept_tick = tick;
+                    }
+                    bot.data.action = Some(Action::Move { path, ticks_left, goals, paint, creep });
                     return;
                 }
                 // Bots are solid. If the next tile is occupied, first try a
@@ -454,7 +458,7 @@ impl Sim {
                 // since — never walk into water or panic on an unpriced
                 // tile (review 2026-07-16).
                 if !edge_allowed(&self.world.grid, &self.world.overlays, from, entered) {
-                    self.replan_move(id, goals, paint, true);
+                    self.replan_move(id, goals, paint, creep, true);
                     return;
                 }
                 // Repainting is live play (Q97): a route tile recolored
@@ -462,7 +466,7 @@ impl Sim {
                 // hardened ground — the program's avoid= stays honest
                 // even when an opponent paints against it.
                 if !paint.allows(self.world.paint_color(entered)) {
-                    self.replan_move(id, goals, paint, true);
+                    self.replan_move(id, goals, paint, creep, true);
                     return;
                 }
                 // Structures are solid too: one placed on the route AFTER
@@ -472,7 +476,7 @@ impl Sim {
                     let dodges = self.sidestep_candidates(id, from, entered, &goals, &paint);
                     if dodges.is_empty() {
                         let bot = self.world.bot_mut(id);
-                        bot.data.action = Some(Action::Move { path, ticks_left: 1, goals, paint });
+                        bot.data.action = Some(Action::Move { path, ticks_left: 1, goals, paint, creep });
                         self.bump_both(id, entered, true);
                     } else {
                         let pick = (crate::world::next_rand(&mut self.world.rng.sidestep)
@@ -483,18 +487,25 @@ impl Sim {
                             &self.world.grid,
                             &self.world.bots[&id].data,
                             step,
+                            creep,
                         )
                         .expect("candidates are passable");
                         let bot = self.world.bot_mut(id);
                         // Single-step path; landing off-route triggers a
                         // re-plan (see the empty-path branch below).
                         bot.data.action =
-                            Some(Action::Move { path: vec![step], ticks_left: cost, goals, paint });
+                            Some(Action::Move { path: vec![step], ticks_left: cost, goals, paint, creep });
                     }
                     return;
                 }
                 path.remove(0);
                 self.world.move_bot(id, entered);
+                // The step that CHANGES tiles is stamped here, not in
+                // move_bot: `advance_action` already took the action, so
+                // the creep flag lives only in this scope.
+                if creep {
+                    self.world.bot_mut(id).data.crept_tick = tick;
+                }
                 self.credit_travel(id);
                 // Ice slides (M8, Q37): momentum carries the mover one
                 // more tile — chaining across ice — until solid ground or
@@ -510,13 +521,14 @@ impl Sim {
                             &self.world.grid,
                             &self.world.bots[&id].data,
                             target,
+                            creep,
                         )
                         .expect("slide targets are passable");
                         let bot = self.world.bot_mut(id);
                         // Single-step override; landing off-route triggers
                         // the same re-plan as a dodge (empty-path branch).
                         bot.data.action =
-                            Some(Action::Move { path: vec![target], ticks_left: cost, goals, paint });
+                            Some(Action::Move { path: vec![target], ticks_left: cost, goals, paint, creep });
                         return;
                     }
                 }
@@ -526,7 +538,7 @@ impl Sim {
                     } else {
                         // A dodge landed us off-route: plan a fresh path,
                         // preferring one that threads around current bots.
-                        self.replan_move(id, goals, paint, true);
+                        self.replan_move(id, goals, paint, creep, true);
                     }
                 } else {
                     // The rest of the plan can harden too — a None here
@@ -536,13 +548,14 @@ impl Sim {
                         &self.world.grid,
                         &self.world.bots[&id].data,
                         path[0],
+                        creep,
                     ) {
                         Some(next_cost) => {
                             let bot = self.world.bot_mut(id);
                             bot.data.action =
-                                Some(Action::Move { path, ticks_left: next_cost, goals, paint });
+                                Some(Action::Move { path, ticks_left: next_cost, goals, paint, creep });
                         }
-                        None => self.replan_move(id, goals, paint, true),
+                        None => self.replan_move(id, goals, paint, creep, true),
                     }
                 }
             }
@@ -1069,6 +1082,7 @@ impl Sim {
                                 &self.world.grid,
                                 &self.world.bots[&id].data,
                                 next,
+                                false, // the guard stance does not creep
                             )
                             .unwrap_or(1);
                             self.world.move_bot(id, next);
@@ -1285,13 +1299,20 @@ impl Sim {
 
     /// Start a walk to a specific tile (the stances' mover): A* around
     /// structures; `survey` chains the scouting stance onto arrival.
-    fn walk_to_tile(&mut self, id: BotId, tile: TilePos, survey: bool, paint: crate::world::PaintFilter) {
+    fn walk_to_tile(
+        &mut self,
+        id: BotId,
+        tile: TilePos,
+        survey: bool,
+        paint: crate::world::PaintFilter,
+        creep: bool,
+    ) {
         let mut goals = BTreeSet::new();
         goals.insert(tile);
         if survey {
             self.world.bot_mut(id).data.survey_after_move = true;
         }
-        self.replan_move(id, goals, paint, false);
+        self.replan_move(id, goals, paint, creep, false);
     }
 
     /// Enter the scouting stance (M7, docs/05): root in place; the seeing
@@ -1535,6 +1556,7 @@ impl Sim {
                         &self.world.grid,
                         &self.world.bots[&id].data,
                         target,
+                        false, // engine walk
                     )
                     .expect("slide targets are passable");
                     recall.path = vec![target];
@@ -1551,6 +1573,7 @@ impl Sim {
                     &self.world.grid,
                     &self.world.bots[&id].data,
                     *next,
+                    false, // engine walk
                 )
                 .unwrap_or(1);
             }

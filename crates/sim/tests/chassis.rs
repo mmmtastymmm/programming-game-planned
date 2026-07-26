@@ -53,7 +53,7 @@ fn damaged_bots_think_and_move_slower() {
         .unwrap()
         .unwrap();
     let healthy_step =
-        stats::step_ticks(sim.ctx(), &sim.world.grid, &sim.world.bots[&id].data, TilePos::new(3, 2))
+        stats::step_ticks(sim.ctx(), &sim.world.grid, &sim.world.bots[&id].data, TilePos::new(3, 2), false)
             .unwrap();
     let healthy_cpu = stats::cpu_centi(sim.ctx(), &sim.world.bots[&id].data, false, false);
     assert_eq!(healthy_step, 14, "140 deci-ticks on a 1x tile");
@@ -65,7 +65,7 @@ fn damaged_bots_think_and_move_slower() {
     let d = &sim.world.bots[&id].data;
     assert!(stats::is_damaged(d));
     assert_eq!(
-        stats::step_ticks(sim.ctx(), &sim.world.grid, d, TilePos::new(3, 2)).unwrap(),
+        stats::step_ticks(sim.ctx(), &sim.world.grid, d, TilePos::new(3, 2), false).unwrap(),
         18,
         "140 + ceil(25%) = 175 deci -> 18 ticks"
     );

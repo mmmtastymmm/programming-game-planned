@@ -38,7 +38,7 @@ fn step_ticks_follow_the_x2_cost_table() {
     let id = spawn(&mut sim, TilePos::new(1, 1), IDLER);
 
     let step = |sim: &Sim, id: &sim::BotId, to: TilePos| {
-        stats::step_ticks(sim.ctx(), &sim.world.grid, &sim.world.bots[id].data, to)
+        stats::step_ticks(sim.ctx(), &sim.world.grid, &sim.world.bots[id].data, to, false)
     };
     // 140 deci-ticks/tile × (cost_x2 / 2): Road halves, Ford quadruples.
     assert_eq!(
@@ -71,7 +71,7 @@ fn mountain_edges_price_the_climb_not_the_tile() {
     g.set(TilePos::new(3, 2), TileKind::Mountain);
 
     let step = |sim: &Sim, id: &sim::BotId, to: TilePos| {
-        stats::step_ticks(sim.ctx(), &sim.world.grid, &sim.world.bots[id].data, to).unwrap()
+        stats::step_ticks(sim.ctx(), &sim.world.grid, &sim.world.bots[id].data, to, false).unwrap()
     };
     let climber = spawn(&mut sim, TilePos::new(1, 2), IDLER);
     assert_eq!(step(&sim, &climber, TilePos::new(2, 2)), 42, "climbing on: 6/2 = 3x");
@@ -167,7 +167,7 @@ fn dunes_swallow_idlers() {
     let id = spawn(&mut sim, TilePos::new(2, 2), IDLER);
     let exit = TilePos::new(1, 2);
 
-    let fresh = stats::step_ticks(sim.ctx(), &sim.world.grid, &sim.world.bots[&id].data, exit)
+    let fresh = stats::step_ticks(sim.ctx(), &sim.world.grid, &sim.world.bots[&id].data, exit, false)
         .unwrap();
     assert_eq!(fresh, 14, "a fresh exit prices the plains it steps onto");
     for _ in 0..65 {
@@ -175,13 +175,13 @@ fn dunes_swallow_idlers() {
     }
     let idle = sim.world.bots[&id].data.dune_idle;
     assert!(idle >= 60, "standing still on sand sinks: {idle}");
-    let sunk = stats::step_ticks(sim.ctx(), &sim.world.grid, &sim.world.bots[&id].data, exit)
+    let sunk = stats::step_ticks(sim.ctx(), &sim.world.grid, &sim.world.bots[&id].data, exit, false)
         .unwrap();
     assert!(sunk > fresh, "the exit step must cost more after idling ({sunk} vs {fresh})");
 
     // The surcharge caps: buried, never trapped.
     sim.world.bots.get_mut(&id).unwrap().data.dune_idle = 100_000;
-    let capped = stats::step_ticks(sim.ctx(), &sim.world.grid, &sim.world.bots[&id].data, exit)
+    let capped = stats::step_ticks(sim.ctx(), &sim.world.grid, &sim.world.bots[&id].data, exit, false)
         .unwrap();
     let cap_cost = (2 + sim.tuning.dune_sink_cap_x2) as u64; // plains 2 + capped sink
     assert_eq!(capped as u64, (140 * cap_cost).div_ceil(20), "sink surcharge is capped");
@@ -515,7 +515,7 @@ fn cleanse_and_road_pave_the_ground() {
     build_until(&mut sim, pave, TileKind::Road);
     let id = spawn(&mut sim, TilePos::new(5, 1), IDLER);
     assert_eq!(
-        stats::step_ticks(sim.ctx(), &sim.world.grid, &sim.world.bots[&id].data, pave).unwrap(),
+        stats::step_ticks(sim.ctx(), &sim.world.grid, &sim.world.bots[&id].data, pave, false).unwrap(),
         7,
         "the paved tile moves at road pace"
     );

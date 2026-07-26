@@ -893,7 +893,13 @@ impl Sim {
         let ticks_left = path
             .first()
             .map(|p| {
-                crate::stats::step_ticks(self.ctx(), &self.world.grid, &self.world.bots[&id].data, *p)
+                crate::stats::step_ticks(
+                    self.ctx(),
+                    &self.world.grid,
+                    &self.world.bots[&id].data,
+                    *p,
+                    false, // engine walk
+                )
                     .unwrap_or(1)
             })
             .unwrap_or(0);

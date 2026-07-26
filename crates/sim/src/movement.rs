@@ -117,6 +117,7 @@ impl Sim {
         id: BotId,
         goals: BTreeSet<TilePos>,
         paint: PaintFilter,
+        creep: bool,
         fault_on_unreachable: bool,
     ) {
         let Some(bot) = self.world.bots.get(&id) else { return };
@@ -136,10 +137,12 @@ impl Sim {
                     &self.world.grid,
                     &self.world.bots[&id].data,
                     path[0],
+                    creep,
                 )
                 .expect("path tiles are passable");
                 let bot = self.world.bot_mut(id);
-                bot.data.action = Some(Action::Move { path, ticks_left: first_cost, goals, paint });
+                bot.data.action =
+                    Some(Action::Move { path, ticks_left: first_cost, goals, paint, creep });
             }
             None if fault_on_unreachable => {
                 self.finish_action(id, Err("move_to: unreachable".into()))
@@ -164,9 +167,10 @@ impl Sim {
         occupied.extend(self.world.structure_tiles());
 
         // Program move.
-        if let Some(Action::Move { goals, paint, .. }) = &bot.data.action {
+        if let Some(Action::Move { goals, paint, creep, .. }) = &bot.data.action {
             let goals = goals.clone();
             let paint = paint.clone();
+            let creep = *creep;
             match astar_avoiding(&self.world.grid, &self.world.overlays, &self.tuning.tile_costs, start, &goals, &occupied, &self.world.paint, &paint) {
                 Some(path) if path.is_empty() => {
                     // Already standing at a goal: the move is done.
@@ -178,11 +182,12 @@ impl Sim {
                         &self.world.grid,
                         &self.world.bots[&id].data,
                         path[0],
+                    creep,
                     )
                     .expect("path tiles are passable");
                     let bot = self.world.bot_mut(id);
                     bot.data.action =
-                        Some(Action::Move { path, ticks_left: first_cost, goals, paint });
+                        Some(Action::Move { path, ticks_left: first_cost, goals, paint, creep });
                 }
                 None => {} // no clear route: keep the old path, retry
             }
@@ -218,6 +223,7 @@ impl Sim {
                             &self.world.grid,
                             &self.world.bots[&id].data,
                             *p,
+                            false, // engine walks never creep
                         )
                         .unwrap_or(1)
                     })
