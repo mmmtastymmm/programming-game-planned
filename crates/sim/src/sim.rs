@@ -648,6 +648,7 @@ fn hash_bot_data(h: &mut Fnv1a, data: &crate::world::BotData) {
         h.write_u8(*q);
     }
     h.write_u64(data.crash_seen);
+    h.write_u64(data.ops_seen);
     h.write_u64(data.rng_program);
     h.write_u32(data.dune_idle);
 }
@@ -1791,6 +1792,7 @@ impl Sim {
                     latent_quirks,
                     quirks: Vec::new(),
                     crash_seen: 0,
+                    ops_seen: 0,
                     env: std::collections::BTreeMap::new(),
                     dune_idle: 0,
                     rng_program: crate::world::stream_seed(
@@ -1934,6 +1936,24 @@ impl Sim {
                 continue;
             }
             let Some(vm) = bot.vm.as_ref() else { continue };
+            // Q100's Processing track: the CPU's own workout. Credited
+            // from the same per-tick VM delta the fault chip uses, so a
+            // hard-working bot's brain sharpens with use. The loop this
+            // creates (cycles → ops → XP → cycles) is deliberate and
+            // bounded by the L5 cap, the quadratic curve, and tier
+            // scaling.
+            let ops = vm.ops_executed();
+            let ops_delta = ops.saturating_sub(bot.data.ops_seen);
+            if ops_delta > 0 {
+                bot.data.ops_seen = ops;
+                self.world.pending_xp.push((
+                    id,
+                    XpTrack::Processing,
+                    ops_delta * self.xp.processing_per_op_deci,
+                ));
+            }
+            let Some(bot) = self.world.bots.get_mut(&id) else { continue };
+            let Some(vm) = bot.vm.as_ref() else { continue };
             let crashes = vm.crash_count();
             let delta = crashes.saturating_sub(bot.data.crash_seen);
             if delta > 0 {
@@ -1978,8 +1998,14 @@ impl Sim {
             let hp =
                 (data.max_hp * self.tuning.wreck_hp_pct as i64 / 100).max(1);
             let countdown = data.countdown_carry.take().unwrap_or_else(|| {
+                // Q105 ruling (d): the rescue window scales with the AGE
+                // track, not total XP. Tier-scaled totals would put a
+                // mid-tier bot's countdown in the HOURS, so its wreck
+                // would never expire and the rescue-vs-salvage race would
+                // lose its clock. A long-lived bot earns a long warning —
+                // which is what the rule always meant.
                 self.tuning.wreck_countdown_base_ticks
-                    + (data.xp_total() / 1000) as u32
+                    + (data.xp(XpTrack::Age) / 1000) as u32
                         * self.tuning.wreck_countdown_per_100xp_ticks
             });
             self.world.wrecks.insert(id, Wreck { data, hp, countdown });
@@ -2363,11 +2389,21 @@ impl Sim {
             if post == 0 {
                 continue;
             }
+            // Q105 ruling (b): Learning takes its cut of the UNSCALED
+            // award. Fed the tier-scaled figure it would cap after ~150
+            // units of work instead of ~15,000, which is not the
+            // lifetime-achievement track it is meant to be.
             if track != XpTrack::Learning {
                 *feeds.entry(id).or_insert(0) += post;
             }
+            // Q105: a capability track earns at its tier's scale, the
+            // same factor its level thresholds moved by — so re-climbing
+            // after an upgrade costs the same WORK, and only the numbers
+            // get bigger.
+            let scale = self.ctx().track_scale(&self.world.bots[&id].data, track);
+            let bot = self.world.bots.get_mut(&id).expect("checked above");
             let entry = bot.data.xp.entry(track).or_insert(0);
-            *entry = (*entry + post).min(cap);
+            *entry = (*entry + post.saturating_mul(scale)).min(cap.saturating_mul(scale));
         }
         for (id, feed) in feeds {
             let Some(bot) = self.world.bots.get_mut(&id) else { continue };

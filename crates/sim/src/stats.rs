@@ -197,8 +197,37 @@ pub struct StatCtx<'a> {
 }
 
 impl StatCtx<'_> {
+    /// A track's LEVEL for this bot. Capability tracks divide by their
+    /// tier scale first (Q105): each tier multiplies both the level
+    /// thresholds and the XP gain, so dividing recovers progress *within
+    /// the current tier* — which is what makes a tier purchase reset the
+    /// level by arithmetic, with no reset branch anywhere. XP carried
+    /// from the tier below survives as a small head start (at scale 100,
+    /// a maxed tier-1 bot lands 15% of the way to the new L1).
     fn level(&self, data: &BotData, track: crate::world::XpTrack) -> u32 {
-        self.xp.level(data.xp(track))
+        self.xp.level(data.xp(track) / self.track_scale(data, track))
+    }
+
+    /// A capability's earned LEVEL — its proficiency with the tool
+    /// currently in hand (Q105). Public because the inspector, the tier
+    /// gates, and the tests all ask the same question.
+    pub fn capability_level(&self, data: &BotData, cap: crate::world::Capability) -> u32 {
+        self.level(data, cap.track())
+    }
+
+    /// The XP scale for a track: `M^(tier-1)` for a capability's paired
+    /// track, 1 for the body tracks (Age, Mileage, Hiding, Flinch, Boot,
+    /// Learning) and Hauling, which no capability tiers.
+    pub fn track_scale(&self, data: &BotData, track: crate::world::XpTrack) -> u64 {
+        let Some(cap) = crate::world::Capability::ALL
+            .iter()
+            .copied()
+            .find(|c| c.track() == track)
+        else {
+            return 1;
+        };
+        let step = self.stats.tier_xp_scale_pct / 100;
+        (0..data.tier(cap).saturating_sub(1)).fold(1u64, |acc, _| acc.saturating_mul(step.max(1)))
     }
 
     /// Per-bot stack depth: base → hardware (Stack extensions) → quirks

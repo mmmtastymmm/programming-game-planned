@@ -110,4 +110,12 @@ impl XpConfig {
         // Cumulative cost of levels 1..=cap: base × n(n+1)/2, in deci.
         self.curve_base * n * (n + 1) / 2 * 10
     }
+
+    /// The cap for a track at a given tier SCALE (Q105). Thresholds and
+    /// gain both scale, so the ceiling must too — otherwise a tier-2 bot
+    /// would hit the tier-1 cap within a few units of work and stop
+    /// earning entirely.
+    pub fn track_cap_deci_scaled(&self, scale: u64) -> u64 {
+        self.track_cap_deci().saturating_mul(scale)
+    }
 }

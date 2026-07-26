@@ -658,6 +658,10 @@ pub struct BotData {
     pub quirks: Vec<u8>,
     /// Last VM crash_count charged for (fault-damage bookkeeping).
     pub crash_seen: u64,
+    /// Ops the Processing track has already been paid for (Q100): the
+    /// sim credits the per-tick delta against `Vm::ops_executed`, exactly
+    /// as `crash_seen` gates the fault chip.
+    pub ops_seen: u64,
     /// This bot's `rng.program` stream state (docs/07): seeded from
     /// (match seed, entity ID) so identical programs desync deterministically.
     pub rng_program: u64,

@@ -287,3 +287,35 @@ fn detection_by_an_enemy_pays_the_hiding_track() {
         "being detected by an enemy opens an episode and pays Hiding XP"
     );
 }
+
+/// Q105: buying a tier effectively RESETS that capability's level — by
+/// arithmetic, not a reset branch. Each tier multiplies the level
+/// thresholds and the XP gain by the same factor, so carried XP falls
+/// below the new L1 while re-climbing costs the same *work*, and no
+/// number ever decreases (which is what keeps a veteran reading as a
+/// veteran to the scrap valve).
+#[test]
+fn a_tier_purchase_resets_the_level_without_erasing_xp() {
+    use sim::world::Capability;
+    let mut sim = Sim::new(&MapSpec::empty(6, 6));
+    let bot = spawn(&mut sim, TilePos::new(2, 2), "wait(600)\n");
+
+    // Max the Mining track at tier 1.
+    let maxed = sim.xp.track_cap_deci();
+    sim.world.bots.get_mut(&bot).unwrap().data.xp.insert(XpTrack::Mining, maxed);
+    let data = &sim.world.bots[&bot].data;
+    assert_eq!(sim.ctx().capability_level(data, Capability::Mining), sim.xp.level_cap, "L5 at tier 1");
+
+    // Buy tier 2 by hand (the Station path is covered in station.rs).
+    sim.world.bots.get_mut(&bot).unwrap().data.tiers[Capability::Mining.idx()] = 2;
+    let data = &sim.world.bots[&bot].data;
+    assert_eq!(sim.ctx().capability_level(data, Capability::Mining), 0, "the new tier starts green");
+    assert_eq!(
+        data.xp(XpTrack::Mining),
+        maxed,
+        "and yet nothing was erased — the XP is untouched, only outscaled"
+    );
+    // Untouched XP is exactly why the fleet still reads this bot as
+    // experienced (Q105-R3's other half is tier_value).
+    assert!(data.xp_total() >= maxed, "total XP never decreases");
+}

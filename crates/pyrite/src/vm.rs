@@ -349,6 +349,11 @@ pub struct Vm {
     /// bot that goes Blocked or Dead reports nothing. Never hashed — it is
     /// derived from state the replay already covers.
     stall_centi: Option<i64>,
+    /// Operations this VM has executed, ever — the income signal for the
+    /// sim's Processing track (Q100: cycles-per-tick is the one compute
+    /// stat that is earned as well as bought). Monotonic; the sim reads
+    /// the delta each tick exactly as it does `crash_count`.
+    ops_executed: u64,
 }
 
 impl Vm {
@@ -377,6 +382,7 @@ impl Vm {
             pending_program: None,
             cost_overlay_centi: 0,
             stall_centi: None,
+            ops_executed: 0,
         }
     }
 
@@ -409,6 +415,11 @@ impl Vm {
     }
 
     /// Monotone count of UNHANDLED faults (those that crash-dumped).
+    /// Operations executed, ever (Q100 — the Processing track's income).
+    pub fn ops_executed(&self) -> u64 {
+        self.ops_executed
+    }
+
     pub fn crash_count(&self) -> u64 {
         self.crash_count
     }
@@ -786,6 +797,7 @@ impl Vm {
                         // the wrap (Q80) — only fault/handler restarts
                         // clear them.
                         let cost = self.charged(costs.statement as i64 * CENT);
+                        self.ops_executed += 1;
                         if self.budget < cost {
                             self.stall_centi = Some(cost);
                             return Outcome::Paused;
@@ -807,6 +819,7 @@ impl Vm {
             };
 
             let cost = self.charged(self.cost_of(top, costs, &*host) as i64 * CENT);
+            self.ops_executed += 1;
             if self.budget < cost {
                 self.stall_centi = Some(cost);
                 return Outcome::Paused;
