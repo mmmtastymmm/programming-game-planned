@@ -315,8 +315,14 @@ pub(crate) fn animate_disassembly(
 /// Ambient terrain animation: water's surface drifts on a forward 3-frame
 /// cycle, grass sways on a ping-pong. All tiles of a (terrain, mask) share
 /// one material, so retargeting 32 materials animates the whole map; the
-/// two clocks are deliberately different so the world doesn't tick in
+/// clocks are deliberately different so the world doesn't tick in
 /// lockstep. Materials are only touched when a frame index changes.
+///
+/// Deliberately wall-clock, not sim-tick: ambient motion keeps its pace
+/// through pause and speed changes (1/4 speed shouldn't slow the water).
+/// Tiles never drift out of sync regardless — a tile revealed from fog
+/// snaps to the shared live material, so it shows exactly the frame its
+/// never-fogged neighbours show.
 pub(crate) fn animate_terrain(
     time: Res<Time>,
     palette: Res<Palette>,
