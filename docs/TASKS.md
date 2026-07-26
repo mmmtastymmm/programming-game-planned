@@ -1026,6 +1026,21 @@ slots. Milestone-sized; ⚠HASH throughout.
       (4) `SelectKey::TotalXp` and the scrap valve keep tier-weighted totals — ratified as
       intended, the colony eats its least-invested machine. Retune `quirks.ron manifest_at`
       and `wreck_countdown_per_100xp_ticks` against Age's rate (1 deci/tick). [sim] ⚠HASH
+- [ ] **Processor capability + Processing track (Q100)** — cycles-per-tick becomes the fifth
+      capability (tier bought, level earned); a twelfth `XpTrack::Processing` is credited for
+      operations executed (⚠ storage migration — `XpTrack::ALL` was sized 11 "so storage never
+      migrates again"). Retire the Coprocessor catalog entry and the `ModuleEffect` for it;
+      docs/01's "actions block" is now unconditional. Watch the deliberate feedback loop
+      (cycles → ops → XP → cycles), bounded by the L5 cap, the quadratic curve, and tier
+      scaling. [sim][pyrite]
+- [ ] **Backup Core (Q100)** — a flat, late, Gold-Chip Station buy that preserves every
+      capability TIER into the reprint and wipes all XP; it preserves itself, so it re-arms
+      once bought. **OPEN DETAIL:** how the tiers travel from the destroyed bot to the
+      reprint — a reprint is a fresh print with an allocation-chosen color and has no channel
+      to a dead bot. Candidates: an automatic per-faction banked loadout the next print
+      consumes (frictionless), or the **Black Box** as carrier (it already drops on every
+      destruction and `recover_black_box()` already exists — makes a veteran's hardware a
+      physical object worth holding ground for, and deniable to the enemy). [sim]
 - [ ] **Structures are built by labor** — `PlaceStructure` becomes a blueprint designation
       serviced by `build()` (the Q97 paint flow generalizes); every structure incl. Q98's Pump.
       Nest claim/raze likewise want a bot on site (docs/04). [sim][game]
