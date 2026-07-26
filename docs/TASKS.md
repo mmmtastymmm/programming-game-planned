@@ -1012,13 +1012,16 @@ slots. Milestone-sized; ⚠HASH throughout.
       (pad, queue, payment-at-mount, coolant all reused); docs/03's Fabricator-makes /
       Station-swaps split folds into the one pad. Prices follow Q72's ladder rule (tier N+1
       prices only in materials mineable at tier ≤ N). [sim][game]
-- [ ] **Level reset on tier change** — buying a tier zeroes that capability's paired task
-      track (Mining/Building/Combat/Scouting). New tool, new hands. [sim]
-- [ ] **Lifetime XP splits from proficiency XP** — a monotonic per-bot `lifetime_xp` (never
-      reset) backs `SelectKey::TotalXp`, the scrap valve's lowest-total pick, and quirk
-      manifestation thresholds; the resettable per-track XP keeps driving perks ONLY.
-      Without this, upgrading a veteran's drill marks it as the fleet's rookie and the scrap
-      valve recycles it. [sim]
+- [ ] **Tier scaling replaces a reset branch** — a capability's level thresholds AND its XP
+      gain both multiply by `M^(tier-1)` (`tier_xp_scale`, tuning, ~100). The curve is
+      cumulative 100/300/600/1000/1500, so any M > 15 drops a maxed tier-1 bot below the new
+      L1 — an effective reset with no reset code — while equal gain scaling keeps re-climbing
+      at the same real work. Nothing decreases, so no `lifetime_xp` counter is needed. [sim]
+- [ ] **Fix the two places the scale leaks** — quirk manifestation moves from total XP to the
+      **Age** track (at tier 2 a bot crosses 300/900 in ~9 units of ore, popping quirks
+      instantly); **Learning's 10% cut reads the UNSCALED award** (else Learning caps after
+      ~150 units instead of ~15,000). Tier-weighted `SelectKey::TotalXp` is ratified as
+      intended for the scrap valve — eat the least-invested machine. [sim]
 - [ ] **Structures are built by labor** — `PlaceStructure` becomes a blueprint designation
       serviced by `build()` (the Q97 paint flow generalizes); every structure incl. Q98's Pump.
       Nest claim/raze likewise want a bot on site (docs/04). [sim][game]
