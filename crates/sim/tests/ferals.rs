@@ -16,6 +16,39 @@ fn nest_spec(nests: Vec<(TilePos, u8)>) -> MapSpec {
     spec
 }
 
+/// Q105-R2: claiming or razing a defeated nest is on-site heavy work — a
+/// bot of that faction, adjacent, at or above `heavy_build_tier`. These
+/// tests exercise the command plumbing, so they park a qualified
+/// converter beside the nest rather than walking one there.
+fn park_converter(sim: &mut Sim, faction: u8, nest: sim::EntityId) {
+    let pos = sim.world.nests[&nest].pos;
+    // Match the spawn rules exactly (spawnable terrain, no structure, no
+    // occupant) — a nest's own Ferals may already be standing here.
+    let spot = [(1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (-1, -1), (1, -1), (-1, 1)]
+        .iter()
+        .map(|(dx, dy)| TilePos::new(pos.x + dx, pos.y + dy))
+        .find(|p| {
+            sim.world.grid.get(*p).is_some_and(|t| t.spawnable())
+                && !sim.world.structure_at(*p)
+                && !sim.world.tile_occupied(*p, sim::BotId(u32::MAX))
+        })
+        .expect("a free tile beside the nest");
+    let bot = sim
+        .apply(&Command::SpawnBot {
+            pos: spot,
+            source: "wait(100000)\n".into(),
+            cpu: 4,
+            cargo_cap: 2,
+            faction,
+            hp: 100,
+            color: Color::GREEN,
+        })
+        .unwrap()
+        .unwrap();
+    let tier = sim.tuning.heavy_build_tier;
+    sim.world.bots.get_mut(&bot).unwrap().data.tiers[sim::world::Capability::Building.idx()] = tier;
+}
+
 fn first_nest(sim: &Sim) -> sim::EntityId {
     *sim.world.nests.keys().next().expect("a nest spawned")
 }
@@ -141,6 +174,7 @@ fn defeated_nests_claim_into_quadratic_printer_slots() {
     let nid = first_nest(&sim);
     sim.world.nests.get_mut(&nid).unwrap().hp = 0;
     sim.world.nests.get_mut(&nid).unwrap().state = NestState::Defeated;
+    park_converter(&mut sim, 0, nid);
     sim.apply(&Command::ClaimNest { nest: nid, faction: 0 }).unwrap();
     assert_eq!(sim.world.nests[&nid].state, NestState::Claimed(0));
 
@@ -160,9 +194,11 @@ fn razing_pays_the_data_bounty_instead() {
     let mut sim = Sim::new(&nest_spec(vec![(TilePos::new(2, 2), 0)]));
     let nid = first_nest(&sim);
     // Razing an ACTIVE nest is refused — beat it first.
+    park_converter(&mut sim, 0, nid);
     sim.apply(&Command::RazeNest { nest: nid, faction: 0 }).unwrap();
     assert!(sim.world.nests.contains_key(&nid));
     sim.world.nests.get_mut(&nid).unwrap().state = NestState::Defeated;
+    park_converter(&mut sim, 0, nid);
     sim.apply(&Command::RazeNest { nest: nid, faction: 0 }).unwrap();
     assert!(!sim.world.nests.contains_key(&nid), "razed: the site is gone");
     assert_eq!(

@@ -220,6 +220,16 @@ impl Sim {
                     self.finish_action(id, Err("repair: target out of range".into()));
                     return;
                 }
+                // Q105-R2: mending structures and bots needs only the base
+                // tier, but FIELD REPAIR — reviving a wreck, the rescue
+                // verb — is the heavy work the build tool used to gate.
+                if self.world.wreck_of(target).is_some()
+                    && self.world.bots[&id].data.tier(crate::world::Capability::Building)
+                        < self.tuning.heavy_build_tier
+                {
+                    self.finish_action(id, Err("repair: field repair needs a heavier build tier".into()));
+                    return;
+                }
                 let bot = self.world.bot_mut(id);
                 bot.data.action = Some(Action::Repair { target, done_deci: 0 });
             }
@@ -252,7 +262,23 @@ impl Sim {
                         }
                         (crate::world::RaceKind::Analyze, self.tuning.analyze_ticks)
                     }
-                    _ => (crate::world::RaceKind::Hijack, self.tuning.hijack_ticks),
+                    _ => {
+                        // Q105-R2: hijack is heavy-equipment work. Tool
+                        // modules died with Q105's generic slots, so the
+                        // gate they used to hold is now a minimum
+                        // Building tier — otherwise a stock rookie could
+                        // walk up and steal a maxed veteran's wreck.
+                        if self.world.bots[&id].data.tier(crate::world::Capability::Building)
+                            < self.tuning.heavy_build_tier
+                        {
+                            self.finish_action(
+                                id,
+                                Err("hijack: needs a heavier build tier".into()),
+                            );
+                            return;
+                        }
+                        (crate::world::RaceKind::Hijack, self.tuning.hijack_ticks)
+                    }
                 };
                 let bot = self.world.bot_mut(id);
                 bot.data.action =

@@ -109,7 +109,10 @@ impl SelectKey {
     /// quirks never enter, Q52's rule extended to keys).
     pub fn value(self, data: &BotData) -> i64 {
         match self {
-            SelectKey::TotalXp => data.xp_total() as i64,
+            // Q105-R3: "most/least valuable bot" reads INVESTMENT —
+            // earned XP plus bought tiers — so a re-equipped veteran is
+            // never mistaken for a rookie. (Wire name kept for replays.)
+            SelectKey::TotalXp => data.investment() as i64,
             SelectKey::Xp(track) => data.xp(track) as i64,
             SelectKey::Hp => data.hp,
             SelectKey::MaxHp => data.max_hp,
@@ -689,6 +692,15 @@ impl BotData {
         self.tiers[cap.idx()].max(1)
     }
 
+    /// A bot's INVESTMENT (Q105-R3): earned XP plus the value of the
+    /// capability tiers bought for it. This is what "the least valuable
+    /// machine" means for the scrap valve and for selection keys — raw XP
+    /// alone would mark a freshly-reprinted Backup-Core veteran (full
+    /// tiers, zero XP) as the cheapest bot in the fleet.
+    pub fn investment(&self) -> u64 {
+        self.xp_total().saturating_add(self.tier_value().saturating_mul(TIER_INVESTMENT_WEIGHT))
+    }
+
     /// Total bought-tier value above the free base — the hardware half of
     /// a bot's INVESTMENT (Q105-R3). The scrap valve and selection keys
     /// rank on XP + this, so a Backup-Core reprint (full tiers, zero XP)
@@ -1036,6 +1048,12 @@ impl BlueprintKind {
         }
     }
 }
+
+/// How much one bought capability tier is worth when ranking a bot's
+/// INVESTMENT against earned XP (Q105-R3). Generous on purpose: a tier
+/// costs materials and a Station trip, so it should outweigh the XP a
+/// rookie accumulates while the veteran was being rebuilt.
+pub const TIER_INVESTMENT_WEIGHT: u64 = 5_000;
 
 /// The paint palette (Q95/Q96, docs/05 Tile Composition): stored tile
 /// paint is a 1-based palette index; **0 is `unpainted`** — a named,

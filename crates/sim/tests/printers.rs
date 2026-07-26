@@ -34,6 +34,39 @@ fn printer_ids(sim: &Sim) -> Vec<EntityId> {
     sim.world.printers.keys().copied().collect()
 }
 
+
+/// Q105-R2: converting a defeated nest is on-site heavy work (a bot of
+/// that faction, adjacent, at or above `heavy_build_tier`). These tests
+/// exercise dormancy plumbing, so they park a qualified converter rather
+/// than walking one there.
+fn park_converter(sim: &mut Sim, faction: u8, nest: sim::EntityId) -> sim::BotId {
+    let pos = sim.world.nests[&nest].pos;
+    let spot = [(1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (-1, -1), (1, -1), (-1, 1)]
+        .iter()
+        .map(|(dx, dy)| TilePos::new(pos.x + dx, pos.y + dy))
+        .find(|p| {
+            sim.world.grid.get(*p).is_some_and(|t| t.spawnable())
+                && !sim.world.structure_at(*p)
+                && !sim.world.tile_occupied(*p, sim::BotId(u32::MAX))
+        })
+        .expect("a free tile beside the nest");
+    let bot = sim
+        .apply(&Command::SpawnBot {
+            pos: spot,
+            source: "wait(100000)\n".into(),
+            cpu: 4,
+            cargo_cap: 2,
+            faction,
+            hp: 100,
+            color: sim::world::Color::GREEN,
+        })
+        .unwrap()
+        .unwrap();
+    let tier = sim.tuning.heavy_build_tier;
+    sim.world.bots.get_mut(&bot).unwrap().data.tiers[sim::world::Capability::Building.idx()] = tier;
+    bot
+}
+
 #[test]
 fn losing_a_bound_nest_dorms_that_printer_reclaim_revives_it_remainder_immune() {
     // Q87/Q88: an over-base printer binds to the nest that gated it; losing
@@ -52,7 +85,16 @@ fn losing_a_bound_nest_dorms_that_printer_reclaim_revives_it_remainder_immune() 
     // Claim the nest (Defeated → ClaimNest), then build the 3rd printer: with
     // 1 claimed nest the quadratic gate allows it, and it binds to that nest.
     sim.world.nests.get_mut(&nid).unwrap().state = NestState::Defeated;
+    let converter = park_converter(&mut sim, 0, nid);
     sim.apply(&Command::ClaimNest { nest: nid, faction: 0 }).unwrap();
+    // The conversion crew LEAVES: an owner bot inside the guard radius
+    // garrisons the claim, and this test is about an UNDEFENDED claim
+    // being taken back by the Ferals (docs/04).
+    sim.apply(&Command::KillBot { bot: converter }).unwrap();
+    for _ in 0..2 {
+        sim.step(); // the wreck leaves the occupancy index with the bot
+    }
+    sim.world.wrecks.clear();
     sim.apply(&Command::PlacePrinter { pos: TilePos::new(6, 6), faction: 0 }).unwrap();
     let (pid, _) =
         sim.world.printers.iter().find(|(_, p)| p.color.0 == 2).expect("3rd printer built");
@@ -86,6 +128,7 @@ fn losing_a_bound_nest_dorms_that_printer_reclaim_revives_it_remainder_immune() 
 
     // Retake the nest → the dormant printer reactivates.
     sim.world.nests.get_mut(&nid).unwrap().state = NestState::Defeated;
+    park_converter(&mut sim, 0, nid);
     sim.apply(&Command::ClaimNest { nest: nid, faction: 0 }).unwrap();
     assert_eq!(
         sim.world.printers[&pid].state,
@@ -108,7 +151,16 @@ fn attacking_a_claimed_nest_to_defeat_dorms_its_printer() {
     sim.world.stock_add(0, Resource::Steel, 1_000 * DECI as u64);
     let nid = *sim.world.nests.keys().next().unwrap();
     sim.world.nests.get_mut(&nid).unwrap().state = NestState::Defeated;
+    let converter = park_converter(&mut sim, 0, nid);
     sim.apply(&Command::ClaimNest { nest: nid, faction: 0 }).unwrap();
+    // The conversion crew LEAVES: an owner bot inside the guard radius
+    // garrisons the claim, and this test is about an UNDEFENDED claim
+    // being taken back by the Ferals (docs/04).
+    sim.apply(&Command::KillBot { bot: converter }).unwrap();
+    for _ in 0..2 {
+        sim.step(); // the wreck leaves the occupancy index with the bot
+    }
+    sim.world.wrecks.clear();
     sim.apply(&Command::PlacePrinter { pos: TilePos::new(6, 6), faction: 0 }).unwrap();
     let pid = *sim.world.printers.iter().find(|(_, p)| p.color.0 == 2).map(|(id, _)| id).unwrap();
     assert_eq!(sim.world.printers[&pid].state, PrinterState::Working);
@@ -773,4 +825,57 @@ fn legacy_set_desired_max_still_parses_and_applies() {
         "the legacy dial maps to a Count target"
     );
     let _ = command;
+}
+
+/// Q105-R3: the scrap valve eats the least-INVESTED machine, where
+/// investment is earned XP plus bought capability tiers. Ranking on raw
+/// XP would betray a Backup-Core reprint (Q100) — it arrives with full
+/// tiers and zero XP, so the colony would dismantle its single largest
+/// hardware investment for a partial refund.
+#[test]
+fn the_scrap_valve_ranks_by_investment_not_raw_xp() {
+    use sim::world::{Capability, XpTrack};
+    let mut sim = Sim::new(&MapSpec::empty(8, 6));
+    let veteran = sim
+        .apply(&Command::SpawnBot {
+            pos: TilePos::new(2, 2),
+            source: IDLER.into(),
+            cpu: 2,
+            cargo_cap: 1,
+            faction: 0,
+            hp: 100,
+            color: sim::world::Color::GREEN,
+        })
+        .unwrap()
+        .unwrap();
+    let rookie = sim
+        .apply(&Command::SpawnBot {
+            pos: TilePos::new(4, 2),
+            source: IDLER.into(),
+            cpu: 2,
+            cargo_cap: 1,
+            faction: 0,
+            hp: 100,
+            color: sim::world::Color::GREEN,
+        })
+        .unwrap()
+        .unwrap();
+
+    // The freshly-rebuilt veteran: every tier bought, no XP yet.
+    for cap in Capability::ALL {
+        sim.world.bots.get_mut(&veteran).unwrap().data.tiers[cap.idx()] = 3;
+    }
+    // The rookie has done a little work and nothing else.
+    sim.world.bots.get_mut(&rookie).unwrap().data.xp.insert(XpTrack::Mining, 50);
+
+    let vet_inv = sim.world.bots[&veteran].data.investment();
+    let rookie_inv = sim.world.bots[&rookie].data.investment();
+    assert!(
+        vet_inv > rookie_inv,
+        "the re-equipped veteran ({vet_inv}) must outrank the rookie ({rookie_inv})"
+    );
+    assert!(
+        sim.world.bots[&veteran].data.xp_total() < sim.world.bots[&rookie].data.xp_total(),
+        "even though raw XP says the opposite — which is the whole point"
+    );
 }

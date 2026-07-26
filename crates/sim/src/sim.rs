@@ -139,6 +139,12 @@ pub struct Tuning {
     /// Q97: paint is labor — the quick, material-free service time of a
     /// paint designation.
     pub paint_ticks: u32,
+    /// Q105-R2: the Building tier that gates the heavy jobs — field
+    /// repair (wreck rescue), hijack, and nest conversion. Replaces the
+    /// build-tool module gate that died with Q105's generic slots; base
+    /// tier 1 still covers ordinary `build()` and structure repair, so
+    /// construction never waits on anything.
+    pub heavy_build_tier: u8,
     /// Q103 creep mode: each step takes this percent of its normal time
     /// (>100 = slower), and the creeping bot's signature drops by
     /// `creep_signature` — slow travel bought with a small audible
@@ -1525,8 +1531,10 @@ impl Sim {
                 Ok(None)
             }
             Command::ClaimNest { nest, faction } => {
+                let converter = self.has_converter_at(*faction, *nest);
                 if let Some(n) = self.world.nests.get_mut(nest)
                     && n.state == crate::world::NestState::Defeated
+                    && converter
                 {
                     n.state = crate::world::NestState::Claimed(*faction);
                     n.hp = n.max_hp / 2;
@@ -1537,11 +1545,15 @@ impl Sim {
                 Ok(None)
             }
             Command::RazeNest { nest, faction } => {
+                // Razing is the same on-site heavy work as claiming
+                // (Q105-R2): a defeated nest is dismantled by a bot that
+                // walked there, not by a click from across the map.
                 let razeable = self
                     .world
                     .nests
                     .get(nest)
-                    .is_some_and(|n| n.state == crate::world::NestState::Defeated);
+                    .is_some_and(|n| n.state == crate::world::NestState::Defeated)
+                    && self.has_converter_at(*faction, *nest);
                 if razeable {
                     // Any printer built against this nest is now permanently
                     // unsupported — reconcile its owner so it goes Dormant and
@@ -2607,6 +2619,23 @@ impl Sim {
         self.world
             .blueprints
             .insert(id, Blueprint { pos, kind, progress: 0, needed, faction });
+    }
+
+
+    /// Q105-R2 / docs/04: converting a defeated nest is heavy work done
+    /// ON SITE — the faction needs a bot at the nest with a Building tier
+    /// at or above `heavy_build_tier`. (The build-tool module this
+    /// replaces died with Q105's generic slots.) Without it the claim or
+    /// raze is refused, so a colony cannot annex a site it never reached.
+    fn has_converter_at(&self, faction: u8, nest: crate::world::EntityId) -> bool {
+        let Some(n) = self.world.nests.get(&nest) else { return false };
+        let pos = n.pos;
+        self.world.bots.values().any(|b| {
+            b.data.faction == faction
+                && !b.data.dying
+                && b.data.pos.chebyshev(pos) <= 1
+                && b.data.tier(crate::world::Capability::Building) >= self.tuning.heavy_build_tier
+        })
     }
 
     pub fn state_hash(&self) -> u64 {

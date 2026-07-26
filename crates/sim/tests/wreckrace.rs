@@ -8,8 +8,11 @@ use sim::sim::{Command, Sim};
 use sim::world::{Color, XpTrack};
 use sim::TilePos;
 
+/// Q105-R2: field repair (the rescue verb) is heavy work gated on the
+/// Building tier. The wreck-race tests are about the RACE, not the gate
+/// (which has its own test), so every bot they spawn is equipped for it.
 fn spawn(sim: &mut Sim, pos: TilePos, source: &str, faction: u8, hp: i64) -> sim::BotId {
-    sim.apply(&Command::SpawnBot {
+    let id = sim.apply(&Command::SpawnBot {
         pos,
         source: source.into(),
         cpu: 4,
@@ -19,7 +22,11 @@ fn spawn(sim: &mut Sim, pos: TilePos, source: &str, faction: u8, hp: i64) -> sim
         color: Color::GREEN,
     })
     .unwrap()
-    .unwrap()
+    .expect("spawn returns an id");
+    // Equip for the heavy jobs the wreck race is made of (Q105-R2).
+    let tier = sim.tuning.heavy_build_tier;
+    sim.world.bots.get_mut(&id).unwrap().data.tiers[sim::world::Capability::Building.idx()] = tier;
+    id
 }
 
 /// Kill a bot into a wreck via the dev command (straight to wreck).
@@ -543,4 +550,39 @@ wait(2)
         sim.world.archive_all().any(|e| e.text.contains("[black box]")),
         "the banked forensics reached the colony cloud"
     );
+}
+
+/// Q105-R2: the build-tool module that gated the heavy jobs died with
+/// Q105's generic slots, and every print now holds Building tier 1 — so
+/// without a replacement gate a stock rookie could walk up and steal a
+/// maxed veteran's wreck. The gate is a minimum Building tier.
+#[test]
+fn heavy_jobs_need_the_build_tier() {
+    use sim::world::Capability;
+    let mut sim = Sim::new(&MapSpec::empty(8, 5));
+    let victim = spawn(&mut sim, TilePos::new(4, 2), "wait(500)\n", 1, 40);
+    wreck(&mut sim, victim);
+
+    // A rookie: base Building tier, so field repair is refused.
+    let rookie = spawn(&mut sim, TilePos::new(3, 2), "repair(closest(wreck).expect())\nwait(500)\n", 0, 100);
+    sim.world.bots.get_mut(&rookie).unwrap().data.tiers[Capability::Building.idx()] = 1;
+    for _ in 0..40 {
+        sim.step();
+    }
+    assert!(
+        sim.world.wrecks.contains_key(&victim),
+        "a base-tier bot cannot field-repair — the wreck is untouched"
+    );
+    assert!(
+        sim.world.bots[&rookie].vm.as_ref().is_some_and(|vm| vm.fault_count() > 0),
+        "and it faults rather than silently doing nothing"
+    );
+
+    // Equip it and the same program works.
+    let tier = sim.tuning.heavy_build_tier;
+    sim.world.bots.get_mut(&rookie).unwrap().data.tiers[Capability::Building.idx()] = tier;
+    for _ in 0..400 {
+        sim.step();
+    }
+    assert!(!sim.world.wrecks.contains_key(&victim), "at the heavy tier the rescue lands");
 }

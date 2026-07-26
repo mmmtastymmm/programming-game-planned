@@ -616,7 +616,13 @@ impl Sim {
                     && !b.data.pad_sit
                     && b.vm.as_ref().is_none_or(|vm| vm.phase() == pyrite::Phase::Main)
             })
-            .map(|b| (b.data.xp_total(), b.data.id))
+            // Q105-R3: the valve eats the least-INVESTED machine, where
+            // investment is XP plus bought capability tiers. Raw XP would
+            // betray a Backup-Core reprint — it arrives with full tiers
+            // and zero XP (Q100), so it would read as the fleet's cheapest
+            // bot and the colony would dismantle its largest hardware
+            // investment for a partial refund.
+            .map(|b| (b.data.investment(), b.data.id))
             .min();
         if let Some((_, victim)) = victim {
             let home = self.nearest_faction_printer(victim);
