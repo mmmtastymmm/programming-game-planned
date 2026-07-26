@@ -27,8 +27,6 @@ pub struct Stats {
     pub cargo_cap_deci: u32,
     /// Sensor range in tiles (consumed by M7 perception; Optics adds).
     pub sensors: u32,
-    /// Module slots (grown by total-XP milestones in M6, cap 3).
-    pub module_slots: u32,
     /// Cycle budget granted per tick, in CENTICYCLES (100 = 1 cycle).
     pub cpu_centi: u64,
     /// Program memory in lines (deploy-bar enforcement lands M9).
@@ -58,14 +56,61 @@ pub struct Stats {
     pub memory_bank_vars: u32,
     pub memory_bank_log: u32,
     pub stack_ext_depth: u32,
-    pub optics_sensors: u32,
 
     /// The Upgrade Station's compute catalog (docs/06): flat prices, no
     /// per-bot cost curve (Q68) — the tier ladder is the whole curve.
     pub upgrades: Vec<UpgradeSpec>,
-    /// Slotted modules — made at the printer or swapped at the Station
-    /// (swap destroys the removed part, no refund).
-    pub modules: Vec<ModuleSpec>,
+    /// Capability tier catalog (Q105): the price of reaching each tier,
+    /// per capability. Index 0 is the price of tier 2 (tier 1 is free with
+    /// the chassis), so a capability's ceiling is `1 + rows.len()`.
+    pub tiers: Vec<TierSpec>,
+    /// Per-tier flat grants, added on top of the capability's level perks.
+    /// **Q105-R1**: a tier's grant must dominate the levels it resets, or
+    /// buying an upgrade could leave a maxed bot WORSE at the very stat it
+    /// paid for (validated at load).
+    pub tier_sensors: u32,
+    pub tier_damage_pct: u32,
+    pub tier_build_pct: u32,
+    pub tier_cpu_centi: u64,
+    /// Q105 tier scaling: each tier multiplies its capability's level
+    /// thresholds AND its XP gain by this percent of the tier below
+    /// (10_000 = 100×). Any value above ~1500 makes even a maxed lower
+    /// tier land below the new L1, so the reset is arithmetic, not code.
+    pub tier_xp_scale_pct: u64,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TierSpec {
+    pub capability: crate::world::Capability,
+    /// The tier this row buys (2 and up).
+    pub tier: u8,
+    pub cost: Vec<(Resource, u32)>,
+    pub time_ticks: u32,
+}
+
+impl Stats {
+    /// The catalog row for `capability` at `tier`, or None past the cap.
+    pub fn tier_cost(&self, capability: crate::world::Capability, tier: u8) -> Option<Vec<(Resource, u32)>> {
+        self.tiers
+            .iter()
+            .find(|t| t.capability == capability && t.tier == tier)
+            .map(|t| t.cost.clone())
+    }
+
+    /// Pad-sit duration for a tier purchase.
+    pub fn tier_time(&self, capability: crate::world::Capability, tier: u8) -> u32 {
+        self.tiers
+            .iter()
+            .find(|t| t.capability == capability && t.tier == tier)
+            .map(|t| t.time_ticks)
+            .unwrap_or(0)
+    }
+
+    /// The highest tier the catalog sells for a capability.
+    pub fn tier_cap(&self, capability: crate::world::Capability) -> u8 {
+        self.tiers.iter().filter(|t| t.capability == capability).map(|t| t.tier).max().unwrap_or(1)
+    }
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -87,29 +132,16 @@ pub enum UpgradeEffect {
     MemoryBank,
     /// +call depth.
     StackExt,
-    /// Think while an action resolves. PURCHASABLE BUT INERT in M5 — the
-    /// VM's blocked-execution semantics are a design discussion
-    /// (TASKS.md); the purchase records on the bot and its receipt.
-    Coprocessor,
-}
-
-#[derive(Debug, Clone, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ModuleSpec {
-    pub name: String,
-    pub cost: Vec<(Resource, u32)>,
-    /// Pad-sit duration for a Station swap.
-    pub time_ticks: u32,
-    pub effect: ModuleEffect,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, serde::Deserialize)]
-pub enum ModuleEffect {
-    /// Preserve 50% XP on destruction. INERT until the death/XP rework
-    /// (M6/M10) — recorded on the bot and its receipt.
+    /// Preserve every capability TIER into the reprint and wipe all XP
+    /// (Q100): it protects what you *bought*, never what you *earned*.
+    /// The carrier from a destroyed bot to its replacement is the one
+    /// detail still open (auto-banked vs the Black Box — TASKS.md), so
+    /// the purchase records on the bot and its receipt for now.
+    ///
+    /// (Q100 RETIRED the Coprocessor: think-while-acting is a language
+    /// feature, not hardware, so actions block permanently and cycles
+    /// became the Processor capability.)
     BackupCore,
-    /// +sensor range (magnitude in [`Stats`]).
-    Optics,
 }
 
 impl Default for Stats {
@@ -119,18 +151,17 @@ impl Default for Stats {
         assert!(stats.hp > 0, "stats: hp must be > 0");
         assert!(stats.cpu_centi > 0, "stats: cpu_centi must be > 0");
         assert!(stats.move_rate_deci > 0, "stats: move_rate_deci must be > 0");
-        assert!(stats.module_slots > 0, "stats: module_slots must be > 0");
         assert!(stats.damaged_penalty_pct < 100 && stats.brownout_penalty_pct < 100,
             "stats: penalties must leave something");
         let mut names: Vec<&str> = stats
             .upgrades.iter().map(|u| u.name.as_str())
-            .chain(stats.modules.iter().map(|m| m.name.as_str()))
+
             .collect();
         names.sort_unstable();
         names.dedup();
         assert_eq!(
             names.len(),
-            stats.upgrades.len() + stats.modules.len(),
+            stats.upgrades.len(),
             "stats: catalog names must be unique"
         );
         stats
@@ -140,10 +171,6 @@ impl Default for Stats {
 impl Stats {
     pub fn upgrade(&self, name: &str) -> Option<(u8, &UpgradeSpec)> {
         self.upgrades.iter().enumerate().find(|(_, u)| u.name == name).map(|(i, u)| (i as u8, u))
-    }
-
-    pub fn module(&self, name: &str) -> Option<(u8, &ModuleSpec)> {
-        self.modules.iter().enumerate().find(|(_, m)| m.name == name).map(|(i, m)| (i as u8, m))
     }
 
     /// Per-bot log-buffer cap from hardware alone: base + memory banks
@@ -222,17 +249,13 @@ impl StatCtx<'_> {
     /// Per-bot sensor range: base → hardware (Optics) → XP (Scouting
     /// +1/level) → quirks (Retina Display / Deprecated Drivers), floor 1.
     pub fn sensors_for(&self, data: &BotData) -> u32 {
-        let optics = data
-            .modules
-            .iter()
-            .filter(|&&m| {
-                matches!(
-                    self.stats.modules.get(m as usize).map(|s| s.effect),
-                    Some(ModuleEffect::Optics)
-                )
-            })
-            .count() as u32;
-        let mut v = (data.sensors + optics * self.stats.optics_sensors) as i64
+        // Q105: the Optics MODULE became the Optics CAPABILITY — every
+        // bot has the slot, and the bought tier above the free base 1 is
+        // what adds range. Q105-R1 guarantees a tier's grant dominates
+        // the level bonus its purchase resets, so buying Optics can never
+        // leave a scout seeing less than before.
+        let optics = (data.tier(crate::world::Capability::Optics) as u32).saturating_sub(1);
+        let mut v = (data.sensors + optics * self.stats.tier_sensors) as i64
             + (self.level(data, crate::world::XpTrack::Scouting)
                 * self.xp.scouting_sensors_per_level) as i64;
         for effect in self.quirks.effects_of(data) {

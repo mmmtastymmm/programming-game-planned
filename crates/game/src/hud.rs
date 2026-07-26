@@ -173,21 +173,20 @@ pub(crate) fn inspector_ui(root: &mut egui::Ui, game: &mut GameSim, editor: &mut
                 .iter()
                 .filter_map(|&u| stats.upgrades.get(u as usize).map(|s| s.name.clone()))
                 .collect();
-            let slotted: Vec<String> = data
-                .modules
+            // Q105: five permanent capability slots, each showing its
+            // bought TIER and its earned LEVEL (the paired XP track).
+            let caps: Vec<String> = sim::world::Capability::ALL
                 .iter()
-                .filter_map(|&m| stats.modules.get(m as usize).map(|s| s.name.clone()))
+                .map(|c| {
+                    let level = game.0.xp.level(data.xp(c.track()));
+                    format!("{} t{} L{}", c.name(), data.tier(*c), level)
+                })
                 .collect();
             ui.monospace(format!(
                 "compute: {}",
                 if installed.is_empty() { "stock".into() } else { installed.join(", ") }
             ));
-            ui.monospace(format!(
-                "slots {}/{}: {}",
-                slotted.len(),
-                data.module_slots,
-                if slotted.is_empty() { "empty".into() } else { slotted.join(", ") }
-            ));
+            ui.monospace(format!("capabilities: {}", caps.join(" · ")));
             if !data.upgrade_queue.is_empty() {
                 let names: Vec<&str> = data
                     .upgrade_queue
@@ -196,9 +195,9 @@ pub(crate) fn inspector_ui(root: &mut egui::Ui, game: &mut GameSim, editor: &mut
                         sim::world::UpgradeOrder::Compute(idx) => {
                             stats.upgrades[*idx as usize].name.as_str()
                         }
-                        sim::world::UpgradeOrder::Module { idx, .. } => {
-                            stats.modules[*idx as usize].name.as_str()
-                        }
+                        sim::world::UpgradeOrder::Tier(cap) => cap.name(),
+                        // Legacy pre-M16 orders never mount.
+                        sim::world::UpgradeOrder::Module { .. } => "(legacy)",
                     })
                     .collect();
                 ui.monospace(format!("queued: {}", names.join(", ")));
@@ -228,23 +227,24 @@ pub(crate) fn inspector_ui(root: &mut egui::Ui, game: &mut GameSim, editor: &mut
                     ui.small(price(&spec.cost));
                 });
             }
-            ui.small("modules (a swap destroys the old part — no refund)");
-            let slots_full = data.modules.len() >= data.module_slots as usize;
-            for spec in &stats.modules {
+            ui.small("capability tiers (buying one resets that capability's level)");
+            for cap in sim::world::Capability::ALL {
+                let next = data.tier(cap) + 1;
+                let Some(cost) = stats.tier_cost(cap, next) else {
+                    ui.horizontal(|ui| {
+                        ui.small(format!("{} t{} (max)", cap.name(), data.tier(cap)));
+                    });
+                    continue;
+                };
                 ui.horizontal(|ui| {
-                    let label = if slots_full {
-                        format!("{} (swap slot 1)", spec.name)
-                    } else {
-                        spec.name.clone()
-                    };
-                    if ui.small_button(label).clicked() {
+                    if ui.small_button(format!("{} → t{next}", cap.name())).clicked() {
                         queued.push(sim::sim::Command::QueueUpgrade {
                             bot: sim::world::BotId(bot_id),
-                            order: spec.name.clone(),
-                            replace: slots_full.then_some(0),
+                            order: cap.name().to_string(),
+                            replace: None,
                         });
                     }
-                    ui.small(price(&spec.cost));
+                    ui.small(price(&cost));
                 });
             }
         });
@@ -252,8 +252,9 @@ pub(crate) fn inspector_ui(root: &mut egui::Ui, game: &mut GameSim, editor: &mut
 
         // VM state.
         if let Some(vm) = &bot.vm {
-            // The budget meter scales to the DERIVED bank_cap (M5, Q75/Q82)
-            // — the most expensive effective op this bot could pay here.
+            // The budget meter scales to bank_cap — a FLAT ceiling since
+            // Q101, guarded by a load-time worst-case check rather than a
+            // per-bot-per-tile derivation.
             // Budget is stored in centicycles (Q56); display whole cycles.
             let bank_cap_centi = game.0.costs.bank_cap as f32 * 100.0;
             let fraction = (vm.budget().max(0) as f32 / bank_cap_centi).min(1.0);

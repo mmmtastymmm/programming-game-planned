@@ -188,11 +188,18 @@ impl Sim {
                 }
             }
         }
-        for &m in &w.data.modules {
-            if let Some(spec) = self.stats.modules.get(m as usize) {
-                for (kind, units) in &spec.cost {
-                    receipt
-                        .push((*kind, (*units as u64 * crate::resources::DECI as u64) * pct / 100));
+        // Capability tiers are bought hardware, so they ride the build
+        // receipt exactly as modules did (Q105): every tier above the
+        // free base 1 contributes its catalog price.
+        for cap in crate::world::Capability::ALL {
+            for tier in 2..=w.data.tier(cap) {
+                if let Some(cost) = self.stats.tier_cost(cap, tier) {
+                    for (kind, units) in cost {
+                        receipt.push((
+                            kind,
+                            (units as u64 * crate::resources::DECI as u64) * pct / 100,
+                        ));
+                    }
                 }
             }
         }

@@ -31,9 +31,13 @@ fn printed_bots_get_the_floor_statline() {
     assert_eq!(bot.data.cargo_cap, s.cargo_cap_deci, "floor cargo (4 units)");
     assert_eq!(bot.data.move_rate_deci, s.move_rate_deci, "floor move rate (14 t/t)");
     assert_eq!(bot.data.sensors, s.sensors);
-    assert_eq!(bot.data.module_slots, s.module_slots);
+    // Q105: five capability slots, every one at the free base tier 1.
+    for cap in sim::world::Capability::ALL {
+        assert_eq!(bot.data.tier(cap), 1, "{} starts at the base tier", cap.name());
+    }
     assert_eq!(bot.data.log_cap, s.log_buffer);
-    assert!(bot.data.upgrades.is_empty() && bot.data.modules.is_empty(), "identical rookies");
+    assert!(bot.data.upgrades.is_empty(), "identical rookies");
+    assert_eq!(bot.data.tier_value(), 0, "a fresh print has bought nothing");
 }
 
 #[test]

@@ -157,21 +157,6 @@ fn flinches_train_only_from_hostile_sources() {
 }
 
 #[test]
-fn total_xp_milestones_grow_module_slots() {
-    let mut spec = MapSpec::empty(4, 4);
-    spec.quirk_permille = 0;
-    let mut sim = Sim::new(&spec);
-    let bot = spawn(&mut sim, TilePos::new(1, 1), "wait(600)\n");
-    assert_eq!(sim.world.bots[&bot].data.module_slots, 1);
-    sim.world.bots.get_mut(&bot).unwrap().data.xp.insert(XpTrack::Mining, 10_000);
-    sim.step();
-    assert_eq!(sim.world.bots[&bot].data.module_slots, 2, "+1 at 1000 total XP");
-    sim.world.bots.get_mut(&bot).unwrap().data.xp.insert(XpTrack::Combat, 20_000);
-    sim.step();
-    assert_eq!(sim.world.bots[&bot].data.module_slots, 3, "+1 at 3000, cap 3");
-}
-
-#[test]
 fn quirks_roll_latent_and_manifest_at_the_threshold() {
     let mut spec = MapSpec::empty(4, 4);
     spec.quirk_permille = 2000; // both latent slots certain
@@ -184,14 +169,24 @@ fn quirks_roll_latent_and_manifest_at_the_threshold() {
     }
     sim.step();
     assert!(sim.world.bots[&bot].data.quirks.is_empty(), "rookies stay quirk-free");
-    // Cross 300 total XP (3000 deci): the first roll comes alive.
-    sim.world.bots.get_mut(&bot).unwrap().data.xp.insert(XpTrack::Mining, 3000);
+    // Q105 ruling (a): manifestation reads the AGE track, not total XP.
+    // Tier-scaled task XP would cross the old total thresholds within a
+    // few units of work and pop every latent quirk at once; Age is
+    // tier-independent and unfarmable. Task XP must therefore do nothing.
+    sim.world.bots.get_mut(&bot).unwrap().data.xp.insert(XpTrack::Mining, 900_000);
+    sim.step();
+    assert!(
+        sim.world.bots[&bot].data.quirks.is_empty(),
+        "task XP never manifests a quirk — only time survived does"
+    );
+    // Cross the first Age threshold: the first roll comes alive.
+    sim.world.bots.get_mut(&bot).unwrap().data.xp.insert(XpTrack::Age, 3000);
     sim.step();
     let data = &sim.world.bots[&bot].data;
     assert_eq!(data.quirks.len(), 1, "first manifestation at 300 XP");
     assert_eq!(data.latent_quirks.len(), 1);
-    // Cross 900: the second.
-    sim.world.bots.get_mut(&bot).unwrap().data.xp.insert(XpTrack::Mining, 9000);
+    // Cross the second Age threshold: the second.
+    sim.world.bots.get_mut(&bot).unwrap().data.xp.insert(XpTrack::Age, 9000);
     sim.step();
     assert_eq!(sim.world.bots[&bot].data.quirks.len(), 2, "second at 900 XP");
 }

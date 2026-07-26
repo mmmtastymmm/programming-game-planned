@@ -557,15 +557,15 @@ fn hash_bot_data(h: &mut Fnv1a, data: &crate::world::BotData) {
     h.write_u64(data.cpu_centi);
     h.write_u32(data.move_rate_deci);
     h.write_u32(data.sensors);
-    h.write_u32(data.module_slots);
     h.write_u32(data.log_cap);
     h.write_u32(data.upgrades.len() as u32);
     for u in &data.upgrades {
         h.write_u8(*u);
     }
-    h.write_u32(data.modules.len() as u32);
-    for m in &data.modules {
-        h.write_u8(*m);
+    // Capability tiers (Q105): fixed-width, so no length prefix is
+    // needed — five bytes in `Capability::idx` order.
+    for t in &data.tiers {
+        h.write_u8(*t);
     }
     h.write_u32(data.upgrade_queue.len() as u32);
     for order in &data.upgrade_queue {
@@ -657,6 +657,10 @@ fn hash_order(h: &mut Fnv1a, order: &crate::world::UpgradeOrder) {
         crate::world::UpgradeOrder::Compute(idx) => {
             h.write_u8(1);
             h.write_u8(*idx);
+        }
+        crate::world::UpgradeOrder::Tier(cap) => {
+            h.write_u8(3);
+            h.write_u8(cap.idx() as u8);
         }
         crate::world::UpgradeOrder::Module { idx, replace } => {
             h.write_u8(2);
@@ -1651,8 +1655,13 @@ impl Sim {
                 let resolved = if let Some((idx, _)) = self.stats.upgrade(order) {
                     // Compute orders never name a slot.
                     (replace.is_none()).then_some(crate::world::UpgradeOrder::Compute(idx))
-                } else if let Some((idx, _)) = self.stats.module(order) {
-                    Some(crate::world::UpgradeOrder::Module { idx, replace: *replace })
+                } else if let Some(cap) = crate::world::Capability::ALL
+                    .iter()
+                    .find(|c| c.name() == order)
+                {
+                    // Q105: capability tiers are named orders too, and
+                    // never name a slot (there are no slots to name).
+                    (replace.is_none()).then_some(crate::world::UpgradeOrder::Tier(*cap))
                 } else {
                     None
                 };
@@ -1755,10 +1764,9 @@ impl Sim {
                     cpu_centi,
                     move_rate_deci: self.stats.move_rate_deci,
                     sensors: self.stats.sensors,
-                    module_slots: self.stats.module_slots,
+                    tiers: [1; crate::world::Capability::COUNT],
                     log_cap: self.stats.log_buffer,
                     upgrades: Vec::new(),
-                    modules: Vec::new(),
                     upgrade_queue: Vec::new(),
                     pad_sit: false,
                     survey_after_move: false,
@@ -2083,7 +2091,7 @@ impl Sim {
                     .sum();
                 draw += self.upkeep.base_draw
                     + self.upkeep.draw_per_upgrade * bot.data.upgrades.len() as u64
-                    + self.upkeep.draw_per_module * bot.data.modules.len() as u64
+                    + self.upkeep.draw_per_module * bot.data.tier_value()
                     + self.upkeep.draw_per_track_level * levels;
             }
             draw += self.upkeep.draw_per_refinery
@@ -2383,20 +2391,20 @@ impl Sim {
     fn settle_milestones(&mut self) {
         let ids: Vec<BotId> = self.world.bots.keys().copied().collect();
         for id in ids {
-            let (total, slots, latent, manifested) = {
+            // Q105 cut Q66's generic module slots and their total-XP
+            // milestones: capability tiers are BOUGHT and levels EARNED,
+            // so there is nothing here to award.
+            //
+            // Quirk manifestation reads the AGE track, not total XP
+            // (Q105 ruling (a)): tier-scaled task XP would cross the old
+            // total thresholds within a few units of work and pop every
+            // latent quirk at once. Age is tier-independent, cannot be
+            // farmed (it is just time survived), and is still zero on a
+            // fresh print — so reroll-fishing still buys nothing.
+            let (age_xp, latent, manifested) = {
                 let d = &self.world.bots[&id].data;
-                (d.xp_total(), d.module_slots, d.latent_quirks.len(), d.quirks.len())
+                (d.xp(XpTrack::Age), d.latent_quirks.len(), d.quirks.len())
             };
-            let owed_slots = (1 + self
-                .xp
-                .slot_milestones
-                .iter()
-                .filter(|&&m| total >= m * 10)
-                .count() as u32)
-                .min(self.xp.slot_cap);
-            if owed_slots > slots {
-                self.world.bots.get_mut(&id).expect("collected").data.module_slots = owed_slots;
-            }
             // Age body perk (xp.ron `age_hp_per_level`): each Age level
             // grows the hull — max HP and current HP both rise by the
             // delta (growing tougher never makes a bot instantly Damaged).
@@ -2418,7 +2426,7 @@ impl Sim {
                 .quirks
                 .manifest_at
                 .iter()
-                .filter(|&&t| total >= t * 10)
+                .filter(|&&t| age_xp >= t * 10)
                 .count()
                 .min(latent + manifested);
             for _ in manifested..owed_quirks {

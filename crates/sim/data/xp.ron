@@ -33,7 +33,7 @@ XpConfig(
     hiding_episode_xp: 25,
     scouting_node_xp: 5,
     scouting_survey_xp: 10,
-
-    slot_milestones: [1000, 3000],
-    slot_cap: 3,
+    // Q100: the Processing track behind cycles-per-tick. 1 deci per
+    // operation = 1 whole XP per 10 ops, matching Age's shape.
+    processing_per_op_deci: 1,
 )

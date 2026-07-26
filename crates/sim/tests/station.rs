@@ -4,7 +4,7 @@
 use sim::map::MapSpec;
 use sim::resources::Resource;
 use sim::sim::{Command, Sim};
-use sim::world::{DamageTarget, Color, StructureKind};
+use sim::world::{Capability, DamageTarget, Color, StructureKind};
 use sim::TilePos;
 
 const STATION_POS: TilePos = TilePos { x: 4, y: 2 };
@@ -86,28 +86,32 @@ fn cpu_upgrade_full_cycle() {
 
 #[test]
 fn unaffordable_orders_skip_and_rearm() {
-    // No GoldChips in stock: a queued coprocessor can't mount; the pad
+    // No GoldChips in stock: a queued Backup Core can't mount; the pad
     // skips to the next queued bot rather than wedging.
     let (mut sim, _sid) = station_sim(&[]);
     let rich = spawn(&mut sim, TilePos::new(3, 2), "wait(600)\n");
     let poor = spawn(&mut sim, TilePos::new(5, 2), "wait(600)\n");
     // Lowest entity id would normally win the pull — queue the pricy
     // order on the LOWER id so the skip is observable.
-    sim.apply(&Command::QueueUpgrade { bot: rich, order: "coprocessor".into(), replace: None })
+    sim.apply(&Command::QueueUpgrade { bot: rich, order: "backup_core".into(), replace: None })
         .unwrap();
     sim.apply(&Command::QueueUpgrade { bot: poor, order: "cpu_mk2".into(), replace: None })
         .unwrap();
     for _ in 0..80 {
         sim.step();
     }
-    assert!(sim.world.bots[&rich].data.upgrades.is_empty(), "coprocessor skipped (no gold)");
+    assert!(sim.world.bots[&rich].data.upgrades.is_empty(), "backup core skipped (no gold)");
     assert!(
         !sim.world.bots[&rich].data.upgrade_queue.is_empty(),
         "skipped order re-arms, never drops"
     );
     assert_eq!(sim.world.bots[&poor].data.upgrades.len(), 1, "the pad moved on to the next bot");
-    // Stock arrives: the skipped order finally mounts.
-    sim.world.stock_add(0, Resource::GoldChip, 30);
+    // Stock arrives: the skipped order finally mounts. (The Backup Core
+    // prices in Chips AND Gold Chips — Q100's late, gilded insurance.)
+    // stock_add takes DECI: the Backup Core prices at 12 Chips + 4 Gold
+    // Chips, i.e. 120 + 40 deci.
+    sim.world.stock_add(0, Resource::GoldChip, 100);
+    sim.world.stock_add(0, Resource::Chips, 200);
     for _ in 0..120 {
         sim.step();
     }
@@ -153,40 +157,43 @@ fn pad_pull_skips_mid_template_bots() {
 }
 
 #[test]
-fn module_slots_fill_and_swaps_destroy_the_old_part() {
+fn buying_a_capability_tier_raises_it_and_grants_its_bonus() {
+    // Q105: capability tiers replace generic module slots. Optics is the
+    // clean probe — its tier grant is a flat sensor bonus.
     let (mut sim, _sid) = station_sim(&[(Resource::Lens, 100), (Resource::Bronze, 100)]);
     let bot = spawn(&mut sim, TilePos::new(3, 2), "wait(600)\n");
-    let (optics_idx, _) = sim.stats.module("optics").unwrap();
-    let (core_idx, _) = sim.stats.module("backup_core").unwrap();
-    // Slot 1 of 1 fills with optics.
+    let base = sim.ctx().sensors_for(&sim.world.bots[&bot].data);
+    assert_eq!(sim.world.bots[&bot].data.tier(Capability::Optics), 1, "free base tier");
+
     sim.apply(&Command::QueueUpgrade { bot, order: "optics".into(), replace: None }).unwrap();
     for _ in 0..60 {
         sim.step();
     }
-    assert_eq!(sim.world.bots[&bot].data.modules, vec![optics_idx]);
+    let data = &sim.world.bots[&bot].data;
+    assert_eq!(data.tier(Capability::Optics), 2, "the tier rose");
     assert_eq!(
-        sim.ctx().sensors_for(&sim.world.bots[&bot].data),
-        sim.stats.sensors + sim.stats.optics_sensors,
-        "Optics: +2 sensor range"
+        sim.ctx().sensors_for(data),
+        base + sim.stats.tier_sensors,
+        "the tier's flat grant lands"
     );
-    // A second module with no slot free and no replace target: dropped.
-    sim.world.stock_add(0, Resource::Chips, 200);
-    sim.world.stock_add(0, Resource::GoldChip, 100);
-    sim.apply(&Command::QueueUpgrade { bot, order: "backup_core".into(), replace: None })
-        .unwrap();
-    for _ in 0..60 {
-        sim.step();
-    }
-    assert_eq!(sim.world.bots[&bot].data.modules, vec![optics_idx], "slots full: order dropped");
-    // Swap into slot 0: the optics is DESTROYED, no refund.
-    let lens_before = sim.world.stock_get(0, Resource::Lens);
-    sim.apply(&Command::QueueUpgrade { bot, order: "backup_core".into(), replace: Some(0) })
-        .unwrap();
-    for _ in 0..60 {
-        sim.step();
-    }
-    assert_eq!(sim.world.bots[&bot].data.modules, vec![core_idx], "swapped in place");
-    assert_eq!(sim.world.stock_get(0, Resource::Lens), lens_before, "no refund for the old part");
+    // Every OTHER capability is untouched — slots are per-capability.
+    assert_eq!(data.tier(Capability::Mining), 1);
+    assert_eq!(data.tier_value(), 1, "one tier above base was bought");
+}
+
+/// Q105-R1: a tier's grant must DOMINATE the level bonus its purchase
+/// resets, or buying an upgrade would leave a maxed bot worse at the very
+/// stat it paid for. Validated at load; asserted here on the shipped data.
+#[test]
+fn a_tier_grant_dominates_the_levels_it_resets() {
+    let sim = Sim::new(&MapSpec::empty(4, 4));
+    let l5_sensors = sim.xp.scouting_sensors_per_level * 5;
+    assert!(
+        sim.stats.tier_sensors >= l5_sensors,
+        "Optics tier grant {} must clear the Scouting L5 bonus {}",
+        sim.stats.tier_sensors,
+        l5_sensors
+    );
 }
 
 #[test]
@@ -226,7 +233,9 @@ fn hostile_replace_slot_neither_panics_nor_mounts() {
         sim.step();
     }
     let data = &sim.world.bots[&bot].data;
-    assert!(data.modules.is_empty(), "an invalid slot never mounts");
+    // Q105: a tier order never names a slot, so a replace= target makes
+    // the order unresolvable — it is refused at the command, not mounted.
+    assert_eq!(data.tier(Capability::Optics), 1, "a slot-naming order never mounts");
     assert!(data.upgrade_queue.is_empty(), "the invalid order is dropped, not wedged");
 }
 

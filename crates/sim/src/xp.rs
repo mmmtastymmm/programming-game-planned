@@ -68,11 +68,12 @@ pub struct XpConfig {
     pub scouting_node_xp: u64,
     pub scouting_survey_xp: u64,
 
-    // --- total-XP milestones (whole XP) ---
-    /// Module slots: +1 at each threshold, in order (docs: 1000, 3000;
-    /// cap 3 slots).
-    pub slot_milestones: Vec<u64>,
-    pub slot_cap: u32,
+    // (Q66's module-slot milestones were CUT by Q105: capability tiers
+    // are bought and levels earned, so there is no generic slot to award.)
+
+    /// Q100's Processing track: deci-XP per operation executed — the one
+    /// compute stat that is earned as well as bought.
+    pub processing_per_op_deci: u64,
 }
 
 impl Default for XpConfig {

@@ -7,7 +7,6 @@ Stats(
     move_rate_deci: 140,   // 14 ticks/tile (deci-ticks; terrain multiplies)
     cargo_cap_deci: 40,    // 4 units
     sensors: 5,            // tiles (M7 perception consumes this)
-    module_slots: 1,
     cpu_centi: 100,        // 1 cycle/tick (centicycles)
     program_lines: 32,
     variable_slots: 8,
@@ -26,7 +25,23 @@ Stats(
     memory_bank_vars: 4,
     memory_bank_log: 8,
     stack_ext_depth: 4,
-    optics_sensors: 2,
+
+    // --- Q105 capability tiers: the per-tier flat grants, added on top of
+    // each capability's level perks. Q105-R1 requires a tier's grant to
+    // DOMINATE the levels its purchase resets, or buying an upgrade could
+    // leave a maxed bot worse at the stat it paid for. The level bonuses
+    // at L5 are: sensors +5 (Scouting +1/level), damage +25%, build +50%,
+    // so each grant below clears its own L5 bonus.
+    tier_sensors: 6,
+    tier_damage_pct: 30,
+    tier_build_pct: 60,
+    tier_cpu_centi: 100,     // +1 cycle/tick per tier
+    // Each tier multiplies its capability's level thresholds AND its XP
+    // gain by this percent of the tier below (10000 = 100x). The curve is
+    // cumulative 100/300/600/1000/1500, so anything above ~1500 lands a
+    // maxed lower tier below the new L1 — the reset is arithmetic, not a
+    // reset branch. This is also the mastery-carry-over dial.
+    tier_xp_scale_pct: 10000,
 
     // --- Upgrade Station catalog (docs/06): flat prices, tier ladder is
     // the whole cost curve (Q68). time_ticks are first-pass numbers —
@@ -36,10 +51,29 @@ Stats(
         (name: "cpu_mk3", cost: [(Chips, 15)], time_ticks: 60, effect: CpuCenti(400)),
         (name: "memory_bank", cost: [(Chips, 5)], time_ticks: 40, effect: MemoryBank),
         (name: "stack_ext", cost: [(Chips, 8)], time_ticks: 40, effect: StackExt),
-        (name: "coprocessor", cost: [(Chips, 10), (GoldChip, 3)], time_ticks: 80, effect: Coprocessor),
-    ],
-    modules: [
+        // Q100 retired the Coprocessor: think-while-acting is a LANGUAGE
+        // feature (async actions), not hardware, so actions block forever
+        // and cycles-per-tick became the Processor capability instead.
         (name: "backup_core", cost: [(Chips, 12), (GoldChip, 4)], time_ticks: 40, effect: BackupCore),
-        (name: "optics", cost: [(Lens, 2), (Bronze, 1)], time_ticks: 40, effect: Optics),
+    ],
+
+    // --- capability tier catalog (Q105). Q72's ladder rule: tier N+1
+    // prices only in materials mineable at tier <= N, so no tier's key is
+    // locked behind its own door. Building tier 2 is the civil-kit
+    // exception, priced in Steel (Q84) — and per Q105-R2 it is also the
+    // gate on field repair, hijack, and nest conversion.
+    tiers: [
+        (capability: Mining,    tier: 2, cost: [(Steel, 3)],               time_ticks: 40),
+        (capability: Mining,    tier: 3, cost: [(Bronze, 3)],              time_ticks: 60),
+        (capability: Mining,    tier: 4, cost: [(Bronze, 5), (Gold, 2)],   time_ticks: 80),
+        (capability: Building,  tier: 2, cost: [(Steel, 4)],               time_ticks: 40),
+        (capability: Building,  tier: 3, cost: [(Bronze, 4)],              time_ticks: 60),
+        (capability: Combat,    tier: 2, cost: [(Bronze, 3)],              time_ticks: 40),
+        (capability: Combat,    tier: 3, cost: [(Bronze, 6), (Gold, 1)],   time_ticks: 60),
+        (capability: Optics,    tier: 2, cost: [(Lens, 2), (Bronze, 1)],   time_ticks: 40),
+        (capability: Optics,    tier: 3, cost: [(Lens, 4), (Chips, 2)],    time_ticks: 60),
+        (capability: Processor, tier: 2, cost: [(Chips, 5)],               time_ticks: 40),
+        (capability: Processor, tier: 3, cost: [(Chips, 15)],              time_ticks: 60),
+        (capability: Processor, tier: 4, cost: [(Chips, 10), (GoldChip, 3)], time_ticks: 80),
     ],
 )

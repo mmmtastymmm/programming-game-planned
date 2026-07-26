@@ -117,7 +117,10 @@ impl SelectKey {
             SelectKey::Sensors => data.sensors as i64,
             SelectKey::CargoCap => data.cargo_cap as i64,
             SelectKey::MoveRate => data.move_rate_deci as i64,
-            SelectKey::ModuleSlots => data.module_slots as i64,
+            // Q105 renamed the concept: generic slots are gone, so this
+            // key now ranks by bought capability tiers (the wire name is
+            // kept so pre-M16 replay files still deserialize).
+            SelectKey::ModuleSlots => data.tier_value() as i64,
         }
     }
 
@@ -401,8 +404,13 @@ pub struct PadJob {
 pub enum UpgradeOrder {
     /// Index into `stats.upgrades` (compute — coolant applies).
     Compute(u8),
-    /// Index into `stats.modules`; `replace` names the slot whose module
-    /// the swap DESTROYS (no refund, Q72) — None fills an open slot.
+    /// Buy the next tier of a capability (Q105). The bot's proficiency
+    /// level in that capability effectively resets, because each tier
+    /// scales its XP thresholds and gain together — new tool, new hands.
+    Tier(Capability),
+    /// LEGACY (pre-M16 replay files): generic module slots died with
+    /// Q105's capability model. Kept deserialize-only so old recordings
+    /// still load; applying one is a no-op.
     Module { idx: u8, replace: Option<u8> },
 }
 
@@ -563,15 +571,15 @@ pub struct BotData {
     pub move_rate_deci: u32,
     /// BASE sensor range in tiles (M7 perception consumes; Optics adds).
     pub sensors: u32,
-    /// Module slots (M6's total-XP milestones grow it, cap 3).
-    pub module_slots: u32,
+    /// Bought **capability tiers** (Q105), indexed by `Capability::idx`.
+    /// Every print starts at tier 1 across the board, so a fresh bot can
+    /// work its whole start zone and no verb is ever locked out.
+    pub tiers: [u8; Capability::COUNT],
     /// Log ring-buffer cap (stats floor; Memory banks grow it).
     pub log_cap: u32,
     /// Station-bought compute upgrades, purchase order (indices into
     /// `stats.upgrades` — the hardware layer of the pipeline).
     pub upgrades: Vec<u8>,
-    /// Slotted modules, slot order (indices into `stats.modules`).
-    pub modules: Vec<u8>,
     /// Player-queued Station orders, FIFO (served at pad mount; an
     /// unaffordable front order is SKIPPED, not dropped — it re-arms).
     pub upgrade_queue: Vec<UpgradeOrder>,
@@ -669,6 +677,20 @@ impl BotData {
     /// manifestation, module slots).
     pub fn xp_total(&self) -> u64 {
         self.xp.values().sum()
+    }
+
+    /// This bot's bought tier for a capability (Q105 — base 1, so every
+    /// capability always answers).
+    pub fn tier(&self, cap: Capability) -> u8 {
+        self.tiers[cap.idx()].max(1)
+    }
+
+    /// Total bought-tier value above the free base — the hardware half of
+    /// a bot's INVESTMENT (Q105-R3). The scrap valve and selection keys
+    /// rank on XP + this, so a Backup-Core reprint (full tiers, zero XP)
+    /// can never read as the fleet's cheapest machine and be dismantled.
+    pub fn tier_value(&self) -> u64 {
+        Capability::ALL.iter().map(|c| (self.tier(*c) as u64).saturating_sub(1)).sum()
     }
 
     /// Whether the bot's Pyrite VM is suspended this tick — the engine is
@@ -1346,6 +1368,10 @@ pub enum XpTrack {
     Combat,
     Building,
     Scouting,
+    /// Operations executed — the CPU's own workout (Q100). Pairs with the
+    /// Processor capability, the one compute stat that is earned as well
+    /// as bought.
+    Processing,
     // --- body tracks (use-based; source-filtered against farming) ---
     Age,
     Mileage,
@@ -1355,13 +1381,70 @@ pub enum XpTrack {
     Learning,
 }
 
+/// A bot's five permanent **capability slots** (Q105, 2026-07-26 —
+/// supersedes Q66's generic module slots). Each carries a bought **tier**
+/// (what the capability can reach) and an earned **level** (how well it
+/// performs — the paired XP track). Nothing is ever locked out: every
+/// print starts at tier 1, so gating is *tiering*, not permission.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
+pub enum Capability {
+    Mining,
+    Building,
+    Combat,
+    Optics,
+    /// Cycles per tick (Q100 — the retired Coprocessor's replacement).
+    Processor,
+}
+
+impl Capability {
+    pub const ALL: [Capability; 5] =
+        [Capability::Mining, Capability::Building, Capability::Combat,
+         Capability::Optics, Capability::Processor];
+    pub const COUNT: usize = 5;
+
+    /// Stable index — the `BotData.tiers` slot and the hash tag.
+    pub fn idx(self) -> usize {
+        match self {
+            Capability::Mining => 0,
+            Capability::Building => 1,
+            Capability::Combat => 2,
+            Capability::Optics => 3,
+            Capability::Processor => 4,
+        }
+    }
+
+    /// The XP track that is this capability's PROFICIENCY level: earned
+    /// by using the tool, and effectively reset by a tier change because
+    /// each tier scales its thresholds and gain together (Q105).
+    pub fn track(self) -> XpTrack {
+        match self {
+            Capability::Mining => XpTrack::Mining,
+            Capability::Building => XpTrack::Building,
+            Capability::Combat => XpTrack::Combat,
+            Capability::Optics => XpTrack::Scouting,
+            Capability::Processor => XpTrack::Processing,
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Capability::Mining => "mining",
+            Capability::Building => "building",
+            Capability::Combat => "combat",
+            Capability::Optics => "optics",
+            Capability::Processor => "processor",
+        }
+    }
+}
+
 impl XpTrack {
-    pub const ALL: [XpTrack; 11] = [
+    pub const ALL: [XpTrack; 12] = [
         XpTrack::Mining,
         XpTrack::Hauling,
         XpTrack::Combat,
         XpTrack::Building,
         XpTrack::Scouting,
+        XpTrack::Processing,
         XpTrack::Age,
         XpTrack::Mileage,
         XpTrack::Hiding,
@@ -1377,6 +1460,7 @@ impl XpTrack {
             XpTrack::Combat => "combat",
             XpTrack::Building => "building",
             XpTrack::Scouting => "scouting",
+            XpTrack::Processing => "processing",
             XpTrack::Age => "age",
             XpTrack::Mileage => "mileage",
             XpTrack::Hiding => "hiding",

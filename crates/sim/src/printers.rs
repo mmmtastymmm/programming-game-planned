@@ -731,21 +731,27 @@ impl Sim {
                                     )
                                 })
                             }
-                            crate::stats::UpgradeEffect::Coprocessor => {
+                            crate::stats::UpgradeEffect::BackupCore => {
                                 data.upgrades.contains(&idx)
                             }
                             _ => false,
                         };
                         (!dup, spec.cost.clone(), self.stats.coolant_water_deci)
                     }
-                    UpgradeOrder::Module { idx, replace } => {
+                    UpgradeOrder::Tier(cap) => {
+                        // A tier purchase is valid while the capability is
+                        // below the catalog's top tier; the price is that
+                        // tier's row (Q72's ladder: tier N+1 prices only in
+                        // materials mineable at tier ≤ N).
                         let data = &self.world.bots[&bot_id].data;
-                        let ok = match replace {
-                            Some(slot) => (slot as usize) < data.modules.len(),
-                            None => data.modules.len() < data.module_slots as usize,
-                        };
-                        (ok, self.stats.modules[idx as usize].cost.clone(), 0)
+                        let next = data.tier(cap) as usize + 1;
+                        match self.stats.tier_cost(cap, next as u8) {
+                            Some(cost) => (true, cost, self.stats.coolant_water_deci),
+                            None => (false, Vec::new(), 0), // already at the cap
+                        }
                     }
+                    // Legacy no-op: generic module slots died with Q105.
+                    UpgradeOrder::Module { .. } => (false, Vec::new(), 0),
                 };
                 if !valid {
                     self.world.bots.get_mut(&bot_id).expect("exists").data.upgrade_queue.remove(0);
@@ -786,9 +792,11 @@ impl Sim {
                 // engine interrupt context set.
                 let time = match order {
                     UpgradeOrder::Compute(idx) => self.stats.upgrades[idx as usize].time_ticks,
-                    UpgradeOrder::Module { idx, .. } => {
-                        self.stats.modules[idx as usize].time_ticks
+                    UpgradeOrder::Tier(cap) => {
+                        let next = self.world.bots[&bot_id].data.tier(cap) + 1;
+                        self.stats.tier_time(cap, next)
                     }
+                    UpgradeOrder::Module { .. } => 0, // legacy no-op
                 };
                 self.world.move_bot(bot_id, pos);
                 let bot = self.world.bots.get_mut(&bot_id).expect("exists");
@@ -825,13 +833,19 @@ impl Sim {
                     vm.set_stack_depth(depth);
                 }
             }
-            UpgradeOrder::Module { idx, replace } => match replace {
-                // The swap destroys the removed part — no refund (Q72);
-                // it also drops off the build receipt (M10 reads
-                // currently-installed hardware).
-                Some(slot) => bot.data.modules[slot as usize] = idx,
-                None => bot.data.modules.push(idx),
-            },
+            UpgradeOrder::Tier(cap) => {
+                // New tool, new hands (Q105): the tier rises and the
+                // capability's proficiency effectively resets — by SCALE,
+                // not erasure. Each tier multiplies that track's level
+                // thresholds and its XP gain together, so the carried XP
+                // falls below the new L1 while re-climbing costs the same
+                // WORK. Nothing is zeroed, so no number ever decreases and
+                // a veteran still reads as a veteran to the scrap valve.
+                let slot = cap.idx();
+                bot.data.tiers[slot] = bot.data.tiers[slot].saturating_add(1);
+            }
+            // Legacy orders never reach here (validated away above).
+            UpgradeOrder::Module { .. } => {}
         }
     }
 
