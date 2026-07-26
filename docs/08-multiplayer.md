@@ -54,7 +54,7 @@ The rules every system must obey (enforced by CI replay tests):
 | **Duel** (stretch) | 2 players, tiny mirror map, fixed identical loadouts, pure program-vs-program. Esports-minimal; also the perfect balance-testing arena. |
 
 - **PvP entry gate**: joining any server where players can be harmed requires **all language constructs permanently unlocked** ([06-progression.md](06-progression.md)) — every combatant has the full language; matches are decided by usage, not vocabulary. Non-PvP servers have no gate.
-- Allied-colony scaffolding: shared **program library** (call a friend's published functions), shared color-decryption intel, grantable channels and vision — but **not shared progression**: each colony recovers its own Function Caches and earns its own unlocks ([06-progression.md](06-progression.md)). Allies share *work products*, not capability.
+- Allied-colony scaffolding: shared **program library** (call a friend's published functions), shared color-decryption intel **from the alliance forward only** (Q107: pre-alliance levels never merge — decryption is permanent and monotonic, so a merge-on-formation would let a faction ally for one tick, absorb everything a partner ever learned, and divorce; forward-only pooling leaves nothing to unwind), grantable channels and vision — but **not shared progression**: each colony recovers its own Function Caches and earns its own unlocks ([06-progression.md](06-progression.md)). Allies share *work products*, not capability.
 
 ## Multiplayer × Code — the interesting design space
 

@@ -81,7 +81,7 @@ Patrols and *calls for help* (other Ferals block on `receive("intruder")`). Coun
 
 Prints Ferals from harvested resources, exactly like a player Fabricator. Feral economy is real: starve the nest (kill Harvesters) and it prints less. Destroying a Nest yields a large Data bounty.
 
-**Controlling nests is the territory game**: a defeated Nest can be **claimed** (a bot with a build tool converts the site) instead of razed. Controlled nests gate how many **printers** — and therefore program colors — a colony may build, on a quadratic curve ([01-language.md](01-language.md), [03-resources.md](03-resources.md)). Razing pays Data now; claiming grows your program portfolio forever. Higher-arcana nests are worth the same slot credit but are far harder to take — pick your conquests.
+**Controlling nests is the territory game**: a defeated Nest can be **claimed** (a bot at **Building tier ≥ 2** converts the site — Q105-R2) instead of razed. Controlled nests gate how many **printers** — and therefore program colors — a colony may build, on a quadratic curve ([01-language.md](01-language.md), [03-resources.md](03-resources.md)). Razing pays Data now; claiming grows your program portfolio forever. Higher-arcana nests are worth the same slot credit but are far harder to take — pick your conquests.
 
 **Claims must be held: Ferals reclaim nests.** An undefended claim is a loan — nearby Feral activity can re-take the site, sending its printer dormant ([01-language.md](01-language.md)). Aggressiveness is arcanum-flavored: siege personalities (Tower, Justice) will assault defended claims; most others only reoccupy ones left empty.
 
@@ -164,3 +164,7 @@ flowchart LR
 - **Max arcanum is a match option, on any server type** — higher-arcana nests always spawn farther from player starts; raising the cap deepens the frontier rather than hardening the neighborhood.
 - **Mutated programs stay functional** — procedural mutation must yield parse-valid, non-degenerate programs. Buggy Feral code (the Fool) is an authored choice, never a mutation accident.
 - **Ferals reclaim claimed nests** — claims must be defended; loss sends the printer dormant. Siege arcana (Tower, Justice) assault defended claims; others reoccupy empty ones.
+
+## Open Questions
+
+- **Q110** ([QUESTIONS.md](QUESTIONS.md)): Tier 0 cannot express a safe attack — the ratified Drone re-queries `closest(enemy)` after a blocking `move_to`, a check-then-act race, and binding the target once needs Tier-1 variables (docs/01 Tier 1).

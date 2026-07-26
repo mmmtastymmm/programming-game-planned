@@ -1085,6 +1085,25 @@ written-up quirks are unbuildable. ⚠HASH.
 - [x] **Alliance decryption** (Q107) — shipped forward-only pooling ratified; docs/07's
       "never decryption" line corrected. No code change.
 
+## Post-sweep review refinements (2026-07-26) — fold into M16/M17
+
+- [ ] **Q101-R1** — the load-time `bank_cap` check evaluates the WORST CASE per key:
+      `region(tile(base + largest cost-raising per-bot delta))`, not overlays alone. Validating
+      overlays only leaves quirked bots outside the certified invariant and freeze-forever
+      reachable for them. [pyrite][sim]
+- [ ] **Q105-R1** — load-time assert that each capability tier's grant ≥ the L5 bonus of the
+      tier below, so a bought upgrade is never a net downgrade of the stat it buys (Optics
+      tier 2 must not leave a Scouting-L5 scout seeing less). [sim]
+- [ ] **Q105-R2** — `Building tier ≥ 2` gates field repair (wreck rescue), `hijack`, and nest
+      claim/raze; base tier 1 covers `build()` and structure `repair()`. Base weapon damage
+      comes from Combat tier 1. Replaces the deleted build-tool gate. [sim]
+- [ ] **Q105-R3** — the scrap valve and `SelectKey::TotalXp` rank by INVESTMENT (lifetime XP +
+      bought tier value), not raw XP: a Backup-Core reprint has tier-4 hardware and 0 XP and
+      must never be selected as the fleet's cheapest machine. [sim]
+- [ ] **Processing track** — the twelfth track needs its income (first pass: 1 per 10 ops
+      executed), its perk magnitudes, and a slot in the phase-7 settlement order; Learning's
+      10% must read the UNSCALED award. [sim]
+
 ## Verb-layer index (every spec'd builtin → its milestone)
 
 | Verb | Milestone | | Verb | Milestone |

@@ -108,7 +108,7 @@ Reading the tree: **constructs gate expressiveness, functions gate verbs**, and 
 
 ## Hardware Upgrades (Chips, per-bot)
 
-Compute is **bought at the Upgrade Station** ([03-resources.md](03-resources.md)): the bot physically walks to the structure, mounts the pad, and sits inert for the upgrade time — **no module slot consumed**. Module slots hold tools (and the Backup Core). **No per-bot cost escalation** (Q68): the catalog's tier prices below are the whole cost curve.
+Compute is **bought at the Upgrade Station** ([03-resources.md](03-resources.md)): the bot physically walks to the structure, mounts the pad, and sits inert for the upgrade time — **no slot consumed by anything** — Q105 replaced generic module slots with four permanent capability slots (Mining, Building, Combat, Optics) plus the Processor; memory, variable slots, stack depth, log buffer and the Backup Core are flat buys. **No per-bot cost escalation** (Q68): the catalog's tier prices below are the whole cost curve.
 
 Upgrade Station catalog:
 
@@ -117,13 +117,13 @@ Upgrade Station catalog:
 | CPU Mk2 / Mk3 | 5 / 15 Chips | 2 / 4 cycles per tick |
 | Memory bank | 5 Chips | +32 program lines, +4 variables, +8 log ring-buffer entries |
 | Stack extension | 8 Chips | +4 call depth (base cap is 4; recursion is legal but overflows fault — stack is what makes recursive style viable, [01-language.md](01-language.md)) |
-| Coprocessor | 10 Chips, 3 **Gold Chips** | think *while* an action resolves (removes action-blocking — huge, late; the top of the catalog is gilded, Q72) |
+| **Processor tier** | per-tier, Chips → **Gold Chips** at the top (Q72's ladder) | More cycles per tick. Q100 **retired the Coprocessor** — thinking and acting never overlap, because think-while-acting is a *language* feature (async actions), not hardware. Compute is a capability instead: buy the tier, sharpen it with the **Processing** track. |
 
 Slotted modules — **made at the Fabricator** (slotted at print time, materials added to the print cost) or **swapped at the Upgrade Station** (Q72). Swap economics (audit round 2): the Station fabricates the incoming module on the spot (its materials paid there); the removed module is **destroyed, no refund** — refits waste the old part — and it **drops off the build receipt**, which always reads *currently-installed* hardware (keeping salvage honest, [02-agents.md](02-agents.md)). Milestone-opened 2nd/3rd slots fill the same way. Module work draws no coolant (mechanical, not thermal — coolant is for compute):
 
 | Module | Cost | Effect |
 |---|---|---|
-| Backup Core | 12 Chips, 4 **Gold Chips** | preserve 50% XP on destruction (see [02-agents.md](02-agents.md)) |
+| Backup Core | 12 Chips, 4 **Gold Chips** | Preserve every capability **tier** into the reprint and **wipe all XP** (Q100 — it protects what you *bought*, never what you *earned*; see [02-agents.md](02-agents.md)). Preserves itself, so it re-arms once bought. |
 | Optics | 2 Lens, 1 Bronze | +2 sensor range — one stat, so both circles widen ([05-terrain.md](05-terrain.md)); on a one-slot rookie this is the whole build (Q53) |
 
 Hardware is where the "compute vs. claws" economy bites — as two material streams (Q72): **Bronze arms, Chips think.** Tools and weapons price up the ladder (tier-2 in Steel, tier-3 in Bronze, tier-4 in Bronze + Gold — [03-resources.md](03-resources.md)); Chips buy compute only. Both compete for the same mining and hauling budget, so a colony that maxes CPUs still starved its armory — and every compute upgrade is a round trip to the station, paid in time and exposure.
