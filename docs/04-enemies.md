@@ -56,14 +56,17 @@ Counterplay written in the code: hurt it and it *will* run — ambush the retrea
 ### Harvester (threat 2) — economic enemy
 
 ```python
-target = closest(ore).expect()
-move_to(target)
-mine()
-move_to(home)
-deposit()
+if exists(ore):
+    vein = closest(ore).expect()
+    move_to(vein)
+    mine()
+    move_to(home)
+    deposit()
+wander()
+wait(4)
 ```
 
-Steals *your* map's ore and feeds its nest. Ignores bots entirely — a pure race pressure on the economy.
+The `exists(ore)` guard is load-bearing (Q108): without it a worked-out map turns every Harvester into a crash-loop rather than an enemy. Steals *your* map's ore and feeds its nest. Ignores bots entirely — a pure race pressure on the economy.
 
 ### Warden (threat 3) — teaches loops + messaging
 
@@ -71,8 +74,11 @@ Steals *your* map's ore and feeds its nest. Ignores bots entirely — a pure rac
 for spot in patrol_route:
     move_to(spot)
     if exists(enemy):
-        try_broadcast("intruder", closest(enemy).expect())
-        attack(closest(enemy).expect())
+        target = closest(enemy).expect()
+        try_broadcast("intruder", target)
+        move_to(target)
+        attack(target)
+wait(6)
 ```
 
 Patrols and *calls for help* (other Ferals block on `receive("intruder")`). Counterplay: jam or bait the call, or kill it inside one patrol leg.

@@ -50,12 +50,15 @@ impl Archetype {
 
     /// The shipped source, in CURRENT builtins (docs/04's listings,
     /// adjusted: a `move_to` precedes each `attack` so the swing is in
-    /// range, and the Harvester guards on `exists(ore)` instead of
-    /// crash-looping on an empty map — RATIFIED 2026-07-26 by Q108, and
-    /// docs/04 now carries these sources: a non-adjacent `attack()`
-    /// faults, so the doc's older four-line Drone crash-looped whenever
-    /// it merely SAW an enemy, and the first program a player reads must
-    /// not teach a bug they would copy).
+    /// range, the Harvester guards on `exists(ore)`, and each target is
+    /// BOUND ONCE before being walked to and struck — Q108 ratified the
+    /// first two, Q110 added the binding. Re-querying `closest()` after a
+    /// blocking `move_to` is a check-then-act race: the second call can
+    /// return a different, non-adjacent enemy and `attack()` faults on
+    /// range. Binding needs Variables, which every attacker already has —
+    /// docs/06's tree runs START → F_SENSE → IF → F_ATK with VAR → IF, so
+    /// `attack` is unreachable without `if`, and `if` without Variables.
+    /// docs/04 carries these sources verbatim.)
     pub fn source(self) -> &'static str {
         match self {
             Archetype::Drone => "\
@@ -63,21 +66,24 @@ wander()
 wander()
 wait(3)
 if exists(enemy):
-    move_to(closest(enemy).expect())
-    attack(closest(enemy).expect())
+    target = closest(enemy).expect()
+    move_to(target)
+    attack(target)
 ",
             Archetype::Stinger => "\
 if health_low():
     move_to(home)
     wait(8)
 if exists(enemy):
-    move_to(closest(enemy).expect())
-    attack(closest(enemy).expect())
+    target = closest(enemy).expect()
+    move_to(target)
+    attack(target)
 wander()
 ",
             Archetype::Harvester => "\
 if exists(ore):
-    move_to(closest(ore).expect())
+    vein = closest(ore).expect()
+    move_to(vein)
     mine()
     move_to(home)
     deposit()
@@ -88,9 +94,10 @@ wait(4)
 for spot in patrol_route:
     move_to(spot)
     if exists(enemy):
-        try_broadcast(\"intruder\", closest(enemy).expect())
-        move_to(closest(enemy).expect())
-        attack(closest(enemy).expect())
+        target = closest(enemy).expect()
+        try_broadcast(\"intruder\", target)
+        move_to(target)
+        attack(target)
 wait(6)
 ",
         }

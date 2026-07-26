@@ -941,6 +941,10 @@ out-of-range quirk to trigger it (guarded by the setenv-range test exercising th
       crash-loop killed a stock bot in ~25 s. ⚠HASH (golden regenerated).
 - [ ] Remaining tuning-to-spec numbers: boot_ticks 2→~20, print_ticks 5→~100 (M0 data
       files) — a pacing pass that deserves its own session. ⚠HASH
+- [ ] **The `try_*` completion pass** (Q109 + Q110, backlogged) — `try_attack()` returning
+      `False` on a dead or out-of-range target lands with `try_move_to()`; one coherent pass
+      over the fault-free family rather than two one-offs. `try_attack` closes Q110's residual
+      (a bound target that dies mid-walk faults on a stale handle). [pyrite][sim]
 - [ ] **`try_move_to()`** (Q109, backlogged) — the fault-free mover, joining
       `try_deposit`/`try_withdraw`/`try_send`: returns `False` instead of faulting when no
       route exists (paint-blocked, walled off, or demolished bridge). The right answer for
