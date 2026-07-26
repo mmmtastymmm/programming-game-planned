@@ -7,7 +7,8 @@
 //!   opaque near-black cover is all that renders. True black.
 //! - **Discovered (memory)**: the terrain renders, swapped to frozen
 //!   "memory" twins of its live materials — unlit, darkened blue-grey,
-//!   no glow, ambient animation frozen at the last-seen frame.
+//!   no glow, ambient animation frozen (Q93: stillness is the contract,
+//!   not per-tile frame fidelity — twins are shared per material).
 //! - **In view**: live materials, nothing on top.
 //!
 //! Heard-only enemy contacts render as pulsing blips — a position, not a
@@ -88,8 +89,9 @@ pub(crate) struct FogAssets {
     rings: HashMap<u32, Entity>,
     /// Live material → its frozen "memory" twin. All tiles sharing a live
     /// material share one twin, and the twin is never retargeted by
-    /// `animate_terrain` — remembered ground holds the frame it was last
-    /// seen on.
+    /// `animate_terrain` — remembered ground holds still. Q93 ruled that
+    /// stillness (not per-tile last-seen frames) is the contract, so one
+    /// twin per material is the intended design, not an approximation.
     dim: HashMap<AssetId<StandardMaterial>, Handle<StandardMaterial>>,
     /// Memory twin → the live material it shadows (restored on reveal).
     bright: HashMap<AssetId<StandardMaterial>, Handle<StandardMaterial>>,

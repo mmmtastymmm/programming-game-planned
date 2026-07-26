@@ -929,6 +929,19 @@ out-of-range quirk to trigger it (guarded by the setenv-range test exercising th
 - [ ] Fog view: replace `gate_fogged_views`' hand-enumerated object registries with a
       `FogGated { pos, dims }` component attached at spawn in `sync_view`, so new spawn
       paths can't silently skip fog gating (2026-07-25 review). [game]
+- [ ] Sim: completing a Barricade clears the tile's overlay and paint entries (the
+      2026-07-26 tile-composition rule: an unwalkable building shares with nothing —
+      today `World.overlays`/`World.paint` would keep stale entries under it). [sim] ⚠HASH
+- [ ] Sim: painting becomes serviced labor (Q97) — `PlacePaint` today applies instantly
+      and ownerless (`actor_faction() → None`); it should place a faction-attributed
+      paint *designation* (blueprint flow, Q86 authorization applies) that an adjacent
+      bot services — quick per tile, material-free; erase = designating `unpainted`.
+      Pathfinding then honors the Q95/Q96 `only=`/`avoid=` args. [sim] ⚠HASH
+- [ ] Sim: per-faction **known-tiles** joins the world (Q94) — the perception phase
+      records every tile inside a faction's seeing union (bitset grid or BTreeSet;
+      deterministic, enters the state hash); `recompute_fog` then reads it for
+      `fog.known` instead of mirroring the eye math view-side (`tile_visible` is the
+      existing sim-side primitive to build on). [sim+game] ⚠HASH
 
 ## Verb-layer index (every spec'd builtin → its milestone)
 
