@@ -1017,11 +1017,15 @@ slots. Milestone-sized; ⚠HASH throughout.
       cumulative 100/300/600/1000/1500, so any M > 15 drops a maxed tier-1 bot below the new
       L1 — an effective reset with no reset code — while equal gain scaling keeps re-climbing
       at the same real work. Nothing decreases, so no `lifetime_xp` counter is needed. [sim]
-- [ ] **Fix the two places the scale leaks** — quirk manifestation moves from total XP to the
-      **Age** track (at tier 2 a bot crosses 300/900 in ~9 units of ore, popping quirks
-      instantly); **Learning's 10% cut reads the UNSCALED award** (else Learning caps after
-      ~150 units instead of ~15,000). Tier-weighted `SelectKey::TotalXp` is ratified as
-      intended for the scrap valve — eat the least-invested machine. [sim]
+- [ ] **Fix the four places the scale leaks** — every `xp_total()` consumer was audited:
+      (1) **quirk manifestation** moves to the **Age** track (at tier 2 a bot crosses 300/900
+      in ~9 units of ore, popping quirks instantly); (2) **the wreck self-destruct countdown**
+      moves to Age too — `base + (xp_total/1000) × per_100xp` would run to HOURS at tier 3, so
+      wrecks would never expire and the rescue race would lose its clock; (3) **Learning's 10%
+      cut reads the UNSCALED award** (else Learning caps after ~150 units instead of ~15,000);
+      (4) `SelectKey::TotalXp` and the scrap valve keep tier-weighted totals — ratified as
+      intended, the colony eats its least-invested machine. Retune `quirks.ron manifest_at`
+      and `wreck_countdown_per_100xp_ticks` against Age's rate (1 deci/tick). [sim] ⚠HASH
 - [ ] **Structures are built by labor** — `PlaceStructure` becomes a blueprint designation
       serviced by `build()` (the Q97 paint flow generalizes); every structure incl. Q98's Pump.
       Nest claim/raze likewise want a bot on site (docs/04). [sim][game]
