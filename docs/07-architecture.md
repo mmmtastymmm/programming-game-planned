@@ -101,7 +101,10 @@ Commands:        DeployProgram, QueuePrint(loadout), PlaceBlueprint
                  QueueUpgrade(bot, catalog item — the program must bring
                  the bot to a pad; the pad applies queued orders),
                  SetRecipe(structure, recipe),
-                 PlaceOverlay(arrow | paint), ExchangeData, PostRequest,
+                 PlaceOverlay(arrow — instant signage),
+                 PlacePaint(pos, color|unpainted — Q97: places a paint
+                 DESIGNATION a bot services, the blueprint flow),
+                 ExchangeData, PostRequest,
                  Grant(faction, channel | vision | module), SetAlliance,
                  Vote(sim-speed | decommission), Research(UnlockId)
                  — the ONLY external inputs to sim (Q77: list completed;

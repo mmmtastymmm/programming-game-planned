@@ -174,3 +174,33 @@ fn survey_uses_mountain_elevation() {
         "a summit scout discovers a vein behind a wall"
     );
 }
+
+// ------------------------------------------------- known tiles (Q94)
+
+#[test]
+fn seen_tiles_are_durable_sim_state() {
+    // Q94: every tile inside the seeing union enters the faction's
+    // known-tiles set — sim state that outlives the eyes that charted it.
+    let spec = MapSpec::empty(14, 3);
+    let mut sim = Sim::new(&spec);
+    let bot = spawn(&mut sim, TilePos::new(1, 1), "log(1)\n");
+    sim.step();
+    let known = sim.world.known_tiles.get(&0).expect("faction 0 charted tiles");
+    assert!(known.contains(&TilePos::new(1, 1)), "own tile is known");
+    assert!(known.contains(&TilePos::new(6, 1)), "the seeing rim (base 5) is known");
+    assert!(!known.contains(&TilePos::new(12, 1)), "beyond the circle stays dark");
+    // The eye dies; the chart survives. The LIVE union is derived and
+    // empties with the last perceiver — knowledge is the durable half.
+    sim.apply(&Command::KillBot { bot }).unwrap();
+    for _ in 0..3 {
+        sim.step();
+    }
+    assert!(
+        sim.world.known_tiles[&0].contains(&TilePos::new(6, 1)),
+        "known tiles survive the scout"
+    );
+    assert!(
+        sim.world.visible_tiles.get(&0).is_none_or(|v| v.is_empty()),
+        "the live union is gone with the eyes"
+    );
+}

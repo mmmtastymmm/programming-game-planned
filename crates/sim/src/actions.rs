@@ -54,7 +54,7 @@ impl Sim {
         let Some(request) = bot.data.requested.take() else { return };
         let pos = bot.data.pos;
         match request {
-            ActionRequest::MoveTo(target) => {
+            ActionRequest::MoveTo { target, paint } => {
                 let Some(target_pos) = self.world.entity_pos(target) else {
                     self.finish_action(id, Err("move_to: no such entity".into()));
                     return;
@@ -85,6 +85,8 @@ impl Sim {
                     pos,
                     &goals,
                     &structures,
+                    &self.world.paint,
+                    &paint,
                 ) {
                     Some(path) if path.is_empty() => {
                         self.finish_action(id, Ok(Value::Unit));
@@ -101,9 +103,11 @@ impl Sim {
                         .expect("path tiles are passable");
                         let bot = self.world.bot_mut(id);
                         bot.data.action =
-                            Some(Action::Move { path, ticks_left: first_cost, goals });
+                            Some(Action::Move { path, ticks_left: first_cost, goals, paint });
                     }
                     None => {
+                        // Q96: paint-forbidden ground is unreachable
+                        // ground — the same fault as a walled-off goal.
                         self.finish_action(id, Err("move_to: unreachable".into()));
                     }
                 }
@@ -229,10 +233,11 @@ impl Sim {
             }
             ActionRequest::Search => self.start_search(id),
             ActionRequest::Study => self.start_study(id),
-            ActionRequest::Wander => {
+            ActionRequest::Wander { paint } => {
                 // A seeded random walk leg: a random passable free
                 // tile within the leg length; unreachable picks are a
-                // completed (empty) leg, not a fault.
+                // completed (empty) leg, not a fault. The Q95 paint
+                // args bound both the pick and the walk.
                 let leg = self.tuning.wander_leg as i32;
                 let mut candidates: Vec<TilePos> = Vec::new();
                 for dy in -leg..=leg {
@@ -244,6 +249,7 @@ impl Sim {
                                 .grid
                                 .get(t)
                                 .is_some_and(|k| k.passable())
+                            && paint.allows(self.world.paint_color(t))
                             && !self.world.structure_at(t)
                             && !self.world.tile_occupied(t, id)
                         {
@@ -257,12 +263,13 @@ impl Sim {
                 }
                 let pick = (crate::world::next_rand(&mut self.world.rng.wander)
                     % candidates.len() as u64) as usize;
-                self.walk_to_tile(id, candidates[pick], false);
+                self.walk_to_tile(id, candidates[pick], false, paint);
             }
-            ActionRequest::Explore => {
+            ActionRequest::Explore { paint } => {
                 // The smart explorer (Q79): a random CURRENTLY-FOGGED
                 // passable tile within the radius; walk there, then
                 // drop into the scouting stance (survey_after_move).
+                // The Q95 paint args bound both the pick and the walk.
                 let radius = self.tuning.explore_radius as i32;
                 let faction = self.world.bots[&id].data.faction;
                 let mut candidates: Vec<TilePos> = Vec::new();
@@ -275,6 +282,7 @@ impl Sim {
                                 .grid
                                 .get(t)
                                 .is_some_and(|k| k.passable())
+                            && paint.allows(self.world.paint_color(t))
                             && !self.world.structure_at(t)
                             && !self.world.tile_occupied(t, id)
                             && !self.tile_visible(faction, t)
@@ -291,7 +299,7 @@ impl Sim {
                 }
                 let pick = (crate::world::next_rand(&mut self.world.rng.explore)
                     % candidates.len() as u64) as usize;
-                self.walk_to_tile(id, candidates[pick], true);
+                self.walk_to_tile(id, candidates[pick], true, paint);
             }
             ActionRequest::Deposit { fault_on_fail } => {
                 // Generalized acceptor (docs/03): an adjacent depot
@@ -374,7 +382,7 @@ impl Sim {
         // Advance an in-flight action.
         let Some(action) = bot.data.action.take() else { return };
         match action {
-            Action::Move { mut path, ticks_left, goals } => {
+            Action::Move { mut path, ticks_left, goals, paint } => {
                 let ticks_left = ticks_left - 1;
                 if ticks_left > 0 {
                     // Advancing the traverse counts as moving for hearing
@@ -383,7 +391,7 @@ impl Sim {
                     // the tile changes, so a mover on Rubble/Ford stays
                     // audible the whole way.
                     bot.data.moved_tick = tick;
-                    bot.data.action = Some(Action::Move { path, ticks_left, goals });
+                    bot.data.action = Some(Action::Move { path, ticks_left, goals, paint });
                     return;
                 }
                 // Bots are solid. If the next tile is occupied, first try a
@@ -398,17 +406,25 @@ impl Sim {
                 // since — never walk into water or panic on an unpriced
                 // tile (review 2026-07-16).
                 if !edge_allowed(&self.world.grid, &self.world.overlays, from, entered) {
-                    self.replan_move(id, goals);
+                    self.replan_move(id, goals, paint, true);
+                    return;
+                }
+                // Repainting is live play (Q97): a route tile recolored
+                // against this move's own filter re-plans exactly like
+                // hardened ground — the program's avoid= stays honest
+                // even when an opponent paints against it.
+                if !paint.allows(self.world.paint_color(entered)) {
+                    self.replan_move(id, goals, paint, true);
                     return;
                 }
                 // Structures are solid too: one placed on the route AFTER
                 // this path was planned blocks the step exactly like a bot
                 // (plan-time A* only sees structures that already exist).
                 if self.world.tile_occupied(entered, id) || self.world.structure_at(entered) {
-                    let dodges = self.sidestep_candidates(id, from, entered, &goals);
+                    let dodges = self.sidestep_candidates(id, from, entered, &goals, &paint);
                     if dodges.is_empty() {
                         let bot = self.world.bot_mut(id);
-                        bot.data.action = Some(Action::Move { path, ticks_left: 1, goals });
+                        bot.data.action = Some(Action::Move { path, ticks_left: 1, goals, paint });
                         self.bump_both(id, entered, true);
                     } else {
                         let pick = (crate::world::next_rand(&mut self.world.rng.sidestep)
@@ -425,7 +441,7 @@ impl Sim {
                         // Single-step path; landing off-route triggers a
                         // re-plan (see the empty-path branch below).
                         bot.data.action =
-                            Some(Action::Move { path: vec![step], ticks_left: cost, goals });
+                            Some(Action::Move { path: vec![step], ticks_left: cost, goals, paint });
                     }
                     return;
                 }
@@ -452,7 +468,7 @@ impl Sim {
                         // Single-step override; landing off-route triggers
                         // the same re-plan as a dodge (empty-path branch).
                         bot.data.action =
-                            Some(Action::Move { path: vec![target], ticks_left: cost, goals });
+                            Some(Action::Move { path: vec![target], ticks_left: cost, goals, paint });
                         return;
                     }
                 }
@@ -462,7 +478,7 @@ impl Sim {
                     } else {
                         // A dodge landed us off-route: plan a fresh path,
                         // preferring one that threads around current bots.
-                        self.replan_move(id, goals);
+                        self.replan_move(id, goals, paint, true);
                     }
                 } else {
                     // The rest of the plan can harden too — a None here
@@ -476,9 +492,9 @@ impl Sim {
                         Some(next_cost) => {
                             let bot = self.world.bot_mut(id);
                             bot.data.action =
-                                Some(Action::Move { path, ticks_left: next_cost, goals });
+                                Some(Action::Move { path, ticks_left: next_cost, goals, paint });
                         }
-                        None => self.replan_move(id, goals),
+                        None => self.replan_move(id, goals, paint, true),
                     }
                 }
             }
@@ -726,14 +742,25 @@ impl Sim {
                             // only entering a Barricade is blocked,
                             // leaving isn't.
                             BlueprintKind::Barricade => {
-                                self.world.set_tile(site, TileKind::Barricade)
+                                self.world.set_tile(site, TileKind::Barricade);
+                                // Tile composition (2026-07-26): an
+                                // unwalkable building shares its tile with
+                                // NOTHING — the wall swallows the signage.
+                                // Demolish leaves bare ground to re-mark.
+                                self.world.overlays.remove(&site);
+                                self.world.paint.remove(&site);
                             }
                             // Un-build to what the works stand on: planks
                             // over water, a wall over plains.
                             BlueprintKind::Demolish => {
                                 match self.world.grid.get(site) {
                                     Some(TileKind::Bridge) => {
-                                        self.world.set_tile(site, TileKind::Water)
+                                        self.world.set_tile(site, TileKind::Water);
+                                        // Water carries no ground stack
+                                        // (tile composition): the deck's
+                                        // signage and paint sink with it.
+                                        self.world.overlays.remove(&site);
+                                        self.world.paint.remove(&site);
                                     }
                                     Some(TileKind::Barricade) => {
                                         self.world.set_tile(site, TileKind::Plains)
@@ -749,6 +776,17 @@ impl Sim {
                             BlueprintKind::Road => {
                                 self.world.set_tile(site, TileKind::Road)
                             }
+                            // Q97: paint is labor — completing the
+                            // designation recolors (or erases) the tile.
+                            // The terrain itself is untouched.
+                            BlueprintKind::Paint { color } => match color {
+                                Some(c) => {
+                                    self.world.paint.insert(site, c);
+                                }
+                                None => {
+                                    self.world.paint.remove(&site);
+                                }
+                            },
                         }
                     }
                     self.finish_action(id, Ok(Value::Unit));
@@ -988,6 +1026,10 @@ impl Sim {
                         pos,
                         &goals,
                         &structures,
+                        &self.world.paint,
+                        // The stance takes no paint args — its follow
+                        // walk is paint-blind.
+                        &crate::world::PaintFilter::FREE,
                     ) && let Some(&next) = path.first()
                     {
                         if !self.world.tile_occupied(next, id) && !self.world.structure_at(next) {
@@ -1204,48 +1246,26 @@ impl Sim {
         }
     }
 
-    /// Is this tile inside any friendly perceiver's SEEING circle right
-    /// now? (Tile-level visibility for explore()'s fogged-tile pick and
-    /// the fog renderer; entities go through `world.perception`.)
+    /// Is this tile inside the faction's seeing union, per the LAST
+    /// perception pass? One source of truth (Q94): the same
+    /// `visible_tiles` the fog renderer draws — full perceiver set,
+    /// search-ring widening, high-ground bonus, and vision grants
+    /// included, so explore()'s fogged-tile pick can never disagree with
+    /// the screen. Last-tick data is the phase discipline (docs/07:
+    /// queries read the previous tick's perception).
     pub fn tile_visible(&self, faction: u8, tile: TilePos) -> bool {
-        let ctx = self.ctx();
-        for bot in self.world.bots.values() {
-            if bot.data.faction != faction || bot.data.dying {
-                continue;
-            }
-            let seeing = ctx.sensors_for(&bot.data);
-            if bot.data.pos.chebyshev(tile) <= seeing
-                && crate::perception::los_clear(
-                    &self.world.grid,
-                    bot.data.pos,
-                    tile,
-                    // Mountain summits see over walls too (docs/05), matching
-                    // passive perception's elevation rule.
-                    crate::perception::on_high_ground(&self.world.grid, bot.data.pos),
-                )
-            {
-                return true;
-            }
-        }
-        let s = self.tuning.structure_sensors;
-        let sees = |pos: TilePos| {
-            pos.chebyshev(tile) <= s
-                && crate::perception::los_clear(&self.world.grid, pos, tile, false)
-        };
-        self.world.printers.values().any(|p| p.faction == faction && sees(p.pos))
-            || self.world.structures.values().any(|st| st.faction == faction && sees(st.pos))
-            || self.world.depots.values().any(|d| d.faction == faction && sees(d.pos))
+        self.world.visible_tiles.get(&faction).is_some_and(|v| v.contains(&tile))
     }
 
     /// Start a walk to a specific tile (the stances' mover): A* around
     /// structures; `survey` chains the scouting stance onto arrival.
-    fn walk_to_tile(&mut self, id: BotId, tile: TilePos, survey: bool) {
+    fn walk_to_tile(&mut self, id: BotId, tile: TilePos, survey: bool, paint: crate::world::PaintFilter) {
         let mut goals = BTreeSet::new();
         goals.insert(tile);
         if survey {
             self.world.bot_mut(id).data.survey_after_move = true;
         }
-        self.replan_move(id, goals);
+        self.replan_move(id, goals, paint, false);
     }
 
     /// Enter the scouting stance (M7, docs/05): root in place; the seeing

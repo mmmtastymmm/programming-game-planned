@@ -141,6 +141,46 @@ impl Sim {
         }
 
         let factions: BTreeSet<u8> = perceivers.keys().copied().collect();
+
+        // --- Q94: the tile unions -------------------------------------
+        // A seen tile is fully known (docs/07 phase 5): rebuild each
+        // faction's live seeing union (derived — replaces last tick's),
+        // and fold it into the DURABLE known-tiles set (sim state,
+        // hashed) the fog renderer draws the greyed snapshot from.
+        // Granted vision is already pooled into `perceivers`, so allied
+        // eyes chart tiles too (Q70: the grant shares maps).
+        let mut visible: BTreeMap<u8, BTreeSet<TilePos>> = BTreeMap::new();
+        for (&faction, eyes) in &perceivers {
+            let union = visible.entry(faction).or_default();
+            for &(pos, seeing, _, elevated) in eyes {
+                let r = seeing as i32;
+                for dy in -r..=r {
+                    for dx in -r..=r {
+                        let t = TilePos::new(pos.x + dx, pos.y + dy);
+                        if self.world.grid.in_bounds(t)
+                            && los_clear(&self.world.grid, pos, t, elevated)
+                        {
+                            union.insert(t);
+                        }
+                    }
+                }
+            }
+        }
+        for (&faction, union) in &visible {
+            let known = self.world.known_tiles.entry(faction).or_default();
+            known.extend(union.iter().copied());
+            // Discovered nodes are map knowledge at any range (Q70) —
+            // their ground is remembered even if no eye ever swept it
+            // (mapgen's pre-discovered start veins, analyzed intel).
+            if let Some(nodes) = self.world.known_nodes.get(&faction) {
+                known.extend(nodes.values().map(|n| n.pos));
+            }
+        }
+        self.world.visible_tiles = visible;
+        // Re-derive the stat context: the tile-union writes above ended
+        // the earlier borrow of self.
+        let ctx = self.ctx();
+
         let mut new_perception: BTreeMap<u8, Perception> = BTreeMap::new();
         for &faction in &factions {
             let mut seen: BTreeSet<EntityId> = BTreeSet::new();
@@ -149,6 +189,14 @@ impl Sim {
             // Bots: seen in the inner circle; heard in the outer while
             // MOVING this tick — unless standing on Snow (mute) — at
             // hearing + signature (Ford-quieted), floored at 1.
+            // Seeing is one lookup: the per-faction tile union above ran
+            // exactly this predicate (d <= seeing under los_clear, same
+            // eyes), so re-walking the eye list per target would be the
+            // same LoS work twice — and a second copy of the rule to
+            // drift (review 2026-07-26). The eye loop below is hearing
+            // only.
+            let sees_tile =
+                |t: TilePos| self.world.visible_tiles.get(&faction).is_some_and(|v| v.contains(&t));
             for target in self.world.bots.values() {
                 if target.data.dying {
                     continue;
@@ -156,48 +204,37 @@ impl Sim {
                 let tpos = target.data.pos;
                 let entity = target.data.entity;
                 let own = target.data.faction == faction;
+                if own || sees_tile(tpos) {
+                    // Own units are always known to the colony cloud.
+                    seen.insert(entity);
+                    continue;
+                }
                 let moving = target.data.moved_tick == tick && tick > 0;
                 let muted = self.world.grid.get(tpos) == Some(TileKind::Snow);
+                if !moving || muted {
+                    continue; // only moving things make noise (Q74)
+                }
                 // Ford wading quiets the mover (M8, Q38): the water
                 // swallows the tread noise — subtracted from heard-at.
                 let mut signature = ctx.signature_for(&target.data);
                 if self.world.grid.get(tpos) == Some(TileKind::Ford) {
                     signature -= self.tuning.ford_quiet;
                 }
-                for &(pos, seeing, hearing, elevated) in eyes {
-                    if own {
-                        // Own units are always known to the colony cloud.
-                        seen.insert(entity);
+                for &(pos, _, hearing, elevated) in eyes {
+                    let heard_at = (hearing as i64 + signature).max(1) as u32;
+                    if pos.chebyshev(tpos) <= heard_at
+                        && los_clear(&self.world.grid, pos, tpos, elevated)
+                    {
+                        heard.insert(entity, tpos);
                         break;
-                    }
-                    let d = pos.chebyshev(tpos);
-                    if d <= seeing && los_clear(&self.world.grid, pos, tpos, elevated) {
-                        seen.insert(entity);
-                        break;
-                    }
-                    if moving && !muted {
-                        let heard_at = (hearing as i64 + signature).max(1) as u32;
-                        if d <= heard_at && los_clear(&self.world.grid, pos, tpos, elevated) {
-                            heard.insert(entity, tpos);
-                            // keep scanning: a later eye may SEE it
-                        }
                     }
                 }
             }
             // Structures, printers, depots, nodes, wrecks: seen-only
-            // (stationary things make no noise).
+            // (stationary things make no noise) — same one-lookup union.
             let mut see_static = |entity: EntityId, tpos: TilePos, own: bool| {
-                if own {
+                if own || sees_tile(tpos) {
                     seen.insert(entity);
-                    return;
-                }
-                for &(pos, seeing, _, elevated) in eyes {
-                    if pos.chebyshev(tpos) <= seeing
-                        && los_clear(&self.world.grid, pos, tpos, elevated)
-                    {
-                        seen.insert(entity);
-                        return;
-                    }
                 }
             };
             for (id, p) in &self.world.printers {

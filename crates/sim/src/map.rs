@@ -95,8 +95,8 @@ pub enum TileKind {
     /// Geothermal vent (docs/05): the only tile allowing a Geothermal
     /// Tap. Ordinary ground to walk on.
     Vent,
-    /// Snowfield. Plains-cost for now; whether it slows, conceals, or
-    /// holds tracks is open (docs/QUESTIONS Q67).
+    /// Snowfield. Plains-cost; **mutes movement noise** (Q78, docs/05 —
+    /// only seeing finds a bot on snow; the hook lives in perception).
     Snow,
     /// Raw-resource terrains (docs/03: the eleven-raw split — Water is
     /// water tiles, Crystal is CrystalField, these are the other nine).
@@ -743,11 +743,25 @@ pub fn astar(
     start: TilePos,
     goals: &BTreeSet<TilePos>,
 ) -> Option<Vec<TilePos>> {
-    astar_avoiding(grid, overlays, costs, start, goals, &BTreeSet::new())
+    astar_avoiding(
+        grid,
+        overlays,
+        costs,
+        start,
+        goals,
+        &BTreeSet::new(),
+        &BTreeMap::new(),
+        &crate::world::PaintFilter::FREE,
+    )
 }
 
 /// A* that additionally refuses to enter `blocked` tiles (used for bump
-/// re-planning: other bots' current positions are obstacles).
+/// re-planning: other bots' current positions are obstacles). `paint` +
+/// `filter` are the Q96 routing constraint: a tile whose paint color the
+/// filter forbids is impassable to THIS search, exactly like water —
+/// only entry is ever checked, so a bot shoved onto forbidden paint can
+/// always route off it.
+#[allow(clippy::too_many_arguments)]
 pub fn astar_avoiding(
     grid: &Grid,
     overlays: &BTreeMap<TilePos, OverlayKind>,
@@ -755,6 +769,8 @@ pub fn astar_avoiding(
     start: TilePos,
     goals: &BTreeSet<TilePos>,
     blocked: &BTreeSet<TilePos>,
+    paint: &BTreeMap<TilePos, u8>,
+    filter: &crate::world::PaintFilter,
 ) -> Option<Vec<TilePos>> {
     if goals.contains(&start) {
         return Some(Vec::new());
@@ -799,6 +815,11 @@ pub fn astar_avoiding(
                 continue;
             }
             if !edge_allowed(grid, overlays, pos, next) {
+                continue;
+            }
+            if !filter.is_free()
+                && !filter.allows(paint.get(&next).copied().unwrap_or(0))
+            {
                 continue;
             }
             let Some(step_cost) = costs.edge_cost_x2(grid, pos, next) else { continue };

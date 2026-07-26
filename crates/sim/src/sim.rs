@@ -136,6 +136,9 @@ pub struct Tuning {
     pub cleanse_ticks: u32,
     pub road_cost_stone: u64,
     pub road_build_ticks: u32,
+    /// Q97: paint is labor — the quick, material-free service time of a
+    /// paint designation.
+    pub paint_ticks: u32,
     // --- the wreck race (M10, docs/02) ---
     pub wreck_hp_pct: u32,
     pub wreck_countdown_base_ticks: u32,
@@ -235,6 +238,7 @@ impl Tuning {
             (self.demolish_ticks, "demolish_ticks"),
             (self.cleanse_ticks, "cleanse_ticks"),
             (self.road_build_ticks, "road_build_ticks"),
+            (self.paint_ticks, "paint_ticks"),
         ] {
             assert!(ticks > 0, "tuning: {name} must be > 0");
         }
@@ -274,7 +278,8 @@ impl crate::world::BlueprintKind {
             K::Bridge => tuning.bridge_cost_stone,
             K::Barricade => tuning.barricade_cost_stone,
             K::Road => tuning.road_cost_stone,
-            K::Clear | K::Demolish | K::Cleanse => 0,
+            // Paint is material-free (Q97): labor and exposure are the price.
+            K::Clear | K::Demolish | K::Cleanse | K::Paint { .. } => 0,
         }
     }
 
@@ -288,6 +293,7 @@ impl crate::world::BlueprintKind {
             K::Demolish => tuning.demolish_ticks,
             K::Cleanse => tuning.cleanse_ticks,
             K::Road => tuning.road_build_ticks,
+            K::Paint { .. } => tuning.paint_ticks,
         }
     }
 }
@@ -334,10 +340,29 @@ fn hash_channel_op(h: &mut Fnv1a, op: &crate::world::ChannelOp) {
 /// Hash an in-flight action — cross-tick lockstep state (review
 /// 2026-07-16: a diverged `waited` counter or race timer must move the
 /// phase-9 hash the tick it diverges, not when it finally touches hp).
+/// The Q95 route constraint, length-prefixed per list (an `only=[2]`
+/// must not collide with an `avoid=[2]`).
+fn hash_paint_filter(h: &mut Fnv1a, paint: &crate::world::PaintFilter) {
+    match &paint.only {
+        Some(only) => {
+            h.write_u8(1);
+            h.write_u32(only.len() as u32);
+            for c in only {
+                h.write_u8(*c);
+            }
+        }
+        None => h.write_u8(0),
+    }
+    h.write_u32(paint.avoid.len() as u32);
+    for c in &paint.avoid {
+        h.write_u8(*c);
+    }
+}
+
 fn hash_action(h: &mut Fnv1a, action: &crate::world::Action) {
     use crate::world::Action;
     match action {
-        Action::Move { path, ticks_left, goals } => {
+        Action::Move { path, ticks_left, goals, paint } => {
             h.write_u8(1);
             h.write_u32(path.len() as u32);
             for p in path {
@@ -350,6 +375,7 @@ fn hash_action(h: &mut Fnv1a, action: &crate::world::Action) {
                 h.write_i32(g.x);
                 h.write_i32(g.y);
             }
+            hash_paint_filter(h, paint);
         }
         Action::Mine { node, ticks_left } => {
             h.write_u8(2);
@@ -432,9 +458,10 @@ fn hash_action(h: &mut Fnv1a, action: &crate::world::Action) {
 fn hash_request(h: &mut Fnv1a, req: &crate::world::ActionRequest) {
     use crate::world::ActionRequest;
     match req {
-        ActionRequest::MoveTo(e) => {
+        ActionRequest::MoveTo { target, paint } => {
             h.write_u8(1);
-            h.write_u64(e.0);
+            h.write_u64(target.0);
+            hash_paint_filter(h, paint);
         }
         ActionRequest::Mine => h.write_u8(2),
         ActionRequest::Deposit { fault_on_fail } => {
@@ -454,8 +481,14 @@ fn hash_request(h: &mut Fnv1a, req: &crate::world::ActionRequest) {
             h.write_u64(e.0);
         }
         ActionRequest::Search => h.write_u8(7),
-        ActionRequest::Wander => h.write_u8(8),
-        ActionRequest::Explore => h.write_u8(9),
+        ActionRequest::Wander { paint } => {
+            h.write_u8(8);
+            hash_paint_filter(h, paint);
+        }
+        ActionRequest::Explore { paint } => {
+            h.write_u8(9);
+            hash_paint_filter(h, paint);
+        }
         ActionRequest::Repair(e) => {
             h.write_u8(10);
             h.write_u64(e.0);
@@ -730,8 +763,17 @@ pub enum Command {
         #[serde(default)]
         faction: u8,
     },
-    /// Set or clear cosmetic tile paint (free).
-    PlacePaint { pos: TilePos, color: Option<u8> },
+    /// Designate tile paint (Q97 — the blueprint flow: a bot services
+    /// it; None designates `unpainted`, the eraser). Material-free; the
+    /// faction is the designating painter (serde-defaulted for stored
+    /// replays, whose instant-paint behavior this supersedes — see the
+    /// 2026-07-26 golden regeneration).
+    PlacePaint {
+        pos: TilePos,
+        color: Option<u8>,
+        #[serde(default)]
+        faction: u8,
+    },
     /// DEV-ONLY emergency stop (M3: abort() is the only PLAYER scuttle):
     /// straight to wreck, no template — the owner pulled the plug. Logs
     /// ride in the wreck; carried cargo spills onto the ground. Kept for
@@ -828,8 +870,9 @@ impl Command {
             | Command::SetRecipe { .. }
             | Command::QueueUpgrade { .. }
             | Command::KillBot { .. } => None,
-            // Cosmetic / ownerless — no faction to authorize against.
-            Command::PlacePaint { .. } => None,
+            // Q97: a paint designation is faction-attributed like any
+            // blueprint — the relay drops forged painters (Q86).
+            Command::PlacePaint { faction, .. } => Some(*faction),
         }
     }
 }
@@ -912,6 +955,12 @@ impl Sim {
             crate::host::UNKNOWN_CONTACT.to_string(),
             Value::Str(crate::host::UNKNOWN_CONTACT.to_string()),
         );
+        // Paint-color constants (Q95/Q96, docs/05 Tile Composition):
+        // ints so filters and a future paint_at() compare naturally;
+        // index 0 is `unpainted` — the named absence.
+        for (value, name) in crate::world::PAINT_NAMES.iter().enumerate() {
+            vm_config.constants.insert(name.to_string(), Value::Int(value as i64));
+        }
         // Quirk names as constants (docs/09: pre-bound like kind
         // constants, no enum): `has_quirk(overclocked)` reads naturally.
         let quirk_catalog = crate::quirks::QuirkCatalog::default();
@@ -1257,6 +1306,14 @@ impl Sim {
                 Ok(None)
             }
             Command::PlaceBlueprint { pos, kind, faction } => {
+                // Paint kinds route through the ONE paint rule set —
+                // palette validation and designation-superseding must not
+                // depend on which command variant a (possibly hostile)
+                // peer chose to wrap them in.
+                if let BlueprintKind::Paint { color } = kind {
+                    self.place_paint_designation(*faction, *pos, *color);
+                    return Ok(None);
+                }
                 // Site + price + duration all come from the shared rule
                 // set (BlueprintKind::site_ok / cost_stone / build_ticks)
                 // so the build bar's ghost can't drift from what this
@@ -1274,9 +1331,10 @@ impl Sim {
                     // figure for an unleveled builder.
                     let needed = kind.build_ticks(&self.tuning) * crate::resources::DECI;
                     let id = self.world.alloc_entity();
-                    self.world
-                        .blueprints
-                        .insert(id, Blueprint { pos: *pos, kind: *kind, progress: 0, needed });
+                    self.world.blueprints.insert(
+                        id,
+                        Blueprint { pos: *pos, kind: *kind, progress: 0, needed, faction: *faction },
+                    );
                 }
                 Ok(None)
             }
@@ -1613,17 +1671,12 @@ impl Sim {
                 }
                 Ok(None)
             }
-            Command::PlacePaint { pos, color } => {
-                if self.world.grid.in_bounds(*pos) {
-                    match color {
-                        Some(c) => {
-                            self.world.paint.insert(*pos, *c);
-                        }
-                        None => {
-                            self.world.paint.remove(pos);
-                        }
-                    }
-                }
+            Command::PlacePaint { pos, color, faction } => {
+                // Q97: painting is LABOR — this places a paint
+                // designation (blueprint flow), not paint. A bot must
+                // travel there and service it; None designates
+                // `unpainted` (the eraser).
+                self.place_paint_designation(*faction, *pos, *color);
                 Ok(None)
             }
         }
@@ -2423,6 +2476,50 @@ impl Sim {
     /// Phase 9: deterministic world hash for desync detection and golden
     /// replays. (VM internals are hashed shallowly for now — budget, line,
     /// blocked/dead — deep state hashing is a TODO.)
+    /// May a paint designation land here (Q97)? ONE rule shared by both
+    /// placement commands and the game's build-preview ghost, so the
+    /// ghost can't drift from what the sim accepts: color in the palette
+    /// (`None` = the eraser; 0/out-of-range are hostile relay input),
+    /// walkable ground, and no PENDING NON-PAINT designation on the tile
+    /// — a pending paint designation is superseded, never a blocker (the
+    /// eraser and a recolor must always be able to land).
+    pub fn paint_designation_ok(&self, pos: TilePos, color: Option<u8>) -> bool {
+        color.is_none_or(|c| c != 0 && (c as usize) < crate::world::PAINT_NAMES.len())
+            && self.world.blueprint_site_ok(BlueprintKind::Paint { color }, pos)
+            && !self
+                .world
+                .blueprints
+                .values()
+                .any(|b| b.pos == pos && !matches!(b.kind, BlueprintKind::Paint { .. }))
+    }
+
+    /// Place (or supersede) the paint designation at `pos` — the shared
+    /// implementation behind `PlacePaint` and `PlaceBlueprint(Paint)`.
+    fn place_paint_designation(&mut self, faction: u8, pos: TilePos, color: Option<u8>) {
+        if !self.paint_designation_ok(pos, color) {
+            return;
+        }
+        // A pending paint designation here is replaced: recoloring or
+        // cancelling your (or anyone's — one shared layer, Q97) queued
+        // paint job is a fresh designation, and its progress resets.
+        let stale: Vec<EntityId> = self
+            .world
+            .blueprints
+            .iter()
+            .filter(|(_, b)| b.pos == pos && matches!(b.kind, BlueprintKind::Paint { .. }))
+            .map(|(id, _)| *id)
+            .collect();
+        for id in stale {
+            self.world.blueprints.remove(&id);
+        }
+        let kind = BlueprintKind::Paint { color };
+        let needed = kind.build_ticks(&self.tuning) * crate::resources::DECI;
+        let id = self.world.alloc_entity();
+        self.world
+            .blueprints
+            .insert(id, Blueprint { pos, kind, progress: 0, needed, faction });
+    }
+
     pub fn state_hash(&self) -> u64 {
         let w = &self.world;
         let mut h = Fnv1a::new();
@@ -2571,6 +2668,18 @@ impl Sim {
                 h.write_u8(node.exhausted as u8);
             }
         }
+        // Q94: known tiles are durable per-faction map knowledge — sim
+        // state, hashed (the live `visible_tiles` union is DERIVED each
+        // perception pass and stays out, like the VM cost overlay).
+        h.write_u32(w.known_tiles.len() as u32);
+        for (faction, tiles) in &w.known_tiles {
+            h.write_u8(*faction);
+            h.write_u32(tiles.len() as u32);
+            for t in tiles {
+                h.write_i32(t.x);
+                h.write_i32(t.y);
+            }
+        }
         h.write_u32(w.milestones_paid.len() as u32);
         for (faction, paid) in &w.milestones_paid {
             h.write_u8(*faction);
@@ -2664,10 +2773,18 @@ impl Sim {
             // six kinds a divergence must desync NOW, not at completion
             // when the wrong tile lands (review 2026-07-16).
             h.write_u8(bp.kind.as_u8());
+            // Paint carries a payload the tag alone can't see: hash the
+            // designated color (255 = the eraser) so two peers can't
+            // agree on "a paint job here" while painting different
+            // colors. Length-prefix discipline is inherited from as_u8.
+            if let crate::world::BlueprintKind::Paint { color } = bp.kind {
+                h.write_u8(color.unwrap_or(255));
+            }
             h.write_i32(bp.pos.x);
             h.write_i32(bp.pos.y);
             h.write_u32(bp.progress);
             h.write_u32(bp.needed);
+            h.write_u8(bp.faction);
         }
         // Program versions ARE source-byte hashes (CLAUDE.md rule 7), so
         // hashing the stored u64s covers the sources without re-walking

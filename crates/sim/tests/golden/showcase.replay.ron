@@ -114,6 +114,7 @@
                     y: 5,
                 ),
                 color: Some(2),
+                faction: 0,
             ),
         ),
         (

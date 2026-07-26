@@ -912,11 +912,14 @@ out-of-range quirk to trigger it (guarded by the setenv-range test exercising th
 
 - [x] Delete the spurious `become_disabled` cost entry once M3 lands. [pyrite] *(with M3)*
 - [x] `health_low()` reads env `hurt_line` (after M3 env). [sim] *(with M3)*
-- [ ] Fold `PlacePaint` into `PlaceOverlay(arrow|paint)` per 07. [sim][game]
+- [x] ~~Fold `PlacePaint` into `PlaceOverlay(arrow|paint)` per 07~~ — superseded
+      2026-07-26 (Q97): painting became blueprint-flow LABOR while overlays stay
+      instant signage, so the two commands are correctly distinct; 07's list updated.
 - [x] `RepairPrinter` re-priced in Data (~60) once Data exists (M4). [sim] *(with M4)*
 - [ ] Tuning values to spec first-pass numbers: fault_damage 5→2, boot_ticks 2→~20,
       print_ticks 5→~100 (in the M0 data files). ⚠HASH
-- [ ] Snow tile comment cites superseded Q67 — re-point at Q78 when M7 lands. [game]
+- [x] Snow tile comment cites superseded Q67 — re-pointed at Q78 (map.rs + scene.rs,
+      2026-07-26). [game]
 - [x] Thought-cloud states to the doc's list (normal/boot/handler/searching/low-health/abort)
       switched on VM run state rather than view-derived flags. [game] *(with M3; searching
       lands with M7's stance)*
@@ -924,24 +927,30 @@ out-of-range quirk to trigger it (guarded by the setenv-range test exercising th
       existence — today its scale tracks the live amount and it despawns at 0 under fog,
       leaking amounts the docs say are live-only-when-seen. [game] *(with Q92's strict
       snapshot, 2026-07-25)*
-- [ ] Sim: `Blueprint` gains a `faction` field so the view can snapshot-gate enemy
-      blueprints (Q92 exempts them until then). [sim] ⚠HASH
-- [ ] Fog view: replace `gate_fogged_views`' hand-enumerated object registries with a
+- [x] Sim: `Blueprint` gains a `faction` field so the view can snapshot-gate enemy
+      blueprints (Q92 exempts them until then). *(2026-07-26: field set at placement,
+      hashed; the view spawns enemy designations only while watched, despawns ghosts
+      on the next look — own blueprints always live.)* [sim] ⚠HASH
+- [x] Fog view: replace `gate_fogged_views`' hand-enumerated object registries with a
       `FogGated { pos, dims }` component attached at spawn in `sync_view`, so new spawn
-      paths can't silently skip fog gating (2026-07-25 review). [game]
-- [ ] Sim: completing a Barricade clears the tile's overlay and paint entries (the
-      2026-07-26 tile-composition rule: an unwalkable building shares with nothing —
-      today `World.overlays`/`World.paint` would keep stale entries under it). [sim] ⚠HASH
-- [ ] Sim: painting becomes serviced labor (Q97) — `PlacePaint` today applies instantly
-      and ownerless (`actor_faction() → None`); it should place a faction-attributed
-      paint *designation* (blueprint flow, Q86 authorization applies) that an adjacent
-      bot services — quick per tile, material-free; erase = designating `unpainted`.
-      Pathfinding then honors the Q95/Q96 `only=`/`avoid=` args. [sim] ⚠HASH
-- [ ] Sim: per-faction **known-tiles** joins the world (Q94) — the perception phase
-      records every tile inside a faction's seeing union (bitset grid or BTreeSet;
-      deterministic, enters the state hash); `recompute_fog` then reads it for
-      `fog.known` instead of mirroring the eye math view-side (`tile_visible` is the
-      existing sim-side primitive to build on). [sim+game] ⚠HASH
+      paths can't silently skip fog gating (2026-07-25 review). *(2026-07-26: all eight
+      classes carry it; ghosts keep theirs, so Q92 memory keeps dimming.)* [game]
+- [x] Sim: completing a Barricade clears the tile's overlay and paint entries (the
+      2026-07-26 tile-composition rule: an unwalkable building shares with nothing).
+      *(Done 2026-07-26, `barricade_swallows_signage` guards it.)* [sim] ⚠HASH
+- [x] Sim: painting becomes serviced labor (Q97) — `PlacePaint` places a
+      faction-attributed `BlueprintKind::Paint` designation (Q86 auth applies) serviced
+      like any blueprint (`paint_ticks` 3, material-free); erase = designating
+      `unpainted`. Pathfinding honors the Q95/Q96 args: `move_to`/`wander`/`explore`
+      take `only=`/`avoid=` (paint constants `unpainted`/`red`/`green`/`blue`/`yellow`,
+      bare or Tier-5 list); forbidden colors are impassable to that route search
+      (A* + sidesteps + wander/explore picks), engine walks stay paint-blind.
+      *(Done 2026-07-26; tests in terrain.rs + building.rs.)* [sim][pyrite][game] ⚠HASH
+- [x] Sim: per-faction **known-tiles** joins the world (Q94) — `run_perception`
+      records every faction's seeing union into hashed `World.known_tiles` (+ the
+      derived, unhashed `visible_tiles` live union), known-node ground folded in;
+      `recompute_fog` now just reads both — the view-side eye mirror is gone.
+      *(Done 2026-07-26; `seen_tiles_are_durable_sim_state` guards it.)* [sim+game] ⚠HASH
 
 ## Verb-layer index (every spec'd builtin → its milestone)
 

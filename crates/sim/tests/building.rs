@@ -262,15 +262,31 @@ fn arrow_overlay_works_on_plain_ground() {
 }
 
 #[test]
-fn paint_is_stored_and_cleared() {
+fn paint_is_labor_not_a_click() {
+    // Q97: PlacePaint designates — a paint blueprint a bot must service;
+    // nothing recolors until the labor lands.
     let mut sim = Sim::new(&MapSpec::empty(4, 4));
     let pos = TilePos::new(2, 2);
-    sim.apply(&Command::PlacePaint { pos, color: Some(3) }).unwrap();
-    assert_eq!(sim.world.paint.get(&pos), Some(&3));
+    sim.apply(&Command::PlacePaint { pos, color: Some(3), faction: 0 }).unwrap();
+    assert!(sim.world.paint.is_empty(), "the command paints nothing by itself");
+    assert!(
+        sim.world.blueprints.values().any(|b| b.pos == pos && b.faction == 0),
+        "a faction-attributed paint designation is placed"
+    );
+    let bot = spawn(&mut sim, TilePos::new(1, 2), "build()\n");
+    for _ in 0..20 {
+        sim.step();
+    }
+    assert_eq!(sim.world.paint.get(&pos), Some(&3), "the serviced designation recolors");
     let painted_hash = sim.state_hash();
-    sim.apply(&Command::PlacePaint { pos, color: None }).unwrap();
-    assert!(sim.world.paint.is_empty());
+    // Erasing is designating `unpainted` — labor again (Q96's eraser).
+    sim.apply(&Command::PlacePaint { pos, color: None, faction: 0 }).unwrap();
+    for _ in 0..20 {
+        sim.step();
+    }
+    assert!(sim.world.paint.is_empty(), "unpainted designation erases");
     assert_ne!(sim.state_hash(), painted_hash, "paint is shared, replayed state");
+    let _ = bot;
 }
 
 #[test]

@@ -35,6 +35,65 @@ pub const KINDS: &[&str] = &[
 /// constant so `last_error() == err_unknown_contact` reads naturally.
 pub const UNKNOWN_CONTACT: &str = "err_unknown_contact";
 
+/// Parse one Q95 routing argument (`only=` / `avoid=`): the `None`
+/// default means unconstrained; a bare paint-color constant or a list
+/// of them names colors (`unpainted` = 0 included — Q96's named
+/// absence). Colors outside the palette fault `err_range`.
+fn paint_colors(v: &Value, func: &str, arg: &str) -> Result<Option<Vec<u8>>, Fault> {
+    fn one(i: i64, func: &str, arg: &str) -> Result<u8, Fault> {
+        if (0..crate::world::PAINT_NAMES.len() as i64).contains(&i) {
+            Ok(i as u8)
+        } else {
+            Err(Fault::new(
+                faults::RANGE,
+                format!("{func}: {arg}= has no paint color {i}"),
+            ))
+        }
+    }
+    match v {
+        Value::Enum(e) if e.enum_name == Value::OPTION_ENUM && e.variant == "None" => Ok(None),
+        Value::Int(i) => Ok(Some(vec![one(*i, func, arg)?])),
+        Value::List(items) => {
+            let mut out = Vec::with_capacity(items.len());
+            for item in items {
+                match item {
+                    Value::Int(i) => out.push(one(*i, func, arg)?),
+                    other => {
+                        return Err(Fault::new(
+                            faults::TYPE,
+                            format!(
+                                "{func}: {arg}= takes paint colors, got {}",
+                                other.type_name()
+                            ),
+                        ));
+                    }
+                }
+            }
+            // Canonical form: PaintFilter::allows binary-searches, and
+            // the hash must not distinguish [red, blue] from [blue, red].
+            out.sort_unstable();
+            out.dedup();
+            Ok(Some(out))
+        }
+        other => Err(Fault::new(
+            faults::TYPE,
+            format!("{func}: {arg}= takes a paint color or a list, got {}", other.type_name()),
+        )),
+    }
+}
+
+/// The two Q95 args as one route constraint (`avoid=None` = avoid nothing).
+fn paint_filter(
+    only: &Value,
+    avoid: &Value,
+    func: &str,
+) -> Result<crate::world::PaintFilter, Fault> {
+    Ok(crate::world::PaintFilter {
+        only: paint_colors(only, func, "only")?,
+        avoid: paint_colors(avoid, func, "avoid")?.unwrap_or_default(),
+    })
+}
+
 /// Editor-facing doc lookup, backed by the function registry
 /// (`pyrite/data/builtins.ron`): signature, summary, and cost note all come
 /// from the same data the VM prices calls with, so hover docs can't go
@@ -393,7 +452,12 @@ impl pyrite::Host for BotHost<'_> {
             "move_to" => match args {
                 // Stale handles fault (M7): a target neither ours, nor
                 // perceived, nor in map knowledge doesn't exist to us.
-                [Value::Entity(target)] => {
+                // `only=`/`avoid=` are the Q95 paint-routing args.
+                [Value::Entity(target), only, avoid] => {
+                    let paint = match paint_filter(only, avoid, "move_to") {
+                        Ok(p) => p,
+                        Err(f) => return HostCall::Fault(f),
+                    };
                     let entity = EntityId(*target);
                     let faction = self.world.bots[&bot_id].data.faction;
                     let known_node = self
@@ -404,12 +468,20 @@ impl pyrite::Host for BotHost<'_> {
                     // Nests are exempt only for their OWNER (a Feral's own
                     // active nest, a claimant's claimed one) — foreign
                     // nests need eyes, same as closest("nest"), so entity-
-                    // id sweeps can't locate fogged nests.
+                    // id sweeps can't locate fogged nests. Blueprints
+                    // follow the same rule now that they carry a faction
+                    // (2026-07-26): your own designations are always
+                    // addressable (build targets), a rival's need eyes.
                     let own_nest =
                         self.world.nests.get(&entity).is_some_and(|n| n.owner() == faction);
+                    let own_blueprint = self
+                        .world
+                        .blueprints
+                        .get(&entity)
+                        .is_some_and(|b| b.faction == faction);
                     if !self.perceived(entity) && !known_node
                         && !self.world.depots.contains_key(&entity)
-                        && !self.world.blueprints.contains_key(&entity)
+                        && !own_blueprint
                         && !own_nest
                     {
                         return HostCall::Fault(Fault::new(
@@ -417,9 +489,9 @@ impl pyrite::Host for BotHost<'_> {
                             "move_to: stale or unknown contact",
                         ));
                     }
-                    self.request(ActionRequest::MoveTo(entity))
+                    self.request(ActionRequest::MoveTo { target: entity, paint })
                 }
-                [other] => HostCall::Fault(Fault::new(
+                [other, _, _] => HostCall::Fault(Fault::new(
                     faults::TYPE,
                     format!("move_to requires an entity, got {}", other.type_name()),
                 )),
@@ -428,8 +500,20 @@ impl pyrite::Host for BotHost<'_> {
             "mine" => self.request(ActionRequest::Mine),
             // --- the exploration stances (M7) ---
             "search" => self.request(ActionRequest::Search),
-            "wander" => self.request(ActionRequest::Wander),
-            "explore" => self.request(ActionRequest::Explore),
+            "wander" => match args {
+                [only, avoid] => match paint_filter(only, avoid, "wander") {
+                    Ok(paint) => self.request(ActionRequest::Wander { paint }),
+                    Err(f) => HostCall::Fault(f),
+                },
+                _ => HostCall::Fault(Fault::new(faults::ARITY, "wander takes no positional arguments")),
+            },
+            "explore" => match args {
+                [only, avoid] => match paint_filter(only, avoid, "explore") {
+                    Ok(paint) => self.request(ActionRequest::Explore { paint }),
+                    Err(f) => HostCall::Fault(f),
+                },
+                _ => HostCall::Fault(Fault::new(faults::ARITY, "explore takes no positional arguments")),
+            },
             // The forced handler-entry ritual: an engine wait the VM
             // injects at every unified-handler entry (the flinch). The
             // duration runs the pipeline: quirks (Rubber Ducky / Race

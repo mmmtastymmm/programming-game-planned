@@ -429,7 +429,8 @@ impl Structure {
 /// An action a builtin asked for this tick; started in the resolve phase.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ActionRequest {
-    MoveTo(EntityId),
+    /// `paint` is the call's Q95 routing constraint (only=/avoid=).
+    MoveTo { target: EntityId, paint: PaintFilter },
     Mine,
     Deposit { fault_on_fail: bool },
     Attack(EntityId),
@@ -441,9 +442,9 @@ pub enum ActionRequest {
     /// radius, resolves at full reach.
     Search,
     /// A seeded random walk leg (rng.wander) — the dumb explorer.
-    Wander,
+    Wander { paint: PaintFilter },
     /// Pick a random fogged tile within ~15, walk there, survey it.
-    Explore,
+    Explore { paint: PaintFilter },
     /// Study an adjacent Template Cache (docs/06): root ~10s, then unlock its
     /// function block colony-wide.
     Study,
@@ -483,8 +484,9 @@ pub enum RaceKind {
 pub enum Action {
     /// `path[0]` is the next tile to enter; `ticks_left` is the remaining
     /// cost of entering it (Rubble takes 2, Plains 1). `goals` is kept so
-    /// the route can be re-planned after a bump.
-    Move { path: Vec<TilePos>, ticks_left: u32, goals: BTreeSet<TilePos> },
+    /// the route can be re-planned after a bump; `paint` is the Q95
+    /// routing constraint every replan runs under.
+    Move { path: Vec<TilePos>, ticks_left: u32, goals: BTreeSet<TilePos>, paint: PaintFilter },
     Mine { node: EntityId, ticks_left: u32 },
     /// `depot` is the acceptor picked at request time (a depot or a
     /// refinery); `fault_on_fail` carries the deposit/try_deposit choice
@@ -928,6 +930,11 @@ pub struct Blueprint {
     pub kind: BlueprintKind,
     pub progress: u32,
     pub needed: u32,
+    /// The designating faction (2026-07-26): fog views gate enemy
+    /// blueprints on it, and a paint designation is attributed to its
+    /// painter. Servicing stays open to any faction's builder (M8 note —
+    /// Clear still pays the finisher).
+    pub faction: u8,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -945,6 +952,10 @@ pub enum BlueprintKind {
     Cleanse,
     /// Plains/Rubble → Road (Stone): the half-cost artery.
     Road,
+    /// Q97: paint is labor — the designation a bot services to recolor
+    /// the tile. `None` erases (designating `unpainted`). Material-free;
+    /// the price is the trip.
+    Paint { color: Option<u8> },
 }
 
 impl BlueprintKind {
@@ -957,6 +968,7 @@ impl BlueprintKind {
             BlueprintKind::Demolish => 3,
             BlueprintKind::Cleanse => 4,
             BlueprintKind::Road => 5,
+            BlueprintKind::Paint { .. } => 6,
         }
     }
 
@@ -975,7 +987,44 @@ impl BlueprintKind {
             BlueprintKind::Road => {
                 matches!(tile, Some(TileKind::Plains | TileKind::Rubble))
             }
+            // Paint goes on any walkable surface (docs/05 Tile
+            // Composition: paint is a ground-stack slot — an unwalkable
+            // building shares with nothing, and water has no ground).
+            BlueprintKind::Paint { .. } => tile.is_some_and(|t| t.passable()),
         }
+    }
+}
+
+/// The paint palette (Q95/Q96, docs/05 Tile Composition): stored tile
+/// paint is a 1-based palette index; **0 is `unpainted`** — a named,
+/// first-class color in routing args, never stored (absence is the
+/// storage). `PAINT_NAMES[i]` is color i's pre-bound Pyrite constant.
+pub const PAINT_NAMES: &[&str] = &["unpainted", "red", "green", "blue", "yellow"];
+
+/// Q95/Q96: one route search's paint constraint — `only` whitelists
+/// colors (None = all), `avoid` blacklists. Colors the filter forbids
+/// are impassable to that search, exactly like water; physics (shoves,
+/// slides, engine walks) ignores it. Lists are kept sorted + deduped so
+/// equality and hashing are canonical.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct PaintFilter {
+    pub only: Option<Vec<u8>>,
+    pub avoid: Vec<u8>,
+}
+
+impl PaintFilter {
+    /// The unrestricted filter — engine walks and paint-blind calls.
+    pub const FREE: PaintFilter = PaintFilter { only: None, avoid: Vec::new() };
+
+    pub fn is_free(&self) -> bool {
+        self.only.is_none() && self.avoid.is_empty()
+    }
+
+    /// May a route running under this filter enter a tile of `color`?
+    /// (0 = unpainted — a named color like any other, Q96.)
+    pub fn allows(&self, color: u8) -> bool {
+        self.only.as_ref().is_none_or(|only| only.binary_search(&color).is_ok())
+            && self.avoid.binary_search(&color).is_err()
     }
 }
 
@@ -1060,9 +1109,20 @@ pub struct World {
     pub blueprints: BTreeMap<EntityId, Blueprint>,
     /// Traffic rules painted per tile (arrows) — affects pathfinding.
     pub overlays: BTreeMap<TilePos, OverlayKind>,
-    /// Cosmetic tile paint (color index) — player markings; a future
-    /// paint_at() sensor can make programs read these.
+    /// Tile paint (1-based palette index; absent = unpainted) — the Q95
+    /// routing layer: `only=`/`avoid=` route args read it, and a future
+    /// paint_at() sensor can too. One global physical layer (Q97).
     pub paint: BTreeMap<TilePos, u8>,
+    /// Per-faction map knowledge: every tile that has EVER been inside
+    /// the faction's seeing union (Q94 — durable sim state, hashed; the
+    /// fog renderer draws the greyed snapshot from it). Written in the
+    /// perception phase, seeded at phase 0 / spawn.
+    pub known_tiles: BTreeMap<u8, BTreeSet<TilePos>>,
+    /// Per-faction live seeing union THIS tick — derived state, rebuilt
+    /// every perception phase and never hashed (like the VM cost
+    /// overlay); the fog renderer reads it instead of mirroring the eye
+    /// math view-side.
+    pub visible_tiles: BTreeMap<u8, BTreeSet<TilePos>>,
     /// Deployed program per (faction, color slot).
     pub color_programs: BTreeMap<(u8, u8), ColorProgram>,
     /// Every source version ever deployed, by source hash — decryption,
@@ -1378,6 +1438,8 @@ impl World {
             blueprints: BTreeMap::new(),
             overlays: BTreeMap::new(),
             paint: BTreeMap::new(),
+            known_tiles: BTreeMap::new(),
+            visible_tiles: BTreeMap::new(),
             color_programs: BTreeMap::new(),
             program_library: BTreeMap::new(),
             wrecks: BTreeMap::new(),
@@ -1756,6 +1818,12 @@ impl World {
         }
         self.unindex_bot(id, from);
         self.index_bot(id, to);
+    }
+
+    /// The tile's paint color: 1-based palette index, 0 = `unpainted`
+    /// (Q96 — the absence is itself a named color).
+    pub fn paint_color(&self, pos: TilePos) -> u8 {
+        self.paint.get(&pos).copied().unwrap_or(0)
     }
 
     /// Structures are solid: bots can neither stand on nor path through

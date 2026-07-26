@@ -836,3 +836,225 @@ fn scouting_l3_runs_clean_inside_corruption() {
     let r = rookie_done.expect("the rookie finishes the loop");
     assert!(s < r, "the immune scout computes faster on corruption (scout t={s} < rookie t={r})");
 }
+
+// -------------------------------------------- paint routing (Q95/Q96)
+
+#[test]
+fn paint_filters_gate_the_route_search() {
+    // A red wall at x=3 with one green gate at (3,1): forbidden colors
+    // are impassable to the search, exactly like water (Q96).
+    let spec = MapSpec::empty(7, 3);
+    let mut sim = Sim::new(&spec);
+    for y in 0..3 {
+        sim.world.paint.insert(TilePos::new(3, y), 1); // red
+    }
+    sim.world.paint.insert(TilePos::new(3, 1), 2); // the green gate
+    let goals: BTreeSet<TilePos> = [TilePos::new(6, 1)].into();
+    let route = |filter: &sim::world::PaintFilter| {
+        sim::map::astar_avoiding(
+            &sim.world.grid,
+            &sim.world.overlays,
+            &sim.tuning.tile_costs,
+            TilePos::new(0, 1),
+            &goals,
+            &BTreeSet::new(),
+            &sim.world.paint,
+            filter,
+        )
+    };
+    // Paint-blind (omitted args): straight through the wall.
+    assert!(route(&sim::world::PaintFilter::FREE).is_some());
+    // avoid=red: must thread the green gate.
+    let dodge_red = sim::world::PaintFilter { only: None, avoid: vec![1] };
+    let path = route(&dodge_red).expect("the green gate keeps the goal reachable");
+    assert!(path.contains(&TilePos::new(3, 1)), "route threads the gate: {path:?}");
+    // only=unpainted (0 is a named color, Q96): every painted tile is a
+    // wall — unreachable, the standard no-path outcome.
+    let bare_only = sim::world::PaintFilter { only: Some(vec![0]), avoid: vec![] };
+    assert!(route(&bare_only).is_none(), "forbidden paint is impassable like water");
+    // only=[unpainted, green] re-admits the gate.
+    let green_road = sim::world::PaintFilter { only: Some(vec![0, 2]), avoid: vec![] };
+    assert!(route(&green_road).is_some());
+}
+
+#[test]
+fn move_to_paint_args_ride_the_call() {
+    // The Pyrite surface (Q95): only=/avoid= trailing kwargs on move_to,
+    // paint colors as pre-bound int constants (`red`, `unpainted`, ...).
+    let mut spec = MapSpec::empty(7, 3);
+    spec.depots.push((TilePos::new(6, 1), 0));
+    let mut sim = Sim::new(&spec);
+    sim.stats.move_rate_deci = 10; // 1 tick/tile: pacing isn't under test
+    for y in 0..3 {
+        sim.world.paint.insert(TilePos::new(3, y), 1); // red wall
+    }
+    sim.world.paint.insert(TilePos::new(3, 1), 2); // green gate
+    let threader = spawn(
+        &mut sim,
+        TilePos::new(0, 1),
+        "move_to(closest(depot).expect(), avoid=red)\nwait(200)\n",
+    );
+    for _ in 0..120 {
+        sim.step();
+    }
+    let at = sim.world.bots[&threader].data.pos;
+    assert!(
+        at.chebyshev(TilePos::new(6, 1)) <= 1,
+        "avoid=red threads the green gate and arrives (at {at:?})"
+    );
+}
+
+#[test]
+fn move_to_only_unpainted_faults_on_a_painted_wall() {
+    let mut spec = MapSpec::empty(7, 3);
+    spec.depots.push((TilePos::new(6, 1), 0));
+    let mut sim = Sim::new(&spec);
+    sim.stats.move_rate_deci = 10;
+    for y in 0..3 {
+        sim.world.paint.insert(TilePos::new(3, y), 1); // solid red wall
+    }
+    let stalled = spawn(
+        &mut sim,
+        TilePos::new(0, 1),
+        "move_to(closest(depot).expect(), only=unpainted)\nwait(200)\n",
+    );
+    for _ in 0..120 {
+        sim.step();
+    }
+    let at = sim.world.bots[&stalled].data.pos;
+    assert!(
+        at.x < 3,
+        "only=unpainted makes the walled goal unreachable — the bot faults and stays (at {at:?})"
+    );
+}
+
+#[test]
+fn barricade_swallows_signage() {
+    // Tile composition (2026-07-26): an unwalkable building shares with
+    // nothing — completing a Barricade clears the tile's overlay + paint.
+    let mut sim = Sim::new(&terraform_map());
+    let site = TilePos::new(2, 1);
+    sim.world.paint.insert(site, 2);
+    sim.world
+        .overlays
+        .insert(site, sim::map::OverlayKind::Arrow(sim::map::Direction::East));
+    sim.apply(&Command::PlaceBlueprint {
+        pos: site,
+        kind: BlueprintKind::Barricade,
+        faction: 0,
+    })
+    .unwrap();
+    let builder = spawn(&mut sim, TilePos::new(1, 1), "build()\n");
+    build_until(&mut sim, site, TileKind::Barricade);
+    assert!(sim.world.paint.get(&site).is_none(), "the wall swallows the paint");
+    assert!(sim.world.overlays.get(&site).is_none(), "and the arrow");
+    let _ = builder;
+}
+
+#[test]
+fn wander_unreachable_pick_completes_instead_of_faulting() {
+    // Review 2026-07-26: a paint-filtered pick nothing can reach is a
+    // completed (empty) leg — the documented wander contract — never a
+    // 'move_to: unreachable' fault the program didn't earn.
+    let spec = MapSpec::empty(9, 3);
+    let mut sim = Sim::new(&spec);
+    // Ring the bot's tile in red: every unpainted candidate beyond the
+    // ring is unreachable under only=unpainted.
+    for (x, y) in [(0, 0), (1, 0), (2, 0), (0, 1), (2, 1), (0, 2), (1, 2), (2, 2)] {
+        sim.world.paint.insert(TilePos::new(x, y), 1);
+    }
+    let bot = spawn(
+        &mut sim,
+        TilePos::new(1, 1),
+        "wander(only=unpainted)\nlog(7)\nwait(500)\n",
+    );
+    for _ in 0..60 {
+        sim.step();
+    }
+    let b = &sim.world.bots[&bot];
+    assert!(
+        b.data.log_buf.iter().any(|(_, s)| s == "7"),
+        "the leg completes and the program continues: {:?}",
+        b.data.log_buf
+    );
+    assert_eq!(b.data.pos, TilePos::new(1, 1), "nowhere legal to go — stayed put");
+}
+
+#[test]
+fn place_blueprint_paint_shares_the_palette_guard() {
+    // Review 2026-07-26: PlaceBlueprint(Paint) must not bypass
+    // PlacePaint's palette validation — hostile peers pick their wrapper.
+    let mut sim = Sim::new(&MapSpec::empty(4, 4));
+    let pos = TilePos::new(2, 2);
+    for bad in [Some(0), Some(200)] {
+        sim.apply(&Command::PlaceBlueprint {
+            pos,
+            kind: BlueprintKind::Paint { color: bad },
+            faction: 0,
+        })
+        .unwrap();
+        assert!(sim.world.blueprints.is_empty(), "out-of-palette color {bad:?} refused");
+    }
+    sim.apply(&Command::PlaceBlueprint {
+        pos,
+        kind: BlueprintKind::Paint { color: Some(2) },
+        faction: 0,
+    })
+    .unwrap();
+    assert_eq!(sim.world.blueprints.len(), 1, "a legal color lands via either command");
+}
+
+#[test]
+fn paint_designations_supersede_pending_paint() {
+    // Review 2026-07-26: the eraser (and a recolor) must never be
+    // blocked by the tile's own pending paint job — it replaces it.
+    let mut sim = Sim::new(&MapSpec::empty(4, 4));
+    let pos = TilePos::new(2, 2);
+    sim.apply(&Command::PlacePaint { pos, color: Some(2), faction: 0 }).unwrap();
+    assert_eq!(sim.world.blueprints.len(), 1);
+    sim.apply(&Command::PlacePaint { pos, color: None, faction: 0 }).unwrap();
+    let kinds: Vec<_> = sim.world.blueprints.values().map(|b| b.kind).collect();
+    assert_eq!(
+        kinds,
+        vec![BlueprintKind::Paint { color: None }],
+        "the eraser replaced the pending recolor"
+    );
+}
+
+#[test]
+fn mid_route_repaint_replans_instead_of_trespassing() {
+    // Review 2026-07-26: a tile recolored against an in-flight move's
+    // own filter re-plans like hardened ground — avoid= stays honest
+    // when an opponent paints against you.
+    let mut spec = MapSpec::empty(9, 3);
+    for x in 0..9 {
+        spec.water.push(TilePos::new(x, 0));
+        spec.water.push(TilePos::new(x, 2));
+    }
+    spec.water.pop(); // keep the depot tile row... (depot sits on land)
+    spec.water.push(TilePos::new(8, 2));
+    spec.depots.push((TilePos::new(8, 1), 0));
+    let mut sim = Sim::new(&spec);
+    sim.stats.move_rate_deci = 10;
+    let bot = spawn(
+        &mut sim,
+        TilePos::new(0, 1),
+        "move_to(closest(depot).expect(), avoid=red)\nwait(300)\n",
+    );
+    let barrier = TilePos::new(5, 1);
+    let mut trespassed = false;
+    for t in 0..80 {
+        if t == 6 {
+            // The corridor tile ahead turns red mid-walk.
+            sim.world.paint.insert(barrier, 1);
+        }
+        sim.step();
+        if t >= 6 && sim.world.bots[&bot].data.pos == barrier {
+            trespassed = true;
+        }
+    }
+    assert!(
+        !trespassed,
+        "the single-lane route turned red: the move must re-plan/fault, never trespass"
+    );
+}

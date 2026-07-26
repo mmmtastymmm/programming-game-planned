@@ -89,7 +89,7 @@ fn golden_replay() -> Replay {
         },
         TimedCommand {
             tick: 60,
-            command: Command::PlacePaint { pos: TilePos::new(5, 5), color: Some(2) },
+            command: Command::PlacePaint { pos: TilePos::new(5, 5), color: Some(2), faction: 0 },
         },
         TimedCommand {
             tick: 100,

@@ -177,4 +177,6 @@ Tuning(
     cleanse_ticks: 40,
     road_cost_stone: 10,
     road_build_ticks: 10,
+    // Q97: painting is quick, material-free labor — the trip is the price.
+    paint_ticks: 3,
 )

@@ -885,7 +885,8 @@ impl Sim {
         // place across the map (or teleport a recolor). The caller's next
         // check re-selects; the bot stays put until a route exists.
         let Some(path) =
-            astar_avoiding(&self.world.grid, &self.world.overlays, &self.tuning.tile_costs, start, &goals, &structures)
+            // Engine walk (recall/recolor): paint-blind by rule (Q96).
+            astar_avoiding(&self.world.grid, &self.world.overlays, &self.tuning.tile_costs, start, &goals, &structures, &self.world.paint, &crate::world::PaintFilter::FREE)
         else {
             return false;
         };

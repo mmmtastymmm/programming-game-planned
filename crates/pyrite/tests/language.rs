@@ -676,7 +676,15 @@ fn expect_unwraps_ok() {
     vm.run(&mut host, &costs);
     // The kind constant arrives at the host as its string value.
     assert_eq!(host.calls[0], ("closest".to_string(), vec![Value::Str("ore".into())]));
-    assert_eq!(host.calls[1], ("move_to".to_string(), vec![Value::Entity(7)]));
+    // move_to's canonical positional form carries the Q95 paint args:
+    // omitted only=/avoid= arrive as their None defaults.
+    assert_eq!(
+        host.calls[1],
+        (
+            "move_to".to_string(),
+            vec![Value::Entity(7), Value::option_none(), Value::option_none()]
+        )
+    );
 }
 
 #[test]

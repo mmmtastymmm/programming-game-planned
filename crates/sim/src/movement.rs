@@ -4,9 +4,9 @@
 use crate::map::{astar_avoiding, edge_allowed, OverlayKind, TileKind, TilePos};
 use crate::sim::Sim;
 use crate::world::{
-    Action, BotId,
+    Action, BotId, PaintFilter,
 };
-use pyrite::Signal;
+use pyrite::{Signal, Value};
 use std::collections::BTreeSet;
 
 impl Sim {
@@ -85,6 +85,7 @@ impl Sim {
         from: TilePos,
         avoid: TilePos,
         goals: &BTreeSet<TilePos>,
+        paint: &PaintFilter,
     ) -> Vec<TilePos> {
         let dist = |p: TilePos| goals.iter().map(|g| p.manhattan(*g)).min().unwrap_or(u32::MAX);
         let here = dist(from);
@@ -94,6 +95,9 @@ impl Sim {
             .filter(|&p| {
                 p != avoid
                     && edge_allowed(&self.world.grid, &self.world.overlays, from, p)
+                    // A program-driven dodge is the router's own step, so
+                    // the move's paint constraint binds it too (Q96).
+                    && paint.allows(self.world.paint_color(p))
                     && !self.world.structure_at(p)
                     && !self.world.tile_occupied(p, id)
                     && dist(p) <= here
@@ -101,17 +105,28 @@ impl Sim {
             .collect()
     }
 
-    /// Fresh route to `goals`: prefer threading around current bot
-    /// positions, fall back to terrain-only, fault if truly unreachable.
-    pub(crate) fn replan_move(&mut self, id: BotId, goals: BTreeSet<TilePos>) {
+    /// Fresh route to `goals` under the move's paint constraint: prefer
+    /// threading around current bot positions, fall back to terrain-only.
+    /// `fault_on_unreachable` separates the two contracts riding this
+    /// planner: move_to faults on no route (Q96 — forbidden paint is
+    /// unreachable ground), while a wander()/explore() leg completes as
+    /// an empty no-op (its pick was random; an unlucky one is not the
+    /// program's error).
+    pub(crate) fn replan_move(
+        &mut self,
+        id: BotId,
+        goals: BTreeSet<TilePos>,
+        paint: PaintFilter,
+        fault_on_unreachable: bool,
+    ) {
         let Some(bot) = self.world.bots.get(&id) else { return };
         let start = bot.data.pos;
         let structures = self.world.structure_tiles();
         let mut occupied: BTreeSet<TilePos> = self.world.occupied_tiles(id);
         occupied.extend(structures.iter().copied());
-        let path = astar_avoiding(&self.world.grid, &self.world.overlays, &self.tuning.tile_costs, start, &goals, &occupied)
+        let path = astar_avoiding(&self.world.grid, &self.world.overlays, &self.tuning.tile_costs, start, &goals, &occupied, &self.world.paint, &paint)
             .or_else(|| {
-                astar_avoiding(&self.world.grid, &self.world.overlays, &self.tuning.tile_costs, start, &goals, &structures)
+                astar_avoiding(&self.world.grid, &self.world.overlays, &self.tuning.tile_costs, start, &goals, &structures, &self.world.paint, &paint)
             });
         match path {
             Some(path) if path.is_empty() => self.complete_move(id),
@@ -124,9 +139,18 @@ impl Sim {
                 )
                 .expect("path tiles are passable");
                 let bot = self.world.bot_mut(id);
-                bot.data.action = Some(Action::Move { path, ticks_left: first_cost, goals });
+                bot.data.action = Some(Action::Move { path, ticks_left: first_cost, goals, paint });
             }
-            None => self.finish_action(id, Err("move_to: unreachable".into())),
+            None if fault_on_unreachable => {
+                self.finish_action(id, Err("move_to: unreachable".into()))
+            }
+            None => {
+                // A wander/explore pick nothing can reach: the leg
+                // completes empty, and the survey that would have chained
+                // on arrival is cancelled — nothing was reached.
+                self.world.bot_mut(id).data.survey_after_move = false;
+                self.finish_action(id, Ok(Value::Unit));
+            }
         }
     }
 
@@ -140,9 +164,10 @@ impl Sim {
         occupied.extend(self.world.structure_tiles());
 
         // Program move.
-        if let Some(Action::Move { goals, .. }) = &bot.data.action {
+        if let Some(Action::Move { goals, paint, .. }) = &bot.data.action {
             let goals = goals.clone();
-            match astar_avoiding(&self.world.grid, &self.world.overlays, &self.tuning.tile_costs, start, &goals, &occupied) {
+            let paint = paint.clone();
+            match astar_avoiding(&self.world.grid, &self.world.overlays, &self.tuning.tile_costs, start, &goals, &occupied, &self.world.paint, &paint) {
                 Some(path) if path.is_empty() => {
                     // Already standing at a goal: the move is done.
                     self.complete_move(id);
@@ -157,7 +182,7 @@ impl Sim {
                     .expect("path tiles are passable");
                     let bot = self.world.bot_mut(id);
                     bot.data.action =
-                        Some(Action::Move { path, ticks_left: first_cost, goals });
+                        Some(Action::Move { path, ticks_left: first_cost, goals, paint });
                 }
                 None => {} // no clear route: keep the old path, retry
             }
@@ -181,7 +206,9 @@ impl Sim {
                 }
             }
             if let Some(path) =
-                astar_avoiding(&self.world.grid, &self.world.overlays, &self.tuning.tile_costs, start, &goals, &occupied)
+                // Engine walk: recall never carries a paint constraint
+                // (Q96 — physics and engine driving ignore paint).
+                astar_avoiding(&self.world.grid, &self.world.overlays, &self.tuning.tile_costs, start, &goals, &occupied, &self.world.paint, &PaintFilter::FREE)
             {
                 let ticks_left = path
                     .first()

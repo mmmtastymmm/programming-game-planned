@@ -27,7 +27,9 @@ pub(crate) enum ToolKind {
     Building(BlueprintKind),
     /// Instant traffic signage on any tile; None = eraser.
     Overlay(Option<OverlayKind>),
-    /// Instant cosmetic tile paint (drag to paint); None = eraser.
+    /// Paint designation (Q97: painting is labor — drag to designate, a
+    /// bot services each tile). Value is the 1-based sim palette index;
+    /// None designates `unpainted`, the eraser.
     Paint(Option<u8>),
     /// Emergency stop: click a bot to wreck it (logs kept, cargo spills).
     Kill,
@@ -38,7 +40,8 @@ pub(crate) struct BuildItem {
     pub(crate) kind: ToolKind,
 }
 
-/// Paint palette (index -> display color).
+/// Paint palette display colors: index = sim palette value − 1 (the sim's
+/// PAINT_NAMES order — red, green, blue, yellow; 0 is `unpainted`).
 pub(crate) const PAINT_COLORS: [(u8, u8, u8); 4] =
     [(220, 60, 50), (70, 200, 80), (70, 120, 230), (235, 200, 60)];
 
@@ -73,10 +76,10 @@ pub(crate) const BUILD_CATEGORIES: &[(&str, &[BuildItem])] = &[
     (
         "Paint",
         &[
-            BuildItem { name: "Red Paint", kind: ToolKind::Paint(Some(0)) },
-            BuildItem { name: "Green Paint", kind: ToolKind::Paint(Some(1)) },
-            BuildItem { name: "Blue Paint", kind: ToolKind::Paint(Some(2)) },
-            BuildItem { name: "Yellow Paint", kind: ToolKind::Paint(Some(3)) },
+            BuildItem { name: "Red Paint", kind: ToolKind::Paint(Some(1)) },
+            BuildItem { name: "Green Paint", kind: ToolKind::Paint(Some(2)) },
+            BuildItem { name: "Blue Paint", kind: ToolKind::Paint(Some(3)) },
+            BuildItem { name: "Yellow Paint", kind: ToolKind::Paint(Some(4)) },
             BuildItem { name: "Clear Paint", kind: ToolKind::Paint(None) },
         ],
     ),
@@ -91,6 +94,7 @@ pub(crate) fn blueprint_hint(kind: BlueprintKind) -> &'static str {
         BlueprintKind::Demolish => "Click a bridge or barricade to un-build — Esc/RMB cancels",
         BlueprintKind::Cleanse => "Click a corruption tile to cleanse (slow) — Esc/RMB cancels",
         BlueprintKind::Road => "Click plains or rubble to pave — Esc/RMB cancels",
+        BlueprintKind::Paint { .. } => "Click walkable ground to designate paint — Esc/RMB cancels",
     }
 }
 
@@ -344,7 +348,7 @@ pub(crate) fn place_blueprint(
         ToolKind::Paint(color) => {
             if editor.last_paint_tile != Some(pos) {
                 editor.last_paint_tile = Some(pos);
-                let _ = game.0.apply(&Command::PlacePaint { pos, color });
+                let _ = game.0.apply(&Command::PlacePaint { pos, color, faction: crate::fog::VIEWER });
             }
         }
         ToolKind::Kill => {
@@ -425,16 +429,26 @@ pub(crate) fn build_preview(
             (world.stock_get(0, sim::resources::Resource::Stone)
                 >= game.0.tuning.overlay_cost_stone, None)
         }
-        ToolKind::Overlay(None) | ToolKind::Paint(None) => (true, None),
+        ToolKind::Overlay(None) => (true, None),
         ToolKind::Kill => {
             (world.bots.values().any(|b| b.data.pos == pos && !b.data.dying), None)
         }
-        ToolKind::Paint(Some(c)) => (true, Some(palette.paint_mats[c as usize % 4].clone())),
+        // Paint previews what the sim command will accept — the shared
+        // `paint_designation_ok` rule, never a copy (Q97: a designation
+        // silently refused must never ghost as valid).
+        ToolKind::Paint(None) => (game.0.paint_designation_ok(pos, None), None),
+        ToolKind::Paint(Some(c)) => (
+            game.0.paint_designation_ok(pos, Some(c)),
+            // Sim palette values are 1-based (0 = unpainted).
+            Some(palette.paint_mats[(c as usize - 1) % 4].clone()),
+        ),
     };
 
     slab_tf.translation = tile_top_xyz(world, pos, 0.08);
     *slab_vis = Visibility::Visible;
-    slab_mat.0 = paint_ghost.unwrap_or_else(|| {
+    // A color ghost only previews a placement that will land; refused
+    // sites show the invalid slab like every other tool.
+    slab_mat.0 = paint_ghost.filter(|_| valid).unwrap_or_else(|| {
         if valid {
             palette.preview_valid_mat.clone()
         } else {

@@ -100,7 +100,9 @@ pub(crate) struct ViewIndex {
     pub(crate) wrecks: HashMap<u32, (Entity, TilePos)>,
     pub(crate) black_boxes: HashMap<u64, (Entity, TilePos)>,
     pub(crate) printers: HashMap<u64, (Entity, PrinterState)>,
-    pub(crate) blueprints: HashMap<u64, Entity>,
+    /// Blueprint ghosts: (view entity, tile, viewer-owned?) — pos +
+    /// ownership drive the Q92 despawn gate.
+    pub(crate) blueprints: HashMap<u64, (Entity, TilePos, bool)>,
     pub(crate) bridges: HashMap<(i32, i32), Entity>,
     pub(crate) overlays: HashMap<(i32, i32), (Entity, OverlayKind)>,
     /// Blueprint id -> its progress-bar fill entity.
@@ -437,6 +439,7 @@ pub(crate) fn sync_view(
             };
             let entity = commands
                 .spawn((
+                    crate::fog::FogGated { pos: printer.pos, dims: false },
                     Mesh3d(palette.printer_box.clone()),
                     MeshMaterial3d(mat),
                     // Face the default camera (the atlas front is -Z).
@@ -509,6 +512,7 @@ pub(crate) fn sync_view(
         }
         let entity = commands
             .spawn((
+                crate::fog::FogGated { pos: depot.pos, dims: false },
                 Mesh3d(palette.crate_box.clone()),
                 MeshMaterial3d(palette.crate_mat.clone()),
                 Transform::from_translation(tile_top_xyz(world, depot.pos, 0.15)),
@@ -787,17 +791,23 @@ pub(crate) fn sync_view(
     index.bot_recalling.retain(|id| seen.contains(id));
 
     // Blueprints: glowing ghost slabs with a billboarded progress bar.
-    // NOT snapshot-gated (Q92): sim blueprints carry no faction field yet,
-    // and every current blueprint is viewer-placed — hiding your own
-    // placement until a bot walks over would read as a lost click. Enemy
-    // blueprint gating needs the sim field first.
+    // Q92 snapshot (2026-07-26 — the sim's faction field landed): your
+    // own designations always render live (hiding your placement until a
+    // bot walks over would read as a lost click), an ENEMY's enters the
+    // view when its tile is watched and, removed unseen, lingers as a
+    // ghost until the viewer looks again.
     for (id, bp) in &world.blueprints {
         if index.blueprints.contains_key(&id.0) {
+            continue;
+        }
+        let own = bp.faction == crate::fog::VIEWER;
+        if !own && !fog.watching(bp.pos) {
             continue;
         }
         let mut fill_entity = Entity::PLACEHOLDER;
         let entity = commands
             .spawn((
+                crate::fog::FogGated { pos: bp.pos, dims: false },
                 Mesh3d(palette.tile_slab.clone()),
                 MeshMaterial3d(palette.print_glow_mat.clone()),
                 Transform::from_translation(tile_top_xyz(world, bp.pos, 0.05)),
@@ -827,15 +837,24 @@ pub(crate) fn sync_view(
                     });
             })
             .id();
-        index.blueprints.insert(id.0, entity);
+        index.blueprints.insert(id.0, (entity, bp.pos, own));
         index.blueprint_fills.insert(id.0, fill_entity);
     }
-    retain_despawn(&mut commands, &mut index.blueprints, |id| {
-        world.blueprints.contains_key(&sim::EntityId(*id))
-    });
-    index
-        .blueprint_fills
-        .retain(|id, _| world.blueprints.contains_key(&sim::EntityId(*id)));
+    {
+        let commands = &mut commands;
+        index.blueprints.retain(|id, (entity, pos, own)| {
+            if world.blueprints.contains_key(&sim::EntityId(*id)) {
+                true
+            } else if *own || fog.watching(*pos) {
+                commands.entity(*entity).despawn();
+                false
+            } else {
+                true // finished/cancelled unseen — the ghost waits (Q92)
+            }
+        });
+    }
+    let live_blueprints: HashSet<u64> = index.blueprints.keys().copied().collect();
+    index.blueprint_fills.retain(|id, _| live_blueprints.contains(id));
 
     // Finished bridges: baked plank tiles over the water. (Direction
     // arrows are an overlay layer now — see below.) Demolish (M8) can
@@ -857,6 +876,7 @@ pub(crate) fn sync_view(
             }
             let entity = commands
                 .spawn((
+                    crate::fog::FogGated { pos, dims: true },
                     Mesh3d(palette.tex_slab.clone()),
                     MeshMaterial3d(palette.bridge_tex_mat.clone()),
                     Transform::from_translation(tile_xyz(world, pos, 0.0)),
@@ -886,6 +906,7 @@ pub(crate) fn sync_view(
         let rot = Quat::from_rotation_y(-(dz as f32).atan2(dx as f32));
         let entity = commands
             .spawn((
+                crate::fog::FogGated { pos: *pos, dims: true },
                 Mesh3d(palette.tex_slab.clone()),
                 MeshMaterial3d(palette.oneway_tex_mat.clone()),
                 Transform::from_translation(tile_top_xyz(world, *pos, 0.08))
@@ -904,20 +925,33 @@ pub(crate) fn sync_view(
         }
     });
 
-    // Paint layer: thin translucent color washes over tiles.
+    // Paint layer: thin translucent color washes over tiles. Q92 (with
+    // Q97 — enemies repaint now): a coat placed, recolored, or erased
+    // unseen applies to the view when the viewer next looks. A coat with
+    // NO view yet also seeds from any KNOWN tile — that's Q94's relaunch
+    // rule (a fresh view session over an in-progress sim re-renders
+    // remembered ground from current state, dimmed), not a live update.
     for (pos, color) in &world.paint {
         let key = (pos.x, pos.y);
-        if let Some((entity, c)) = index.paint.get(&key) {
-            if c == color {
-                continue;
+        let watched = fog.watching(*pos);
+        match index.paint.get(&key) {
+            Some((_, c)) if c == color => continue,
+            // Recolored: applies only while watched; otherwise the
+            // memory keeps the last-seen coat.
+            Some((entity, _)) if watched => {
+                commands.entity(*entity).despawn();
+                index.paint.remove(&key);
             }
-            commands.entity(*entity).despawn();
-            index.paint.remove(&key);
+            Some(_) => continue,
+            None if watched || fog.known.contains(&key) => {}
+            None => continue,
         }
         let entity = commands
             .spawn((
+                crate::fog::FogGated { pos: *pos, dims: false },
                 Mesh3d(palette.tile_slab.clone()),
-                MeshMaterial3d(palette.paint_mats[*color as usize % 4].clone()),
+                // Sim palette values are 1-based (0 = unpainted, never stored).
+                MeshMaterial3d(palette.paint_mats[(*color as usize).saturating_sub(1) % 4].clone()),
                 Transform::from_translation(tile_top_xyz(world, *pos, 0.02))
                     .with_scale(Vec3::new(1.0, 0.25, 1.0)),
             ))
@@ -925,8 +959,9 @@ pub(crate) fn sync_view(
         index.paint.insert(key, (entity, *color));
     }
     index.paint.retain(|key, (entity, _)| {
-        if world.paint.contains_key(&TilePos::new(key.0, key.1)) {
-            true
+        let pos = TilePos::new(key.0, key.1);
+        if world.paint.contains_key(&pos) || !fog.watching(pos) {
+            true // present — or erased unseen: the memory keeps the coat
         } else {
             commands.entity(*entity).despawn();
             false
@@ -955,6 +990,7 @@ pub(crate) fn sync_view(
         }
         let entity = commands
             .spawn((
+                crate::fog::FogGated { pos: wreck.pos(), dims: true },
                 Mesh3d(palette.pad_slab.clone()),
                 MeshMaterial3d(palette.wreck_tex_mat.clone()),
                 Transform::from_translation(tile_top_xyz(world, wreck.pos(), 0.07)),
@@ -997,6 +1033,7 @@ pub(crate) fn sync_view(
         }
         let cube = commands
             .spawn((
+                crate::fog::FogGated { pos: bb.pos, dims: false },
                 Mesh3d(palette.nose_cube.clone()),
                 MeshMaterial3d(palette.black_mat.clone()),
                 Transform::from_translation(tile_top_xyz(world, bb.pos, 0.12)),
@@ -1035,6 +1072,16 @@ pub(crate) fn update_progress_bars(
     };
     for (id, bp) in &game.0.world.blueprints {
         let Some(&fill) = index.blueprint_fills.get(&id.0) else { continue };
+        // Q92: build progress is live intel — an enemy designation's bar
+        // freezes at last-seen while its tile is unwatched (the same
+        // rule the printer bars enforce below).
+        let watched = match index.blueprints.get(&id.0) {
+            Some(&(_, pos, own)) => own || fog.watching(pos),
+            None => false,
+        };
+        if !watched {
+            continue;
+        }
         let Ok(mut transform) = fills.get_mut(fill) else { continue };
         set_fill(&mut transform, bp.progress as f32 / bp.needed as f32);
     }

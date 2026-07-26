@@ -15,13 +15,11 @@
 //! picture — and a searching bot shows its expanding survey ring.
 
 use bevy::prelude::*;
-use sim::perception::los_clear;
 use sim::TilePos;
 use std::collections::{HashMap, HashSet};
 
 use crate::palette::Palette;
 use crate::scene::{tile_top_xyz, tile_xyz, TerrainTile};
-use crate::view::ViewIndex;
 use crate::GameSim;
 
 /// The viewer faction whose perception the fog renders (and whose colony
@@ -66,6 +64,19 @@ fn tile_fog(fog: &FogState, key: (i32, i32)) -> TileFog {
     } else {
         TileFog::Unknown
     }
+}
+
+/// Fog gating contract for a world-object view (2026-07-25 review):
+/// attached AT SPAWN in `sync_view`, so a new spawn path can't silently
+/// skip fog gating — `gate_fogged_views` queries the component instead
+/// of hand-enumerated registries. `dims` marks flat ground decals that
+/// swap to memory-twin materials; standing objects stay visible as
+/// remembered landmarks. Ghosts (sim object gone, removal unseen) keep
+/// their component and so keep dimming/hiding with their tile.
+#[derive(Component)]
+pub(crate) struct FogGated {
+    pub(crate) pos: TilePos,
+    pub(crate) dims: bool,
 }
 
 /// One opaque black cover quad (per tile) — the undiscovered look.
@@ -117,71 +128,20 @@ pub(crate) fn setup_fog(
     assets.ring = materials.add(ring);
 }
 
-/// Mirror the sim's two-circle model for the viewer faction: chebyshev
-/// seeing circles with LoS, from every live viewer bot (docs/05; the
-/// renderer recomputes rather than reading sim internals — fog stays a
-/// pure view concern).
+/// Read the viewer faction's tile knowledge straight from the sim (Q94):
+/// the perception phase owns both unions now — the live seeing circle
+/// (`visible_tiles`, derived per tick) and the durable known-tiles chart
+/// (sim state, hashed, survives save/load). The renderer stopped
+/// mirroring the eye math the day the sim started publishing it.
 pub(crate) fn recompute_fog(game: NonSend<GameSim>, mut fog: ResMut<FogState>) {
-    let simulation = &game.0;
-    let world = &simulation.world;
-    let ctx = simulation.ctx();
+    let world = &game.0.world;
     fog.visible.clear();
-    // Mirror the sim's FULL perceiver set (bots + printers + structures +
-    // the factionless depots), or tiles the sim treats as seen render
-    // under fog and explore()'s picks disagree with the screen.
-    let mut eyes: Vec<(TilePos, i32, bool)> = Vec::new();
-    for bot in world.bots.values() {
-        if bot.data.faction != VIEWER || bot.data.dying {
-            continue;
-        }
-        let mut seeing = ctx.sensors_for(&bot.data)
-            + sim::perception::high_ground_bonus(
-                &world.grid,
-                bot.data.pos,
-                simulation.tuning.high_ground_sensor_bonus,
-            );
-        // The search stance widens real sight to its current ring.
-        if let Some(sim::world::Action::Search { current, .. }) = &bot.data.action {
-            seeing = seeing.max(*current);
-        }
-        eyes.push((
-            bot.data.pos,
-            seeing as i32,
-            sim::perception::on_high_ground(&world.grid, bot.data.pos),
-        ));
+    if let Some(visible) = world.visible_tiles.get(&VIEWER) {
+        fog.visible.extend(visible.iter().map(|t| (t.x, t.y)));
     }
-    let s = simulation.tuning.structure_sensors as i32;
-    for p in world.printers.values().filter(|p| p.faction == VIEWER) {
-        eyes.push((p.pos, s, false));
-    }
-    for st in world.structures.values().filter(|st| st.faction == VIEWER) {
-        eyes.push((st.pos, s, false));
-    }
-    for d in world.depots.values().filter(|d| d.faction == VIEWER) {
-        eyes.push((d.pos, s, false)); // owner's eyes (Q89)
-    }
-    for (pos, seeing, elevated) in eyes {
-        for dy in -seeing..=seeing {
-            for dx in -seeing..=seeing {
-                let t = TilePos::new(pos.x + dx, pos.y + dy);
-                if !world.grid.in_bounds(t) {
-                    continue;
-                }
-                if los_clear(&world.grid, pos, t, elevated) {
-                    fog.visible.insert((t.x, t.y));
-                }
-            }
-        }
-    }
-    let visible: Vec<(i32, i32)> = fog.visible.iter().copied().collect();
-    fog.known.extend(visible);
-    // Seed view memory from the sim's permanent map knowledge (Q70:
-    // discovered nodes outlive any one viewing session — PRESTEP_TICKS,
-    // future save/load). A known vein's tile is remembered ground, so its
-    // gem neither floats over undiscovered black nor vanishes from the
-    // player's own map (review 2026-07-25).
-    if let Some(known) = world.known_nodes.get(&VIEWER) {
-        fog.known.extend(known.values().map(|n| (n.pos.x, n.pos.y)));
+    fog.known.clear();
+    if let Some(known) = world.known_tiles.get(&VIEWER) {
+        fog.known.extend(known.iter().map(|t| (t.x, t.y)));
     }
 
     // Heard-only contacts: the sim's own perception (entity handles the
@@ -418,57 +378,28 @@ pub(crate) fn shade_terrain(
 /// there. Flat ground decals (bridges, one-way arrows, wrecks) swap to
 /// memory twins so they dim with the terrain under them; standing objects
 /// (printers, depots, blueprints, black boxes, paint marks) just stay
-/// visible as remembered landmarks. Bots are perception-gated in
-/// sync_view; ore gems discovery-gated there too.
+/// visible as remembered landmarks. Every gated view carries a
+/// [`FogGated`] component attached at spawn (2026-07-25 review — a spawn
+/// path that forgets it is now the exception, not the default), ghosts
+/// included. Bots are perception-gated in sync_view; ore gems
+/// discovery-gated there too.
 pub(crate) fn gate_fogged_views(
-    game: NonSend<GameSim>,
     fog: Res<FogState>,
-    index: Res<ViewIndex>,
     mut assets: ResMut<FogAssets>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    mut views: Query<(&mut Visibility, Option<&mut MeshMaterial3d<StandardMaterial>>)>,
+    mut views: Query<(
+        &FogGated,
+        &mut Visibility,
+        Option<&mut MeshMaterial3d<StandardMaterial>>,
+    )>,
 ) {
     if crate::screenshot_hides_fog() {
         return;
     }
-    let world = &game.0.world;
-    // (view entity, tile, dims-with-the-ground?)
-    let mut targets: Vec<(Entity, TilePos, bool)> = Vec::new();
-    for (id, p) in &world.printers {
-        if let Some(&(e, _)) = index.printers.get(&id.0) {
-            targets.push((e, p.pos, false));
-        }
-    }
-    for (id, bp) in &world.blueprints {
-        if let Some(&e) = index.blueprints.get(&id.0) {
-            targets.push((e, bp.pos, false));
-        }
-    }
-    // Q92 snapshot classes iterate the INDEX, not the world: a ghost (sim
-    // object gone, removal unseen) keeps dimming/hiding with its tile.
-    for &(e, pos) in index.depots.values() {
-        targets.push((e, pos, false));
-    }
-    for &(e, pos) in index.wrecks.values() {
-        targets.push((e, pos, true));
-    }
-    for &(e, pos) in index.black_boxes.values() {
-        targets.push((e, pos, false));
-    }
-    for (&(x, y), &e) in &index.bridges {
-        targets.push((e, TilePos::new(x, y), true));
-    }
-    for (&(x, y), &(e, _)) in &index.overlays {
-        targets.push((e, TilePos::new(x, y), true));
-    }
-    for (&(x, y), &(e, _)) in &index.paint {
-        targets.push((e, TilePos::new(x, y), false));
-    }
-    for (entity, pos, dims) in targets {
-        let Ok((vis, mat)) = views.get_mut(entity) else { continue };
+    for (gated, vis, mat) in &mut views {
         apply_tile_fog(
-            tile_fog(&fog, (pos.x, pos.y)),
-            dims,
+            tile_fog(&fog, (gated.pos.x, gated.pos.y)),
+            gated.dims,
             vis,
             mat,
             &mut assets,

@@ -50,7 +50,8 @@ pub(crate) fn build_colony() -> Sim {
         }
     }
     // A snowfield drapes the mesa's west flank (altitude reads cold);
-    // plains-cost for now, so no route changes (docs/QUESTIONS Q67).
+    // plains-cost, and it mutes movement noise (Q78 — the silent-
+    // approach biome), so no route changes here.
     for (x, depth) in [(25, 2), (26, 3), (27, 4), (28, 3)] {
         for y in 0..depth {
             spec.snow.push(TilePos::new(x, y));
