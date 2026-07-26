@@ -112,7 +112,7 @@ Rates & currency:
 
 ## Harvest Tool Tiers
 
-Harvesting requires a **tool module** ([02-agents.md](02-agents.md)), and tools are **tiered**: a level-N harvester works every resource of tier ≤ N. Each resource declares its required tier (data-driven; numbers below are made-up tuning values):
+Harvesting reads a bot's **Mining capability tier** ([02-agents.md](02-agents.md), Q105): tier N works every resource of tier ≤ N. **Base tier is 1**, so a fresh print works its whole start zone and the opening program never stalls; each resource declares its required tier (data-driven; numbers below are made-up tuning values):
 
 | Resource | Required tool tier |
 |---|---|
@@ -123,7 +123,7 @@ Harvesting requires a **tool module** ([02-agents.md](02-agents.md)), and tools 
 | Crystal | 4 |
 | Water | — (pumped by a structure, not mined) |
 
-The tier ladder is the arc of the colony: chop, dig, electrify, get rich, get brave. **The ladder rule (Q72): tier-N+1 tools price only in materials mineable at tier ≤ N** — no tier's key is ever locked behind its own door.
+The tier ladder is the arc of the colony: chop, dig, electrify, get rich, get brave. **The ladder rule (Q72): tier-N+1 tools price only in materials mineable at tier ≤ N** — no tier's key is ever locked behind its own door. Tiers are bought at the **Upgrade Station** (Q105 folds the Fabricator's tool-making role into the one pad flow), and buying one **resets that capability's earned level** — the drill is better, the hands are new.
 
 | Tool tier | Priced in | Made from what you already mine |
 |---|---|---|
@@ -145,6 +145,9 @@ No free-form resource gifting. A colony builds a **Request Box** and posts a req
 - Requests are visible to all allies (and, being on the field, spottable by enemy scouts: a colony begging for Steel is telling everyone something).
 
 ## Structures (resource-relevant set)
+
+**Every structure is built by labor** (Q105, 2026-07-26): the player designates a blueprint, a bot walks there and `build()`s it, exactly like bridges, roads, barricades, and paint. Nothing in the colony appears the instant it is clicked — "designation is the player's; labor is code" holds everywhere, and a contested build is a thing you defend.
+
 
 | Structure | Cost | Function |
 |---|---|---|

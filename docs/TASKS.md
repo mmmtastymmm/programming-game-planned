@@ -993,6 +993,36 @@ out-of-range quirk to trigger it (guarded by the setenv-range test exercising th
       the enum, so the path already exists). First-pass HP scaled to the 20-Stone price.
       [sim][game] ⚠HASH
 
+## M16 — Capability slots & construction by labor (Q105) — NOT STARTED
+
+The tool layer docs/02–03 describe was never built: no verb checks a tool, the module
+catalog holds `optics` + the inert `backup_core`, printed bots get no modules, and
+`Resource::tool_tier()` is dead data. Q105 replaces generic module slots with per-capability
+slots. Milestone-sized; ⚠HASH throughout.
+
+- [ ] **Capability slots on the chassis** — `BotData.modules: Vec<u8>` retires; four permanent
+      capabilities (Mining, Building, Combat, Optics), each `{ tier: u8, }` with **base tier 1**,
+      hashed. `stats.module_slots`, `xp.slot_milestones` ([1000, 3000]) and `SelectKey::ModuleSlots`
+      are cut with Q66's generic slots. [sim]
+- [ ] **Tier enforcement** — `mine()` checks the bot's Mining tier against
+      `Resource::tool_tier()` (the dead data goes live; a too-low tier faults with a typed id).
+      Build/Combat/Optics tiers feed build rate, `attack_damage`, and sensor range through the
+      existing pipeline; Optics module effect becomes optics tier. [sim]
+- [ ] **Tier purchase at the Upgrade Station** — capabilities join the catalog beside compute
+      (pad, queue, payment-at-mount, coolant all reused); docs/03's Fabricator-makes /
+      Station-swaps split folds into the one pad. Prices follow Q72's ladder rule (tier N+1
+      prices only in materials mineable at tier ≤ N). [sim][game]
+- [ ] **Level reset on tier change** — buying a tier zeroes that capability's paired task
+      track (Mining/Building/Combat/Scouting). New tool, new hands. [sim]
+- [ ] **Lifetime XP splits from proficiency XP** — a monotonic per-bot `lifetime_xp` (never
+      reset) backs `SelectKey::TotalXp`, the scrap valve's lowest-total pick, and quirk
+      manifestation thresholds; the resettable per-track XP keeps driving perks ONLY.
+      Without this, upgrading a veteran's drill marks it as the fleet's rookie and the scrap
+      valve recycles it. [sim]
+- [ ] **Structures are built by labor** — `PlaceStructure` becomes a blueprint designation
+      serviced by `build()` (the Q97 paint flow generalizes); every structure incl. Q98's Pump.
+      Nest claim/raze likewise want a bot on site (docs/04). [sim][game]
+
 ## Verb-layer index (every spec'd builtin → its milestone)
 
 | Verb | Milestone | | Verb | Milestone |
