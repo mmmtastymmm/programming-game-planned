@@ -491,6 +491,7 @@ fn structures_placed_mid_route_block_the_walk() {
         faction: 0,
     })
     .unwrap();
+    sim.finish_structure_for_test(block);
     assert!(sim.world.structure_at(block), "the smelter was placed");
     for _ in 0..300 {
         sim.step();

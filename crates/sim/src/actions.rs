@@ -788,7 +788,9 @@ impl Sim {
                 }
                 bp.progress += rate;
                 let done = bp.progress >= bp.needed;
-                let (site, kind) = (bp.pos, bp.kind);
+                // The DESIGNATING faction owns what gets built (Q105) —
+                // the finisher may be an ally, or an opportunist.
+                let (site, kind, bp_faction) = (bp.pos, bp.kind, bp.faction);
                 // Building income: 1 XP per 10 progress units = deci/10.
                 self.world.pending_xp.push((id, XpTrack::Building, (rate / 10).max(1) as u64));
                 if done {
@@ -854,6 +856,28 @@ impl Sim {
                             }
                             BlueprintKind::Road => {
                                 self.world.set_tile(site, TileKind::Road)
+                            }
+                            // Q105: the site was designated and paid for;
+                            // completing the labor is what actually raises
+                            // the building. Nothing appears on a click.
+                            BlueprintKind::Structure(skind) => {
+                                let sid = self.world.alloc_entity();
+                                let faction = bp_faction;
+                                self.world.structures.insert(
+                                    sid,
+                                    crate::world::Structure {
+                                        kind: skind,
+                                        faction,
+                                        pos: site,
+                                        hp: self.tuning.structure_hp,
+                                        max_hp: self.tuning.structure_hp,
+                                        input: std::collections::BTreeMap::new(),
+                                        output: std::collections::BTreeMap::new(),
+                                        recipe: None,
+                                        batch: None,
+                                        pad: None,
+                                    },
+                                );
                             }
                             // Q97: paint is labor — completing the
                             // designation recolors (or erases) the tile.

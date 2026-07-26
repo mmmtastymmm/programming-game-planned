@@ -95,6 +95,9 @@ pub(crate) fn blueprint_hint(kind: BlueprintKind) -> &'static str {
         BlueprintKind::Cleanse => "Click a corruption tile to cleanse (slow) — Esc/RMB cancels",
         BlueprintKind::Road => "Click plains or rubble to pave — Esc/RMB cancels",
         BlueprintKind::Paint { .. } => "Click walkable ground to designate paint — Esc/RMB cancels",
+        // Q105: every structure is built by labor now, so its blueprint
+        // reads like any other designation.
+        BlueprintKind::Structure(_) => "Click buildable ground to designate — a bot raises it",
     }
 }
 

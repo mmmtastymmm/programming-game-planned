@@ -12,7 +12,7 @@
 
 use crate::hash::Fnv1a;
 use crate::host::BotHost;
-use crate::map::{MapSpec, OverlayKind, TileKind, TilePos};
+use crate::map::{MapSpec, OverlayKind, TilePos};
 use crate::world::{
     Blueprint, BlueprintKind, Bot,
     BotData, BotId, Color, ColorProgram, EntityId, PrinterState, Wreck,
@@ -139,6 +139,9 @@ pub struct Tuning {
     /// Q97: paint is labor — the quick, material-free service time of a
     /// paint designation.
     pub paint_ticks: u32,
+    /// Q105: structures are built by labor — this is the build time of
+    /// a structure blueprint (its materials are charged at designation).
+    pub structure_build_ticks: u32,
     /// Q105-R2: the Building tier that gates the heavy jobs — field
     /// repair (wreck rescue), hijack, and nest conversion. Replaces the
     /// build-tool module gate that died with Q105's generic slots; base
@@ -290,8 +293,10 @@ impl crate::world::BlueprintKind {
             K::Bridge => tuning.bridge_cost_stone,
             K::Barricade => tuning.barricade_cost_stone,
             K::Road => tuning.road_cost_stone,
-            // Paint is material-free (Q97): labor and exposure are the price.
-            K::Clear | K::Demolish | K::Cleanse | K::Paint { .. } => 0,
+            // Paint is material-free (Q97): labor and exposure are the
+            // price. Structures carry TYPED prices (tuning.structure_costs),
+            // charged by the placement command, so they owe no Stone here.
+            K::Clear | K::Demolish | K::Cleanse | K::Paint { .. } | K::Structure(_) => 0,
         }
     }
 
@@ -306,6 +311,7 @@ impl crate::world::BlueprintKind {
             K::Cleanse => tuning.cleanse_ticks,
             K::Road => tuning.road_build_ticks,
             K::Paint { .. } => tuning.paint_ticks,
+            K::Structure(_) => tuning.structure_build_ticks,
         }
     }
 }
@@ -1386,13 +1392,16 @@ impl Sim {
             }
             Command::PlaceStructure { pos, kind, faction } => {
                 use crate::resources::{Resource, DECI};
-                use crate::world::StructureKind;
-                let free = self.world.grid.get(*pos).is_some_and(|t| t.spawnable())
-                    && !self.world.structure_at(*pos)
+                // Q105: structures are BUILT BY LABOR. This designates the
+                // site and charges the materials (the blueprint flow every
+                // other placement already used); a bot must then walk there
+                // and `build()` it. Nothing in the colony appears the
+                // instant it is clicked — "designation is the player's;
+                // labor is code" now holds everywhere.
+                let bk = BlueprintKind::Structure(*kind);
+                let free = self.world.blueprint_site_ok(bk, *pos)
                     && !self.world.tile_occupied(*pos, BotId(u32::MAX))
-                    // The Tap harnesses a vent — vent tiles only (docs/03).
-                    && (*kind != StructureKind::GeothermalTap
-                        || self.world.grid.get(*pos) == Some(TileKind::Vent));
+                    && !self.world.blueprints.values().any(|b| b.pos == *pos);
                 // Typed prices live in tuning.ron (docs/03 figures;
                 // validated complete at load — every kind has an entry).
                 let cost: &[(Resource, u32)] = self
@@ -1411,21 +1420,11 @@ impl Sim {
                             self.world.stock_take(*faction, *k, (*units * DECI) as u64);
                         debug_assert!(taken, "checked affordable above");
                     }
+                    let needed = bk.build_ticks(&self.tuning) * crate::resources::DECI;
                     let id = self.world.alloc_entity();
-                    self.world.structures.insert(
+                    self.world.blueprints.insert(
                         id,
-                        crate::world::Structure {
-                            kind: *kind,
-                            faction: *faction,
-                            pos: *pos,
-                            hp: self.tuning.structure_hp,
-                            max_hp: self.tuning.structure_hp,
-                            input: std::collections::BTreeMap::new(),
-                            output: std::collections::BTreeMap::new(),
-                            recipe: None,
-                            batch: None,
-                            pad: None,
-                        },
+                        Blueprint { pos: *pos, kind: bk, progress: 0, needed, faction: *faction },
                     );
                 }
                 Ok(None)
@@ -2622,6 +2621,42 @@ impl Sim {
     }
 
 
+    /// Test hook (mirrors `apply_damage_for_test`): finish the structure
+    /// designation on `pos` immediately, skipping the build labor Q105
+    /// requires in real play. Tests that exercise what a structure DOES —
+    /// refining, powering, hosting a pad — use this rather than staging a
+    /// builder; construction itself has its own tests.
+    pub fn finish_structure_for_test(&mut self, pos: TilePos) -> bool {
+        let Some((&id, kind, faction)) = self
+            .world
+            .blueprints
+            .iter()
+            .find(|(_, b)| b.pos == pos && matches!(b.kind, BlueprintKind::Structure(_)))
+            .map(|(id, b)| (id, b.kind, b.faction))
+        else {
+            return false;
+        };
+        let BlueprintKind::Structure(skind) = kind else { return false };
+        self.world.blueprints.remove(&id);
+        let sid = self.world.alloc_entity();
+        self.world.structures.insert(
+            sid,
+            crate::world::Structure {
+                kind: skind,
+                faction,
+                pos,
+                hp: self.tuning.structure_hp,
+                max_hp: self.tuning.structure_hp,
+                input: std::collections::BTreeMap::new(),
+                output: std::collections::BTreeMap::new(),
+                recipe: None,
+                batch: None,
+                pad: None,
+            },
+        );
+        true
+    }
+
     /// Q105-R2 / docs/04: converting a defeated nest is heavy work done
     /// ON SITE — the faction needs a bot at the nest with a Building tier
     /// at or above `heavy_build_tier`. (The build-tool module this
@@ -2897,6 +2932,11 @@ impl Sim {
             // colors. Length-prefix discipline is inherited from as_u8.
             if let crate::world::BlueprintKind::Paint { color } = bp.kind {
                 h.write_u8(color.unwrap_or(255));
+            }
+            // Same reason as Paint's color: the tag alone cannot tell a
+            // Smelter designation from a Foundry one.
+            if let crate::world::BlueprintKind::Structure(k) = bp.kind {
+                h.write_u8(k.as_u8());
             }
             h.write_i32(bp.pos.x);
             h.write_i32(bp.pos.y);

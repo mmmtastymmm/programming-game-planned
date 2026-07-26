@@ -26,6 +26,7 @@ fn station_sim(stock: &[(Resource, u64)]) -> (Sim, sim::EntityId) {
         faction: 0,
     })
     .unwrap();
+    sim.finish_structure_for_test(STATION_POS);
     let sid = *sim.world.structures.keys().next().expect("station placed");
     // Coolant is a physical feed — wet the buffer by hand (a Pump/It's
     // hauled in real play; see TASKS.md water-source discussion).

@@ -1010,6 +1010,12 @@ pub enum BlueprintKind {
     /// the tile. `None` erases (designating `unpainted`). Material-free;
     /// the price is the trip.
     Paint { color: Option<u8> },
+    /// Q105: **every structure is built by labor**. The player designates
+    /// the site (materials charged on placement, like every blueprint)
+    /// and a bot walks there and `build()`s it — Smelters, Foundries,
+    /// Generators, Taps, Stations and the Pump alike. Nothing in the
+    /// colony appears the instant it is clicked.
+    Structure(StructureKind),
 }
 
 impl BlueprintKind {
@@ -1023,6 +1029,7 @@ impl BlueprintKind {
             BlueprintKind::Cleanse => 4,
             BlueprintKind::Road => 5,
             BlueprintKind::Paint { .. } => 6,
+            BlueprintKind::Structure(_) => 7,
         }
     }
 
@@ -1045,6 +1052,13 @@ impl BlueprintKind {
             // Composition: paint is a ground-stack slot — an unwalkable
             // building shares with nothing, and water has no ground).
             BlueprintKind::Paint { .. } => tile.is_some_and(|t| t.passable()),
+            // A structure needs ground it can stand on; the Geothermal
+            // Tap additionally harnesses a vent (docs/03), checked by the
+            // placement command which knows the kind.
+            BlueprintKind::Structure(k) => match k {
+                StructureKind::GeothermalTap => tile == Some(TileKind::Vent),
+                _ => tile.is_some_and(|t| t.spawnable()),
+            },
         }
     }
 }

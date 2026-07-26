@@ -183,6 +183,9 @@ Tuning(
     road_build_ticks: 10,
     // Q97: painting is quick, material-free labor — the trip is the price.
     paint_ticks: 3,
+    // Q105: every structure is built by labor — the site is designated,
+    // a bot walks there and builds it. First-pass duration.
+    structure_build_ticks: 25,
     // Q105-R2: field repair, hijack and nest conversion need this Building
     // tier (the replacement for the deleted build-tool gate).
     heavy_build_tier: 2,

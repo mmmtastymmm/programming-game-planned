@@ -62,6 +62,7 @@ fn geothermal_tap_is_free_steady_power_and_vents_only() {
         faction: 0,
     })
     .unwrap();
+    sim.finish_structure_for_test(TilePos::new(3, 3));
     assert!(sim.world.structures.is_empty(), "taps place on vent tiles only");
     sim.apply(&Command::PlaceStructure {
         pos: TilePos::new(6, 2),
@@ -69,6 +70,7 @@ fn geothermal_tap_is_free_steady_power_and_vents_only() {
         faction: 0,
     })
     .unwrap();
+    sim.finish_structure_for_test(TilePos::new(6, 2));
     assert_eq!(sim.world.structures.len(), 1);
     spawn(&mut sim, TilePos::new(2, 2), "wait(600)\n");
     for _ in 0..100 {
@@ -184,6 +186,7 @@ fn browned_out_refineries_stand_idle() {
         faction: 0,
     })
     .unwrap();
+    sim.finish_structure_for_test(TilePos::new(5, 2));
     let smelter = *sim.world.structures.keys().next().unwrap();
     sim.apply(&Command::SetRecipe { structure: smelter, recipe: Some(0) }).unwrap();
     spawn(&mut sim, TilePos::new(2, 2), "wait(600)\n"); // someone to draw power

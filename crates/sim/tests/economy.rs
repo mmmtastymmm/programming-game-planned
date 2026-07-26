@@ -83,6 +83,7 @@ fn smelter_refines_fed_inputs_into_withdrawable_steel() {
         faction: 0,
     })
     .unwrap();
+    sim.finish_structure_for_test(TilePos::new(4, 2));
     let smelter = *sim.world.structures.keys().next().expect("placed");
     assert_eq!(
         sim.world.stock_get(0, Resource::Steel),
@@ -175,6 +176,7 @@ fn structures_are_attackable_and_fall_at_zero() {
         faction: 0,
     })
     .unwrap();
+    sim.finish_structure_for_test(TilePos::new(3, 1));
     let smelter = *sim.world.structures.keys().next().unwrap();
     spawn(&mut sim, TilePos::new(2, 1), "attack(closest(smelter).expect())\n");
     let hp0 = sim.world.structures[&smelter].hp;
@@ -325,6 +327,7 @@ fn acceptor_destroyed_mid_deposit_moves_nothing() {
         faction: 0,
     })
     .unwrap();
+    sim.finish_structure_for_test(TilePos::new(4, 2));
     let smelter = *sim.world.structures.keys().next().expect("placed");
     sim.apply(&Command::SetRecipe { structure: smelter, recipe: Some(0) }).unwrap();
     let hauler = spawn(&mut sim, TilePos::new(3, 2), "deposit()\nwait(600)\n");
@@ -373,6 +376,7 @@ fn recipe_change_scraps_the_batch_and_its_inputs() {
         faction: 0,
     })
     .unwrap();
+    sim.finish_structure_for_test(TilePos::new(4, 2));
     let smelter = *sim.world.structures.keys().next().expect("placed");
     sim.apply(&Command::SetRecipe { structure: smelter, recipe: Some(0) }).unwrap();
     {
@@ -482,6 +486,7 @@ fn crystal_field_mines_and_the_chips_recipe_runs() {
         faction: 0,
     })
     .unwrap();
+    sim.finish_structure_for_test(TilePos::new(5, 2));
     let foundry = *sim
         .world
         .structures
