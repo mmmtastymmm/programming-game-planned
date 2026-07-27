@@ -33,6 +33,11 @@ pub(crate) enum ToolKind {
     Paint(Option<u8>),
     /// Emergency stop: click a bot to wreck it (logs kept, cargo spills).
     Kill,
+    /// Call off a pending designation and get its materials back. A
+    /// structure designation charges up front, so without this a misplaced
+    /// click destroyed the materials AND bricked the tile forever (M16
+    /// review) — nothing else can clear a blueprint but a builder.
+    Cancel,
 }
 
 pub(crate) struct BuildItem {
@@ -72,7 +77,13 @@ pub(crate) const BUILD_CATEGORIES: &[(&str, &[BuildItem])] = &[
     ),
     // Dev-only escape hatch (M3): abort() is the only PLAYER scuttle;
     // this drives the dev Command::KillBot.
-    ("Command", &[BuildItem { name: "Kill Bot", kind: ToolKind::Kill }]),
+    (
+        "Command",
+        &[
+            BuildItem { name: "Kill Bot", kind: ToolKind::Kill },
+            BuildItem { name: "Cancel Designation", kind: ToolKind::Cancel },
+        ],
+    ),
     (
         "Paint",
         &[
@@ -354,6 +365,9 @@ pub(crate) fn place_blueprint(
                 let _ = game.0.apply(&Command::PlacePaint { pos, color, faction: crate::fog::VIEWER });
             }
         }
+        ToolKind::Cancel => {
+            let _ = game.0.apply(&Command::CancelBlueprint { pos, faction: 0 });
+        }
         ToolKind::Kill => {
             // Lowest-id bot standing on the clicked tile.
             let victim = game
@@ -435,6 +449,9 @@ pub(crate) fn build_preview(
         ToolKind::Overlay(None) => (true, None),
         ToolKind::Kill => {
             (world.bots.values().any(|b| b.data.pos == pos && !b.data.dying), None)
+        }
+        ToolKind::Cancel => {
+            (world.blueprints.values().any(|b| b.pos == pos && b.faction == 0), None)
         }
         // Paint previews what the sim command will accept — the shared
         // `paint_designation_ok` rule, never a copy (Q97: a designation

@@ -194,6 +194,29 @@ impl Stats {
             self.tier_build_pct as u64 >= cap * xp.building_speed_pct as u64,
             "stats: Building tier grant must clear the Building L{cap} bonus — Q105-R1",
         );
+        // The M16 review found this one MISSING and the shipped data
+        // violating it: the level bonus was `level * tier_cpu_centi / 2`,
+        // so at cap 5 the reset (250) always beat the grant (100) no
+        // matter how the constant moved — buying the Processor tier made
+        // a maxed thinker permanently slower. The per-level magnitude now
+        // lives in xp.ron so the two sides can actually be tuned apart.
+        assert!(
+            self.tier_cpu_centi >= cap * xp.processing_cpu_centi_per_level,
+            "stats: Processor tier grant ({}) must clear the Processing L{cap} bonus ({}) — Q105-R1",
+            self.tier_cpu_centi,
+            cap * xp.processing_cpu_centi_per_level,
+        );
+        // Q105-R3's ordering is only real if one bought tier outweighs
+        // every track a bot can max — otherwise the scrap valve eats
+        // Backup-Core reprints (see TIER_INVESTMENT_WEIGHT).
+        let max_earnable = crate::world::XpTrack::ALL.len() as u64 * xp.track_cap_deci();
+        assert!(
+            crate::world::TIER_INVESTMENT_WEIGHT > max_earnable,
+            "world: TIER_INVESTMENT_WEIGHT ({}) must outweigh a fully-maxed bot's \
+             total XP ({max_earnable}) or the scrap valve ranks a tiered \
+             reprint below an unimproved rookie — Q105-R3",
+            crate::world::TIER_INVESTMENT_WEIGHT,
+        );
     }
 
     pub fn upgrade(&self, name: &str) -> Option<(u8, &UpgradeSpec)> {
@@ -231,8 +254,24 @@ impl StatCtx<'_> {
     /// level by arithmetic, with no reset branch anywhere. XP carried
     /// from the tier below survives as a small head start (at scale 100,
     /// a maxed tier-1 bot lands 15% of the way to the new L1).
+    /// Public because the perk gates, the energy upkeep, the inspector and
+    /// the tests all ask this question — and the M16 review found that
+    /// every one of them that could not reach a `StatCtx` had open-coded
+    /// `xp.level(data.xp(track))` instead, reading tier-scaled storage as
+    /// if it were progress. This is the ONLY correct way to level a track.
+    pub fn track_level(&self, data: &BotData, track: crate::world::XpTrack) -> u32 {
+        self.xp.level(self.track_deci(data, track))
+    }
+
+    /// A track's EFFECTIVE deci-XP: stored magnitude divided back down by
+    /// the tier scale, so it means the same thing at every tier. Anything
+    /// comparing XP against a threshold wants this, not `BotData::xp`.
+    pub fn track_deci(&self, data: &BotData, track: crate::world::XpTrack) -> u64 {
+        data.xp(track).raw_unscaled() / self.track_scale(data, track)
+    }
+
     fn level(&self, data: &BotData, track: crate::world::XpTrack) -> u32 {
-        self.xp.level(data.xp(track) / self.track_scale(data, track))
+        self.track_level(data, track)
     }
 
     /// A capability's earned LEVEL — its proficiency with the tool
@@ -490,8 +529,7 @@ pub fn cpu_centi(
     let ptier = (data.tier(crate::world::Capability::Processor) as u64).saturating_sub(1);
     v += (ptier * ctx.stats.tier_cpu_centi) as i64;
     v += (ctx.capability_level(data, crate::world::Capability::Processor) as u64
-        * ctx.stats.tier_cpu_centi
-        / 2) as i64;
+        * ctx.xp.processing_cpu_centi_per_level) as i64;
     // quirks: flat centicycle deltas (Overclocked, `unsafe` Block…), and
     // Energy Star softens the brownout percent below.
     let mut brownout_pct = ctx.stats.brownout_penalty_pct;
@@ -544,10 +582,10 @@ pub fn step_ticks(
     let mut rate = data.move_rate_deci as i64;
     // XP: Mileage wears the bearings in (−% per level, reduction floors);
     // Hauling L3 moves +10% faster WHILE LOADED.
-    let mileage = ctx.xp.level(data.xp(crate::world::XpTrack::Mileage)) as i64;
+    let mileage = ctx.track_level(data, crate::world::XpTrack::Mileage) as i64;
     rate -= (rate * mileage * ctx.xp.mileage_move_pct as i64) / 100;
     if data.cargo_total() > 0
-        && ctx.xp.level(data.xp(crate::world::XpTrack::Hauling)) >= 3
+        && ctx.track_level(data, crate::world::XpTrack::Hauling) >= 3
     {
         rate -= (rate * ctx.xp.hauling_l3_loaded_speed_pct as i64) / 100;
     }

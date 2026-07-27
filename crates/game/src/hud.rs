@@ -134,9 +134,17 @@ pub(crate) fn inspector_ui(root: &mut egui::Ui, game: &mut GameSim, editor: &mut
         let xp_line: Vec<String> = sim::world::XpTrack::ALL
             .iter()
             .filter_map(|&track| {
-                let deci = data.xp(track);
+                // EFFECTIVE deci and level, both scale-corrected: a
+                // capability track's STORED number is tier-scaled, so the
+                // raw pair read ~100x high per tier bought.
+                let deci = game.0.ctx().track_deci(data, track);
                 (deci > 0).then(|| {
-                    format!("{} {}(L{})", track.name(), deci / 10, game.0.xp.level(deci))
+                    format!(
+                        "{} {}(L{})",
+                        track.name(),
+                        deci / 10,
+                        game.0.ctx().track_level(data, track)
+                    )
                 })
             })
             .collect();
@@ -178,7 +186,12 @@ pub(crate) fn inspector_ui(root: &mut egui::Ui, game: &mut GameSim, editor: &mut
             let caps: Vec<String> = sim::world::Capability::ALL
                 .iter()
                 .map(|c| {
-                    let level = game.0.xp.level(data.xp(c.track()));
+                    // Through the pipeline: the raw read reported the
+                    // PRE-tier level, so a scout that had just bought
+                    // Optics t2 showed "L5" while the sim had reset its
+                    // effective level to 0 and dropped its sensor range
+                    // (M16 review).
+                    let level = game.0.ctx().capability_level(data, *c);
                     format!("{} t{} L{}", c.name(), data.tier(*c), level)
                 })
                 .collect();

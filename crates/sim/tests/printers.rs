@@ -285,7 +285,7 @@ fn rule_edit_recolors_by_key_keeping_xp() {
 
     let veteran = spawn_green(&mut sim, TilePos::new(2, 3));
     let rookie = spawn_green(&mut sim, TilePos::new(3, 3));
-    sim.world.bots.get_mut(&veteran).unwrap().data.xp.insert(sim::world::XpTrack::Mining, 500);
+    sim.world.bots.get_mut(&veteran).unwrap().data.xp.insert(sim::world::XpTrack::Mining, sim::world::StoredXp::from_scaled(500));
 
     // Red claims ONE bot, worst-first on total XP: the rookie.
     dial(&mut sim, red, 1, SelectKey::TotalXp, false);
@@ -310,7 +310,7 @@ fn best_first_claim_takes_the_veteran() {
     sim.apply(&Command::RepairPrinter { printer: red }).unwrap();
     let veteran = spawn_green(&mut sim, TilePos::new(2, 3));
     let _rookie = spawn_green(&mut sim, TilePos::new(3, 3));
-    sim.world.bots.get_mut(&veteran).unwrap().data.xp.insert(sim::world::XpTrack::Combat, 700);
+    sim.world.bots.get_mut(&veteran).unwrap().data.xp.insert(sim::world::XpTrack::Combat, sim::world::StoredXp::from_scaled(700));
 
     dial(&mut sim, red, 1, SelectKey::Xp(sim::world::XpTrack::Combat), true);
     // The walk may bump the parked rookie (50-tick freeze) and detour.
@@ -544,7 +544,7 @@ fn over_capacity_scraps_lowest_total_xp_for_refund() {
     let veteran = spawn_green(&mut sim, TilePos::new(2, 3));
     spawn_green(&mut sim, TilePos::new(3, 3));
     // TOTAL XP decides (M9: every track counts — Building included).
-    sim.world.bots.get_mut(&veteran).unwrap().data.xp.insert(sim::world::XpTrack::Building, 900);
+    sim.world.bots.get_mut(&veteran).unwrap().data.xp.insert(sim::world::XpTrack::Building, sim::world::StoredXp::from_scaled(900));
 
     let ore_before = sim.world.stock_get(0, sim::resources::Resource::Iron);
     // The valve fires per sustained settlement; disarm it after the first
@@ -593,7 +593,7 @@ fn scrap_walk_ends_beside_the_printer_for_a_visible_tick() {
     let veteran = spawn_green(&mut sim, TilePos::new(2, 3));
     // The victim starts across the map, so the recall is a real walk.
     let victim = spawn_green(&mut sim, TilePos::new(10, 6));
-    sim.world.bots.get_mut(&veteran).unwrap().data.xp.insert(sim::world::XpTrack::Combat, 900);
+    sim.world.bots.get_mut(&veteran).unwrap().data.xp.insert(sim::world::XpTrack::Combat, sim::world::StoredXp::from_scaled(900));
 
     let printer_pos = TilePos::new(2, 2);
     let mut last_seen = TilePos::new(10, 6);
@@ -866,7 +866,7 @@ fn the_scrap_valve_ranks_by_investment_not_raw_xp() {
         sim.world.bots.get_mut(&veteran).unwrap().data.tiers[cap.idx()] = 3;
     }
     // The rookie has done a little work and nothing else.
-    sim.world.bots.get_mut(&rookie).unwrap().data.xp.insert(XpTrack::Mining, 50);
+    sim.world.bots.get_mut(&rookie).unwrap().data.xp.insert(XpTrack::Mining, sim::world::StoredXp::from_scaled(50));
 
     let vet_inv = sim.world.bots[&veteran].data.investment();
     let rookie_inv = sim.world.bots[&rookie].data.investment();
@@ -877,5 +877,51 @@ fn the_scrap_valve_ranks_by_investment_not_raw_xp() {
     assert!(
         sim.world.bots[&veteran].data.xp_total() < sim.world.bots[&rookie].data.xp_total(),
         "even though raw XP says the opposite — which is the whole point"
+    );
+}
+
+/// M16 review: `ops_seen` is a high-water mark against `Vm::ops_executed`,
+/// but a recolor (like a rescue or a hijack) hands the SAME BotData a
+/// FRESH Vm that restarts at 0. Treated as monotonic, the saturating
+/// subtraction then yielded 0 forever and froze the veteran's Processing
+/// track — and with it its cycles-per-tick — for the rest of the match.
+#[test]
+fn a_fresh_vm_does_not_freeze_the_processing_track() {
+    use sim::world::XpTrack;
+    let mut sim = Sim::new(&MapSpec::empty(8, 6));
+    let bot = spawn_green(&mut sim, TilePos::new(2, 2));
+    for _ in 0..40 {
+        sim.step();
+    }
+    let before = sim.world.bots[&bot].data.xp(XpTrack::Processing);
+    assert!(before > 0, "the bot has been thinking");
+    assert!(sim.world.bots[&bot].data.ops_seen > 0, "and its ops have been banked");
+    // A LONG-LIVED veteran: hundreds of thousands of ops behind it. This
+    // is the population the bug actually hurt — the gap has to be wider
+    // than a fresh VM can re-run inside the test window, or the freeze
+    // heals on its own and proves nothing.
+    sim.world.bots.get_mut(&bot).unwrap().data.ops_seen = 400_000;
+    let seen = sim.world.bots[&bot].data.ops_seen;
+
+    // Simulate the VM swap every recolor/rescue/hijack performs: same
+    // BotData (ops_seen intact), brand-new VM counting from zero.
+    sim.apply(&Command::DeployProgram {
+        faction: 0,
+        color: Color::GREEN,
+        source: "y = 2\n".into(),
+    })
+    .unwrap();
+    assert_eq!(
+        sim.world.bots[&bot].data.ops_seen, seen,
+        "the redeploy keeps the bot's banked ops — that is the trap"
+    );
+    for _ in 0..40 {
+        sim.step();
+    }
+    let after = sim.world.bots[&bot].data.xp(XpTrack::Processing);
+    assert!(
+        after > before,
+        "Processing must keep accruing after a VM swap \
+         (was {before}, now {after})"
     );
 }

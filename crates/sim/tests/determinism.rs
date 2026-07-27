@@ -88,7 +88,7 @@ fn combat_outcome_does_not_depend_on_spawn_order() {
         sim.stats.move_rate_deci = 10; // 1 tick/tile: keep the chase tight
         let flee = format!("wait({delay})\nmove_to(closest(depot).expect())\nwait(500)\n");
         let hunt = "attack(closest(enemy).expect())\nwait(500)\n"; // one swing
-        let mut spawn = |sim: &mut Sim, pos: TilePos, faction: u8, src: &str| {
+        let spawn = |sim: &mut Sim, pos: TilePos, faction: u8, src: &str| {
             sim.apply(&Command::SpawnBot {
                 pos,
                 source: src.into(),

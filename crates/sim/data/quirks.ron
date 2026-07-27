@@ -4,7 +4,14 @@
 // Telemetry Enabled, …) land with M8's per-bot cost overlays. Weights
 // are first-pass rarities: common 10, uncommon 6, rare 3.
 QuirkCatalog(
-    manifest_at: [300, 900],
+    // Whole-XP thresholds on the AGE track (Q105 ruling (a) moved
+    // manifestation off total XP, which tier scaling would have made
+    // meaningless). Age drips 1 deci/tick, so these are 500 and 1,500
+    // TICKS survived. The pre-M16 300/900 were written against total XP
+    // across twelve tracks and, read as Age, silently became 3,000 and
+    // 9,000 ticks — long enough that quirks stopped appearing in normal
+    // play (M16 review). First-pass magnitudes, like the rest of docs/09.
+    manifest_at: [50, 150],
     quirks: [
         // --- positive ---
         (name: "overclocked", weight: 3, effects: [CpuCenti(100)]),

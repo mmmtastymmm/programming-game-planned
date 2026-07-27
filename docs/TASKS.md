@@ -1038,6 +1038,13 @@ slots. Milestone-sized; ⚠HASH throughout.
       (4) `SelectKey::TotalXp` and the scrap valve keep tier-weighted totals — ratified as
       intended, the colony eats its least-invested machine. Retune `quirks.ron manifest_at`
       and `wreck_countdown_per_100xp_ticks` against Age's rate (1 deci/tick). [sim] ⚠HASH
+      **The audit missed six more consumers** (M16 review): the energy upkeep, all three L3
+      perk gates (Scouting/Building/Combat), the HUD inspector and `SelectKey::Xp` all read
+      RAW stored XP. Fixed, and the class is now closed structurally — `BotData::xp` returns
+      a `StoredXp` newtype, so feeding stored XP to a level curve is a compile error and the
+      only way to level a track is `StatCtx::track_level`. `TIER_INVESTMENT_WEIGHT` was also
+      far too small (12 tiers = 60,000 vs a maxed rookie's 180,000, so the scrap valve ate
+      Backup-Core reprints); it is now asserted at load to exceed a fully-maxed bot's total.
 - [x] **Processor capability + Processing track (Q100)** — cycles-per-tick becomes the fifth
       capability (tier bought, level earned); a twelfth `XpTrack::Processing` is credited for
       operations executed (⚠ storage migration — `XpTrack::ALL` was sized 11 "so storage never
@@ -1045,6 +1052,15 @@ slots. Milestone-sized; ⚠HASH throughout.
       docs/01's "actions block" is now unconditional. Watch the deliberate feedback loop
       (cycles → ops → XP → cycles), bounded by the L5 cap, the quadratic curve, and tier
       scaling. [sim][pyrite]
+      **M16 review fixes:** `ops_executed` was incremented BEFORE the affordability check
+      (counting the op the VM stalls on, every starved tick); `ops_seen` was treated as a
+      monotonic high-water mark and so froze the track forever after any VM swap (recolor,
+      rescue, hijack) — it now rebases when the counter goes backwards; and the credit is
+      capped per tick and also paid while BLOCKED on a real action, because the raw rule
+      paid idle spinning strictly more than labor. The Processing LEVEL bonus moved to its
+      own constant (`xp.processing_cpu_centi_per_level`): sharing `tier_cpu_centi` made
+      Q105-R1 unsatisfiable by construction, so buying the Processor tier was a net cycle
+      DOWNGRADE (350 → 200 centicycles, measured). `validate_against_xp` now covers it.
 - [ ] **Backup Core (Q100)** — the catalog entry and its effect flag exist; the PRESERVATION
       itself is still unbuilt (nothing yet carries tiers into a reprint or wipes XP).
       **OPEN DETAIL:** how the tiers travel from the destroyed bot to the

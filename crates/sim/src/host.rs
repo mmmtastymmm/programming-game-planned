@@ -180,10 +180,21 @@ impl BotHost<'_> {
         let bot = &self.world.bots[&self.bot].data;
         let faction = bot.faction;
         let known = self.world.known_nodes.get(&faction);
+        // Q105 gave `mine()` a tier precondition; this is the matching
+        // half. "Closest ore" means closest ore THIS BOT CAN WORK — with
+        // no filter here, the shipped starter program
+        // (`move_to(closest(ore)); mine()`) walked the whole fleet to the
+        // nearest Copper seam once the start-zone veins ran dry and then
+        // faulted on every loop, with Q109's fault damage grinding the
+        // bots to wrecks at the vein (M16 review). `scan_resources()` is
+        // deliberately NOT filtered: it is the survey/planning list, and
+        // knowing where the rich seams are is what motivates the upgrade.
+        let mining = bot.tier(crate::world::Capability::Mining);
+        let workable = move |k: Resource| k.tool_tier().is_none_or(|t| t <= mining);
         let node_query = |filter: &dyn Fn(Resource) -> bool| -> Option<EntityId> {
             known?
                 .iter()
-                .filter(|(_, n)| !n.exhausted && filter(n.kind))
+                .filter(|(_, n)| !n.exhausted && filter(n.kind) && workable(n.kind))
                 .map(|(id, n)| (bot.pos.chebyshev(n.pos), *id))
                 .min()
                 .map(|(_, id)| id)

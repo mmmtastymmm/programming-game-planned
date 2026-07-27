@@ -85,7 +85,7 @@ impl Sim {
             // detects non-own movers (enemies), the bonus rides the
             // perceiver's own hearing circle.
             let mut hearing = base_seeing * self.tuning.sense_factor_pct / 100;
-            if self.xp.level(bot.data.xp(crate::world::XpTrack::Combat)) >= 3 {
+            if self.ctx().track_level(&bot.data, crate::world::XpTrack::Combat) >= 3 {
                 hearing += self.tuning.combat_hearing_bonus;
             }
             let seeing = match &bot.data.action {
