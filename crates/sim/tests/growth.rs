@@ -350,42 +350,79 @@ fn tier_up(sim: &mut Sim, bot: sim::BotId, cap: sim::world::Capability, tier: u8
 
 #[test]
 fn a_tier_purchase_does_not_hand_out_the_l3_perks_for_free() {
-    let mut sim = Sim::new(&MapSpec::empty(6, 6));
-    let bot = spawn(&mut sim, TilePos::new(1, 1), "wait(600)\n");
-    // One survey's worth of work at Optics t2: 100 deci scaled x100.
-    tier_up(&mut sim, bot, sim::world::Capability::Optics, 2, 10_000);
-    let data = &sim.world.bots[&bot].data;
-    // The raw number really does level as L4 — that is the trap.
-    assert_eq!(sim.xp.level(data.xp(XpTrack::Scouting).raw_unscaled()), 4);
-    // ...but the bot's actual proficiency has reset to 0.
-    assert_eq!(
-        sim.ctx().track_level(data, XpTrack::Scouting),
-        0,
-        "a tier purchase resets the level by arithmetic (Q105)"
-    );
+    // Asserts on the PERK, not on the helper: the Scouting-L3 immunity is
+    // observable as the corruption compute tax the VM does or does not
+    // pay, and an earlier version of this test only compared
+    // `track_level(..) < 3` against itself (M16 max review).
+    let taxed = |tier: u8| {
+        let mut spec = MapSpec::empty(6, 6);
+        spec.quirk_permille = 0;
+        spec.corruption.push(TilePos::new(1, 1));
+        let mut sim = Sim::new(&spec);
+        let bot = spawn(&mut sim, TilePos::new(1, 1), "x = 1\n");
+        // The SAME stored magnitude either way — a Scouting-L4 scout that
+        // then buys Optics tier 2. Storage never decreases; only the
+        // scale it is read at changes, which is the whole of Q105.
+        tier_up(&mut sim, bot, sim::world::Capability::Optics, tier, 10_000);
+        // Past the boot ritual: phase 2 skips a booting bot entirely, so
+        // the overlay is not set until the VM actually runs.
+        for _ in 0..10 {
+            sim.step();
+        }
+        sim.world.bots[&bot]
+            .vm
+            .as_ref()
+            .map(|vm| vm.cost_overlay_centi())
+            .unwrap_or(0)
+    };
+    // Tier 1 with 10,000 deci really is Scouting L4 — genuinely immune.
+    assert_eq!(taxed(1), 0, "a real L3+ scout runs clean inside Corruption");
+    // The SAME work at tier 2 stores 100x and raw-levels as L4 too, but
+    // the bot's effective level is 0: it must still pay the tax.
     assert!(
-        sim.ctx().track_level(data, XpTrack::Scouting) < 3,
-        "so the Scouting-L3 corruption immunity must NOT be granted"
+        taxed(2) > 0,
+        "a freshly-tiered bot has NOT earned the L3 immunity — the raw \
+         stored number only looks like it has"
     );
 }
 
 #[test]
 fn tier_scaled_storage_does_not_inflate_the_energy_bill() {
-    // Two identical colonies; the second bot buys a Mining tier and does
-    // a little work. Its EFFECTIVE Mining level is 0 either way, so its
-    // upkeep must not move. Pre-fix, the tiered bot billed 4 extra levels.
-    let levels_of = |tier: u8, stored: u64| {
+    // Asserts on the OBSERVABLE — whether the colony browns out — not on
+    // the helper the fix happens to use. The first version of this test
+    // re-implemented the upkeep sum from `StatCtx::track_level` and
+    // compared it against itself, so reverting the actual call site in
+    // `settle_upkeep` left it green (M16 max review).
+    // Track LEVELS are the only thing drawing power here, so the colony
+    // browns out exactly when the sim thinks the bot has levels.
+    let browns_out = |tier: u8| {
         let mut sim = Sim::new(&MapSpec::empty(6, 6));
+        sim.world.dev_free_power = false; // empty maps run on free power
+        sim.upkeep.interval_ticks = 1;
+        sim.upkeep.base_draw = 0;
+        sim.upkeep.draw_per_upgrade = 0;
+        sim.upkeep.draw_per_module = 0;
+        sim.upkeep.draw_per_track_level = 2;
+        let cap = sim.xp.track_cap_deci();
         let bot = spawn(&mut sim, TilePos::new(1, 1), "wait(600)\n");
-        tier_up(&mut sim, bot, sim::world::Capability::Mining, tier, stored);
-        let data = &sim.world.bots[&bot].data;
-        XpTrack::ALL.iter().map(|&t| sim.ctx().track_level(data, t)).sum::<u32>()
+        // The SAME stored magnitude either way — a bot maxed at tier 1
+        // that then buys tier 2. Storage never decreases; only the scale
+        // it is read at changes.
+        tier_up(&mut sim, bot, sim::world::Capability::Mining, tier, cap);
+        for _ in 0..5 {
+            sim.step();
+        }
+        sim.world.brownout.contains(&0)
     };
-    // 200 deci of real Mining work: unscaled at t1, x100 at t2.
-    assert_eq!(
-        levels_of(1, 200),
-        levels_of(2, 20_000),
-        "the same real work bills the same upkeep at any tier"
+    assert!(
+        browns_out(1),
+        "sanity: genuine veteran levels DO cost power — otherwise this \
+         test could not tell the two cases apart"
+    );
+    assert!(
+        !browns_out(2),
+        "a tier purchase must not bill the colony for levels the bot no \
+         longer has"
     );
 }
 
@@ -433,7 +470,80 @@ fn one_bought_tier_outranks_a_fully_maxed_rookie() {
             data.xp.insert(t, sim::world::StoredXp::from_scaled(cap));
         }
     }
-    let a = sim.world.bots[&reprint].data.investment();
-    let b = sim.world.bots[&rookie].data.investment();
+    let ctx = sim.ctx();
+    let a = sim.world.bots[&reprint].data.investment(ctx);
+    let b = sim.world.bots[&rookie].data.investment(ctx);
     assert!(a > b, "one bought tier ({a}) must outweigh a maxed rookie ({b})");
+
+    // ...and the case the first version of this test MISSED: a rookie
+    // whose XP is stored at a high tier's scale. Stored magnitudes are
+    // multiplied by M^(tier-1), so a tier-3 specialist banks 10,000x the
+    // deci — summing storage instead of effective XP let one track dwarf
+    // every tier a Backup Core could carry, and the scrap valve ate the
+    // reprint regardless (M16 max review).
+    let specialist = spawn(&mut sim, TilePos::new(3, 1), "wait(600)\n");
+    {
+        let cap = sim.xp.track_cap_deci();
+        let data = &mut sim.world.bots.get_mut(&specialist).unwrap().data;
+        data.tiers[sim::world::Capability::Mining.idx()] = 3;
+        // Maxed WITHIN tier 3, i.e. cap * 100^2 in STORED deci — which is
+        // still just one maxed track of real proficiency.
+        data.xp.insert(
+            XpTrack::Mining,
+            sim::world::StoredXp::from_scaled(cap.saturating_mul(10_000)),
+        );
+    }
+    // A real Backup-Core reprint: every capability at max tier, zero XP.
+    {
+        let data = &mut sim.world.bots.get_mut(&reprint).unwrap().data;
+        for c in sim::world::Capability::ALL {
+            data.tiers[c.idx()] = 3;
+        }
+        data.xp.clear();
+    }
+    let ctx = sim.ctx();
+    let reprint_v = sim.world.bots[&reprint].data.investment(ctx);
+    let specialist_v = sim.world.bots[&specialist].data.investment(ctx);
+    assert!(
+        reprint_v > specialist_v,
+        "a fully-tiered reprint ({reprint_v}) must outrank a single-track \
+         specialist ({specialist_v}) — summing STORED magnitudes let one \
+         tier-3 track dwarf every tier a Backup Core can carry"
+    );
 }
+
+/// The tier reset is arithmetic, so it lives or dies by `track_scale`.
+/// `tier_xp_scale_pct / 100` in integer arithmetic truncated every dial
+/// below 200 to 1, silently turning the reset into a no-op — a maxed
+/// scout would keep its L5 sensors AND collect the new tier's flat grant.
+#[test]
+fn the_tier_reset_holds_at_every_tier() {
+    let mut sim = Sim::new(&MapSpec::empty(6, 6));
+    let bot = spawn(&mut sim, TilePos::new(1, 1), "wait(600)\n");
+    let cap = sim.xp.track_cap_deci();
+    let scale_pct = sim.stats.tier_xp_scale_pct;
+    assert!(scale_pct > 100, "the dial itself must be a real multiplier");
+
+    // At EVERY tier the catalog sells, a bot maxed within the tier below
+    // must land under the new L1 — that is what "the reset is arithmetic"
+    // means, and it has to hold past the 1 -> 2 step.
+    let top = sim.stats.tier_cap(sim::world::Capability::Mining);
+    assert!(top >= 2, "the catalog must sell at least one Mining tier");
+    for tier in 2..=top {
+        let scale_below = (0..tier - 2).fold(1u64, |a, _| a * scale_pct / 100);
+        let maxed_below = cap.saturating_mul(scale_below);
+        {
+            let data = &mut sim.world.bots.get_mut(&bot).unwrap().data;
+            data.tiers[sim::world::Capability::Mining.idx()] = tier;
+            data.xp.insert(XpTrack::Mining, sim::world::StoredXp::from_scaled(maxed_below));
+        }
+        let data = &sim.world.bots[&bot].data;
+        assert_eq!(
+            sim.ctx().capability_level(data, sim::world::Capability::Mining),
+            0,
+            "buying tier {tier} must drop a bot maxed at tier {} to level 0",
+            tier - 1
+        );
+    }
+}
+

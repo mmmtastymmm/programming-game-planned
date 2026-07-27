@@ -1045,6 +1045,17 @@ slots. Milestone-sized; ⚠HASH throughout.
       only way to level a track is `StatCtx::track_level`. `TIER_INVESTMENT_WEIGHT` was also
       far too small (12 tiers = 60,000 vs a maxed rookie's 180,000, so the scrap valve ate
       Backup-Core reprints); it is now asserted at load to exceed a fully-maxed bot's total.
+      **A second review pass (max) found the fixes themselves defective** and they were
+      redone: `investment()` was adding tier-SCALED storage to an unscaled tier term (a
+      tier-3 specialist banked 150M against a full reprint's 2.4M, so the valve still ate
+      the reprint, and the new load assert compared unscaled magnitudes so it passed);
+      `SelectKey::Xp` had been "fixed" to `tier * (cap+1) + level`, discarding every bit of
+      sub-level progress so printer claims tie-broke by entity id; the build-completion
+      occupancy check passed `BotId(u32::MAX)`, a sentinel that excludes NOBODY, so any bot
+      on the site — the builder included — permanently voided the designation; and the
+      `site_ok` re-check deleted the blueprint with no refund while still reporting `Ok`.
+      `tier_xp_scale_pct / 100` also truncated every dial below 200 to 1, silently deleting
+      the whole arithmetic reset — now percent arithmetic, with the dial asserted > 100.
 - [x] **Processor capability + Processing track (Q100)** — cycles-per-tick becomes the fifth
       capability (tier bought, level earned); a twelfth `XpTrack::Processing` is credited for
       operations executed (⚠ storage migration — `XpTrack::ALL` was sized 11 "so storage never
@@ -1061,6 +1072,15 @@ slots. Milestone-sized; ⚠HASH throughout.
       own constant (`xp.processing_cpu_centi_per_level`): sharing `tier_cpu_centi` made
       Q105-R1 unsatisfiable by construction, so buying the Processor tier was a net cycle
       DOWNGRADE (350 → 200 centicycles, measured). `validate_against_xp` now covers it.
+      **The blocked-tick drip was REVERTED** by the max review: it had to enumerate which
+      actions count as idle and got it wrong at once — `receive()`'s timeout is optional, so
+      a bot parked forever on `receive("nobody")` drew the full cap every tick, a cheaper
+      idle than the `wait()` the exclusion existed to close. Credit is operations only, per
+      Q100, with the per-tick cap asserted ABOVE the per-op rate (they had been set equal at
+      1, which made executing more operations irrelevant and reduced the track to a second
+      Age drip). Node QUERIES are tier-blind again per docs/01's ratified rule; the
+      crash-loop that motivated filtering them is answered by a new `workable` entity
+      attribute plus a `mine()` fault that names the tier as the reason.
 - [ ] **Backup Core (Q100)** — the catalog entry and its effect flag exist; the PRESERVATION
       itself is still unbuilt (nothing yet carries tiers into a reprint or wipes XP).
       **OPEN DETAIL:** how the tiers travel from the destroyed bot to the

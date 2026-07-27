@@ -44,8 +44,15 @@ fn countdown_scales_with_xp_and_expiry_blasts_without_chaining() {
     sim.tuning.fault_damage = 0;
     let rookie = spawn(&mut sim, TilePos::new(2, 2), "wait(600)\n", 0, 100);
     let veteran = spawn(&mut sim, TilePos::new(3, 2), "wait(600)\n", 0, 100);
-    // 1000 XP = 10000 deci → +100 ticks of countdown.
-    sim.world.bots.get_mut(&veteran).unwrap().data.xp.insert(XpTrack::Mining, sim::world::StoredXp::from_scaled(10_000));
+    // Seniority is the AGE track now (Q105 ruling (d)), not total XP — the
+    // test used to inject MINING XP, which after that move contributed
+    // nothing, and passed only because the two wrecks are minted one tick
+    // apart so the rookie's had already ticked down by 1 (M16 max review).
+    let age_deci = 10_000;
+    sim.world.bots.get_mut(&veteran).unwrap().data.xp.insert(
+        XpTrack::Age,
+        sim::world::StoredXp::from_scaled(age_deci),
+    );
     let bystander = spawn(&mut sim, TilePos::new(2, 3), "wait(600)\n", 0, 100);
     wreck(&mut sim, rookie);
     wreck(&mut sim, veteran);
@@ -53,9 +60,20 @@ fn countdown_scales_with_xp_and_expiry_blasts_without_chaining() {
         sim.world.wrecks[&rookie].countdown,
         sim.world.wrecks[&veteran].countdown,
     );
+    // Assert the ARITHMETIC, not merely an inequality a clock offset can
+    // satisfy: base + (age_deci / 1000) * per_100xp, less the one tick the
+    // veteran's wreck has not yet spent.
+    let expected =
+        sim.tuning.wreck_countdown_base_ticks
+            + (age_deci / 1000) as u32 * sim.tuning.wreck_countdown_per_100xp_ticks;
+    assert_eq!(
+        v_cd, expected,
+        "the veteran's countdown is base + the Age seniority bonus"
+    );
     assert!(
-        v_cd > r_cd,
-        "veterans linger — the richest prizes give the most time ({r_cd} vs {v_cd})"
+        v_cd > r_cd + 1,
+        "and it beats the rookie by more than the one-tick minting offset \
+         ({r_cd} vs {v_cd})"
     );
     // Run the rookie's countdown out: the blast hits the adjacent
     // bystander AND the adjacent veteran wreck — which is DESTROYED, not
@@ -561,6 +579,13 @@ fn heavy_jobs_need_the_build_tier() {
     use sim::world::Capability;
     let mut sim = Sim::new(&MapSpec::empty(8, 5));
     let victim = spawn(&mut sim, TilePos::new(4, 2), "wait(500)\n", 1, 40);
+    // A long-lived victim: its wreck must outlive the whole run, or the
+    // final assertion is satisfied by the countdown EXPIRING rather than
+    // by any rescue landing (M16 max review — it was, for 440 ticks).
+    sim.world.bots.get_mut(&victim).unwrap().data.xp.insert(
+        XpTrack::Age,
+        sim::world::StoredXp::from_scaled(15_000),
+    );
     wreck(&mut sim, victim);
 
     // A rookie: base Building tier, so field repair is refused.
@@ -584,7 +609,11 @@ fn heavy_jobs_need_the_build_tier() {
     for _ in 0..400 {
         sim.step();
     }
-    assert!(!sim.world.wrecks.contains_key(&victim), "at the heavy tier the rescue lands");
+    assert!(
+        sim.world.bots.contains_key(&victim),
+        "at the heavy tier the rescue lands — the wreck BOOTS, which an \
+         expiry can never fake"
+    );
 }
 
 /// Q105-R2's gate has to hold at RESOLUTION, not just at request time.
@@ -641,3 +670,69 @@ fn a_mend_that_becomes_a_rescue_still_needs_the_build_tier() {
     );
 }
 
+
+/// Q105-R2 gates hijack the same way it gates field repair — "otherwise a
+/// stock rookie could walk up and steal a maxed veteran's wreck" — but
+/// only the repair half had a test, so deleting this one left CI green.
+#[test]
+fn hijacking_needs_the_build_tier() {
+    use sim::world::Capability;
+    let mut sim = Sim::new(&MapSpec::empty(8, 5));
+    let victim = spawn(&mut sim, TilePos::new(4, 2), "wait(500)\n", 1, 40);
+    sim.world.bots.get_mut(&victim).unwrap().data.xp.insert(
+        XpTrack::Age,
+        sim::world::StoredXp::from_scaled(15_000),
+    );
+    wreck(&mut sim, victim);
+
+    let rookie = spawn(
+        &mut sim,
+        TilePos::new(3, 2),
+        "hijack(closest(wreck).expect())\nwait(500)\n",
+        0,
+        100,
+    );
+    sim.world.bots.get_mut(&rookie).unwrap().data.tiers[Capability::Building.idx()] = 1;
+    for _ in 0..60 {
+        sim.step();
+    }
+    assert!(
+        sim.world.wrecks.contains_key(&victim),
+        "a base-tier bot cannot hijack — the wreck is still there"
+    );
+    assert!(
+        sim.world.bots[&rookie].vm.as_ref().is_some_and(|vm| vm.fault_count() > 0),
+        "and it faults rather than silently doing nothing"
+    );
+
+    // Equip it and the same program takes the wreck.
+    let tier = sim.tuning.heavy_build_tier;
+    sim.world.bots.get_mut(&rookie).unwrap().data.tiers[Capability::Building.idx()] = tier;
+    let faults_before = sim.world.bots[&rookie].vm.as_ref().unwrap().fault_count();
+    for _ in 0..60 {
+        sim.step();
+        if matches!(
+            sim.world.bots[&rookie].data.action,
+            Some(sim::world::Action::Race { kind: sim::world::RaceKind::Hijack, .. })
+        ) {
+            break;
+        }
+    }
+    // The gate is the subject here: at the heavy tier the request is
+    // ACCEPTED and the hijack starts running. (Whether it then completes
+    // depends on colony capacity, which the wreck-race tests cover
+    // separately — asserting on completion here would make this test
+    // fail for reasons that have nothing to do with the tier.)
+    assert!(
+        matches!(
+            sim.world.bots[&rookie].data.action,
+            Some(sim::world::Action::Race { kind: sim::world::RaceKind::Hijack, .. })
+        ),
+        "at the heavy tier the hijack is accepted and begins"
+    );
+    assert_eq!(
+        sim.world.bots[&rookie].vm.as_ref().unwrap().fault_count(),
+        faults_before,
+        "and it stops faulting the moment it is qualified"
+    );
+}

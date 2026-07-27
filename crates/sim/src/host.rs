@@ -180,21 +180,19 @@ impl BotHost<'_> {
         let bot = &self.world.bots[&self.bot].data;
         let faction = bot.faction;
         let known = self.world.known_nodes.get(&faction);
-        // Q105 gave `mine()` a tier precondition; this is the matching
-        // half. "Closest ore" means closest ore THIS BOT CAN WORK — with
-        // no filter here, the shipped starter program
-        // (`move_to(closest(ore)); mine()`) walked the whole fleet to the
-        // nearest Copper seam once the start-zone veins ran dry and then
-        // faulted on every loop, with Q109's fault damage grinding the
-        // bots to wrecks at the vein (M16 review). `scan_resources()` is
-        // deliberately NOT filtered: it is the survey/planning list, and
-        // knowing where the rich seams are is what motivates the upgrade.
-        let mining = bot.tier(crate::world::Capability::Mining);
-        let workable = move |k: Resource| k.tool_tier().is_none_or(|t| t <= mining);
+        // NOT tier-filtered, by ruling: docs/01 says "Queries return nodes
+        // regardless of tool tier — sensing isn't harvesting; an
+        // under-tiered `mine()` faults as usual." A previous pass filtered
+        // here to stop the starter program crash-looping on an unworkable
+        // seam, which contradicted that rule outright and left `closest`
+        // and `scan_resources()` disagreeing about whether a node exists
+        // (M16 max review). The crash-loop is answered where it belongs —
+        // in `mine()`, which now walks past nodes it cannot work instead
+        // of faulting when a workable one is in reach.
         let node_query = |filter: &dyn Fn(Resource) -> bool| -> Option<EntityId> {
             known?
                 .iter()
-                .filter(|(_, n)| !n.exhausted && filter(n.kind) && workable(n.kind))
+                .filter(|(_, n)| !n.exhausted && filter(n.kind))
                 .map(|(id, n)| (bot.pos.chebyshev(n.pos), *id))
                 .min()
                 .map(|(_, id)| id)
@@ -403,6 +401,26 @@ impl pyrite::Host for BotHost<'_> {
                     )),
                 }
             }
+            // Q105's tier ladder, readable from a program. docs/01 keeps
+            // node QUERIES tier-blind on purpose — "sensing isn't
+            // harvesting" — which leaves `closest(ore)` free to hand back
+            // a seam this bot's Mining tier cannot work. Without a way to
+            // ask, the only way to find out was to walk there and eat the
+            // fault, and with Q109's fault damage that grinds a fleet to
+            // wrecks at a vein it can see but not touch (M16 reviews).
+            // So: sensing tells you what is there AND whether you can
+            // work it; harvesting is still the thing that can fail.
+            "workable" => match self.world.nodes.get(&e) {
+                Some(node) => {
+                    let mining =
+                        self.world.bots[&self.bot].data.tier(crate::world::Capability::Mining);
+                    Ok(Value::Bool(node.kind.tool_tier().is_none_or(|t| t <= mining)))
+                }
+                None => Err((
+                    UNKNOWN_CONTACT,
+                    "workable: not a resource node".to_string(),
+                )),
+            },
             _ => Err((faults::NAME, format!("unknown attribute {name}"))),
         }
     }

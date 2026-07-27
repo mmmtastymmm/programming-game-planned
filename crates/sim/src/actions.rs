@@ -180,6 +180,16 @@ impl Sim {
                     .filter(|(_, n)| n.amount > 0 && pos.chebyshev(n.pos) <= 1 && reachable(n))
                     .map(|(nid, _)| *nid)
                     .next();
+                // Distinguish "nothing here" from "nothing here I can
+                // work": docs/01 keeps queries tier-blind, so a bot WILL
+                // be walked onto seams above its tier, and a fault that
+                // names the reason is the difference between a player
+                // debugging their program and a fleet grinding itself to
+                // wrecks on Q109 fault damage (M16 max review).
+                let blocked_by_tier = node.is_none()
+                    && self.world.nodes.values().any(|n| {
+                        n.amount > 0 && pos.chebyshev(n.pos) <= 1 && !reachable(n)
+                    });
                 match node {
                     Some(node) => {
                         // Mining L3 swings −25% (the pipeline).
@@ -190,9 +200,15 @@ impl Sim {
                         let bot = self.world.bot_mut(id);
                         bot.data.action = Some(Action::Mine { node, ticks_left });
                     }
+                    None if blocked_by_tier => self.finish_action(
+                        id,
+                        Err("mine: this seam needs a higher Mining tier \
+                             (ask node.workable before walking)"
+                            .into()),
+                    ),
                     None => self.finish_action(
                         id,
-                        Err("mine: no workable ore in range (check the Mining tier)".into()),
+                        Err("mine: no ore in range".into()),
                     ),
                 }
             }
@@ -794,6 +810,41 @@ impl Sim {
                 // Building income: 1 XP per 10 progress units = deci/10.
                 self.world.pending_xp.push((id, XpTrack::Building, (rate / 10).max(1) as u64));
                 if done {
+                    // A structure needs SOLID GROUND OF ITS OWN, and a
+                    // pending designation is not solid — nothing stops a
+                    // bot walking over it or parking on it between
+                    // designation and completion. That is a TEMPORARY
+                    // obstruction, so the build HOLDS at the threshold and
+                    // retries (the hijack path does the same); destroying
+                    // the designation would throw away the player's
+                    // materials and the crew's labor over a bot that is
+                    // about to step off.
+                    //
+                    // The builder itself counts as a blocker — raising a
+                    // solid structure on its own tile would entomb it —
+                    // but it gets a message it can act on, exactly as a
+                    // rescuer standing on its wreck does, because
+                    // `build()` only requires chebyshev <= 1 and a bot
+                    // that parked on the site would otherwise hold
+                    // forever with no idea why (M16 max review).
+                    if matches!(kind, BlueprintKind::Structure(_)) {
+                        if pos == site {
+                            self.finish_action(
+                                id,
+                                Err("build: move off the site to raise it".into()),
+                            );
+                            return;
+                        }
+                        if self.world.structure_at(site)
+                            || self.world.tile_occupied(site, id)
+                        {
+                            self.finish_action(
+                                id,
+                                Err("build: the site is blocked — holding".into()),
+                            );
+                            return;
+                        }
+                    }
                     let removed = self.world.blueprints.remove(&blueprint);
                     // The ground may have changed under a slow build
                     // (corruption spread, another crew's works): EVERY
@@ -802,6 +853,17 @@ impl Sim {
                     // must not erase creep 4× faster than the 40-tick
                     // Cleanse (review 2026-07-16). The labor still ends
                     // Ok: the crew finished the job it was given.
+                    //
+                    // Materials, though, must not evaporate: a structure's
+                    // typed cost was charged AT DESIGNATION, so a site
+                    // that has become unbuildable refunds rather than
+                    // silently destroying it (M16 max review — a Vent
+                    // overrun by creep mid-build ate the whole Tap).
+                    if !kind.site_ok(self.world.grid.get(site))
+                        && let Some(bp) = &removed
+                    {
+                        self.refund_blueprint(bp);
+                    }
                     if kind.site_ok(self.world.grid.get(site)) {
                         match kind {
                             BlueprintKind::Bridge => {
@@ -861,30 +923,8 @@ impl Sim {
                             // completing the labor is what actually raises
                             // the building. Nothing appears on a click.
                             BlueprintKind::Structure(skind) => {
-                                // The tile-KIND test above is not enough
-                                // for a structure. Printers appear the
-                                // instant they are commanded and bots
-                                // walk, so a site that was clear at
-                                // designation can be taken by the time
-                                // the crew finishes — and raising the
-                                // building anyway put two solid entities
-                                // on one tile, after which every lookup
-                                // that resolves by position picked
-                                // whichever the BTreeMap yielded (M16
-                                // review). Give the materials back
-                                // instead: they were charged up front.
-                                if self.world.structure_at(site)
-                                    || self.world.tile_occupied(site, BotId(u32::MAX))
-                                {
-                                    if let Some(bp) = &removed {
-                                        self.refund_blueprint(bp);
-                                    }
-                                    self.finish_action(
-                                        id,
-                                        Err("build: the site is occupied".into()),
-                                    );
-                                    return;
-                                }
+                                // Occupancy was re-checked above, before
+                                // the blueprint was consumed.
                                 let sid = self.world.alloc_entity();
                                 let faction = bp_faction;
                                 self.world.structures.insert(

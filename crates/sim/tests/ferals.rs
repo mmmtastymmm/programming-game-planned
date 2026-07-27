@@ -502,3 +502,49 @@ fn dormant_nests_swallow_no_deposits() {
         "the manifest stays aboard"
     );
 }
+
+/// Q105-R2 gates nest claim/raze on a QUALIFIED converter standing beside
+/// the nest. Only the positive path had coverage, so deleting the
+/// `has_converter_at` term — or the tier inside it — left the suite green.
+#[test]
+fn claiming_a_nest_needs_a_qualified_converter_adjacent() {
+    use sim::world::Capability;
+    let mut spec = nest_spec(vec![(TilePos::new(10, 6), 0)]);
+    spec.fleet_cap_override = Some(0); // command plumbing only
+    let mut sim = Sim::new(&spec);
+    sim.tuning.nest_print_ticks = 1000;
+    let nid = first_nest(&sim);
+    sim.world.nests.get_mut(&nid).unwrap().hp = 0;
+    sim.world.nests.get_mut(&nid).unwrap().state = NestState::Defeated;
+
+    // Nobody beside it: refused.
+    sim.apply(&Command::ClaimNest { nest: nid, faction: 0 }).unwrap();
+    assert_eq!(
+        sim.world.nests[&nid].state,
+        NestState::Defeated,
+        "a defeated nest does not convert itself — someone has to do the work"
+    );
+
+    // A bot IS adjacent, but at base Building tier: still refused.
+    park_converter(&mut sim, 0, nid);
+    let rookie = *sim
+        .world
+        .bots
+        .iter()
+        .find(|(_, b)| b.data.faction == 0)
+        .map(|(id, _)| id)
+        .expect("the parked converter");
+    sim.world.bots.get_mut(&rookie).unwrap().data.tiers[Capability::Building.idx()] = 1;
+    sim.apply(&Command::ClaimNest { nest: nid, faction: 0 }).unwrap();
+    assert_eq!(
+        sim.world.nests[&nid].state,
+        NestState::Defeated,
+        "conversion is heavy work — base tier cannot do it"
+    );
+
+    // Equip that same bot and the same command lands.
+    let tier = sim.tuning.heavy_build_tier;
+    sim.world.bots.get_mut(&rookie).unwrap().data.tiers[Capability::Building.idx()] = tier;
+    sim.apply(&Command::ClaimNest { nest: nid, faction: 0 }).unwrap();
+    assert_eq!(sim.world.nests[&nid].state, NestState::Claimed(0));
+}

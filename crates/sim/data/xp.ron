@@ -35,10 +35,12 @@ XpConfig(
     scouting_survey_xp: 10,
     // Q100: the Processing track behind cycles-per-tick. 1 deci per
     // operation = 1 whole XP per 10 ops, matching Age's shape. The
-    // per-tick cap is what a working bot also earns while BLOCKED on an
-    // action, so labor and idle spinning climb at the same rate.
+    // per-tick cap only clips absurd bursts — it MUST stay above the
+    // per-op rate or executing more operations stops mattering and the
+    // whole mechanic collapses into a second Age drip (M16 max review
+    // found it set equal, at 1). Asserted at load.
     processing_per_op_deci: 1,
-    processing_max_per_tick_deci: 1,
+    processing_max_per_tick_deci: 10,
     // Q105-R1: 5 levels x 20 = 100 centicycles, exactly the tier grant
     // (stats.ron tier_cpu_centi) that resets it. Asserted at load.
     processing_cpu_centi_per_level: 20,

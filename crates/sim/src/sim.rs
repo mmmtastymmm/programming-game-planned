@@ -843,7 +843,8 @@ pub enum Command {
     /// (docs/03: payments are abstract). Q105: nothing appears on a click
     /// — a bot must walk to the site and `build()` it.
     PlaceStructure { pos: TilePos, kind: crate::world::StructureKind, faction: u8 },
-    /// Call off a pending designation and refund what it charged. Without
+    /// Call off a pending designation and refund what it charged, so long
+    /// as no labor has gone into it yet (`progress == 0`). Without
     /// this a structure designation was an unrecoverable loss: the
     /// materials were taken up front, no command could remove the
     /// blueprint, and the tile it sat on refused every other designation
@@ -1417,11 +1418,19 @@ impl Sim {
                 // Only the owner's own designation, and only one: the
                 // placement rules already refuse a second blueprint on a
                 // tile, so there is at most one to find.
+                // Only an UNSTARTED designation. Once a crew has put
+                // labor in, cancelling would delete the blueprint out from
+                // under the builder — and `build()`'s missing-blueprint
+                // arm reads that as "someone else finished it", so the bot
+                // would get `Ok` for a structure that was never raised and
+                // fault later in some unrelated verb (M16 max review).
+                // Refusing a started job also closes the grief where a
+                // player cancels to burn an ally's labor.
                 let found = self
                     .world
                     .blueprints
                     .iter()
-                    .find(|(_, b)| b.pos == *pos && b.faction == *faction)
+                    .find(|(_, b)| b.pos == *pos && b.faction == *faction && b.progress == 0)
                     .map(|(id, b)| (*id, b.clone()));
                 if let Some((id, bp)) = found {
                     self.world.blueprints.remove(&id);
@@ -1971,34 +1980,29 @@ impl Sim {
                 bot.data.ops_seen = 0;
             }
             let ops_delta = ops.saturating_sub(bot.data.ops_seen);
-            // Q100 credits ops, but a bot is BLOCKED — stepping zero ops —
-            // for every tick of a real action, while a bot spinning `x = 1`
-            // in a bare loop never blocks. Uncapped and unfloored that paid
-            // idling strictly more than labor: a miner blocked ~95% of its
-            // ticks never approached the cap while a spinner bought +2.5
-            // cycles/tick with pure busywork. Capping the credit and paying
-            // the same drip to a bot that is blocked ON ITS OWN ACTION puts
-            // the two on equal footing — docs/02's rule that a track cannot
-            // be staged by the bot itself, applied to Processing.
             if ops_delta > 0 {
                 bot.data.ops_seen = ops;
             }
-            // `wait()` and `guard()` are the bot choosing to do nothing —
-            // paying them here would just move the idling exploit from a
-            // bare `x = 1` loop into a cheaper one.
-            let working = !matches!(
-                bot.data.action,
-                None | Some(crate::world::Action::Wait { .. })
-                    | Some(crate::world::Action::Guard { .. })
-            );
-            let deci = if working {
-                // Blocked on real work: the processor is engaged even
-                // though the VM stepped nothing this tick.
-                self.xp.processing_max_per_tick_deci
-            } else {
-                (ops_delta * self.xp.processing_per_op_deci)
-                    .min(self.xp.processing_max_per_tick_deci)
-            };
+            // OPERATIONS EXECUTED, full stop — Q100's wording, and the
+            // only rule that survives contact with the action set. An
+            // earlier pass also paid a flat per-tick drip to any bot
+            // "blocked on real work", to stop labour starving next to
+            // idle spinners; that drip had to enumerate which actions
+            // count as idle, and the enumeration was wrong the moment it
+            // shipped: `receive()` takes an OPTIONAL timeout, so a bot
+            // parked forever on `receive("nobody")` was paid the full cap
+            // every tick for one op of work — a strictly cheaper idle
+            // than the `wait()` it was written to exclude (M16 max
+            // review). Spinning is now bounded the way the doc always
+            // intended: by the track cap, the quadratic curve, and the
+            // opportunity cost of a bot that does nothing else for
+            // 15,000 ticks.
+            //
+            // The per-tick cap must stay ABOVE `processing_per_op_deci`
+            // or it swallows the mechanic whole — a 5-cycle thinker and a
+            // 1-cycle one would earn identically. Asserted at load.
+            let deci = (ops_delta * self.xp.processing_per_op_deci)
+                .min(self.xp.processing_max_per_tick_deci);
             if deci > 0 {
                 self.world.pending_xp.push((id, XpTrack::Processing, deci));
             }
@@ -2728,6 +2732,28 @@ impl Sim {
             .insert(id, Blueprint { pos, kind, progress: 0, needed, faction });
     }
 
+
+    /// Test hook: spill cargo onto the ground exactly as a wreck does, so
+    /// tests can exercise the recovery path without staging a death.
+    pub fn drop_cargo_for_test(
+        &mut self,
+        pos: TilePos,
+        kind: crate::resources::Resource,
+        deci: u64,
+    ) {
+        let mut manifest = std::collections::BTreeMap::new();
+        manifest.insert(kind, deci as u32);
+        self.drop_cargo_to_ground(pos, manifest);
+    }
+
+    /// Test hook: rewrite a tile the way the sim's own terrain mutations
+    /// do. Goes through `World::set_tile` so the scree wear and the
+    /// terrain-hash dirty flag stay consistent — poking `world.grid.set`
+    /// directly would leave the cached terrain hash stale, which in a
+    /// lockstep sim is a desync waiting to happen.
+    pub fn set_tile_for_test(&mut self, pos: TilePos, kind: crate::map::TileKind) {
+        self.world.set_tile(pos, kind);
+    }
 
     /// Test hook: issue an action request exactly as the Pyrite host does,
     /// for targets no query builtin can name (a specific living ally, say).
