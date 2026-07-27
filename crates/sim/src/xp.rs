@@ -74,19 +74,6 @@ pub struct XpConfig {
     /// Q100's Processing track: deci-XP per operation executed — the one
     /// compute stat that is earned as well as bought.
     pub processing_per_op_deci: u64,
-    /// Ceiling on Processing deci-XP credited in a single tick. Q100
-    /// credits ops, but a bot is BLOCKED (and so steps zero ops) for every
-    /// tick of a real action, while a bot spinning `x = 1` in a bare loop
-    /// is never blocked — uncapped, that paid idling strictly more than
-    /// labor. The cap plus the blocked-tick drip in phase 6 puts a working
-    /// bot and a spinning bot on the same footing.
-    pub processing_max_per_tick_deci: u64,
-    /// Centicycles the Processing LEVEL adds per level (Q100). Separate
-    /// from `stats.tier_cpu_centi` (the bought-tier grant) so the two
-    /// sides of Q105-R1 can be tuned against each other; when they shared
-    /// one constant the invariant was unsatisfiable by construction and
-    /// buying the Processor tier was a net cycle DOWNGRADE.
-    pub processing_cpu_centi_per_level: u64,
 }
 
 impl Default for XpConfig {

@@ -97,7 +97,7 @@ impl Sim {
     /// finish/fault it immediately). Entered only when `requested.is_some()`;
     /// the started action first advances on the NEXT tick, so this never falls
     /// through to [`Self::advance_action`].
-    pub(crate) fn start_requested_action(&mut self, id: BotId) {
+    fn start_requested_action(&mut self, id: BotId) {
         let Some(bot) = self.world.bots.get_mut(&id) else { return };
         let Some(request) = bot.data.requested.take() else { return };
         let pos = bot.data.pos;
@@ -794,7 +794,7 @@ impl Sim {
                 // Building income: 1 XP per 10 progress units = deci/10.
                 self.world.pending_xp.push((id, XpTrack::Building, (rate / 10).max(1) as u64));
                 if done {
-                    let removed = self.world.blueprints.remove(&blueprint);
+                    self.world.blueprints.remove(&blueprint);
                     // The ground may have changed under a slow build
                     // (corruption spread, another crew's works): EVERY
                     // kind re-checks its site rule at completion, and
@@ -861,30 +861,6 @@ impl Sim {
                             // completing the labor is what actually raises
                             // the building. Nothing appears on a click.
                             BlueprintKind::Structure(skind) => {
-                                // The tile-KIND test above is not enough
-                                // for a structure. Printers appear the
-                                // instant they are commanded and bots
-                                // walk, so a site that was clear at
-                                // designation can be taken by the time
-                                // the crew finishes — and raising the
-                                // building anyway put two solid entities
-                                // on one tile, after which every lookup
-                                // that resolves by position picked
-                                // whichever the BTreeMap yielded (M16
-                                // review). Give the materials back
-                                // instead: they were charged up front.
-                                if self.world.structure_at(site)
-                                    || self.world.tile_occupied(site, BotId(u32::MAX))
-                                {
-                                    if let Some(bp) = &removed {
-                                        self.refund_blueprint(bp);
-                                    }
-                                    self.finish_action(
-                                        id,
-                                        Err("build: the site is occupied".into()),
-                                    );
-                                    return;
-                                }
                                 let sid = self.world.alloc_entity();
                                 let faction = bp_faction;
                                 self.world.structures.insert(
@@ -932,7 +908,6 @@ impl Sim {
             }
             Action::Repair { target, done_deci } => {
                 let pos = bot.data.pos;
-                let build_tier = bot.data.tier(crate::world::Capability::Building);
                 // Rate through the pipeline; Building L3 repairs +25%.
                 let ctx = crate::stats::StatCtx {
                     stats: &self.stats,
@@ -941,7 +916,7 @@ impl Sim {
                     tuning: &self.tuning,
                 };
                 let mut rate = ctx.build_rate_for(&bot.data);
-                if ctx.track_level(&bot.data, XpTrack::Building) >= 3 {
+                if self.xp.level(bot.data.xp(XpTrack::Building)) >= 3 {
                     rate += rate * self.xp.building_l3_repair_pct / 100;
                 }
                 let Some(tpos) = self.world.entity_pos(target) else {
@@ -960,21 +935,6 @@ impl Sim {
                 let was_deci = done_deci;
                 let done_deci = done_deci + rate;
                 if let Some(wreck) = self.world.wreck_of(target) {
-                    // Q105-R2's gate has to be re-checked HERE, not just
-                    // where the action is requested: `repair(ally)` on a
-                    // living bot passes the request-time test, and if that
-                    // ally dies mid-job the same parked action falls into
-                    // this lane under the same EntityId. A rookie could
-                    // therefore complete the heavy rescue for free — and
-                    // farm it deliberately by parking a repair on anything
-                    // about to die (M16 review).
-                    if build_tier < self.tuning.heavy_build_tier {
-                        self.finish_action(
-                            id,
-                            Err("repair: field repair needs a heavier build tier".into()),
-                        );
-                        return;
-                    }
                     // A rescuer standing ON the wreck tile blocks its own
                     // boot forever — fail loudly instead of holding (and
                     // minting XP) for eternity (review 2026-07-16).

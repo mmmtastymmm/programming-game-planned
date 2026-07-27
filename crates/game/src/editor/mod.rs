@@ -836,11 +836,7 @@ pub(crate) fn editor_ui(root: &mut egui::Ui, game: &mut GameSim, editor: &mut Ed
                 let cost = match item.kind {
                     ToolKind::Building(kind) => kind.cost_stone(&game.0.tuning),
                     ToolKind::Overlay(Some(_)) => game.0.tuning.overlay_cost_stone,
-                    ToolKind::Overlay(None)
-                    | ToolKind::Paint(_)
-                    | ToolKind::Kill
-                    // Cancelling REFUNDS; it never charges.
-                    | ToolKind::Cancel => 0,
+                    ToolKind::Overlay(None) | ToolKind::Paint(_) | ToolKind::Kill => 0,
                 };
                 let affordable = game.0.world.stock_get(0, sim::resources::Resource::Stone) >= cost;
                 if !editor.icons.contains_key(item.name) {
@@ -900,11 +896,6 @@ pub(crate) fn editor_ui(root: &mut egui::Ui, game: &mut GameSim, editor: &mut Ed
                         }
                         ToolKind::Kill => {
                             ui.label("Click a bot to shut it down — Esc/RMB cancels");
-                        }
-                        ToolKind::Cancel => {
-                            ui.label(
-                                "Click a pending designation to call it off and                                  refund it — Esc/RMB cancels",
-                            );
                         }
                     }
                 } else {

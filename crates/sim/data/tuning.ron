@@ -85,16 +85,9 @@ Tuning(
     // --- the wreck race (M10, docs/02 Q83/Q84 first-pass figures) ---
     // Wreck hull, percent of the bot's max HP (docs: ~25%).
     wreck_hp_pct: 25,
-    // Self-destruct: base ~20s + a seniority bonus per 100 whole XP on
-    // the AGE track (10Hz ticks). Q105 ruling (d) moved this off total XP
-    // — tier-scaled totals would have put a mid-tier bot's countdown in
-    // the hours, so its wreck would never expire and the rescue-vs-
-    // salvage race would lose its clock. Age drips 1 deci/tick, so the
-    // bonus is now 1s per 1,000 ticks survived: at the old 10 the rescue
-    // window barely moved for anyone (M16 review), hence 25 — a
-    // 5,000-tick veteran earns +12.5s over a fresh print's 20s.
+    // Self-destruct: base ~20s + 1s per 100 total XP (10Hz ticks).
     wreck_countdown_base_ticks: 200,
-    wreck_countdown_per_100xp_ticks: 25,
+    wreck_countdown_per_100xp_ticks: 10,
     // Expiry blast: radius in tiles; damage scales with the wreck's max
     // HP (this percent of it). Friend and foe; never chains.
     blast_radius: 1,

@@ -797,19 +797,12 @@ impl Vm {
                         // the wrap (Q80) — only fault/handler restarts
                         // clear them.
                         let cost = self.charged(costs.statement as i64 * CENT);
+                        self.ops_executed += 1;
                         if self.budget < cost {
                             self.stall_centi = Some(cost);
                             return Outcome::Paused;
                         }
                         self.budget -= cost;
-                        // Counted only once the op is PAID FOR and about
-                        // to run. Bumping before the affordability check
-                        // credited the op the VM stalls on — every tick,
-                        // and again when it retried — so Q100's Processing
-                        // track ran ~50% hot, and a bot permanently stuck
-                        // on an op it could never afford earned XP forever
-                        // for executing nothing (M16 review).
-                        self.ops_executed += 1;
                         if let Some(program) = self.pending_program.take() {
                             self.program = program; // redeploy lands here
                             // A redeploy replaces the code out from under
@@ -826,13 +819,12 @@ impl Vm {
             };
 
             let cost = self.charged(self.cost_of(top, costs, &*host) as i64 * CENT);
+            self.ops_executed += 1;
             if self.budget < cost {
                 self.stall_centi = Some(cost);
                 return Outcome::Paused;
             }
             self.budget -= cost;
-            // Paid for, therefore executed — see the wrap arm above.
-            self.ops_executed += 1;
 
             let work = self.work.pop().expect("checked non-empty above");
             self.execute(work, host, costs);

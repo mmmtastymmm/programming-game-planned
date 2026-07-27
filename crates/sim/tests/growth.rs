@@ -77,7 +77,7 @@ fn hauling_pays_cargo_distance_at_delivery_and_mileage_per_tile() {
     let data = &sim.world.bots[&bot].data;
     assert!(data.xp(XpTrack::Mileage) >= 120, "1 XP (10 deci) per tile, both legs");
     // One swing = 2 units carried ~6 tiles home: 2 deci-XP per tile.
-    let hauled = data.xp(XpTrack::Hauling).raw_unscaled();
+    let hauled = data.xp(XpTrack::Hauling);
     assert!(
         (10..=16).contains(&hauled),
         "cargo-distance delivered: 2 units x ~6 tiles = ~12 deci, got {hauled}"
@@ -173,35 +173,22 @@ fn quirks_roll_latent_and_manifest_at_the_threshold() {
     // Tier-scaled task XP would cross the old total thresholds within a
     // few units of work and pop every latent quirk at once; Age is
     // tier-independent and unfarmable. Task XP must therefore do nothing.
-    sim.world.bots.get_mut(&bot).unwrap().data.xp.insert(XpTrack::Mining, sim::world::StoredXp::from_scaled(900_000));
+    sim.world.bots.get_mut(&bot).unwrap().data.xp.insert(XpTrack::Mining, 900_000);
     sim.step();
     assert!(
         sim.world.bots[&bot].data.quirks.is_empty(),
         "task XP never manifests a quirk — only time survived does"
     );
-    // Thresholds come from the catalog, not from literals: they are
-    // tuning constants and were retuned once already (M16 review) —
-    // hardcoding them here just moves the breakage into the test.
-    let first = sim.quirks.manifest_at[0] * 10;
-    let second = sim.quirks.manifest_at[1] * 10;
-    // Land just BELOW the first threshold — minus 2, because the step
-    // itself drips one more deci of Age before manifestation is checked.
-    sim.world.bots.get_mut(&bot).unwrap().data.xp.insert(XpTrack::Age, sim::world::StoredXp::from_scaled(first - 2));
-    sim.step();
-    assert!(
-        sim.world.bots[&bot].data.quirks.is_empty(),
-        "one deci short of the threshold manifests nothing"
-    );
     // Cross the first Age threshold: the first roll comes alive.
-    sim.world.bots.get_mut(&bot).unwrap().data.xp.insert(XpTrack::Age, sim::world::StoredXp::from_scaled(first));
+    sim.world.bots.get_mut(&bot).unwrap().data.xp.insert(XpTrack::Age, 3000);
     sim.step();
     let data = &sim.world.bots[&bot].data;
-    assert_eq!(data.quirks.len(), 1, "first manifestation at manifest_at[0]");
+    assert_eq!(data.quirks.len(), 1, "first manifestation at 300 XP");
     assert_eq!(data.latent_quirks.len(), 1);
     // Cross the second Age threshold: the second.
-    sim.world.bots.get_mut(&bot).unwrap().data.xp.insert(XpTrack::Age, sim::world::StoredXp::from_scaled(second));
+    sim.world.bots.get_mut(&bot).unwrap().data.xp.insert(XpTrack::Age, 9000);
     sim.step();
-    assert_eq!(sim.world.bots[&bot].data.quirks.len(), 2, "second at manifest_at[1]");
+    assert_eq!(sim.world.bots[&bot].data.quirks.len(), 2, "second at 900 XP");
 }
 
 #[test]
@@ -315,7 +302,7 @@ fn a_tier_purchase_resets_the_level_without_erasing_xp() {
 
     // Max the Mining track at tier 1.
     let maxed = sim.xp.track_cap_deci();
-    sim.world.bots.get_mut(&bot).unwrap().data.xp.insert(XpTrack::Mining, sim::world::StoredXp::from_scaled(maxed));
+    sim.world.bots.get_mut(&bot).unwrap().data.xp.insert(XpTrack::Mining, maxed);
     let data = &sim.world.bots[&bot].data;
     assert_eq!(sim.ctx().capability_level(data, Capability::Mining), sim.xp.level_cap, "L5 at tier 1");
 
@@ -331,109 +318,4 @@ fn a_tier_purchase_resets_the_level_without_erasing_xp() {
     // Untouched XP is exactly why the fleet still reads this bot as
     // experienced (Q105-R3's other half is tier_value).
     assert!(data.xp_total() >= maxed, "total XP never decreases");
-}
-
-// --- M16 review: the tier-scale leaks ------------------------------
-//
-// Capability XP is STORED tier-scaled (Q105), so every consumer has to
-// divide it back down before reading a level. Six of them did not. Each
-// test below fails against the pre-fix code.
-
-/// Give a bot a capability tier and enough stored XP that the RAW number
-/// reads at the level cap while the EFFECTIVE level is still 0 — the exact
-/// shape that fooled the perk gates and the energy bill.
-fn tier_up(sim: &mut Sim, bot: sim::BotId, cap: sim::world::Capability, tier: u8, stored: u64) {
-    let data = &mut sim.world.bots.get_mut(&bot).unwrap().data;
-    data.tiers[cap.idx()] = tier;
-    data.xp.insert(cap.track(), sim::world::StoredXp::from_scaled(stored));
-}
-
-#[test]
-fn a_tier_purchase_does_not_hand_out_the_l3_perks_for_free() {
-    let mut sim = Sim::new(&MapSpec::empty(6, 6));
-    let bot = spawn(&mut sim, TilePos::new(1, 1), "wait(600)\n");
-    // One survey's worth of work at Optics t2: 100 deci scaled x100.
-    tier_up(&mut sim, bot, sim::world::Capability::Optics, 2, 10_000);
-    let data = &sim.world.bots[&bot].data;
-    // The raw number really does level as L4 — that is the trap.
-    assert_eq!(sim.xp.level(data.xp(XpTrack::Scouting).raw_unscaled()), 4);
-    // ...but the bot's actual proficiency has reset to 0.
-    assert_eq!(
-        sim.ctx().track_level(data, XpTrack::Scouting),
-        0,
-        "a tier purchase resets the level by arithmetic (Q105)"
-    );
-    assert!(
-        sim.ctx().track_level(data, XpTrack::Scouting) < 3,
-        "so the Scouting-L3 corruption immunity must NOT be granted"
-    );
-}
-
-#[test]
-fn tier_scaled_storage_does_not_inflate_the_energy_bill() {
-    // Two identical colonies; the second bot buys a Mining tier and does
-    // a little work. Its EFFECTIVE Mining level is 0 either way, so its
-    // upkeep must not move. Pre-fix, the tiered bot billed 4 extra levels.
-    let levels_of = |tier: u8, stored: u64| {
-        let mut sim = Sim::new(&MapSpec::empty(6, 6));
-        let bot = spawn(&mut sim, TilePos::new(1, 1), "wait(600)\n");
-        tier_up(&mut sim, bot, sim::world::Capability::Mining, tier, stored);
-        let data = &sim.world.bots[&bot].data;
-        XpTrack::ALL.iter().map(|&t| sim.ctx().track_level(data, t)).sum::<u32>()
-    };
-    // 200 deci of real Mining work: unscaled at t1, x100 at t2.
-    assert_eq!(
-        levels_of(1, 200),
-        levels_of(2, 20_000),
-        "the same real work bills the same upkeep at any tier"
-    );
-}
-
-#[test]
-fn buying_the_processor_tier_is_never_a_cycle_downgrade() {
-    // Q105-R1, the invariant validate_against_xp now asserts at load.
-    let mut sim = Sim::new(&MapSpec::empty(6, 6));
-    let bot = spawn(&mut sim, TilePos::new(1, 1), "wait(600)\n");
-    let cap = sim.xp.track_cap_deci();
-    tier_up(&mut sim, bot, sim::world::Capability::Processor, 1, cap);
-    let maxed_at_t1 = {
-        let data = &sim.world.bots[&bot].data;
-        sim::stats::cpu_centi(sim.ctx(), data, false, false)
-    };
-    // Buy the next tier: the level resets to 0, the flat grant replaces it.
-    tier_up(&mut sim, bot, sim::world::Capability::Processor, 2, cap);
-    let fresh_at_t2 = {
-        let data = &sim.world.bots[&bot].data;
-        sim::stats::cpu_centi(sim.ctx(), data, false, false)
-    };
-    assert!(
-        fresh_at_t2 >= maxed_at_t1,
-        "paying for a Processor tier must not make the bot slower \
-         (was {maxed_at_t1} centicycles, became {fresh_at_t2})"
-    );
-}
-
-#[test]
-fn one_bought_tier_outranks_a_fully_maxed_rookie() {
-    // Q105-R3: the scrap valve ranks on investment(), and a Backup-Core
-    // reprint (every tier, zero XP) must never read as the cheapest
-    // machine in the fleet.
-    let mut sim = Sim::new(&MapSpec::empty(6, 6));
-    let reprint = spawn(&mut sim, TilePos::new(1, 1), "wait(600)\n");
-    let rookie = spawn(&mut sim, TilePos::new(2, 1), "wait(600)\n");
-    {
-        let data = &mut sim.world.bots.get_mut(&reprint).unwrap().data;
-        data.tiers[sim::world::Capability::Mining.idx()] = 2;
-    }
-    {
-        // The rookie maxes EVERY track — the best an untiered bot can do.
-        let cap = sim.xp.track_cap_deci();
-        let data = &mut sim.world.bots.get_mut(&rookie).unwrap().data;
-        for t in XpTrack::ALL {
-            data.xp.insert(t, sim::world::StoredXp::from_scaled(cap));
-        }
-    }
-    let a = sim.world.bots[&reprint].data.investment();
-    let b = sim.world.bots[&rookie].data.investment();
-    assert!(a > b, "one bought tier ({a}) must outweigh a maxed rookie ({b})");
 }

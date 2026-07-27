@@ -814,7 +814,7 @@ fn scouting_l3_runs_clean_inside_corruption() {
     };
     let scout = mk(&mut sim, 1);
     let rookie = mk(&mut sim, 4);
-    sim.world.bots.get_mut(&scout).unwrap().data.xp.insert(XpTrack::Scouting, sim::world::StoredXp::from_scaled(1_000_000));
+    sim.world.bots.get_mut(&scout).unwrap().data.xp.insert(XpTrack::Scouting, 1_000_000);
 
     let done = |sim: &Sim, id: &sim::BotId| {
         sim.world.bots[id].data.log_buf.iter().any(|(_, s)| s == "\"done\"")
@@ -946,8 +946,8 @@ fn barricade_swallows_signage() {
     .unwrap();
     let builder = spawn(&mut sim, TilePos::new(1, 1), "build()\n");
     build_until(&mut sim, site, TileKind::Barricade);
-    assert!(!sim.world.paint.contains_key(&site), "the wall swallows the paint");
-    assert!(!sim.world.overlays.contains_key(&site), "and the arrow");
+    assert!(sim.world.paint.get(&site).is_none(), "the wall swallows the paint");
+    assert!(sim.world.overlays.get(&site).is_none(), "and the arrow");
     let _ = builder;
 }
 

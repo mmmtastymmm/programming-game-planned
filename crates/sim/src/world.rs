@@ -107,25 +107,13 @@ pub enum SelectKey {
 impl SelectKey {
     /// The key's raw per-bot value (base + hardware — deploy-time stats;
     /// quirks never enter, Q52's rule extended to keys).
-    pub fn value(self, ctx: crate::stats::StatCtx<'_>, data: &BotData) -> i64 {
+    pub fn value(self, data: &BotData) -> i64 {
         match self {
             // Q105-R3: "most/least valuable bot" reads INVESTMENT —
             // earned XP plus bought tiers — so a re-equipped veteran is
             // never mistaken for a rookie. (Wire name kept for replays.)
             SelectKey::TotalXp => data.investment() as i64,
-            // Ranks by PROFICIENCY, not by stored magnitude: a tier-3
-            // bot's stored Mining XP is 10,000x a tier-1 bot's, so the
-            // raw number made "most Mining XP" mean "highest Mining
-            // TIER" regardless of skill. (tier, level-within-tier)
-            // ordered lexicographically keeps better hardware ahead of
-            // equal skill without erasing the skill term.
-            SelectKey::Xp(track) => {
-                let tier = Capability::ALL
-                    .iter()
-                    .find(|c| c.track() == track)
-                    .map_or(0, |c| data.tier(*c) as i64);
-                tier * (ctx.xp.level_cap as i64 + 1) + ctx.track_level(data, track) as i64
-            }
+            SelectKey::Xp(track) => data.xp(track) as i64,
             SelectKey::Hp => data.hp,
             SelectKey::MaxHp => data.max_hp,
             SelectKey::CpuCenti => data.cpu_centi as i64,
@@ -630,7 +618,7 @@ pub struct BotData {
     /// DECI-XP per track (M6, round 4: awards and multipliers compute in
     /// tenths so Learning's 10% of a 1-XP drip is real). Absent = 0.
     /// Tables in docs read whole XP — the human unit; divide by 10.
-    pub xp: BTreeMap<XpTrack, StoredXp>,
+    pub xp: BTreeMap<XpTrack, u64>,
     /// Hauling income accumulator (deci-XP): cargo-distance carried since
     /// the last delivery — credited at deposit, forfeited by drops/spills
     /// (docs/02: "cargo-distance DELIVERED").
@@ -686,84 +674,16 @@ pub struct BotData {
     pub dune_idle: u32,
 }
 
-/// XP exactly as STORED on a bot — tier-SCALED for capability tracks
-/// (Q105), and therefore NOT a level-curve input.
-///
-/// A newtype rather than a bare `u64` because the M16 review found six
-/// consumers that fed this straight to [`crate::xp::XpConfig::level`]: at
-/// Optics tier 2 a single `survey()` stores 10,000 deci and raw-levels as
-/// L4 while the bot's effective Scouting level is 0, so those consumers
-/// granted L3 perks and billed power off numbers 100x too big. The type
-/// turns that mistake into a compile error — go through
-/// [`crate::stats::StatCtx::track_level`] / `capability_level` /
-/// `track_deci`, which divide by the tier scale first.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct StoredXp(u64);
-
-impl StoredXp {
-    pub const ZERO: StoredXp = StoredXp(0);
-
-    /// Mint stored XP from an ALREADY tier-scaled magnitude. `settle_xp`
-    /// is the one place that should call this — it is where the scale is
-    /// applied — plus test fixtures seeding a bot's history.
-    pub fn from_scaled(deci: u64) -> Self {
-        StoredXp(deci)
-    }
-
-    /// The stored magnitude, tier scale and all. Correct ONLY where the
-    /// number itself is the point — the state hash, totals, the wire —
-    /// never as input to a level curve or an XP threshold.
-    pub fn raw_unscaled(self) -> u64 {
-        self.0
-    }
-}
-
-/// Awards arrive already tier-scaled from `settle_xp`, which is the one
-/// place allowed to mint XP.
-impl std::ops::AddAssign<u64> for StoredXp {
-    fn add_assign(&mut self, rhs: u64) {
-        self.0 = self.0.saturating_add(rhs);
-    }
-}
-
-// Comparisons against plain deci-XP stay ergonomic (tests and asserts read
-// `data.xp(track) > 0`); only *arithmetic* has to spell out its intent.
-impl PartialEq<u64> for StoredXp {
-    fn eq(&self, other: &u64) -> bool {
-        self.0 == *other
-    }
-}
-
-impl PartialOrd<u64> for StoredXp {
-    fn partial_cmp(&self, other: &u64) -> Option<std::cmp::Ordering> {
-        self.0.partial_cmp(other)
-    }
-}
-
-impl std::fmt::Display for StoredXp {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-impl std::iter::Sum<StoredXp> for u64 {
-    fn sum<I: Iterator<Item = StoredXp>>(iter: I) -> Self {
-        iter.map(|x| x.0).sum()
-    }
-}
-
 impl BotData {
-    /// This track's STORED deci-XP — tier-scaled for capability tracks.
-    /// See [`StoredXp`]: to ask what LEVEL this is worth, go through
-    /// `StatCtx`, which divides by the tier scale.
-    pub fn xp(&self, track: XpTrack) -> StoredXp {
-        self.xp.get(&track).copied().unwrap_or(StoredXp::ZERO)
+    /// This track's deci-XP.
+    pub fn xp(&self, track: XpTrack) -> u64 {
+        self.xp.get(&track).copied().unwrap_or(0)
     }
 
     /// Total deci-XP across every track — the milestone scale (quirk
     /// manifestation, module slots).
     pub fn xp_total(&self) -> u64 {
-        self.xp.values().copied().sum()
+        self.xp.values().sum()
     }
 
     /// This bot's bought tier for a capability (Q105 — base 1, so every
@@ -1147,18 +1067,7 @@ impl BlueprintKind {
 /// INVESTMENT against earned XP (Q105-R3). Generous on purpose: a tier
 /// costs materials and a Station trip, so it should outweigh the XP a
 /// rookie accumulates while the veteran was being rebuilt.
-///
-/// The magnitude is load-bearing, not decorative. At the review's 5,000 a
-/// fully-tiered Backup-Core reprint scored 12 x 5,000 = 60,000 while an
-/// unimproved bot that had merely stayed alive reached 60,000+ from the
-/// time-and-motion tracks alone (Age + Mileage + Learning + Hauling, each
-/// capped at 15,000 deci) — so the scrap valve dismantled the colony's
-/// most expensive machine, the exact outcome Q105-R3 exists to prevent.
-/// One bought tier must therefore outweigh EVERY track a bot can max:
-/// `XpTrack::ALL.len() * track_cap_deci()`, asserted at load in
-/// [`crate::stats::Stats::validate_against_xp`] so a tuning edit to
-/// `curve_base`/`level_cap` can never quietly re-invert the ordering.
-pub const TIER_INVESTMENT_WEIGHT: u64 = 200_000;
+pub const TIER_INVESTMENT_WEIGHT: u64 = 5_000;
 
 /// The paint palette (Q95/Q96, docs/05 Tile Composition): stored tile
 /// paint is a 1-based palette index; **0 is `unpainted`** — a named,

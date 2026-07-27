@@ -454,7 +454,7 @@ impl Sim {
                 })
                 .map(|id| {
                     let data = &self.world.bots[id].data;
-                    let value = rules.key.value(ctx, data);
+                    let value = rules.key.value(data);
                     // Best-first follows the key's improvement direction
                     // (Q64); the stored sort key normalizes to ascending.
                     let sort = if rules.best_first == rules.key.higher_is_better() {

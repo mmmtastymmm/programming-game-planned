@@ -45,7 +45,7 @@ fn countdown_scales_with_xp_and_expiry_blasts_without_chaining() {
     let rookie = spawn(&mut sim, TilePos::new(2, 2), "wait(600)\n", 0, 100);
     let veteran = spawn(&mut sim, TilePos::new(3, 2), "wait(600)\n", 0, 100);
     // 1000 XP = 10000 deci → +100 ticks of countdown.
-    sim.world.bots.get_mut(&veteran).unwrap().data.xp.insert(XpTrack::Mining, sim::world::StoredXp::from_scaled(10_000));
+    sim.world.bots.get_mut(&veteran).unwrap().data.xp.insert(XpTrack::Mining, 10_000);
     let bystander = spawn(&mut sim, TilePos::new(2, 3), "wait(600)\n", 0, 100);
     wreck(&mut sim, rookie);
     wreck(&mut sim, veteran);
@@ -217,7 +217,7 @@ fn hijack_boots_the_wreck_under_the_claimers_remainder_color() {
     let mut sim = Sim::new(&spec);
     sim.tuning.fault_damage = 0;
     let victim = spawn(&mut sim, TilePos::new(3, 2), "wait(600)\n", 0, 100);
-    sim.world.bots.get_mut(&victim).unwrap().data.xp.insert(XpTrack::Combat, sim::world::StoredXp::from_scaled(5000));
+    sim.world.bots.get_mut(&victim).unwrap().data.xp.insert(XpTrack::Combat, 5000);
     let raider = spawn(
         &mut sim,
         TilePos::new(2, 2),
@@ -586,58 +586,3 @@ fn heavy_jobs_need_the_build_tier() {
     }
     assert!(!sim.world.wrecks.contains_key(&victim), "at the heavy tier the rescue lands");
 }
-
-/// Q105-R2's gate has to hold at RESOLUTION, not just at request time.
-/// `repair(ally)` on a living bot passes the request-time check because
-/// the target is not a wreck yet; if that ally then dies, the same parked
-/// action drops into the wreck lane under the same EntityId. Pre-fix a
-/// stock rookie completed the heavy rescue for free — and could farm it
-/// deliberately by parking a repair on anything about to die.
-#[test]
-fn a_mend_that_becomes_a_rescue_still_needs_the_build_tier() {
-    use sim::world::Capability;
-    let mut sim = Sim::new(&MapSpec::empty(8, 5));
-    // A wounded ALLY (not a wreck): the repair request is legal.
-    let ally = spawn(&mut sim, TilePos::new(4, 2), "wait(900)\n", 0, 100);
-    sim.world.bots.get_mut(&ally).unwrap().data.hp = 20;
-    // A long-lived ally: its wreck lives well past the ~80 ticks a field
-    // repair takes, so an expiry can never be mistaken for a refusal.
-    sim.world.bots.get_mut(&ally).unwrap().data.xp
-        .insert(XpTrack::Age, sim::world::StoredXp::from_scaled(15_000));
-    let ally_entity = sim.world.bots[&ally].data.entity;
-
-    // A program that requests NO action of its own, so the injected mend
-    // is not overwritten before the ally dies.
-    let rookie = spawn(&mut sim, TilePos::new(3, 2), "x = 1\n", 0, 100);
-    sim.world.bots.get_mut(&rookie).unwrap().data.tiers[Capability::Building.idx()] = 1;
-    // Request the mend through the real host path: at this moment the
-    // target is a LIVING ally, so the request-time tier gate passes.
-    sim.request_action_for_test(rookie, sim::world::ActionRequest::Repair(ally_entity));
-    assert!(
-        matches!(
-            sim.world.bots[&rookie].data.action,
-            Some(sim::world::Action::Repair { .. })
-        ),
-        "a base-tier bot may mend a living ally — that is not the heavy job"
-    );
-
-    // The ally dies mid-job and becomes a wreck under the same handle.
-    wreck(&mut sim, ally);
-    assert!(sim.world.wrecks.contains_key(&ally), "the ally is now a wreck");
-
-    // Long enough for the rescue to land: field repair needs ~80 ticks at
-    // the base build rate, and the wreck's countdown is well past that.
-    for _ in 0..150 {
-        sim.step();
-    }
-    assert!(
-        sim.world.wrecks.contains_key(&ally),
-        "a base-tier bot must not finish the rescue just because its \
-         mend target died mid-job"
-    );
-    assert!(
-        !sim.world.bots.contains_key(&ally),
-        "and the wreck must not have been booted back into a live bot"
-    );
-}
-

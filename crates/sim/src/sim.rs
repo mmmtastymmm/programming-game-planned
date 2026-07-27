@@ -13,7 +13,7 @@
 use crate::hash::Fnv1a;
 use crate::host::BotHost;
 use crate::map::{MapSpec, OverlayKind, TilePos};
-use crate::world::{StoredXp, StructureKind, 
+use crate::world::{
     Blueprint, BlueprintKind, Bot,
     BotData, BotId, Color, ColorProgram, EntityId, PrinterState, Wreck,
     World, XpTrack,
@@ -633,7 +633,7 @@ fn hash_bot_data(h: &mut Fnv1a, data: &crate::world::BotData) {
     h.write_u32(data.xp.len() as u32);
     for (track, deci) in &data.xp {
         h.write_u8(track.as_u8());
-        h.write_u64(deci.raw_unscaled());
+        h.write_u64(*deci);
     }
     h.write_u64(data.haul_accum);
     h.write_u64(data.learning_carry);
@@ -839,18 +839,10 @@ pub enum Command {
     /// unaffordable placements are ignored — lockstep commands never
     /// error.
     PlacePrinter { pos: TilePos, faction: u8 },
-    /// DESIGNATE a structure, paying its typed cost from colony stock
-    /// (docs/03: payments are abstract). Q105: nothing appears on a click
-    /// — a bot must walk to the site and `build()` it.
+    /// Place a structure, paying its typed cost from colony stock
+    /// (docs/03: payments are abstract). Instant placement for now; build
+    /// labor for structures is flagged for discussion in TASKS.md.
     PlaceStructure { pos: TilePos, kind: crate::world::StructureKind, faction: u8 },
-    /// Call off a pending designation and refund what it charged. Without
-    /// this a structure designation was an unrecoverable loss: the
-    /// materials were taken up front, no command could remove the
-    /// blueprint, and the tile it sat on refused every other designation
-    /// forever — so one click on an unreachable tile destroyed the
-    /// materials and bricked the ground (M16 review). Only the owning
-    /// faction may cancel.
-    CancelBlueprint { pos: TilePos, faction: u8 },
     /// Set (or clear) a refinery's recipe by RECIPES index (docs/03,
     /// round 4: recipe set per structure).
     SetRecipe { structure: EntityId, recipe: Option<u8> },
@@ -895,7 +887,6 @@ impl Command {
             | Command::RazeNest { faction, .. }
             | Command::PlacePrinter { faction, .. }
             | Command::PlaceStructure { faction, .. }
-            | Command::CancelBlueprint { faction, .. }
             | Command::Research { faction, .. } => Some(*faction),
             Command::ExchangeData { from, .. } | Command::Grant { from, .. } => Some(*from),
             Command::SetAlliance { a, .. } => Some(*a),
@@ -1355,16 +1346,6 @@ impl Sim {
                     self.place_paint_designation(*faction, *pos, *color);
                     return Ok(None);
                 }
-                // Structures route through theirs for exactly the same
-                // reason. `cost_stone` is 0 for them — their prices are
-                // TYPED and live in `structure_costs` — so falling through
-                // to the generic Stone charge below handed out free
-                // Foundries to any peer that wrapped the kind in this
-                // command instead (M16 review).
-                if let BlueprintKind::Structure(k) = kind {
-                    self.place_structure_designation(*faction, *pos, *k);
-                    return Ok(None);
-                }
                 // Site + price + duration all come from the shared rule
                 // set (BlueprintKind::site_ok / cost_stone / build_ticks)
                 // so the build bar's ghost can't drift from what this
@@ -1410,22 +1391,41 @@ impl Sim {
                 Ok(None)
             }
             Command::PlaceStructure { pos, kind, faction } => {
-                self.place_structure_designation(*faction, *pos, *kind);
-                Ok(None)
-            }
-            Command::CancelBlueprint { pos, faction } => {
-                // Only the owner's own designation, and only one: the
-                // placement rules already refuse a second blueprint on a
-                // tile, so there is at most one to find.
-                let found = self
-                    .world
-                    .blueprints
+                use crate::resources::{Resource, DECI};
+                // Q105: structures are BUILT BY LABOR. This designates the
+                // site and charges the materials (the blueprint flow every
+                // other placement already used); a bot must then walk there
+                // and `build()` it. Nothing in the colony appears the
+                // instant it is clicked — "designation is the player's;
+                // labor is code" now holds everywhere.
+                let bk = BlueprintKind::Structure(*kind);
+                let free = self.world.blueprint_site_ok(bk, *pos)
+                    && !self.world.tile_occupied(*pos, BotId(u32::MAX))
+                    && !self.world.blueprints.values().any(|b| b.pos == *pos);
+                // Typed prices live in tuning.ron (docs/03 figures;
+                // validated complete at load — every kind has an entry).
+                let cost: &[(Resource, u32)] = self
+                    .tuning
+                    .structure_costs
                     .iter()
-                    .find(|(_, b)| b.pos == *pos && b.faction == *faction)
-                    .map(|(id, b)| (*id, b.clone()));
-                if let Some((id, bp)) = found {
-                    self.world.blueprints.remove(&id);
-                    self.refund_blueprint(&bp);
+                    .find(|(k, _)| k == kind)
+                    .map(|(_, c)| c.as_slice())
+                    .expect("validated at load");
+                let affordable = cost.iter().all(|(k, units)| {
+                    self.world.stock_get(*faction, *k) >= (*units * DECI) as u64
+                });
+                if free && affordable {
+                    for (k, units) in cost {
+                        let taken =
+                            self.world.stock_take(*faction, *k, (*units * DECI) as u64);
+                        debug_assert!(taken, "checked affordable above");
+                    }
+                    let needed = bk.build_ticks(&self.tuning) * crate::resources::DECI;
+                    let id = self.world.alloc_entity();
+                    self.world.blueprints.insert(
+                        id,
+                        Blueprint { pos: *pos, kind: bk, progress: 0, needed, faction: *faction },
+                    );
                 }
                 Ok(None)
             }
@@ -1863,8 +1863,7 @@ impl Sim {
             // Scouting L3 veterans run CLEAN inside Corruption (docs/02+05,
             // Q75: "the only bots whose code runs clean in there"). Computed
             // before the mutable reborrow below.
-            let scout_immune =
-                self.ctx().track_level(&bot.data, crate::world::XpTrack::Scouting) >= 3;
+            let scout_immune = self.xp.level(bot.data.xp(crate::world::XpTrack::Scouting)) >= 3;
             let bot = self.world.bots.get_mut(&id).expect("checked above");
             let mut vm = bot.vm.take().expect("vm present between phases");
             if vm.is_dead() {
@@ -1960,47 +1959,14 @@ impl Sim {
             // bounded by the L5 cap, the quadratic curve, and tier
             // scaling.
             let ops = vm.ops_executed();
-            // A FRESH Vm restarts at 0 while BotData (and its `ops_seen`)
-            // rides along: recolor at a printer, a field rescue, a hijack.
-            // Treated as a high-water mark that could only rise, the
-            // saturating subtraction then yielded 0 forever and froze the
-            // veteran's Processing track for the rest of the match (M16
-            // review). A counter that went BACKWARDS is a new VM, so
-            // rebase on it rather than hunting every swap site.
-            if ops < bot.data.ops_seen {
-                bot.data.ops_seen = 0;
-            }
             let ops_delta = ops.saturating_sub(bot.data.ops_seen);
-            // Q100 credits ops, but a bot is BLOCKED — stepping zero ops —
-            // for every tick of a real action, while a bot spinning `x = 1`
-            // in a bare loop never blocks. Uncapped and unfloored that paid
-            // idling strictly more than labor: a miner blocked ~95% of its
-            // ticks never approached the cap while a spinner bought +2.5
-            // cycles/tick with pure busywork. Capping the credit and paying
-            // the same drip to a bot that is blocked ON ITS OWN ACTION puts
-            // the two on equal footing — docs/02's rule that a track cannot
-            // be staged by the bot itself, applied to Processing.
             if ops_delta > 0 {
                 bot.data.ops_seen = ops;
-            }
-            // `wait()` and `guard()` are the bot choosing to do nothing —
-            // paying them here would just move the idling exploit from a
-            // bare `x = 1` loop into a cheaper one.
-            let working = !matches!(
-                bot.data.action,
-                None | Some(crate::world::Action::Wait { .. })
-                    | Some(crate::world::Action::Guard { .. })
-            );
-            let deci = if working {
-                // Blocked on real work: the processor is engaged even
-                // though the VM stepped nothing this tick.
-                self.xp.processing_max_per_tick_deci
-            } else {
-                (ops_delta * self.xp.processing_per_op_deci)
-                    .min(self.xp.processing_max_per_tick_deci)
-            };
-            if deci > 0 {
-                self.world.pending_xp.push((id, XpTrack::Processing, deci));
+                self.world.pending_xp.push((
+                    id,
+                    XpTrack::Processing,
+                    ops_delta * self.xp.processing_per_op_deci,
+                ));
             }
             let Some(bot) = self.world.bots.get_mut(&id) else { continue };
             let Some(vm) = bot.vm.as_ref() else { continue };
@@ -2055,7 +2021,7 @@ impl Sim {
                 // lose its clock. A long-lived bot earns a long warning —
                 // which is what the rule always meant.
                 self.tuning.wreck_countdown_base_ticks
-                    + (self.ctx().track_deci(&data, XpTrack::Age) / 1000) as u32
+                    + (data.xp(XpTrack::Age) / 1000) as u32
                         * self.tuning.wreck_countdown_per_100xp_ticks
             });
             self.world.wrecks.insert(id, Wreck { data, hp, countdown });
@@ -2159,16 +2125,11 @@ impl Sim {
                 self.world.bots.values().filter(|b| b.data.faction == faction && !b.data.dying)
             {
                 bot_count += 1;
-                // EFFECTIVE levels, not stored magnitudes: a capability
-                // track's storage is tier-scaled, so summing raw levels
-                // billed a freshly-tiered bot for L4/L5 on a track whose
-                // real level had just reset to 0 — every tier purchase
-                // multiplied the colony's draw and tipped it into
-                // brownout (M16 review).
-                let ctx = self.ctx();
-                let levels: u64 = XpTrack::ALL
-                    .iter()
-                    .map(|&track| ctx.track_level(&bot.data, track) as u64)
+                let levels: u64 = bot
+                    .data
+                    .xp
+                    .values()
+                    .map(|&deci| self.xp.level(deci) as u64)
                     .sum();
                 draw += self.upkeep.base_draw
                     + self.upkeep.draw_per_upgrade * bot.data.upgrades.len() as u64
@@ -2457,11 +2418,8 @@ impl Sim {
             // get bigger.
             let scale = self.ctx().track_scale(&self.world.bots[&id].data, track);
             let bot = self.world.bots.get_mut(&id).expect("checked above");
-            let entry = bot.data.xp.entry(track).or_insert(StoredXp::ZERO);
-            *entry = StoredXp::from_scaled(
-                (entry.raw_unscaled() + post.saturating_mul(scale))
-                    .min(cap.saturating_mul(scale)),
-            );
+            let entry = bot.data.xp.entry(track).or_insert(0);
+            *entry = (*entry + post.saturating_mul(scale)).min(cap.saturating_mul(scale));
         }
         for (id, feed) in feeds {
             let Some(bot) = self.world.bots.get_mut(&id) else { continue };
@@ -2471,10 +2429,8 @@ impl Sim {
             let gain = carry / 100;
             bot.data.learning_carry = carry % 100;
             if gain > 0 {
-                // Learning is nobody's capability track, so its storage is
-                // always unscaled and the plain cap is the right ceiling.
-                let entry = bot.data.xp.entry(XpTrack::Learning).or_insert(StoredXp::ZERO);
-                *entry = StoredXp::from_scaled((entry.raw_unscaled() + gain).min(cap));
+                let entry = bot.data.xp.entry(XpTrack::Learning).or_insert(0);
+                *entry = (*entry + gain).min(cap);
             }
         }
         self.settle_milestones();
@@ -2499,18 +2455,14 @@ impl Sim {
             // fresh print — so reroll-fishing still buys nothing.
             let (age_xp, latent, manifested) = {
                 let d = &self.world.bots[&id].data;
-                (
-                    self.ctx().track_deci(d, XpTrack::Age),
-                    d.latent_quirks.len(),
-                    d.quirks.len(),
-                )
+                (d.xp(XpTrack::Age), d.latent_quirks.len(), d.quirks.len())
             };
             // Age body perk (xp.ron `age_hp_per_level`): each Age level
             // grows the hull — max HP and current HP both rise by the
             // delta (growing tougher never makes a bot instantly Damaged).
             let age_level = {
                 let d = &self.world.bots[&id].data;
-                self.ctx().track_level(d, XpTrack::Age)
+                self.xp.level(d.xp(XpTrack::Age))
             };
             {
                 let d = &mut self.world.bots.get_mut(&id).expect("collected").data;
@@ -2643,66 +2595,6 @@ impl Sim {
 
     /// Place (or supersede) the paint designation at `pos` — the shared
     /// implementation behind `PlacePaint` and `PlaceBlueprint(Paint)`.
-    /// The ONE rule set for designating a structure (Q105: structures are
-    /// BUILT BY LABOR). Site, occupancy, typed price and duration all
-    /// resolve here, so no command variant can charge a different price
-    /// or skip a check — `PlaceStructure` and `PlaceBlueprint` both land
-    /// on this.
-    fn place_structure_designation(&mut self, faction: u8, pos: TilePos, kind: StructureKind) {
-        use crate::resources::DECI;
-        let bk = BlueprintKind::Structure(kind);
-        let free = self.world.blueprint_site_ok(bk, pos)
-            && !self.world.tile_occupied(pos, BotId(u32::MAX))
-            && !self.world.blueprints.values().any(|b| b.pos == pos);
-        let cost = self.structure_cost(kind);
-        let affordable =
-            cost.iter().all(|(k, units)| self.world.stock_get(faction, *k) >= *units);
-        if free && affordable {
-            for (k, units) in &cost {
-                let taken = self.world.stock_take(faction, *k, *units);
-                debug_assert!(taken, "checked affordable above");
-            }
-            let needed = bk.build_ticks(&self.tuning) * DECI;
-            let id = self.world.alloc_entity();
-            self.world
-                .blueprints
-                .insert(id, Blueprint { pos, kind: bk, progress: 0, needed, faction });
-        }
-    }
-
-    /// A structure's typed price in DECI units. Prices live in tuning.ron
-    /// (docs/03 figures; validated complete at load — every kind has an
-    /// entry), and both the charge and the refund read them from here so
-    /// a cancelled designation can never return more than it took.
-    fn structure_cost(&self, kind: StructureKind) -> Vec<(crate::resources::Resource, u64)> {
-        self.tuning
-            .structure_costs
-            .iter()
-            .find(|(k, _)| *k == kind)
-            .map(|(_, c)| {
-                c.iter().map(|(r, u)| (*r, (*u * crate::resources::DECI) as u64)).collect()
-            })
-            .expect("validated at load")
-    }
-
-    /// Give a designation's materials back. Used when a structure
-    /// blueprint is cancelled by the player and when its site has become
-    /// unbuildable by the time a builder finishes: the materials were
-    /// charged at designation, so they have to come back somewhere or a
-    /// misplaced click silently destroys them (M16 review).
-    pub(crate) fn refund_blueprint(&mut self, bp: &Blueprint) {
-        if let BlueprintKind::Structure(kind) = bp.kind {
-            for (k, units) in self.structure_cost(kind) {
-                self.world.stock_add(bp.faction, k, units);
-            }
-        } else {
-            let stone = bp.kind.cost_stone(&self.tuning);
-            if stone > 0 {
-                self.world.stock_add(bp.faction, crate::resources::Resource::Stone, stone);
-            }
-        }
-    }
-
     fn place_paint_designation(&mut self, faction: u8, pos: TilePos, color: Option<u8>) {
         if !self.paint_designation_ok(pos, color) {
             return;
@@ -2728,16 +2620,6 @@ impl Sim {
             .insert(id, Blueprint { pos, kind, progress: 0, needed, faction });
     }
 
-
-    /// Test hook: issue an action request exactly as the Pyrite host does,
-    /// for targets no query builtin can name (a specific living ally, say).
-    /// Goes through `start_requested_action`, so every request-time
-    /// precondition still runs — writing `data.action` directly would skip
-    /// them AND be overwritten by the bot's own program on the next tick.
-    pub fn request_action_for_test(&mut self, bot: BotId, req: crate::world::ActionRequest) {
-        self.world.bot_mut(bot).data.requested = Some(req);
-        self.start_requested_action(bot);
-    }
 
     /// Test hook (mirrors `apply_damage_for_test`): finish the structure
     /// designation on `pos` immediately, skipping the build labor Q105
