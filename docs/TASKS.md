@@ -1005,7 +1005,31 @@ out-of-range quirk to trigger it (guarded by the setenv-range test exercising th
       the enum, so the path already exists). First-pass HP scaled to the 20-Stone price.
       [sim][game] ⚠HASH
 
-## M16 — Capability slots & construction by labor (Q105) ✅ COMPLETE (2026-07-26)
+## M16 — Capability slots & construction by labor (Q105) ⚠️ SHIPPED, THEN REVERTED TO RETHINK (2026-07-27)
+
+> **Status.** M16 shipped 2026-07-26 and was reviewed three times (xhigh, max,
+> max). The passes confirmed **45 defects** — and each fix commit was found by
+> the next pass to have introduced more than it closed, so both fix commits are
+> reverted. The tree is M16-as-originally-built; the attempts are preserved at
+> tag `m16-fix-attempts` and contain work worth salvaging deliberately (the
+> `StoredXp` newtype, the `ops_executed` ordering in vm.rs, the `ops_seen`
+> rebase on VM swap, closing the `PlaceBlueprint` free-structure laundering,
+> and several genuinely repaired tests).
+>
+> The 45 sort into five clusters, none of them a coding slip: **tier-scaled XP
+> storage** (11 findings, 3 failed fixes), **the structure-by-labor completion
+> path** (11 findings, 3 failed fixes), **Q100's Processing track** (5 findings,
+> 2 failed fixes), **tier gates vs. tier-blind queries** (6), and **residue from
+> the retired module system** (4). Each is a decision M16 implemented without
+> ever making. They are now open as **Q111–Q119** in QUESTIONS.md, with **Q120
+> already decided** (a completing structure shoves; entombment kills).
+>
+> **Do not resume M16 by patching.** The next pass starts from the Q111–Q119
+> rulings, and — per what actually worked when it was tried — writes the failing
+> test before deciding the fix. Note also that five tests shipped across this
+> milestone that passed against broken code; the structure-by-labor completion
+> arm had no end-to-end test at all, which is why its worst defect shipped green.
+
 
 The tool layer docs/02–03 describe was never built: no verb checks a tool, the module
 catalog holds `optics` + the inert `backup_core`, printed bots get no modules, and
