@@ -554,14 +554,6 @@ impl Vm {
     /// Set this tick's flat per-op surcharge (centicycles). The sim owns
     /// the figure — tile kind under the chassis, M8 — and re-sets it
     /// before every grant; the VM only applies it.
-    /// The overlay currently in force — the cost tax the world is adding
-    /// to every charged op. Readable so the sim's own tests can assert on
-    /// the tax a bot actually pays rather than re-deriving the predicate
-    /// that sets it.
-    pub fn cost_overlay_centi(&self) -> i64 {
-        self.cost_overlay_centi
-    }
-
     pub fn set_cost_overlay_centi(&mut self, centi: i64) {
         self.cost_overlay_centi = centi;
     }

@@ -97,19 +97,8 @@ impl Resource {
 
     /// Harvest tier (docs/03's ladder: "chop, dig, electrify, get rich,
     /// get brave"). ENFORCED since M16 — `mine()` works a node only if
-    /// the bot's Mining capability tier reaches this (Q105).
-    ///
-    /// `None` means NO TIER REQUIREMENT, i.e. workable by any bot — both
-    /// gates spell it `is_none_or(..)`. This is load-bearing, not a
-    /// technicality: spilled and dropped cargo becomes a `ResourceNode`
-    /// whose kind is whatever the bot was carrying, so every ground pile
-    /// of refined goods (Steel, Bronze, Glass, Lens, Chips, Gold Chips —
-    /// all `None` here) is recovered through `mine()`. "Fixing" either
-    /// gate to `is_some_and(..)` on the strength of a misread doc would
-    /// make all dropped cargo permanently unrecoverable.
-    ///
-    /// Water is the odd one out — `None` because it is pumped by a
-    /// structure rather than mined, and no Water node is ever created.
+    /// the bot's Mining capability tier reaches this (Q105). `None` means
+    /// the resource is not mined at all (Water is pumped).
     pub fn tool_tier(self) -> Option<u8> {
         match self {
             Resource::Wood | Resource::Stone | Resource::Sand => Some(0),

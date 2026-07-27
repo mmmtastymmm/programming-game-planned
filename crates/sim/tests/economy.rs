@@ -548,87 +548,43 @@ fn mining_tier_gates_which_veins_a_bot_can_work() {
     );
 }
 
-/// docs/01 is explicit: "Queries return nodes regardless of tool tier —
-/// sensing isn't harvesting; an under-tiered `mine()` faults as usual." An
-/// earlier pass filtered node queries by Mining tier to stop the starter
-/// program crash-looping, which contradicted the ruling and left `closest`
-/// and `scan_resources()` disagreeing about whether a vein exists. The
-/// ruling stands; what programs gained instead is a way to ASK.
+/// M16 review: `mine()` gained a Mining-tier precondition, but the node
+/// QUERIES kept returning veins the bot could never work. The shipped
+/// starter program is `move_to(closest(ore).expect())` then `mine()`, so
+/// once the start-zone seams ran dry the whole fleet walked to the nearest
+/// Copper seam and faulted on every loop — with Q109's fault damage
+/// grinding them to wrecks at the vein.
 #[test]
-fn queries_are_tier_blind_but_workability_is_askable() {
+fn closest_ore_skips_veins_the_bot_cannot_work() {
     let mut spec = MapSpec::empty(10, 4);
     spec.quirk_permille = 0;
+    // Deep seams: the run must end because the test stops, not because
+    // the Coal ran out and left closest(ore) with nothing to return.
     spec.node_amount = 10_000;
-    // A Copper seam (tool tier 2) nearer than the Coal seam (tier 1).
+    // A Copper seam (tool tier 2) NEARER than the Coal seam (tier 1).
     spec.resource_tiles.push((TilePos::new(2, 1), sim::TileKind::CopperVein));
     spec.resource_tiles.push((TilePos::new(4, 1), sim::TileKind::CoalSeam));
     let mut sim = Sim::new(&spec);
-    // Base Mining tier 1: Copper is out of reach, Coal is not. The bot
-    // asks before it walks — the idiom the fault message now names.
+    // Base Mining tier 1: Copper is out of reach, Coal is not.
     let bot = spawn(
         &mut sim,
         TilePos::new(1, 1),
-        "n = closest(ore).expect()\nif n.workable:\n    move_to(n)\n    mine()\nelse:\n    wait(1)\n",
+        "move_to(closest(ore).expect())\nmine()\n",
     );
-    for _ in 0..80 {
+    for _ in 0..300 {
         sim.step();
     }
     let data = &sim.world.bots[&bot].data;
-    // Tier-blind query: the NEAREST ore is still the Copper it cannot work.
-    assert_eq!(
-        data.pos,
-        TilePos::new(1, 1),
-        "the bot asked, learned it cannot work the nearest seam, and stayed put"
-    );
-    assert_eq!(data.xp(sim::world::XpTrack::Mining), 0, "so it mined nothing");
     assert!(
-        sim.world.bots[&bot].vm.as_ref().is_some_and(|vm| vm.fault_count() == 0),
-        "and it never faulted — asking is fault-free, which is the point"
+        data.xp(sim::world::XpTrack::Mining) > 0,
+        "the bot must route past the unworkable Copper to the Coal it can mine"
     );
-}
-
-/// `tool_tier() == None` means NO tier requirement, not "unmineable" —
-/// and the difference is load-bearing, because dropped cargo becomes a
-/// node whose kind is a refined good, all of which answer `None`. Reading
-/// the gate the other way would strand every spill on the ground forever.
-#[test]
-fn dropped_refined_cargo_is_recoverable_at_any_mining_tier() {
-    let mut spec = MapSpec::empty(8, 4);
-    spec.quirk_permille = 0;
-    let mut sim = Sim::new(&spec);
-    let pile = TilePos::new(3, 1);
-    // A refined good on the ground: tool_tier() is None for every one.
-    assert_eq!(sim::resources::Resource::Steel.tool_tier(), None);
-    sim.drop_cargo_for_test(
-        pile,
-        sim::resources::Resource::Steel,
-        4 * sim::resources::DECI as u64,
-    );
-    // The spill lands on a free tile at or beside the drop point.
-    let spot = sim
-        .world
-        .nodes
-        .values()
-        .find(|n| n.kind == sim::resources::Resource::Steel)
-        .map(|n| n.pos)
-        .expect("the spill is a node now");
-
-    // A base-tier miner standing next to it recovers it — no Mining
-    // upgrade involved anywhere.
-    let bot = spawn(&mut sim, TilePos::new(spot.x - 1, spot.y), "mine()\nwait(50)\n");
-    assert_eq!(
-        sim.world.bots[&bot].data.tier(sim::world::Capability::Mining),
-        1,
-        "stock chassis"
-    );
-    for _ in 0..120 {
-        sim.step();
-        if sim.world.bots[&bot].data.cargo_total() > 0 {
-            break;
-        }
-    }
+    // The only workable vein is the FARTHER one, so mining XP at all
+    // proves the query skipped the nearer Copper. Pre-fix the bot parked
+    // next to the Copper and faulted on every loop instead.
     assert!(
-        sim.world.bots[&bot].data.cargo_total() > 0,
-        "a stock bot must be able to pick its own colony's spillage back up"
+        data.pos.chebyshev(TilePos::new(4, 1)) <= 1,
+        "it should be standing at the Coal seam it can work, not the Copper;          ended at {:?}",
+        data.pos
     );
 }

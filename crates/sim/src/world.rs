@@ -112,7 +112,7 @@ impl SelectKey {
             // Q105-R3: "most/least valuable bot" reads INVESTMENT —
             // earned XP plus bought tiers — so a re-equipped veteran is
             // never mistaken for a rookie. (Wire name kept for replays.)
-            SelectKey::TotalXp => data.investment(ctx) as i64,
+            SelectKey::TotalXp => data.investment() as i64,
             // Ranks by PROFICIENCY, not by stored magnitude: a tier-3
             // bot's stored Mining XP is 10,000x a tier-1 bot's, so the
             // raw number made "most Mining XP" mean "highest Mining
@@ -120,20 +120,11 @@ impl SelectKey {
             // ordered lexicographically keeps better hardware ahead of
             // equal skill without erasing the skill term.
             SelectKey::Xp(track) => {
-                // Tier first, then EFFECTIVE deci within the tier. An
-                // earlier pass ranked by `tier * (level_cap + 1) + level`,
-                // which threw away every bit of sub-level progress: two
-                // bots at 0 and 999 deci both scored 0, so "send my best
-                // miner" resolved by entity id and picked a fresh print
-                // over a near-L1 worker (M16 max review). `track_deci` is
-                // already scale-corrected, so multiplying the tier by the
-                // track cap keeps tiers strictly ordered while preserving
-                // a total order over progress inside each one.
                 let tier = Capability::ALL
                     .iter()
                     .find(|c| c.track() == track)
                     .map_or(0, |c| data.tier(*c) as i64);
-                tier * ctx.xp.track_cap_deci() as i64 + ctx.track_deci(data, track) as i64
+                tier * (ctx.xp.level_cap as i64 + 1) + ctx.track_level(data, track) as i64
             }
             SelectKey::Hp => data.hp,
             SelectKey::MaxHp => data.max_hp,
@@ -786,19 +777,8 @@ impl BotData {
     /// machine" means for the scrap valve and for selection keys — raw XP
     /// alone would mark a freshly-reprinted Backup-Core veteran (full
     /// tiers, zero XP) as the cheapest bot in the fleet.
-    /// Takes a `StatCtx` because the XP half must be measured in
-    /// EFFECTIVE deci, not stored magnitude. `xp_total()` sums storage,
-    /// which for a capability track is multiplied by `M^(tier-1)` — at
-    /// tier 3 that is 10,000x — so adding it to an unscaled tier term let
-    /// a single specialist's scaled Mining XP (150,000,000) dwarf a
-    /// fully-tiered reprint's 2,400,000, and the scrap valve ate the
-    /// reprint anyway (M16 max review). Scale-corrected, both halves are
-    /// in the same unit and `TIER_INVESTMENT_WEIGHT` means what its
-    /// load-time assertion claims.
-    pub fn investment(&self, ctx: crate::stats::StatCtx<'_>) -> u64 {
-        let earned: u64 =
-            XpTrack::ALL.iter().map(|&t| ctx.track_deci(self, t)).sum();
-        earned.saturating_add(self.tier_value().saturating_mul(TIER_INVESTMENT_WEIGHT))
+    pub fn investment(&self) -> u64 {
+        self.xp_total().saturating_add(self.tier_value().saturating_mul(TIER_INVESTMENT_WEIGHT))
     }
 
     /// Total bought-tier value above the free base — the hardware half of

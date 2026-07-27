@@ -868,9 +868,8 @@ fn the_scrap_valve_ranks_by_investment_not_raw_xp() {
     // The rookie has done a little work and nothing else.
     sim.world.bots.get_mut(&rookie).unwrap().data.xp.insert(XpTrack::Mining, sim::world::StoredXp::from_scaled(50));
 
-    let ctx = sim.ctx();
-    let vet_inv = sim.world.bots[&veteran].data.investment(ctx);
-    let rookie_inv = sim.world.bots[&rookie].data.investment(ctx);
+    let vet_inv = sim.world.bots[&veteran].data.investment();
+    let rookie_inv = sim.world.bots[&rookie].data.investment();
     assert!(
         vet_inv > rookie_inv,
         "the re-equipped veteran ({vet_inv}) must outrank the rookie ({rookie_inv})"

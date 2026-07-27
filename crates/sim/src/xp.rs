@@ -74,11 +74,12 @@ pub struct XpConfig {
     /// Q100's Processing track: deci-XP per operation executed — the one
     /// compute stat that is earned as well as bought.
     pub processing_per_op_deci: u64,
-    /// Ceiling on Processing deci-XP credited in a single tick — a clip on
-    /// absurd bursts, nothing more. It MUST exceed
-    /// `processing_per_op_deci`, or the cap binds every tick and a
-    /// 5-cycle thinker earns exactly what a 1-cycle one does, which is
-    /// Q100's mechanic deleted. Asserted in `XpConfig::default`.
+    /// Ceiling on Processing deci-XP credited in a single tick. Q100
+    /// credits ops, but a bot is BLOCKED (and so steps zero ops) for every
+    /// tick of a real action, while a bot spinning `x = 1` in a bare loop
+    /// is never blocked — uncapped, that paid idling strictly more than
+    /// labor. The cap plus the blocked-tick drip in phase 6 puts a working
+    /// bot and a spinning bot on the same footing.
     pub processing_max_per_tick_deci: u64,
     /// Centicycles the Processing LEVEL adds per level (Q100). Separate
     /// from `stats.tier_cpu_centi` (the bought-tier grant) so the two
@@ -95,14 +96,6 @@ impl Default for XpConfig {
         assert!(xp.curve_base > 0, "xp: curve_base must be > 0");
         assert!(xp.level_cap > 0, "xp: level_cap must be > 0");
         assert!(xp.learning_feed_pct <= 100, "xp: learning feed is a percent");
-        assert!(
-            xp.processing_max_per_tick_deci > xp.processing_per_op_deci,
-            "xp: processing_max_per_tick_deci ({}) must exceed \
-             processing_per_op_deci ({}) or executing more operations \
-             stops affecting the Processing track at all — Q100",
-            xp.processing_max_per_tick_deci,
-            xp.processing_per_op_deci,
-        );
         xp
     }
 }

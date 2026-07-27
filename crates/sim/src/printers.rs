@@ -599,7 +599,6 @@ impl Sim {
     /// (M5, `upkeep.ron` `rust_scraps`).
     pub(crate) fn scrap_recall_lowest(&mut self, faction: u8) {
         // Lowest-XP bot colony-wide walks home for scrap.
-        let ctx = self.ctx();
         let victim = self
             .world
             .bots
@@ -623,7 +622,7 @@ impl Sim {
             // and zero XP (Q100), so it would read as the fleet's cheapest
             // bot and the colony would dismantle its largest hardware
             // investment for a partial refund.
-            .map(|b| (b.data.investment(ctx), b.data.id))
+            .map(|b| (b.data.investment(), b.data.id))
             .min();
         if let Some((_, victim)) = victim {
             let home = self.nearest_faction_printer(victim);

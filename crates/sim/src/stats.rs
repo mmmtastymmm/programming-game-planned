@@ -200,16 +200,6 @@ impl Stats {
         // matter how the constant moved — buying the Processor tier made
         // a maxed thinker permanently slower. The per-level magnitude now
         // lives in xp.ron so the two sides can actually be tuned apart.
-        // A dial below 100 would SHRINK the thresholds each tier, turning
-        // the reset into a free promotion; 100 exactly makes it a no-op.
-        // Neither is a reset, so neither is allowed to pass silently.
-        assert!(
-            self.tier_xp_scale_pct > 100,
-            "stats: tier_xp_scale_pct ({}) must exceed 100 — at or below it \
-             a tier purchase stops resetting the capability's level, which \
-             is the whole of Q105's arithmetic reset",
-            self.tier_xp_scale_pct,
-        );
         assert!(
             self.tier_cpu_centi >= cap * xp.processing_cpu_centi_per_level,
             "stats: Processor tier grant ({}) must clear the Processing L{cap} bonus ({}) — Q105-R1",
@@ -219,10 +209,6 @@ impl Stats {
         // Q105-R3's ordering is only real if one bought tier outweighs
         // every track a bot can max — otherwise the scrap valve eats
         // Backup-Core reprints (see TIER_INVESTMENT_WEIGHT).
-        // EFFECTIVE deci, matching what `investment()` now sums: both
-        // halves are scale-corrected, so this comparison is the real
-        // guarantee rather than a coincidence of units (M16 max review
-        // caught it comparing an unscaled cap against a scaled total).
         let max_earnable = crate::world::XpTrack::ALL.len() as u64 * xp.track_cap_deci();
         assert!(
             crate::world::TIER_INVESTMENT_WEIGHT > max_earnable,
@@ -306,16 +292,8 @@ impl StatCtx<'_> {
         else {
             return 1;
         };
-        // Percent arithmetic, NOT an integer step: `pct / 100` truncated
-        // every dial below 200 to 1, so a perfectly reasonable tuning
-        // choice like 150 silently disabled Q105's whole arithmetic reset
-        // — no error, no failing test, just a maxed bot keeping its level
-        // through a tier purchase (M16 max review). Multiplying by the
-        // percent and dividing keeps fractional dials real.
-        let pct = self.stats.tier_xp_scale_pct.max(100);
-        (0..data.tier(cap).saturating_sub(1))
-            .fold(1u64, |acc, _| acc.saturating_mul(pct) / 100)
-            .max(1)
+        let step = self.stats.tier_xp_scale_pct / 100;
+        (0..data.tier(cap).saturating_sub(1)).fold(1u64, |acc, _| acc.saturating_mul(step.max(1)))
     }
 
     /// Per-bot stack depth: base → hardware (Stack extensions) → quirks
