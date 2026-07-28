@@ -2,6 +2,24 @@
 
 All design questions collected from docs 01–08. As each is decided, it moves to the owning doc's *Decided* section and is marked answered here. Numbering is stable — append new questions, never renumber.
 
+**Status 2026-07-27 (M16 rethink, later): Q111–Q115 ANSWERED — TIERS ARE
+REMOVED.** Both halves of Q105's tier/level split were a mistake. A bot now
+has **levels only**, on eleven structurally identical tracks (Boot deleted),
+counted in **centi-points**, on one uncapped quadratic curve. XP is strictly
+monotonic — buying never costs XP and nothing ever resets, so Q111 dissolves
+rather than resolving, Q112/Q114 are moot, and Q113/Q115 become trivial.
+**Total level is the mean across all eleven tracks**, so seniority is a real
+route to capability and staying alive is how it is earned. **Tools are
+bought and licensed by level** — either the specific skill's or the total —
+with quirks able to grant them outright. The **Backup Core inverts**: a
+cloud backup keeps all XP and loses all tools. This deletes `Capability`,
+the tier catalog, every tier stat, the scale factor, the level cap, the
+settle-time clamp and the two XP carry fields — the root cause of roughly 26
+of M16's 45 findings, removed rather than repaired. Newly open: **Q121**
+(per-level perks must become milestones now the ladder is uncapped) and
+**Q122** (upkeep lost both its `tier_value()` basis and its ceiling). Still
+open: Q116–Q119. ⚠HASH, and a units migration.
+
 **Status 2026-07-27 (M16 rethink): Q111–Q119 OPENED, Q120 answered.** Three
 review passes over the capability-slots milestone (xhigh, then max, then max
 again) confirmed **45 defects** — and the second pass found that most of the
@@ -266,157 +284,133 @@ decisions that were never actually made, each patched three times by
 implementation guesswork. M16's two fix commits are reverted (tag
 `m16-fix-attempts`) and the underlying choices are recorded here first.*
 
-**Q111 — how does a capability's earned LEVEL reset when its TIER is bought?**
-Q105 chose *tier scaling*: multiply an award by `M^(tier-1)` going into
-storage and divide coming out, so the level resets by arithmetic with no
-reset branch. The implementation evidence is bad — 11 of the 45 findings
-trace here, and three separate attempts to fix it failed. Two properties
-of the representation explain why, and neither is a discipline problem:
-**(a)** the *unit* of `xp[track]` depends on the bot's tier, so every
-reader must remember to divide and six did not (the energy bill, three L3
-perk gates, the HUD, `SelectKey::Xp`); **(b)** aggregate XP stops being
-well-defined — summing tier-scaled tracks is meaningless, since a tier-3
-track (×10,000) dwarfs eleven other maxed tracks — so `xp_total()` has no
-correct implementation, which is why `investment()` was wrong twice and
-the load-time assertion written to guarantee its ordering was comparing
-incommensurable numbers.
-  - **Option A — harden the scaling.** Keep it, but make the stored value
-    a newtype so raw reads are a compile error, and stop expressing the
-    factor as a percent: `(pct/100)^(tier-1)` cannot be exact in integer
-    math for fractional dials (150 truncates to 1 at every tier, twice
-    shipped), whereas a plain multiplier (`tier_xp_scale: 100`) gives an
-    exact `mult^(tier-1)`. Repairs the arithmetic; does **not** repair (b).
-  - **Option B — lifetime XP + a per-capability BASELINE.** `xp[]` stays
-    unscaled, monotonic, lifetime; `tier_baseline[c]` records `xp[c.track()]`
-    at the moment the current tier was bought; the level reads the
-    difference. Only ONE counter is ever incremented, so progress-within-
-    tier is *derived* and cannot drift from its source. Two consequences
-    are then forced rather than chosen: lifetime XP must **not** clamp (a
-    clamped track would leave `baseline == cap` and the bot could never
-    re-level — `curve()` already saturates, so the clamp simply goes), and
-    the **Backup Core becomes one operation** (zero `xp[]` and
-    `tier_baseline`: keeps every tier, level 0 in each).
-  - **Option C — plain reset** (`xp[track] = 0` on purchase). Simplest
-    math, but the bot's history is erased and `investment()`, the scrap
-    valve and the Backup Core lose their basis — reintroducing Q105-R3's
-    problem by another route.
-  The honest trade: Option B **does** have a reset line, which is exactly
-  what tier scaling was chosen to avoid. It buys, in exchange, that no
-  unit anywhere in the sim is tier-dependent. Q112–Q115 are its
-  sub-decisions and only need answering if B wins.
+**Q111 — how does a capability's earned LEVEL reset when its TIER is bought?
+ANSWERED 2026-07-27: it doesn't — TIERS ARE REMOVED ENTIRELY.** The question
+dissolves rather than resolving: both halves of Q105's tier/level split were
+a mistake. A bot now has **levels and nothing else**, and XP is strictly
+monotonic — buying never costs XP, nothing ever resets. The model:
 
-**Q112 — what does the energy bill read: EFFECTIVE or LIFETIME levels?**
-Upkeep is "sum of levels across all tracks × `draw_per_track_level`",
-justified as *veterans cost more to run*. Under Q111-B that becomes
-ambiguous: effective levels mean a tier purchase temporarily *lowers*
-your power bill until you re-earn it (simple to explain, slightly odd);
-lifetime levels mean a purchase never reduces upkeep (matches "veterans
-cost more", needs a second accessor). Independently of the choice,
-`draw_per_module` needs a **retune**: M16 silently changed it from
-`modules.len()` (0–3, hard-capped by the deleted `slot_cap`) to
-`tier_value()` (0–12 in the shipped catalog), quadrupling the hardware
-term's ceiling with no tuning change and no mention in any commit — a
-mature colony now browns out at a materially smaller fleet than the
-numbers were set for.
+  - **Eleven tracks, structurally identical**: Mining, Hauling, Combat,
+    Building, Scouting, Processing, Age, Mileage, Hiding, Flinch, Learning.
+    No capability/body split, no `Capability::track()` pairing deciding
+    which tracks are special. One struct, one rule, one code path.
+  - **Centi-points** (`i64`), replacing deci. This is not cosmetic: the
+    `gain_carry` and `learning_carry` fields exist today *only* because deci
+    was too coarse for a 10% Learning cut of a 1-deci drip, and they are
+    carried in hundredths-of-a-deci — i.e. centi. Storing centi natively
+    deletes both fields and the carry arithmetic in `settle_xp`.
+  - **One quadratic curve**, applied uniformly, with **no level cap** — the
+    ladder runs until `i64` does (~43 million levels at any sane base, so
+    never in practice). Most levels grant nothing; specific ones do.
+  - **Total level = the mean across all eleven tracks**, passive tracks
+    included. Seniority is a legitimate route to capability and staying
+    alive is how it is earned — deliberately rewarding careful play.
+  - **Tools are BOUGHT, and level licenses the purchase.** Every track has
+    one: drill, build tool, weapon, optics, CPU, hull plating, drivetrain,
+    signature dampener, gyros, cargo rack, training module. A bot may buy a
+    tool whose requirement is met by **either** that skill's level **or** its
+    total level. Because XP never decreases and the gate sits at purchase, a
+    separate use-gate is redundant — a bot can never hold a tool it is not
+    licensed for. Quirks may grant tools outright (e.g. a machine-learning
+    quirk upgrading the processor); that is the deliberate exception.
+  - **`XpTrack::Boot` is deleted** — an odd track that had a perk, a
+    documented income, and no award site anywhere in the sim.
 
-**Q113 — what does `SelectKey::Xp(track)` rank by?** The editor exposes it
-as "Mining XP" on the printer-allocation dial. It could mean lifetime on
-that track (a total order — "my most experienced miner") or current
-proficiency `(tier, progress-within-tier)`. Both are expressible without
-unit confusion under Q111-B; this is purely what a player expects the dial
-to do. (Under the shipped scaling it meant neither: it returned raw scaled
-storage, so "most Mining XP" resolved to *highest Mining tier* regardless
-of skill.)
+  Deleted outright by this ruling: `Capability`, `tiers[5]`, `tier()`,
+  `tier_value()`, `TIER_INVESTMENT_WEIGHT`, `TierSpec` and the tier catalog,
+  `tier_sensors`/`tier_damage_pct`/`tier_build_pct`/`tier_cpu_centi`/
+  `tier_xp_scale_pct`, `StatCtx::track_scale`, `capability_level`,
+  `track_cap_deci`/`track_cap_deci_scaled` and the settle-time clamp,
+  `UpgradeOrder::Tier`, the Q105-R1 load validation, and the Q105-R3
+  investment weighting. This is the root cause of roughly 26 of M16's 45
+  findings, removed rather than repaired. ⚠HASH, and a units migration.
 
-**Q114 — how does a tier reset present in the inspector?** The moment a
-purchase drops a maxed capability to L0 is when the mechanic is most
-confusing, and the shipped HUD made it worse by printing the pre-reset
-level. Under Q111-B the inspector can honestly show both — e.g.
-`mining 1,240 (t2 · L0)` — lifetime total beside current-tier level, so
-the player can see their history did not vanish. Worth deciding as UX
-rather than discovering.
+**Q112 — what does the energy bill read: EFFECTIVE or LIFETIME levels?
+ANSWERED 2026-07-27: moot** — there is only one kind of level now. What the
+question was really carrying survives as **Q122** (upkeep has lost its
+ceiling, and `draw_per_module` has lost the `tier_value()` it multiplied).
 
-**Q115 — what does `investment()` actually measure?** Q105-R3 defined it as
-earned XP plus bought tiers so the scrap valve never eats a Backup-Core
-reprint (full tiers, zero XP). Under Q111-B lifetime XP is unbounded, so a
-very old unimproved bot eventually outranks a fully-tiered reprint — the
-same failure by another route. The cheap fix is to bound the XP half
-(`min(xp[track], track_cap_deci)`, ceiling 12 × 15,000) so the tier weight
-can dominate. The more principled answer is to rank by the **build
-receipt** — what the colony actually spent on this bot — which docs/03
-already references for refunds and salvage, and which would make
-"investment" mean the same thing everywhere. Cheap fix now, receipt later?
+**Q113 — what does `SelectKey::Xp(track)` rank by? ANSWERED 2026-07-27:**
+the track's centi-points, directly. With one unscaled unit everywhere the
+key is unambiguous and comparable across bots — the question only existed
+because tier-scaled storage made "XP" mean different things on different bots.
 
-**Q116 — does the Processing track survive, and does Processor stay a
-capability?** Q100 made cycles-per-tick the fifth capability with a level
-earned by executing operations. It produced 5 defects and its anti-gaming
-story never closed: crediting ops rewards a bot spinning `x = 1` in a bare
-loop, while crediting engagement rewards standing still — and the
-enumeration of "which actions count as idle" was wrong the moment it
-shipped (`receive()` takes an *optional* timeout, so a bot parked forever
-on `receive("nobody")` out-earned every worker).
-  - **Cut it; compute returns to an Upgrade purchase.** Four capabilities
-    (Mining, Building, Combat, Optics), each tier × level; cycles go back
-    to the existing `UpgradeEffect::CpuCenti` line (CPU Mk2/Mk3, already
-    in the catalog). No residue, no asymmetry, `XpTrack::ALL` back to 11.
-  - **Cut the track, keep Processor as a tier-only capability.** Five
-    slots survive Q105's model; one of them behaves unlike the other four.
-  - **Keep it, credit only when recently productive.** Ops count only if
-    the bot completed a real action inside a window — idling earns
-    nothing, "compute sharpens with use" survives. Costs new per-bot state
-    and a window to tune.
-  Whichever wins, Q100's *other* ruling stands untouched: the Coprocessor
-  stays retired and "actions block" stays unconditional, because that was
-  a language decision, not a track decision.
+**Q114 — how does a tier reset present in the inspector? ANSWERED
+2026-07-27: moot** — nothing resets. The inspector shows level and
+centi-points per track, plus the total level (the mean).
 
-**Q117 — how do tier-blind queries and an under-tiered `mine()` coexist
-without killing the fleet?** docs/01 rules that "Queries return nodes
-regardless of tool tier — sensing isn't harvesting; an under-tiered
-`mine()` faults as usual." With Q109's fault damage that is a death
-spiral: once the start-zone tier-0/1 veins exhaust, `closest(ore)` returns
-a Copper seam, every bot in the shipped starter program walks there and
-faults on every loop until it wrecks. M16 filtered the queries (which
-contradicted the ruling outright and left `closest` and `scan_resources`
-disagreeing), then reverted the filter and added an opt-in `workable`
-attribute that no shipped program used (restoring the spiral).
-  - **Scope the filter to the `ore` FAMILY only.** Explicit kinds stay
-    tier-blind exactly as ruled; `ore` — whose documented job docs/01
-    already states is *"nearest thing to mine"* — resolves to what this
-    bot can work. One filter, one sentence of doc, no new language surface.
-  - **Make an under-tiered `mine()` a NON-DAMAGING fault.** The ruling
-    stays literally true everywhere; the program still faults and the
-    player still sees it, but this fault class does not feed Q109's HP
-    chip, so a mis-targeted fleet stalls loudly instead of dying quietly.
-  - **Keep queries tier-blind and update every shipped program** to guard
-    with a (perception-gated) `workable` attribute — GREEN/RED starters,
-    the Feral Harvester, and docs/04. Most literal; naive player-written
-    programs still die.
-  Note for whoever takes this: the M16 attribute read `world.nodes`
-  directly, skipping the perception gate its sibling `distance` enforces,
-  so it disclosed a node's harvest tier for ground the faction had never
-  scouted. Any revival must gate it.
+**Q115 — what does `investment()` measure? ANSWERED 2026-07-27:**
+`xp_total()` is meaningful again (one unit, plain addition), so investment is
+earned XP plus the value of installed tools. **The Backup Core inverts**: it
+is a *cloud backup*, so it preserves **all XP and loses all tools** — the
+tools were far away when the body died. The reprint arrives fully
+experienced and completely naked, and must re-buy its kit, which it is
+licensed for precisely because the XP survived. (The old definition — keeps
+tiers, wipes XP — described a thing that no longer exists.)
 
-**Q118 — should the capability tier catalog be validated against Q72's
-ladder rule at load?** docs/03 ratifies "tier N+1 prices only in materials
-mineable at tier ≤ N — no tier's key is ever locked behind its own door",
-plus "Bronze arms, Chips think". The shipped M16 catalog violates both:
-`Optics tier 3 = [(Lens,4),(Chips,2)]` needs Crystal (Mining tier 4), so a
-mid-game sensor upgrade is gated behind the *top* of the mining ladder and
-prices a non-compute capability in Chips; Combat tiers 2 and 3 reach past
-their allowed rungs too. M16 added four load-time invariants for
-Q105-R1/R3 and none for Q72, so this shipped silently. Fix the prices,
-add the invariant, or both?
+**Q116 — does the Processing track survive? PARTLY ANSWERED 2026-07-27:**
+yes, as one of the eleven, with the CPU as its tool. What does **not** go
+away is why it was in doubt: it is one of only two tracks whose income
+counts an *action* rather than an *outcome*, so a bot spinning `x = 1` in a
+bare loop farms it having delivered nothing. Mining pays on units loaded,
+Building on progress and HP actually restored, Combat on HP actually
+removed, Hauling on delivered cargo-distance (and explicitly excludes
+`withdrawn_aboard` so a withdraw→lap→deposit loop earns zero); Flinch pays
+only for hostile sources; Hiding needs its detection episode to re-arm.
+Processing has no such guard — and neither does **Mileage**, which pays one
+unit per tile walked unconditionally, so a bot pacing two tiles farms its
+way to the drivetrain perk. Both need an outcome to hang on, or an explicit
+guard, or an accepted reason they are exempt.
 
-**Q119 — do capability tier purchases draw coolant?** docs/06 states
-"module work draws no coolant (mechanical, not thermal — coolant is for
-compute)". Q105's capability tiers inherited the module slots' role — the
-Optics tier-2 row even carries the retired Optics module's exact price —
-but the implementation inherited the *compute* branch's coolant charge
-instead. The consequence is not cosmetic: a colony with no Water reaching
-its Station cannot buy Mining tier 2, which gates every Copper and Tin
-seam, and the order re-arms silently forever with no message. Should
-mechanical tiers (Mining, Building, Combat, Optics) be coolant-free, with
-only Processor — if it survives Q116 — paying?
+**Q117 — how do tier-blind queries and a failing `mine()` coexist without
+killing the fleet?** Unchanged in substance, restated against levels: the
+gate is now the bot's Mining **level** (or total level) against the
+resource's requirement, not a bought tier. docs/01 rules that queries are
+tier-blind and an under-tiered `mine()` "faults as usual"; with Q109's fault
+damage that is a death spiral once start-zone veins exhaust and
+`closest(ore)` starts returning seams the fleet cannot work. Options as
+before: scope the filter to the `ore` FAMILY only (docs/01 already frames
+`ore` as "nearest thing to mine"), make the failing `mine()` a
+**non-damaging** fault, or keep queries blind and teach every shipped
+program to guard. Any revival of a `workable`-style attribute must respect
+the perception gate — M16's read `world.nodes` directly and leaked node
+grades for unscouted ground.
+
+**Q118 — should the tool catalog be validated against Q72's ladder rule at
+load?** Still open, and still live: tools are bought with materials, so
+"tier N+1 prices only in materials mineable at tier ≤ N" still has to hold,
+and M16's catalog violated it (Optics t3 priced in Chips, which need Crystal
+— the top of the mining ladder). Fix the prices, add the load-time
+invariant, or both.
+
+**Q119 — which tool purchases draw coolant?** Restated: docs/06 says
+mechanical work is "not thermal — coolant is for compute". With tiers gone
+the question is per-tool: presumably only the CPU (and perhaps the training
+module) draws Water, and drills, weapons, plating and the rest do not. M16
+charged coolant on every capability purchase, which silently made Mining
+tier 2 — the gate on every Copper and Tin seam — unreachable without a water
+chain, with no message to the player.
+
+**Q121 — what shape do per-level perks take now the ladder is uncapped?**
+Today's perks are linear per level (+10% mine yield, +5% damage, +1 sensor,
+−4% move rate…), which was safe only because the cap was 5. Unbounded levels
+make them unbounded — level 50 would be +500% yield. The ruling that "we
+won't have special things for all the levels" points at **milestone**
+effects: most levels are score and seniority, specific levels grant a perk
+or license a tool. That is coherent and fits the licensing model, but it is
+a rewrite of the whole perk table rather than a tuning pass, and it needs
+deciding which levels carry what.
+
+**Q122 — what does energy upkeep scale on now?** Two problems, one
+question. The per-bot draw is `base + per_upgrade × upgrades + per_module ×
+tier_value() + per_track_level × Σ levels`. First, `tier_value()` no longer
+exists — the term needs a new basis, presumably installed tools (and note
+M16 had already silently changed it from a 3-slot cap to a 12-tier sum,
+quadrupling the ceiling with no retune and no mention). Second, and new:
+`Σ levels` was bounded at 5 × 12 = 60 and is now **unbounded**, so an
+ancient fleet browns out a colony purely by being old. Either the level
+term caps, or it goes sub-linear, or veterans genuinely become unaffordable
+to run — which may be a fine pressure, but it should be a choice.
 
 **Q120 — what happens when a structure completes on an occupied tile? ANSWERED
 2026-07-27: SHOVE, and entombment kills.** A pending designation is *not*
@@ -445,6 +439,11 @@ The **playtest-tuning** bucket also remains (numbers that need the prototype, no
 
 ## Answered log
 
+- **Q115** (Agents): **the Backup Core inverts — a cloud backup keeps all XP and loses all tools**, which were far away when the body died. The reprint arrives fully experienced and naked, and is licensed to re-buy its kit precisely because the XP survived. `investment()` is earned XP plus installed tool value, meaningful again now that one unscaled unit makes addition work ([02-agents.md](02-agents.md), [06-progression.md](06-progression.md)).
+- **Q114** (Agents): **moot** — nothing resets, so there is no reset to present. The inspector shows level and centi-points per track plus the total level.
+- **Q113** (Agents): **`SelectKey::Xp` ranks by the track's centi-points, directly** — unambiguous and comparable across bots once storage stops being tier-dependent.
+- **Q112** (Agents): **moot** — one kind of level. What it was carrying survives as Q122 (upkeep lost its `tier_value()` basis and, with the cap gone, its ceiling).
+- **Q111** (Agents/Progression): **TIERS ARE REMOVED; levels only.** Eleven structurally identical tracks (Boot deleted), centi-points, one uncapped quadratic curve, XP strictly monotonic — buying never costs XP and nothing resets. Total level is the mean across all eleven, so seniority earns capability and careful play is rewarded. Tools are bought, licensed by either the specific skill's level or the total, with quirks able to grant them outright. Deletes `Capability`, the tier catalog, the scale factor, the level cap, the settle-time clamp and both XP carry fields — the root cause of ~26 of M16's 45 findings ([02-agents.md](02-agents.md), [06-progression.md](06-progression.md)).
 - **Q120** (Resources/Agents): **a completing structure SHOVES the occupant; entombment kills.** Blueprints stay passable — solid designations would let anyone wall off ground for free by pretending to build. No free adjacent tile means the occupant is destroyed and drops a black box, skipping the wreck stage. Rules out both M16 repairs: the build may neither hold (stalling, minting XP, or faulting the builder to death under Q109) nor delete the designation and its materials ([03-resources.md](03-resources.md)).
 - **Q108** (Enemies): **shipped Feral sources ratified** — the `move_to` before each `attack` is load-bearing (a non-adjacent swing faults, so docs/04's four-line Drone crash-loops whenever it *sees* an enemy), and the first program a player reads must not teach a bug they would copy; `wait(n)` beats give the Magician's mutation an integer literal to bite on. docs/04 updated ([04-enemies.md](04-enemies.md)).
 - **Q107** (Multiplayer): **alliance decryption pools forward only** — merge-on-formation is ruled out because decryption is permanent and monotonic, so it would enable laundering (ally one tick, absorb everything, divorce). Ratifies the shipped behavior; docs/07's "never decryption" line was the outlier against docs/08 and the code, and is corrected ([07-architecture.md](07-architecture.md), [08-multiplayer.md](08-multiplayer.md)).
