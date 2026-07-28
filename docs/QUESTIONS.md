@@ -14,8 +14,7 @@ Q123 claim that the skill route was "dead on arrival" was true in deci/tick
 but **false in levels** (the mean over ten tracks, several at zero, very
 nearly cancels the passive lead — a pure miner comes out tied); and
 **specialisation dissolves the duty-cycle problem by itself**, which is why
-"pay the loop, not the verb" was rejected as unnecessary. Still open:
-**Q116–Q119**.
+"pay the loop, not the verb" was rejected as unnecessary. Still open: **Q117–Q119**.
 
 **Status 2026-07-27 (M16 rethink, earlier): Q121 ANSWERED — tools carry the
 power, levels license.** Perks take three shapes: tools hold the step
@@ -386,19 +385,37 @@ experienced and completely naked, and must re-buy its kit, which it is
 licensed for precisely because the XP survived. (The old definition — keeps
 tiers, wipes XP — described a thing that no longer exists.)
 
-**Q116 — does the Processing track survive? PARTLY ANSWERED 2026-07-27:**
-yes, as one of the eleven, with the CPU as its tool. What does **not** go
-away is why it was in doubt: it is one of only two tracks whose income
-counts an *action* rather than an *outcome*, so a bot spinning `x = 1` in a
-bare loop farms it having delivered nothing. Mining pays on units loaded,
-Building on progress and HP actually restored, Combat on HP actually
-removed, Hauling on delivered cargo-distance (and explicitly excludes
-`withdrawn_aboard` so a withdraw→lap→deposit loop earns zero); Flinch pays
-only for hostile sources; Hiding needs its detection episode to re-arm.
-Processing has no such guard — and neither does **Mileage**, which pays one
-unit per tile walked unconditionally, so a bot pacing two tiles farms its
-way to the drivetrain perk. Both need an outcome to hang on, or an explicit
-guard, or an accepted reason they are exempt.
+**Q116 — does the Processing track survive? ANSWERED 2026-07-27: yes, and
+neither it nor Mileage gets an anti-farm guard.** Processing is one of the
+ten, with the CPU as its tool. The objection was that it and Mileage are the
+only tracks whose income counts an *action* rather than an *outcome*, so a
+bot spinning `x = 1` in a bare loop, or pacing two tiles, farms them having
+delivered nothing. The ruling is that this sorts itself out, and two later
+decisions are why it now clearly does: **Q121** moved the power into tools
+and made continuous perks hyperbolic-bounded, so the prize is slow and
+asymptotic rather than compounding; **Q123** put both tracks in the ambient
+bucket at ~50 minutes to L5. Meanwhile the cost never shrank — a farming bot
+is not mining, hauling or building, still draws upkeep, still counts against
+the fleet cap, and a level only *licenses* a tool it has earned no materials
+to buy. **An exploit is something that beats playing properly; these lose to
+it**, so they are bad strategies rather than exploits, and the opponent who
+mined does the policing.
+
+  **The distinction that makes this a principle rather than permissiveness**
+  — and which explains why the guards that already exist must stay. Hauling
+  excludes `withdrawn_aboard` (a withdraw→lap→deposit loop farms XP at the
+  depot the bot was standing at anyway); Flinch pays only for hostile
+  sources (a friendly ram costs the colony nothing); Hiding needs its
+  detection episode to re-arm (or the same enemy pays out repeatedly for
+  free). In all three, farming was **free** — available *alongside* the job,
+  or at no opportunity cost at all. So the rule for any future track is:
+  **guard it when farming is free; leave it alone when farming costs the
+  work.** Pacing and spinning cost the bot's entire output, so they need
+  nothing.
+
+  Note also that Q105's specialisation ruling makes legitimate play dominate
+  the "exploit": a hauler earns Mileage constantly just by doing its job,
+  and one that pads its route by wandering simply delivers less.
 
 **Q117 — how do tier-blind queries and a failing `mine()` coexist without
 killing the fleet?** Unchanged in substance, restated against levels: the
@@ -590,6 +607,7 @@ The **playtest-tuning** bucket also remains (numbers that need the prototype, no
 
 ## Answered log
 
+- **Q116** (Agents): **Processing survives; neither it nor Mileage gets an anti-farm guard.** Farming them costs the bot's entire output while Q121 bounded the prize and Q123 made it slow — an exploit is something that beats playing properly, and these lose to it. Records the reusable rule: guard a track when farming is free (as Hauling, Flinch and Hiding still are), leave it alone when farming costs the work ([02-agents.md](02-agents.md)).
 - **Q123** (Agents/Progression): **per-track `curve_base`, two-tier pacing, and Age slowed to 0.2 deci/tick.** `curve_base = dedicated_rate × target_ticks_to_L5 / 15`; job tracks target L5 in ~10 min of dedicated work, ambient tracks ~50 min, and that gap is what lets a specialist out-level the seniority clock. Corrects the question's original premise: the skill route was not "dead on arrival" — in levels it came out tied, because the mean over ten tracks with several at zero cancels the passive lead. Specialisation itself fixes the 1.4% mining duty cycle, so "pay the loop" was rejected as unnecessary ([02-agents.md](02-agents.md)).
 - **Q122** (Agents): **upkeep takes Q121's bounded hyperbolic, and its module term re-bases on installed tools.** `Σ levels` was capped at 60 and is now unbounded, so an ancient fleet would have browned out a colony purely by being old; one shape for both questions because they are the same question ([02-agents.md](02-agents.md)).
 - **Q121** (Agents/Progression): **tools carry the power; levels license, with sparse milestones and bounded continuous perks.** Continuous perks take the integer hyperbolic `max × level / (level + K)`, which makes the uncapped ladder safe by construction and stops `+1 sensor/level` switching off fog of war at a reachable level. **Learning is retired entirely** — perk and track — because the mean-across-tracks total level already measures what it measured. Ten tracks remain ([02-agents.md](02-agents.md), [06-progression.md](06-progression.md)).
