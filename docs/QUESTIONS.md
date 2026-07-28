@@ -14,7 +14,7 @@ Q123 claim that the skill route was "dead on arrival" was true in deci/tick
 but **false in levels** (the mean over ten tracks, several at zero, very
 nearly cancels the passive lead — a pure miner comes out tied); and
 **specialisation dissolves the duty-cycle problem by itself**, which is why
-"pay the loop, not the verb" was rejected as unnecessary. Still open: **Q117–Q119**.
+"pay the loop, not the verb" was rejected as unnecessary. Still open: **Q118–Q119**.
 
 **Status 2026-07-27 (M16 rethink, earlier): Q121 ANSWERED — tools carry the
 power, levels license.** Perks take three shapes: tools hold the step
@@ -418,18 +418,78 @@ mined does the policing.
   and one that pads its route by wandering simply delivers less.
 
 **Q117 — how do tier-blind queries and a failing `mine()` coexist without
-killing the fleet?** Unchanged in substance, restated against levels: the
-gate is now the bot's Mining **level** (or total level) against the
-resource's requirement, not a bought tier. docs/01 rules that queries are
-tier-blind and an under-tiered `mine()` "faults as usual"; with Q109's fault
-damage that is a death spiral once start-zone veins exhaust and
-`closest(ore)` starts returning seams the fleet cannot work. Options as
-before: scope the filter to the `ore` FAMILY only (docs/01 already frames
-`ore` as "nearest thing to mine"), make the failing `mine()` a
-**non-damaging** fault, or keep queries blind and teach every shipped
-program to guard. Any revival of a `workable`-style attribute must respect
-the perception gate — M16's read `world.nodes` directly and leaked node
-grades for unscouted ground.
+killing the fleet? ANSWERED 2026-07-27: NAMED minable queries, plus shipped
+programs that handle the miss — and docs/01 needs no amendment.** The
+failure was a fleet-killer: `move_to(closest(ore).expect())` then `mine()`
+walks every bot to a seam its drill cannot work, and because `move_to`
+returns `Ok` immediately at chebyshev ≤ 1 the loop collapses to
+`closest → move_to (0 ticks) → mine → fault → restart`, about 3–4 ticks per
+iteration. At `fault_damage: 2` a 40 HP chassis dies in ~20 faults ≈ **80
+ticks, eight seconds** — and every bot on the same program does it at the
+same vein together. (An earlier draft of this question guessed the
+mine→haul round trip spread the faults out. It does not: the travel happens
+once, then the tight loop is identical for specialist and generalist.)
+
+  It is really **two** failures, and only one is a targeting problem:
+  *(1)* the nearest ore is unworkable while workable ore exists; *(2)* no
+  workable ore exists anywhere known — the mid-game transition, where
+  `closest` returns `Err` and there is genuinely nothing to hand back. Any
+  answer addressing only (1) moves the death from "when Copper is nearest"
+  to "when Iron runs out."
+
+  **The ruling, both halves:**
+
+  - **Named queries, not a redefinition.** `closest(ore)` and `exists(ore)`
+    are untouched and stay tier-blind, so docs/01's ratified rule —
+    *"Queries return nodes regardless of tool tier — sensing isn't
+    harvesting"* — remains literally true and needs no edit. Alongside them
+    sit **`closest_minable(kind)`** and **`exists_minable(kind)`**, which
+    answer the other question explicitly. The name carries the meaning
+    instead of `ore` silently behaving unlike the union of its members.
+    Both take a kind, so `closest_minable(copper)` means "the copper, if my
+    drill reaches it". `scan_resources()` stays complete — it is the
+    survey/planning list.
+    **Doing this as a query rather than an entity attribute also closes a
+    hole by construction**: M16's `workable` attribute read `world.nodes`
+    directly and disclosed a node's grade for ground the faction had never
+    scouted, whereas the query family is already scoped to `known_nodes`.
+  - **Shipped programs handle the miss.** This is what covers failure (2),
+    and Q108 already set the precedent that a shipped source must not
+    crash-loop, because the first program a player reads must not teach a
+    bug they will copy. **Q110 additionally requires binding once rather
+    than check-then-act**, which rules out the `exists`-then-`closest`
+    guard (the node can vanish between them) and makes `match` the
+    consistent form:
+
+    ```python
+    match closest_minable(ore):
+        case Result.Ok(t):
+            move_to(t)
+            mine()
+            haul_home()
+        case Result.Err(msg):
+            explore()
+    ```
+
+    Six lines instead of four, teaching `match` exactly where the player
+    needs it. GREEN/RED (`crates/game/src/editor/mod.rs`) and the Feral
+    Harvester (`crates/sim/src/feral.rs`) both need it, and docs/04's
+    verbatim sources need re-syncing — they were already found stale
+    against Q110's ruling.
+
+  **`try_mine()` joins the `try_*` family** rather than being a one-off: a
+  fault-free swing for the case where the node empties between arriving and
+  mining. It lands with `try_move_to` and `try_attack` (backlogged from
+  Q109/Q110) so the family grows in one coherent pass with one convention.
+
+  A fault class ("a failing `mine()` does not chip HP") was considered and
+  rejected. The resolving distinction is avoidable versus unavoidable, and
+  every fault here is avoidable — the language already ships `match` and
+  `on error:`, so Q109's punishment stays fair and needs no exceptions,
+  which would only have raised "which other faults?".
+
+  Implementation notes: the two new builtins need cycle costs in the cost
+  table, and both sort `(distance, id)` like `closest` for determinism.
 
 **Q118 — should the tool catalog be validated against Q72's ladder rule at
 load?** Still open, and still live: tools are bought with materials, so
@@ -607,6 +667,7 @@ The **playtest-tuning** bucket also remains (numbers that need the prototype, no
 
 ## Answered log
 
+- **Q117** (Language/Resources): **named `closest_minable` / `exists_minable`, plus shipped programs that handle the miss.** `closest(ore)` and `exists(ore)` are untouched, so docs/01's tier-blind ruling stays literally true and needs no amendment; the name carries the meaning instead of `ore` silently behaving unlike its members. As queries rather than an entity attribute they are already scoped to `known_nodes`, closing the perception leak M16's `workable` attribute had. The shipped starters and the Feral Harvester `match` on the result — per Q108 (shipped sources must not crash-loop) and Q110 (bind once, never check-then-act) — which covers the mid-game case where no workable ore exists at all. `try_mine()` joins the backlogged `try_*` family ([01-language.md](01-language.md), [03-resources.md](03-resources.md)).
 - **Q116** (Agents): **Processing survives; neither it nor Mileage gets an anti-farm guard.** Farming them costs the bot's entire output while Q121 bounded the prize and Q123 made it slow — an exploit is something that beats playing properly, and these lose to it. Records the reusable rule: guard a track when farming is free (as Hauling, Flinch and Hiding still are), leave it alone when farming costs the work ([02-agents.md](02-agents.md)).
 - **Q123** (Agents/Progression): **per-track `curve_base`, two-tier pacing, and Age slowed to 0.2 deci/tick.** `curve_base = dedicated_rate × target_ticks_to_L5 / 15`; job tracks target L5 in ~10 min of dedicated work, ambient tracks ~50 min, and that gap is what lets a specialist out-level the seniority clock. Corrects the question's original premise: the skill route was not "dead on arrival" — in levels it came out tied, because the mean over ten tracks with several at zero cancels the passive lead. Specialisation itself fixes the 1.4% mining duty cycle, so "pay the loop" was rejected as unnecessary ([02-agents.md](02-agents.md)).
 - **Q122** (Agents): **upkeep takes Q121's bounded hyperbolic, and its module term re-bases on installed tools.** `Σ levels` was capped at 60 and is now unbounded, so an ancient fleet would have browned out a colony purely by being old; one shape for both questions because they are the same question ([02-agents.md](02-agents.md)).
