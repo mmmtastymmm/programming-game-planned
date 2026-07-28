@@ -2,6 +2,22 @@
 
 All design questions collected from docs 01–08. As each is decided, it moves to the owning doc's *Decided* section and is marked answered here. Numbering is stable — append new questions, never renumber.
 
+**Status 2026-07-27 (M16 rethink, latest): Q121 ANSWERED — tools carry the
+power, levels license.** Perks take three shapes: tools hold the step
+changes (which is what makes an uncapped ladder harmless by construction),
+sparse **milestones** at named levels carry qualitative growth (the L3
+thresholds that already exist are the model), and genuinely continuous
+perks use a bounded integer **hyperbolic**, `max × level / (level + K)` —
+which also settles the sensor problem, since `+1/level` switched fog of war
+off at a reachable level on a 34×20 map. **Learning is retired entirely**,
+perk and track: it was defined as 10% of every other award, and the
+mean-across-tracks total level measures that from the same data without a
+stored copy. **Ten tracks remain.** Newly open: **Q123** — the passive
+tracks currently out-earn the active ones (Age climbs ~7× faster than
+Mining), so total level is a clock and the skill route to a tool licence is
+dead on arrival; incomes need rebalancing before specialisation means
+anything.
+
 **Status 2026-07-27 (M16 rethink, later): Q111–Q115 ANSWERED — TIERS ARE
 REMOVED.** Both halves of Q105's tier/level split were a mistake. A bot now
 has **levels only**, on eleven structurally identical tracks (Boot deleted),
@@ -290,19 +306,26 @@ dissolves rather than resolving: both halves of Q105's tier/level split were
 a mistake. A bot now has **levels and nothing else**, and XP is strictly
 monotonic — buying never costs XP, nothing ever resets. The model:
 
-  - **Eleven tracks, structurally identical**: Mining, Hauling, Combat,
-    Building, Scouting, Processing, Age, Mileage, Hiding, Flinch, Learning.
-    No capability/body split, no `Capability::track()` pairing deciding
-    which tracks are special. One struct, one rule, one code path.
-  - **Centi-points** (`i64`), replacing deci. This is not cosmetic: the
-    `gain_carry` and `learning_carry` fields exist today *only* because deci
-    was too coarse for a 10% Learning cut of a 1-deci drip, and they are
-    carried in hundredths-of-a-deci — i.e. centi. Storing centi natively
-    deletes both fields and the carry arithmetic in `settle_xp`.
+  - **Ten tracks, structurally identical**: Mining, Hauling, Combat,
+    Building, Scouting, Processing, Age, Mileage, Hiding, Flinch. (Boot was
+    deleted here; Learning followed under Q121.) No capability/body split,
+    no `Capability::track()` pairing deciding which tracks are special. One
+    struct, one rule, one code path.
+  - **Centi-points** (`i64`), replacing deci. The `gain_carry` and
+    `learning_carry` fields exist today because deci was too coarse for a
+    10% Learning cut of a 1-deci drip, and they hold hundredths-of-a-deci —
+    i.e. centi. `learning_carry` dies with the Learning track (Q121).
+    `gain_carry` is subtler than first written here: a carry buys one
+    decimal place *below* the storage unit, so deci→centi moves the problem
+    down rather than removing it. What is true is weaker — at centi
+    magnitudes the shipped awards are large enough (Age's 1 deci/tick
+    becomes 10 centi/tick, ×90% = 9 exactly) that truncation stops biting,
+    so the carry becomes unnecessary in practice rather than impossible in
+    principle.
   - **One quadratic curve**, applied uniformly, with **no level cap** — the
     ladder runs until `i64` does (~43 million levels at any sane base, so
     never in practice). Most levels grant nothing; specific ones do.
-  - **Total level = the mean across all eleven tracks**, passive tracks
+  - **Total level = the mean across all ten tracks**, passive tracks
     included. Seniority is a legitimate route to capability and staying
     alive is how it is earned — deliberately rewarding careful play.
   - **Tools are BOUGHT, and level licenses the purchase.** Every track has
@@ -391,15 +414,71 @@ charged coolant on every capability purchase, which silently made Mining
 tier 2 — the gate on every Copper and Tin seam — unreachable without a water
 chain, with no message to the player.
 
-**Q121 — what shape do per-level perks take now the ladder is uncapped?**
-Today's perks are linear per level (+10% mine yield, +5% damage, +1 sensor,
-−4% move rate…), which was safe only because the cap was 5. Unbounded levels
-make them unbounded — level 50 would be +500% yield. The ruling that "we
-won't have special things for all the levels" points at **milestone**
-effects: most levels are score and seniority, specific levels grant a perk
-or license a tool. That is coherent and fits the licensing model, but it is
-a rewrite of the whole perk table rather than a tuning pass, and it needs
-deciding which levels carry what.
+**Q121 — what shape do per-level perks take now the ladder is uncapped?
+ANSWERED 2026-07-27: TOOLS carry the power; LEVELS license, with sparse
+MILESTONES and bounded CONTINUOUS perks.** The premise of the question was
+that every number in the perk table was authored against a cap of 5 —
+`+10% mine yield per level` and `+1 sensor per level` were chosen knowing
+the maximum multiplier was 5×. Uncapping the ladder does not merely risk
+runaway; it leaves the table with no authored intent past L5 at all. The
+ruling has three parts:
+
+  - **Tools carry the step changes.** Now that tools are bought and
+    licensed by level, the tool holds the big numbers. This is the piece
+    that makes an uncapped ladder harmless *by construction*: levels barely
+    multiply anything, so there is nothing to run away.
+  - **Qualitative growth arrives as sparse milestones** at named levels.
+    The shape already exists and is proven — five perks are L3 thresholds
+    today (Mining swing −25%, Building repair +25%, Hauling loaded speed,
+    Combat hearing, Scouting corruption immunity). Most levels grant
+    nothing; they are licence and score.
+  - **Where a perk genuinely reads as continuous** — hull toughening with
+    age, bearings wearing in, optics sharpening — it uses a **bounded
+    hyperbolic**: `bonus = max_bonus × level / (level + K)`. Pure integer,
+    deterministic, no floats: half of `max_bonus` at level K, 80% at 4K,
+    asymptotic and never exceeding it.
+
+  The hyperbolic settles the sharpest case without a special-case clamp.
+  `+1 sensor/level` on a 34×20 map put a Scouting-L10 bot's vision at 15
+  tiles — a 31×31 square, most of the board — and L15 saw everything, so
+  **fog of war switched off at a reachable level**. Under an asymptotic
+  bonus vision approaches a ceiling instead, and fog cannot be ground away.
+  The self-saturating perks (Flinch −10%/lvl floors at L10, Mileage at L25,
+  Hiding signature once below any hearing radius) already behaved and need
+  no change beyond restatement in the new form.
+
+  **Learning is retired entirely — both the perk and the track.** It was
+  the lifetime-achievement track, defined as 10% of every other award; the
+  mean-across-tracks total level now measures exactly that, derived from
+  the same data without a stored copy. Deletes `XpTrack::Learning`,
+  `learning_feed_pct`, `learning_gain_pct_per_level`, `learning_carry`, the
+  `feeds` map and `settle_xp`'s entire second pass, the Learning term in
+  `xp_gain_pct` (quirk `XpPct` effects — 10x Developer, Tech Debt — stay),
+  and the Learning award site. Ten tracks remain.
+
+  Per-perk magnitudes (`max_bonus`, `K`, which levels carry milestones) are
+  tuning and deferred; the *shape* is what this ruling fixes.
+
+**Q123 — how are track incomes rebalanced so specialisation beats
+seniority?** Measured against the shipped constants, the **passive tracks
+out-earn the active ones**, which inverts the intent of the whole model:
+
+  | Track | deci-XP per tick, while doing the thing |
+  |---|---|
+  | Combat | ~10 — but only mid-swing, and bursty |
+  | **Age** | **1.0 — unconditional, 100% duty cycle** |
+  | Mileage | ~0.71 (10/tile ÷ 14 ticks/tile) |
+  | Hauling | ~0.29 (4 units × 10 tiles per round trip) |
+  | Mining | ~0.14 (two swings fill a 4-unit hold; the depot trip dominates) |
+
+  So Age climbs roughly **7× faster than Mining**, and total level — the
+  mean across ten tracks — is driven mostly by time alive. Because a tool
+  licenses on the specific skill's level **or** the total, the skill route
+  is dead on arrival: every bot qualifies by seniority before it qualifies
+  by doing the job, and specialisation stops meaning anything. Either
+  active incomes rise, passive incomes fall, or the licensing rule changes.
+  This is the follow-up the Q121 ruling deliberately deferred, and it is
+  arguably a bigger lever on how the game plays than the perk shapes are.
 
 **Q122 — what does energy upkeep scale on now?** Two problems, one
 question. The per-bot draw is `base + per_upgrade × upgrades + per_module ×
@@ -439,6 +518,7 @@ The **playtest-tuning** bucket also remains (numbers that need the prototype, no
 
 ## Answered log
 
+- **Q121** (Agents/Progression): **tools carry the power; levels license, with sparse milestones and bounded continuous perks.** Continuous perks take the integer hyperbolic `max × level / (level + K)`, which makes the uncapped ladder safe by construction and stops `+1 sensor/level` switching off fog of war at a reachable level. **Learning is retired entirely** — perk and track — because the mean-across-tracks total level already measures what it measured. Ten tracks remain ([02-agents.md](02-agents.md), [06-progression.md](06-progression.md)).
 - **Q115** (Agents): **the Backup Core inverts — a cloud backup keeps all XP and loses all tools**, which were far away when the body died. The reprint arrives fully experienced and naked, and is licensed to re-buy its kit precisely because the XP survived. `investment()` is earned XP plus installed tool value, meaningful again now that one unscaled unit makes addition work ([02-agents.md](02-agents.md), [06-progression.md](06-progression.md)).
 - **Q114** (Agents): **moot** — nothing resets, so there is no reset to present. The inspector shows level and centi-points per track plus the total level.
 - **Q113** (Agents): **`SelectKey::Xp` ranks by the track's centi-points, directly** — unambiguous and comparable across bots once storage stops being tier-dependent.
