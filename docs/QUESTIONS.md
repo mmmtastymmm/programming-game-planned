@@ -515,7 +515,40 @@ once, then the tight loop is identical for specialist and generalist.)
     guard (the node can vanish between them) and makes `match` the
     consistent form:
 
-    **AMENDED 2026-07-28.** The `match` form first written here was
+    **AMENDED TWICE, 2026-07-28.** *(Second amendment, after the follow-up
+    review.)* The `try_*`-eats-a-failed-query rule below was itself wrong:
+    it named `Result.Err` but not `Option.None`, the language's *other*
+    absence value, leaving `try_move_to(try_receive("orders"))` undefined —
+    and since `try_move_to` is signal-safe, one reading makes that line a
+    fault inside a running handler, i.e. a double-handle that wrecks the
+    wounded bot it was meant to save. **The rule is deleted rather than
+    extended.** `try_*` verbs take a **concrete target**; handing one a
+    `Result` or an `Option` is an ordinary type fault. That also removes a
+    hole the extension would have left, where `try_send(ch, None)` becomes a
+    silent no-op and a legitimate message vanishes.
+
+    What replaces it: **`if` / `elif` / `else` is granted at game start**
+    instead of costing 20 Data, so the starter can guard its fallible
+    queries:
+
+    ```python
+    if exists_minable(ore):
+        move_to(closest_minable(ore).expect())
+        try_mine()
+    if exists(depot):
+        move_to(closest(depot).expect())
+        try_deposit()
+    ```
+
+    **The guard-then-query race is accepted deliberately** — the two calls
+    are adjacent ops, so the window is a tick or two rather than the tens of
+    ticks a blocking verb opens (which is what made Q110's Feral race a
+    systematic bug), and it faults occasionally rather than every iteration,
+    costing 2 HP that passive repair heals. Binding once would need
+    Variables, and the starter is deliberately a Tier-0 program.
+
+    *(First amendment, below, for the record.)* The `match` form first
+    written here was
     impossible: `enum + match` is a **Tier-6** construct (70 Data) and the
     shipped starter is defined by docs/01 as **Tier-0 straight-line code**
     with no branching at all (`if` alone costs 20). A starter written in
@@ -530,13 +563,10 @@ once, then the tight loop is identical for specialist and generalist.)
     try_deposit()
     ```
 
-    Still four lines, no branching, and it cannot fault. This needs one new
-    rule, recorded in docs/01 beside `Result`: **a `try_*` verb handed a
-    failed query treats it as "nothing to do" — no action, no fault,
-    returns `False`.** `try_move_to` and `try_mine` join the start kit
-    alongside the `try_*` verbs already there. A bot with no workable ore
-    idles rather than exploring, which is the honest outcome: idle miners
-    are a thing the player should notice and answer.
+    — superseded by the second amendment above, which replaced the
+    unwrap-inside-`try_*` rule with granting `if` at game start.
+    `try_move_to` and `try_mine` do join the start kit, alongside the
+    `try_*` verbs already there.
 
     GREEN/RED (`crates/game/src/editor/mod.rs`) and the Feral Harvester
     (`crates/sim/src/feral.rs`) both take this form, and docs/04's verbatim

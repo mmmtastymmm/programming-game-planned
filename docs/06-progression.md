@@ -30,11 +30,10 @@ Function blocks are **learned from Template Caches**: ruined installations holdi
 
 ```mermaid
 flowchart TD
-    START([Game start:<br/>straight-line programs + the start kit:<br/>move_to + try_move_to, mine + try_mine,<br/>deposit + try_deposit, withdraw + try_withdraw,<br/>study, closest, closest_minable, exists,<br/>exists_minable, wait, rng, drop_cargo, abort,<br/>wander, cargo_count, is_seen])
+    START([Game start:<br/>straight-line programs + <b>if / elif / else</b><br/>+ the start kit:<br/>move_to + try_move_to, mine + try_mine,<br/>deposit + try_deposit, withdraw + try_withdraw,<br/>study, closest, closest_minable, exists,<br/>exists_minable, wait, rng, drop_cargo, abort,<br/>wander, cargo_count, is_seen])
 
     subgraph Constructs["Language constructs (one-time Data cost, PERMANENT)"]
         VAR["Variables — 10"]
-        IF["if / elif / else — 20"]
         WHILE["while / break — 35"]
         SIG1["on error: window — 40"]
         SIG2["on hurt: window — 55"]
@@ -66,16 +65,14 @@ flowchart TD
     START --> VAR
     START --> F_SENSE
     START --> F_LOG
-    VAR --> IF
-    F_SENSE --> IF
-    IF --> WHILE
-    IF --> SIG1
+    VAR --> WHILE
+    VAR --> SIG1
     F_LOG --> SIG1
     SIG1 --> SIG2
-    IF --> F_ATK
+    START --> F_ATK
     F_ATK --> F_GUARD
     F_ATK --> F_SALV
-    IF --> F_BUILD
+    START --> F_BUILD
     WHILE --> DEF
     DEF --> IMPORT
     START --> F_SEARCH

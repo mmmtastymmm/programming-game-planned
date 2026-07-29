@@ -193,26 +193,32 @@ Constructs are unlocked in tiers ([06-progression.md](06-progression.md) owns th
 
 ### Tier 0 — Straight-line programs (game start)
 
-Only sequential calls to unlocked function blocks. No state, no branching.
-
-The **shipped starter is the fault-free form**, and it has to be: Tier 0 has
-no branching at all (`if` costs 20 Data, `match` 70), so a program that
-cannot handle a missed query is a program that cannot survive one. Every
-verb here is a `try_*`, and **a `try_*` verb handed a failed query does
-nothing and returns `False`** — so when the ore this bot can work runs out,
-the miner idles instead of faulting itself to death (Q117).
+Sequential calls to unlocked function blocks, plus **branching** — Tier 2's
+`if` / `elif` / `else` is **granted at game start** rather than researched
+(Q117). Branching is not a luxury here: a starter that cannot guard a
+fallible query is a starter that faults every loop once the ore it can work
+runs out, and Q109's fault damage turns that into a dead fleet in about
+eight seconds. No state, no loops.
 
 ```python
-try_move_to(closest_minable(ore))
-try_mine()
-try_move_to(closest(depot))
-try_deposit()
+if exists_minable(ore):
+    move_to(closest_minable(ore).expect())
+    try_mine()
+if exists(depot):
+    move_to(closest(depot).expect())
+    try_deposit()
 # program loops back to line 1
 ```
 
-The `.expect()` form below is what the *docs* teach about `Result`; it is
-deliberately not what the game ships, because `.expect()` in a Tier-0 loop
-has no recovery path.
+**The guard-then-query race is accepted, deliberately.** `exists_minable`
+and `closest_minable` are two queries, so a node can be taken or emptied
+between them and `.expect()` faults. Two things make that a fair price
+rather than the bug Q110 ruled against: the two calls are *adjacent ops*
+with no blocking verb between them, so the window is a tick or two rather
+than the tens of ticks a blocking `move_to` opens; and it faults
+*occasionally* rather than every iteration, so it costs 2 HP that passive
+repair heals instead of grinding the fleet down. Binding once would need
+Variables, and the starter is deliberately a *Tier-0* program.
 
 ### Tier 1 — Variables & arithmetic
 
@@ -222,7 +228,12 @@ move_to(target)
 mine()
 ```
 
-### Tier 2 — Branching (`if` / `elif` / `else`)
+### Tier 2 — Branching (`if` / `elif` / `else`) — **granted at game start**
+
+Numbered here for concept depth, but **not researched**: branching ships with
+the chassis (Q117), because the Tier-0 starter needs it to guard a fallible
+query. Everything downstream of it in the unlock tree keeps Variables as its
+prerequisite.
 
 ```python
 if cargo_full():
@@ -422,7 +433,7 @@ Three builtin conventions ride on these types:
   - **Factions**: per-match faction constants, one per colony/nest — the handle for foreign-channel work.
   - **Feral bindings**: Feral programs additionally run with nest-bound values — `home` (*their own* nest; the global `nest` kind still means any nest) and `patrol_route` — supplied at print, the same mechanism faction-scoped. Player programs never get user bindings (Q59).
 - **`Option` and `None`** — Pyrite has **no null**; absence is an enum, exactly as in Rust: the builtin `Option.Some(v)` / `Option.None`, with **`None`** as sugar for `Option.None`. `None`, `True`, and `False` are **reserved words** (Python-style): assigning to them is a parse error — unlike the kind and level constants, which stay ordinary shadowable names. Optional-typed parameters accept the value or `None` — `send(ch, val, timeout=None)` means "no timeout." `.expect()` works on it (`Some` unwraps, `None` faults), `match` destructures it like any enum, and a bare `case None:` is accepted as sugar for `case Option.None:`.
-- **`Result`** — a builtin enum for fallible queries: `Result.Ok(entity)` / `Result.Err(msg)`. Unwrap with `.expect()` (returns the entity, or faults with the carried message), handle the miss fault-free with `match` (Tier 6), or — the **Tier-0 route** — pass the `Result` straight into a `try_*` verb, which **treats `Result.Err` as "nothing to do": no action, no fault, returns `False`** (Q117). That is what lets the shipped starter survive a missed query with no branching:
+- **`Result`** — a builtin enum for fallible queries: `Result.Ok(entity)` / `Result.Err(msg)`. Unwrap with `.expect()` (returns the entity, or faults with the carried message) or handle the miss fault-free with `match` (Tier 6). **`try_*` verbs do not unwrap** — they take a concrete target, so handing one a `Result` or an `Option` is an ordinary type fault, not a silent no-op. The Tier-0 route is to guard with `exists_minable` / `exists` before unwrapping (see Tier 0):
 
 ```python
 match closest(ore):
@@ -460,7 +471,7 @@ The full catalog and unlock order live in [06-progression.md](06-progression.md)
 | `move_to(entity, only=None, avoid=None)` | 2 + travel | **yes** | Pathfind and move; blocks until arrival or failure. **Tracks moving targets** (re-paths — there is no `chase()`; `move_to` *is* the chase). Safe because retreat *is* the canonical handler. **Paint-routed (Q95/Q96)**: `only=`/`avoid=` take a paint-color constant or a list of them (`unpainted` is a color too) and make forbidden colors impassable to this route search, like water — unreachable = the normal no-path fault; per call, no persistent binding; omitted = paint-blind ([05-terrain.md](05-terrain.md) Tile Composition) |
 | `closest_minable(kind)` → `Result` | 4 | **yes** | Nearest node of `kind` this bot can work **right now** — within the grade of its installed drill **and** with ore remaining (Q117). The plain `closest` stays tier-blind by ruling (sensing isn't harvesting); this is the verb that asks the other question. Start kit |
 | `exists_minable(kind)` → bool | 2 | **yes** | Is there anything of `kind` this bot can work right now? Same predicate as `closest_minable`. Start kit |
-| `try_move_to(target, only=None, avoid=None)` → bool | 2 + travel | **yes** | The fault-free walk: `target` may be an entity **or a `Result`** — a `Result.Err` (or an unreachable goal) is no action and `False`, never a fault. Start kit |
+| `try_move_to(target, only=None, avoid=None)` → bool | 2 + travel | **yes** | The fault-free walk: takes a concrete entity or position, and an **unreachable goal** is no action and `False` rather than a fault. It does *not* accept a `Result` or an `Option` — unwrap first (guard with `exists`). Start kit |
 | `mine()` | 2 + action | no | Extract from resource node in range |
 | `try_mine()` → bool | 2 + action | **yes** | The fault-free swing: extracts if an in-range node is workable by this bot's drill and not empty, else `False`. Start kit — the starter's verb |
 | `deposit()` | 1 + action | no | Unload cargo into the adjacent **accepting structure** (Q79): Depot storage, refinery input, Generator intake, Station coolant tank, Request Box — and a Feral's nest is *their* depot. If several adjacent structures accept, lowest entity ID wins; **no acceptor / full buffer = a fault**, like any failed action (round 4) |
