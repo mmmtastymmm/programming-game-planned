@@ -34,11 +34,13 @@ anything.
 
 **Status 2026-07-27 (M16 rethink, later): Q111–Q115 ANSWERED — TIERS ARE
 REMOVED.** Both halves of Q105's tier/level split were a mistake. A bot now
-has **levels only**, on eleven structurally identical tracks (Boot deleted),
+has **levels only**, on ten structurally identical tracks (Boot and Learning
+deleted),
 counted in **centi-points**, on one uncapped quadratic curve. XP is strictly
 monotonic — buying never costs XP and nothing ever resets, so Q111 dissolves
 rather than resolving, Q112/Q114 are moot, and Q113/Q115 become trivial.
-**Total level is the mean across all eleven tracks**, so seniority is a real
+**Total level is the mean across all ten tracks, floored** (docs/02's
+pessimistic-rounding rule: gains floor), so seniority is a real
 route to capability and staying alive is how it is earned. **Tools are
 bought and licensed by level** — either the specific skill's or the total —
 with quirks able to grant them outright. The **Backup Core inverts**: a
@@ -339,7 +341,10 @@ monotonic — buying never costs XP, nothing ever resets. The model:
   - **One quadratic curve**, applied uniformly, with **no level cap** — the
     ladder runs until `i64` does (~43 million levels at any sane base, so
     never in practice). Most levels grant nothing; specific ones do.
-  - **Total level = the mean across all ten tracks**, passive tracks
+  - **Total level = the mean across all ten tracks, FLOORED** — docs/02
+    already rules that rounding is pessimistic (gains floor, penalties
+    ceil), and a level is a gain, so no new convention is needed. Passive
+    tracks
     included. Seniority is a legitimate route to capability and staying
     alive is how it is earned — deliberately rewarding careful play.
   - **Tools are BOUGHT, and level licenses the purchase.** Every track has
@@ -657,7 +662,7 @@ The **playtest-tuning** bucket also remains (numbers that need the prototype, no
 - **Q114** (Agents): **moot** — nothing resets, so there is no reset to present. The inspector shows level and centi-points per track plus the total level.
 - **Q113** (Agents): **`SelectKey::Xp` ranks by the track's centi-points, directly** — unambiguous and comparable across bots once storage stops being tier-dependent.
 - **Q112** (Agents): **moot** — one kind of level. What it was carrying survives as Q122 (upkeep lost its `tier_value()` basis and, with the cap gone, its ceiling).
-- **Q111** (Agents/Progression): **TIERS ARE REMOVED; levels only.** Eleven structurally identical tracks (Boot deleted), centi-points, one uncapped quadratic curve, XP strictly monotonic — buying never costs XP and nothing resets. Total level is the mean across all eleven, so seniority earns capability and careful play is rewarded. Tools are bought, licensed by either the specific skill's level or the total, with quirks able to grant them outright. Deletes `Capability`, the tier catalog, the scale factor, the level cap, the settle-time clamp and both XP carry fields — the root cause of ~26 of M16's 45 findings ([02-agents.md](02-agents.md), [06-progression.md](06-progression.md)).
+- **Q111** (Agents/Progression): **TIERS ARE REMOVED; levels only.** Ten structurally identical tracks (Boot and Learning deleted), centi-points, one uncapped quadratic curve, XP strictly monotonic — buying never costs XP and nothing resets. Total level is the mean across all ten, floored, so seniority earns capability and careful play is rewarded. Tools are bought, licensed by either the specific skill's level or the total, with quirks able to grant them outright. Deletes `Capability`, the tier catalog, the scale factor, the level cap, the settle-time clamp and both XP carry fields — the root cause of ~26 of M16's 45 findings ([02-agents.md](02-agents.md), [06-progression.md](06-progression.md)).
 - **Q120** (Resources/Agents): **a completing structure DISPLACES the occupant; nothing dies.** Blueprints stay passable — solid designations would let anyone wall off ground for free by pretending to build. The destination is a BFS outward from the site (first free passable tile, ties on lowest `(x, y)`), so it is always somewhere the bot could have walked. The original ruling killed an occupant boxed in on all eight sides; widening the search to the whole map deleted that death, the undefined black-box tile it created, and the cross-faction kill primitive, and left docs/02's "no instant-destruction path" intact. Rules out both M16 repairs: the build may neither hold (stalling, minting XP, or faulting the builder to death under Q109) nor delete the designation and its materials ([03-resources.md](03-resources.md)).
 - **Q108** (Enemies): **shipped Feral sources ratified** — the `move_to` before each `attack` is load-bearing (a non-adjacent swing faults, so docs/04's four-line Drone crash-loops whenever it *sees* an enemy), and the first program a player reads must not teach a bug they would copy; `wait(n)` beats give the Magician's mutation an integer literal to bite on. docs/04 updated ([04-enemies.md](04-enemies.md)).
 - **Q107** (Multiplayer): **alliance decryption pools forward only** — merge-on-formation is ruled out because decryption is permanent and monotonic, so it would enable laundering (ally one tick, absorb everything, divorce). Ratifies the shipped behavior; docs/07's "never decryption" line was the outlier against docs/08 and the code, and is corrected ([07-architecture.md](07-architecture.md), [08-multiplayer.md](08-multiplayer.md)).
