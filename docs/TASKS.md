@@ -1005,81 +1005,93 @@ out-of-range quirk to trigger it (guarded by the setenv-range test exercising th
       the enum, so the path already exists). First-pass HP scaled to the 20-Stone price.
       [sim][game] ⚠HASH
 
-## M16 — Capability slots & construction by labor (Q105) ⚠️ SHIPPED, THEN REVERTED TO RETHINK (2026-07-27)
+## M16 — Capability slots (Q105) ⚠️ REVERTED; REDESIGNED AS M16b (2026-07-27)
 
 > **Status.** M16 shipped 2026-07-26 and was reviewed three times (xhigh, max,
-> max). The passes confirmed **45 defects** — and each fix commit was found by
-> the next pass to have introduced more than it closed, so both fix commits are
-> reverted. The tree is M16-as-originally-built; the attempts are preserved at
-> tag `m16-fix-attempts` and contain work worth salvaging deliberately (the
-> `StoredXp` newtype, the `ops_executed` ordering in vm.rs, the `ops_seen`
-> rebase on VM swap, closing the `PlaceBlueprint` free-structure laundering,
-> and several genuinely repaired tests).
+> max), confirming **45 defects** — and each fix commit was found by the next
+> pass to have introduced more than it closed. Both fix commits are reverted;
+> the tree is M16-as-originally-built and the attempts are preserved at tag
+> `m16-fix-attempts`.
 >
-> The 45 sort into five clusters, none of them a coding slip: **tier-scaled XP
-> storage** (11 findings, 3 failed fixes), **the structure-by-labor completion
-> path** (11 findings, 3 failed fixes), **Q100's Processing track** (5 findings,
-> 2 failed fixes), **tier gates vs. tier-blind queries** (6), and **residue from
-> the retired module system** (4). Each is a decision M16 implemented without
-> ever making. They are now open as **Q111–Q119** in QUESTIONS.md, with **Q120
-> already decided** (a completing structure shoves; entombment kills).
->
-> **Do not resume M16 by patching.** The next pass starts from the Q111–Q119
-> rulings, and — per what actually worked when it was tried — writes the failing
-> test before deciding the fix. Note also that five tests shipped across this
-> milestone that passed against broken code; the structure-by-labor completion
-> arm had no end-to-end test at all, which is why its worst defect shipped green.
+> The 45 sorted into five clusters, none a coding slip: tier-scaled XP storage
+> (11 findings, 3 failed fixes), the structure-by-labor completion path (11, 3
+> failed fixes), Q100's Processing track (5, 2 failed fixes), tier gates vs.
+> tier-blind queries (6), and residue from the retired module system (4). Each
+> was a decision M16 implemented without ever making. **Q111–Q123 now decide
+> all of them**, and the answer is a materially simpler and different design —
+> so this is a **fresh build against a spec, not a repair**. Most of the
+> reverted code implements concepts that no longer exist.
 
+### M16b — the rebuild scope
 
-The tool layer docs/02–03 describe was never built: no verb checks a tool, the module
-catalog holds `optics` + the inert `backup_core`, printed bots get no modules, and
-`Resource::tool_tier()` is dead data. Q105 replaces generic module slots with per-capability
-slots. Milestone-sized; ⚠HASH throughout.
+**Do not start by un-reverting.** Only four pieces of `m16-fix-attempts` are
+worth recovering: the `ops_executed` ordering in `vm.rs` (count *after* the
+budget check), the `ops_seen` rebase on VM swap, closing the `PlaceBlueprint`
+free-structure laundering, and a handful of genuinely repaired tests.
 
-- [x] **Capability slots on the chassis** — `BotData.modules: Vec<u8>` retires; four permanent
-      capabilities (Mining, Building, Combat, Optics), each `{ tier: u8, }` with **base tier 1**,
-      hashed. `stats.module_slots`, `xp.slot_milestones` ([1000, 3000]) and `SelectKey::ModuleSlots`
-      are cut with Q66's generic slots. [sim]
-- [x] **Tier enforcement** — `mine()` checks the bot's Mining tier against
-      `Resource::tool_tier()` (the dead data goes live; a too-low tier faults with a typed id).
-      Build/Combat/Optics tiers feed build rate, `attack_damage`, and sensor range through the
-      existing pipeline; Optics module effect becomes optics tier. [sim]
-- [x] **Tier purchase at the Upgrade Station** — capabilities join the catalog beside compute
-      (pad, queue, payment-at-mount, coolant all reused); docs/03's Fabricator-makes /
-      Station-swaps split folds into the one pad. Prices follow Q72's ladder rule (tier N+1
-      prices only in materials mineable at tier ≤ N). [sim][game]
-- [x] **Tier scaling replaces a reset branch** — a capability's level thresholds AND its XP
-      gain both multiply by `M^(tier-1)` (`tier_xp_scale`, tuning, ~100). The curve is
-      cumulative 100/300/600/1000/1500, so any M > 15 drops a maxed tier-1 bot below the new
-      L1 — an effective reset with no reset code — while equal gain scaling keeps re-climbing
-      at the same real work. Nothing decreases, so no `lifetime_xp` counter is needed. [sim]
-- [x] **Fix the four places the scale leaks** — every `xp_total()` consumer was audited:
-      (1) **quirk manifestation** moves to the **Age** track (at tier 2 a bot crosses 300/900
-      in ~9 units of ore, popping quirks instantly); (2) **the wreck self-destruct countdown**
-      moves to Age too — `base + (xp_total/1000) × per_100xp` would run to HOURS at tier 3, so
-      wrecks would never expire and the rescue race would lose its clock; (3) **Learning's 10%
-      cut reads the UNSCALED award** (else Learning caps after ~150 units instead of ~15,000);
-      (4) `SelectKey::TotalXp` and the scrap valve keep tier-weighted totals — ratified as
-      intended, the colony eats its least-invested machine. Retune `quirks.ron manifest_at`
-      and `wreck_countdown_per_100xp_ticks` against Age's rate (1 deci/tick). [sim] ⚠HASH
-- [x] **Processor capability + Processing track (Q100)** — cycles-per-tick becomes the fifth
-      capability (tier bought, level earned); a twelfth `XpTrack::Processing` is credited for
-      operations executed (⚠ storage migration — `XpTrack::ALL` was sized 11 "so storage never
-      migrates again"). Retire the Coprocessor catalog entry and the `ModuleEffect` for it;
-      docs/01's "actions block" is now unconditional. Watch the deliberate feedback loop
-      (cycles → ops → XP → cycles), bounded by the L5 cap, the quadratic curve, and tier
-      scaling. [sim][pyrite]
-- [ ] **Backup Core (Q100)** — the catalog entry and its effect flag exist; the PRESERVATION
-      itself is still unbuilt (nothing yet carries tiers into a reprint or wipes XP).
-      **OPEN DETAIL:** how the tiers travel from the destroyed bot to the
-      reprint — a reprint is a fresh print with an allocation-chosen color and has no channel
-      to a dead bot. Candidates: an automatic per-faction banked loadout the next print
-      consumes (frictionless), or the **Black Box** as carrier (it already drops on every
-      destruction and `recover_black_box()` already exists — makes a veteran's hardware a
-      physical object worth holding ground for, and deniable to the enemy). [sim]
-- [x] **Structures are built by labor** — `PlaceStructure` becomes a blueprint designation
-      serviced by `build()` (the Q97 paint flow generalizes); every structure incl. Q98's Pump.
-      Nest claim/raze likewise want a bot on site (docs/04). [sim][game]
+- [ ] **XP core (Q111, Q121, Q123)** — ten tracks (Boot and Learning deleted),
+      `i64` **centi-points**, one quadratic curve with a **per-track
+      `curve_base`**, **uncapped**, strictly monotonic. Total level = the mean
+      across the ten. Delete `Capability`, `tiers[]`, `tier_value()`,
+      `TIER_INVESTMENT_WEIGHT`, `TierSpec` and the tier catalog, every `tier_*`
+      stat, `tier_xp_scale_pct`, `track_scale`, `capability_level`,
+      `track_cap_deci(_scaled)`, the settle-time clamp, `UpgradeOrder::Tier`,
+      the Q105-R1/R3 validations, `learning_carry`, and `settle_xp`'s second
+      pass. Age income → **0.2 deci/tick**; per-track bases per Q123's table.
+      ⚠HASH + units migration. [sim]
+- [ ] **Tools (Q111, Q118)** — ten tools, one per track (drill, build tool,
+      weapon, optics, CPU, hull plating, drivetrain, signature dampener, gyros,
+      cargo rack). Grade 1 free with the chassis, **grades 2–5 purchasable** —
+      ~40 catalog entries against today's 12. **Bought** with materials and
+      **licensed by level**: the specific skill's *or* the total. No separate
+      use-gate (XP never decreases, so a bot cannot hold an unlicensed tool);
+      quirks may grant tools outright. [sim]
+- [ ] **Three load-time assertions (Q118)** — anti-circularity (no tool priced
+      in a material its own ladder unlocks at or above the grade being bought,
+      resolving refined goods through their recipes); no orphan materials; no
+      gaps in a tool's grade sequence, so no level is dead. [sim]
+- [ ] **Perks (Q121)** — tools carry the step changes; qualitative growth is
+      **sparse milestones** at named levels; genuinely continuous perks use the
+      bounded integer hyperbolic `max × level / (level + K)`. Rewrite the whole
+      perk table off linear-per-level. [sim]
+- [ ] **Upkeep (Q122)** — same hyperbolic on `Σ levels` (it lost its 60-level
+      ceiling); the `draw_per_module` term re-bases on installed tools. [sim]
+- [ ] **Compute pacing (Q118)** — the compute ladder starts on **Wire** and
+      escalates (Wire → Silver+Wire → Chips → Gold Chips), and program-capacity
+      buys (memory bank, stack ext, log buffer) start on Wire too. Program size
+      must not sit behind maxed mining. [sim]
+- [ ] **Coolant (Q119)** — declared **per catalog entry in data**, not by code
+      branch. Compute family only. Surface what a blocked Station order is
+      waiting on. [sim][game]
+- [ ] **Backup Core (Q115)** — inverts: keeps **all XP**, loses **all tools**.
+      A cloud backup; the reprint arrives experienced and naked, licensed to
+      re-buy its kit. [sim]
+- [ ] **Structures by labor (Q120)** — a completing build **shoves** the
+      occupant to a deterministically-chosen free adjacent tile; with no free
+      tile the occupant is **destroyed and drops a black box**, skipping the
+      wreck stage. The build must **never hold** and **never delete the
+      designation**. Blueprints stay passable. [sim]
+- [ ] **Queries (Q117)** — add `closest_minable(kind)` and
+      `exists_minable(kind)` beside the untouched tier-blind `closest`/`exists`
+      (docs/01 needs no amendment). Add `try_mine()` with the backlogged
+      `try_*` family. Both new queries scope to `known_nodes` and sort
+      `(distance, id)`. [sim][pyrite]
+- [ ] **Shipped programs (Q117, Q108, Q110)** — GREEN/RED starters and the
+      Feral Harvester `match` on `closest_minable(ore)` and handle the miss;
+      bind once, never check-then-act. Re-sync docs/04's verbatim sources,
+      already found stale against Q110. [game][sim][docs]
+- [ ] **Doc sync** — docs/03's ladder paragraph still says buying a tier
+      "resets that capability's earned level" (Q111 deleted that); docs/02 and
+      docs/06 carry the tier/level model throughout. [docs]
+
+**Method, learned the hard way.** Build in verified slices, and **write the
+failing test before deciding the fix** — the one discipline that worked when it
+was applied, and that was abandoned as soon as the items got small. Five tests
+across this milestone passed against broken code (two asserted on a helper
+rather than an observable, one had its action overwritten by the bot's own
+program, one was satisfied by a wreck expiring, one by a stale counter healing
+inside the test window), and the structure-by-labor completion arm had **no
+end-to-end test at all**, which is why its worst defect shipped green.
 
 ## M17 — The overlay pipeline (Q101) — NOT STARTED
 
