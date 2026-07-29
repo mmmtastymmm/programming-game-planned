@@ -138,13 +138,42 @@ stateDiagram-v2
 
 Bots earn XP **per task track**, by doing:
 
-| Track | Earned by | Level perks (per level, cap L5) |
-|---|---|---|
-| Mining | units harvested, any resource kind (yields are typed, [01-language.md](01-language.md)) | +10% mine yield, at L3: `mine()` action time −25% |
-| Hauling | cargo-distance delivered | +10% cargo capacity, at L3: +10% move speed while loaded |
-| Combat | damage dealt / kills | +5% damage, at L3: +1 **hearing range** vs enemies (Q74) |
-| Building | build/repair progress | +10% build speed, at L3: repairs restore +25% more |
-| Scouting | nodes discovered + surveys completed (Q83 — sim events; no seen-tile set, so eyes-only fog stays stateless) | +1 sensor range, at L3: immune to Corruption's cycle tax ([05-terrain.md](05-terrain.md)) |
+| Track | Earned by | Tool it licenses | Level perks |
+|---|---|---|---|
+| Mining | units harvested, any resource kind (yields are typed, [01-language.md](01-language.md)) | **drill** | mine yield (bounded), at L3: `mine()` action time −25% |
+| Hauling | cargo-distance delivered | **cargo rack** | cargo capacity (bounded), at L3: +10% move speed while loaded |
+| Combat | damage dealt / kills | **weapon** | damage (bounded), at L3: +1 **hearing range** vs enemies (Q74) |
+| Building | build/repair progress | **build tool** | build speed (bounded), at L3: repairs restore +25% more |
+| Scouting | nodes discovered + surveys completed (Q83 — sim events; no seen-tile set, so eyes-only fog stays stateless) | **optics** | sensor range (bounded), at L3: immune to Corruption's cycle tax ([05-terrain.md](05-terrain.md)) |
+
+**Perks take three shapes, and none of them is linear-per-level** (Q121). The
+ladder is uncapped, so a `+10% per level` perk would run away — a `+1 sensor
+per level` scout would see the entire map somewhere around level 30 and switch
+fog of war off for its faction, which is precisely what this rule exists to
+prevent. Instead:
+
+1. **Tools carry the step changes.** This is the load-bearing one: because the
+   power lives in a purchase rather than in the level count, an uncapped ladder
+   is harmless by construction.
+2. **Milestones** are named levels that grant something qualitative — the `L3`
+   entries above are exactly this shape, and they are the model for any new one.
+   Most levels grant no automatic perk at all.
+3. **Bounded continuous** perks, where growth genuinely reads as continuous
+   (a hull toughening with age, bearings wearing in, optics sharpening), use an
+   integer **hyperbolic**:
+
+   ```
+   bonus = max_bonus × level / (level + K)
+   ```
+
+   No floats, deterministic, asymptotic: half of `max_bonus` at level `K`, 80%
+   at `4K`, and never more than `max_bonus` however far the ladder runs. Both
+   constants live per-perk in `xp.ron` alongside the track's `curve_base`;
+   magnitudes are tuning and deliberately not fixed here.
+
+This is why every level still matters without any level being large: **a level
+is a licence** (Q118 — the catalog is dense to grade 5, so no reachable level is
+dead), and only some levels are also a perk.
 
 These five are the **task tracks** — earned by what the program chooses to do. A second family levels by what merely *happens* to the machine:
 
