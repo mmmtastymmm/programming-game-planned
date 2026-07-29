@@ -14,7 +14,7 @@ Q123 claim that the skill route was "dead on arrival" was true in deci/tick
 but **false in levels** (the mean over ten tracks, several at zero, very
 nearly cancels the passive lead — a pure miner comes out tied); and
 **specialisation dissolves the duty-cycle problem by itself**, which is why
-"pay the loop, not the verb" was rejected as unnecessary. Still open: **Q119**.
+"pay the loop, not the verb" was rejected as unnecessary. **THE BOARD IS CLEAR** — every numbered question through Q123 is decided.
 
 **Status 2026-07-27 (M16 rethink, earlier): Q121 ANSWERED — tools carry the
 power, levels license.** Perks take three shapes: tools hold the step
@@ -544,157 +544,42 @@ catalog first revealed that the *rule* was the problem, not the data:
   contradiction with Q121 and is not: Q121 says most levels grant no
   *automatic* perk, this says every level opens a *shopping option*. A level
   is a licence, and there is always something newly licensed. Assertion (3)
-  enforces it. **Open sub-detail:** levels are uncapped, so the catalog
-  needs a ceiling — proposed **grade 5** (five rungs, matching the resource
-  ladder 0–4), grade 1 free with the chassis, 2–5 purchasable, and levels
-  past 5 are pure score. That sizes the catalog at **10 tools × 4 grades ≈
+  enforces it. **Ceiling: GRADE 5** (decided 2026-07-27 — five
+  rungs, matching the resource ladder 0–4), grade 1 free with the chassis,
+  2–5 purchasable, and levels past 5 are pure score. That sizes the catalog at **10 tools × 4 grades ≈
   40 entries** against today's 12; every one needs a price obeying the
   invariant and the resource roles, which is a tuning pass.
 
   Doc-sync regardless: docs/03's ladder paragraph still says buying a tier
   "resets that capability's earned level", which Q111 deleted.
 
-**Q119 — which tool purchases draw coolant?** Restated: docs/06 says
-mechanical work is "not thermal — coolant is for compute". With tiers gone
-the question is per-tool: presumably only the CPU (and perhaps the training
-module) draws Water, and drills, weapons, plating and the rest do not. M16
-charged coolant on every capability purchase, which silently made Mining
-tier 2 — the gate on every Copper and Tin seam — unreachable without a water
-chain, with no message to the player.
+**Q119 — which tool purchases draw coolant? ANSWERED 2026-07-27: the
+compute family only, and it becomes a property of the CATALOG ENTRY rather
+than of a code branch.** docs/06 already ruled the principle — "module work
+draws no coolant (mechanical, not thermal — coolant is for compute)" — and
+`coolant_water_deci`'s own doc comment in `stats.rs` says the same. So the
+answer was never in doubt; the *mechanism* was the bug. M16 attached the
+charge to the **Compute branch of the purchase code**, and when
+`UpgradeOrder::Tier` was added it inherited that branch, silently making
+every mechanical tool cost Water.
 
-**Q121 — what shape do per-level perks take now the ladder is uncapped?
-ANSWERED 2026-07-27: TOOLS carry the power; LEVELS license, with sparse
-MILESTONES and bounded CONTINUOUS perks.** The premise of the question was
-that every number in the perk table was authored against a cap of 5 —
-`+10% mine yield per level` and `+1 sensor per level` were chosen knowing
-the maximum multiplier was 5×. Uncapping the ladder does not merely risk
-runaway; it leaves the table with no authored intent past L5 at all. The
-ruling has three parts:
+  The ruling therefore has two halves. **Substance:** only the compute
+  family pays coolant — the **CPU tool** and the flat program-capacity buys
+  (memory bank, stack extension, log buffer), which are silicon and
+  genuinely thermal. The mechanical tools pay none: drill, build tool,
+  weapon, optics (a lens is glass), hull plating, drivetrain, cargo rack,
+  gyros, signature dampener. **Mechanism:** coolant is **declared per
+  catalog entry in data**, not inferred from which code path handles the
+  purchase, so a future entry cannot acquire it by inheriting the wrong
+  branch — which is exactly how this shipped.
 
-  - **Tools carry the step changes.** Now that tools are bought and
-    licensed by level, the tool holds the big numbers. This is the piece
-    that makes an uncapped ladder harmless *by construction*: levels barely
-    multiply anything, so there is nothing to run away.
-  - **Qualitative growth arrives as sparse milestones** at named levels.
-    The shape already exists and is proven — five perks are L3 thresholds
-    today (Mining swing −25%, Building repair +25%, Hauling loaded speed,
-    Combat hearing, Scouting corruption immunity). Most levels grant
-    nothing; they are licence and score.
-  - **Where a perk genuinely reads as continuous** — hull toughening with
-    age, bearings wearing in, optics sharpening — it uses a **bounded
-    hyperbolic**: `bonus = max_bonus × level / (level + K)`. Pure integer,
-    deterministic, no floats: half of `max_bonus` at level K, 80% at 4K,
-    asymptotic and never exceeding it.
-
-  The hyperbolic settles the sharpest case without a special-case clamp.
-  `+1 sensor/level` on a 34×20 map put a Scouting-L10 bot's vision at 15
-  tiles — a 31×31 square, most of the board — and L15 saw everything, so
-  **fog of war switched off at a reachable level**. Under an asymptotic
-  bonus vision approaches a ceiling instead, and fog cannot be ground away.
-  The self-saturating perks (Flinch −10%/lvl floors at L10, Mileage at L25,
-  Hiding signature once below any hearing radius) already behaved and need
-  no change beyond restatement in the new form.
-
-  **Learning is retired entirely — both the perk and the track.** It was
-  the lifetime-achievement track, defined as 10% of every other award; the
-  mean-across-tracks total level now measures exactly that, derived from
-  the same data without a stored copy. Deletes `XpTrack::Learning`,
-  `learning_feed_pct`, `learning_gain_pct_per_level`, `learning_carry`, the
-  `feeds` map and `settle_xp`'s entire second pass, the Learning term in
-  `xp_gain_pct` (quirk `XpPct` effects — 10x Developer, Tech Debt — stay),
-  and the Learning award site. Ten tracks remain.
-
-  Per-perk magnitudes (`max_bonus`, `K`, which levels carry milestones) are
-  tuning and deferred; the *shape* is what this ruling fixes.
-
-**Q123 — how are track incomes rebalanced so specialisation beats
-seniority? ANSWERED 2026-07-27: per-track CURVE BASES, plus one income
-change — Age drops to 0.2 deci/tick (2 centi).** Two corrections to how this
-question was first written, because the original framing was half wrong:
-
-  - It claimed the passive tracks out-earn the active ones so badly that
-    the skill route to a tool licence was "dead on arrival". True in raw
-    deci/tick, **false in levels**: levels go as √XP, and total level is the
-    *mean over ten tracks* with several sitting at zero for any given bot.
-    That dilution very nearly cancels the passive lead — worked forward,
-    a pure miner at 50,000 ticks has Mining L3 against a total level of 3.
-    Tied, not dead. The sharper true statement is that the skill route
-    only *beats* the clock for tracks whose rate substantially exceeds
-    Age's, which was **Combat and nothing else** — so the skill route
-    worked for fighters and was denied to workers, backwards for a game
-    about programming an economy.
-  - **Specialisation dissolves most of the problem by itself**, which is
-    why the "pay the loop, not the verb" option was rejected as
-    unnecessary. The 1.4% mining duty cycle came from one bot doing the
-    whole mine→walk→deposit→walk loop. A bot that parks at a vein and
-    lets a hauler carry runs ~80% duty and earns ~8 deci/tick. The travel
-    that ate everything now belongs to the hauler, whose travel *is* its
-    job.
-
-  **The ruling: each track carries its own `curve_base`**, so income rate
-  and progression pace are tuned independently — an event's payout keeps
-  its fiction while the ladder normalises the pace. The pacing intent is
-  deliberately **two-tier**, because normalising everything to one pace
-  would silently undo the Age slowdown:
-
-  - **Job tracks** (Mining, Building, Scouting, Combat, Hauling): a
-    dedicated specialist reaches **L5 in ~10 minutes** (6,000 ticks).
-  - **Ambient tracks** (Age, Mileage, Processing, Hiding, Flinch): **L5 in
-    ~50 minutes** (30,000 ticks) — these are seniority, not skill.
-
-  That gap is what makes the specialist route beat the clock, which is the
-  entire point of the question. Sanity check: a dedicated miner at ten
-  minutes holds Mining **L5** against a **total level of 0** (Age L2,
-  Processing L2, Mileage 0 because it never walks, the rest zero).
-
-  First-pass values, in centi (1 whole XP = 100 centi):
-
-  | Track | Income | Dedicated rate | `curve_base` | L5 at that rate |
-  |---|---|---|---|---|
-  | Mining | 100/unit | ~80 /tick | 32,000 | 10 min |
-  | Building | 10/tick building | 10 /tick | 4,000 | 10 min |
-  | Scouting | 500/node, 1,000/survey | ~20 /tick | 8,000 | 10 min |
-  | Combat | 10/HP, 2,500/kill | ~10 /tick effective | 4,000 | 10 min |
-  | Hauling | 10/unit-tile | ~1.4 /tick | 600 | 11 min |
-  | Processing | 10/op | ~15 /tick | 30,000 | 50 min |
-  | Mileage | 100/tile | ~7 /tick | 14,000 | 50 min |
-  | Hiding | 2,500/episode | ~5 /tick | 10,000 | 50 min |
-  | **Age** | **2/tick** | 2 /tick | 4,000 | 50 min |
-  | Flinch | 1,000/flinch | ~1 /tick | 2,000 | 50 min |
-
-  Cumulative cost to level N is `curve_base × N(N+1)/2`, so every value
-  above is one substitution into **`curve_base = dedicated_rate ×
-  target_ticks_to_L5 / 15`**. That formula and the two-tier intent are the
-  durable part; the numbers are guesses and belong to the playtest bucket.
-
-  **Three to watch.** *Combat* is a guess wearing a number — its in-fight
-  rate is ~100 centi/tick and its duty cycle is whatever the match gives
-  it, so "10 effective" is a placeholder, and the 2,500 kill bonus is 60%
-  of a first level. *Hauling's 600* is the lowest base by far, so hauling
-  levels are cheap for everyone, not just haulers — a dedicated hauler
-  out-levels a part-timer by only ~1.8× (mining's margin is far wider),
-  and if that feels wrong the honest fix is raising Hauling's income
-  rather than cutting its base further, which would mean revisiting the
-  B-only decision for that one track. *Processing at 30,000* assumes ~1.5
-  ops/tick, which scales with cycles — so a better CPU levels Processing
-  faster, which buys more cycles through its tool. Bounded by Q121's
-  hyperbolic, but a loop worth watching.
-
-**Q122 — what does energy upkeep scale on now? ANSWERED 2026-07-27: the
-hyperbolic, and tools replace the module term.** Two problems, one answer.
-The per-bot draw was `base + per_upgrade × upgrades + per_module ×
-tier_value() + per_track_level × Σ levels`. `tier_value()` no longer exists,
-so that term's basis becomes **installed tools** — and note M16 had already
-silently changed it from a 3-slot cap to a 12-tier sum, quadrupling the
-ceiling with no retune and no mention in any commit. The level term had a
-worse problem: `Σ levels` was bounded at 5 × 12 = 60 and is now
-**unbounded**, so an ancient fleet would brown out a colony purely by being
-old. It takes **the same bounded hyperbolic Q121 gives the perks** —
-`max × Σlevels / (Σlevels + K)` — so veteran upkeep approaches a ceiling
-instead of growing without limit. Using one shape for both is deliberate:
-the two questions are the same question (an uncapped ladder feeding a
-linear term), and a single mechanism means a future reader has one thing to
-understand rather than two. Magnitudes are tuning.
+  Consequence worth remembering: the failure was invisible. A colony with
+  no Water reaching its Station could not buy Mining grade 2 — the gate on
+  every Copper and Tin seam — and the order simply re-armed forever with no
+  message, no charge and no log line. Re-arming is correct behaviour for a
+  *temporary* shortfall, but a requirement the colony cannot satisfy at all
+  is a soft-lock. The Station should surface what an order is waiting on
+  (flagged for the HUD pass, not a design question).
 
 **Q120 — what happens when a structure completes on an occupied tile? ANSWERED
 2026-07-27: SHOVE, and entombment kills.** A pending designation is *not*
@@ -723,6 +608,7 @@ The **playtest-tuning** bucket also remains (numbers that need the prototype, no
 
 ## Answered log
 
+- **Q119** (Resources): **only the compute family draws coolant, and it becomes a property of the catalog entry.** The principle was never in doubt (docs/06: "mechanical, not thermal"); the mechanism was the bug — M16 attached the charge to the Compute *code branch*, which `UpgradeOrder::Tier` then inherited, silently making every mechanical tool cost Water and putting Mining grade 2 behind a water chain with no message. Declaring it per entry in data makes that class of mistake unrepresentable ([03-resources.md](03-resources.md), [06-progression.md](06-progression.md)).
 - **Q118** (Resources/Progression): **the ladder rule is narrower than docs/03 states, and the catalog gets three load-time assertions.** Only a ladder that *unlocks materials* can be circular, so the invariant is "no tool may be priced in a material its own ladder unlocks at or above the grade being bought" — which binds on Mining alone today and covers a future unlocking tool without amendment. The literal rule and "Chips think" were in arithmetic conflict (Chips need Crystal, tier 4), and the shipped catalog had silently chosen the resource roles. Assertions: anti-circularity, no orphan materials, no gaps. **Compute is not meant to sit behind maxed mining** — the compute ladder starts on Wire and escalates to Chips, and program-capacity upgrades with it. **Every level licenses a purchase** (dense catalog), which complements rather than contradicts Q121's sparse automatic perks ([03-resources.md](03-resources.md), [06-progression.md](06-progression.md)).
 - **Q117** (Language/Resources): **named `closest_minable` / `exists_minable`, plus shipped programs that handle the miss.** `closest(ore)` and `exists(ore)` are untouched, so docs/01's tier-blind ruling stays literally true and needs no amendment; the name carries the meaning instead of `ore` silently behaving unlike its members. As queries rather than an entity attribute they are already scoped to `known_nodes`, closing the perception leak M16's `workable` attribute had. The shipped starters and the Feral Harvester `match` on the result — per Q108 (shipped sources must not crash-loop) and Q110 (bind once, never check-then-act) — which covers the mid-game case where no workable ore exists at all. `try_mine()` joins the backlogged `try_*` family ([01-language.md](01-language.md), [03-resources.md](03-resources.md)).
 - **Q116** (Agents): **Processing survives; neither it nor Mileage gets an anti-farm guard.** Farming them costs the bot's entire output while Q121 bounded the prize and Q123 made it slow — an exploit is something that beats playing properly, and these lose to it. Records the reusable rule: guard a track when farming is free (as Hauling, Flinch and Hiding still are), leave it alone when farming costs the work ([02-agents.md](02-agents.md)).
