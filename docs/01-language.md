@@ -195,13 +195,24 @@ Constructs are unlocked in tiers ([06-progression.md](06-progression.md) owns th
 
 Only sequential calls to unlocked function blocks. No state, no branching.
 
+The **shipped starter is the fault-free form**, and it has to be: Tier 0 has
+no branching at all (`if` costs 20 Data, `match` 70), so a program that
+cannot handle a missed query is a program that cannot survive one. Every
+verb here is a `try_*`, and **a `try_*` verb handed a failed query does
+nothing and returns `False`** — so when the ore this bot can work runs out,
+the miner idles instead of faulting itself to death (Q117).
+
 ```python
-move_to(closest(ore).expect())
-mine()
-move_to(closest(depot).expect())
-deposit()
+try_move_to(closest_minable(ore))
+try_mine()
+try_move_to(closest(depot))
+try_deposit()
 # program loops back to line 1
 ```
+
+The `.expect()` form below is what the *docs* teach about `Result`; it is
+deliberately not what the game ships, because `.expect()` in a Tier-0 loop
+has no recovery path.
 
 ### Tier 1 — Variables & arithmetic
 
@@ -411,7 +422,7 @@ Three builtin conventions ride on these types:
   - **Factions**: per-match faction constants, one per colony/nest — the handle for foreign-channel work.
   - **Feral bindings**: Feral programs additionally run with nest-bound values — `home` (*their own* nest; the global `nest` kind still means any nest) and `patrol_route` — supplied at print, the same mechanism faction-scoped. Player programs never get user bindings (Q59).
 - **`Option` and `None`** — Pyrite has **no null**; absence is an enum, exactly as in Rust: the builtin `Option.Some(v)` / `Option.None`, with **`None`** as sugar for `Option.None`. `None`, `True`, and `False` are **reserved words** (Python-style): assigning to them is a parse error — unlike the kind and level constants, which stay ordinary shadowable names. Optional-typed parameters accept the value or `None` — `send(ch, val, timeout=None)` means "no timeout." `.expect()` works on it (`Some` unwraps, `None` faults), `match` destructures it like any enum, and a bare `case None:` is accepted as sugar for `case Option.None:`.
-- **`Result`** — a builtin enum for fallible queries: `Result.Ok(entity)` / `Result.Err(msg)`. Unwrap with `.expect()` (returns the entity, or faults with the carried message) or handle the miss fault-free with `match`:
+- **`Result`** — a builtin enum for fallible queries: `Result.Ok(entity)` / `Result.Err(msg)`. Unwrap with `.expect()` (returns the entity, or faults with the carried message), handle the miss fault-free with `match` (Tier 6), or — the **Tier-0 route** — pass the `Result` straight into a `try_*` verb, which **treats `Result.Err` as "nothing to do": no action, no fault, returns `False`** (Q117). That is what lets the shipped starter survive a missed query with no branching:
 
 ```python
 match closest(ore):
@@ -447,7 +458,9 @@ The full catalog and unlock order live in [06-progression.md](06-progression.md)
 | Function | Cost | Signal-safe | Effect |
 |---|---|---|---|
 | `move_to(entity, only=None, avoid=None)` | 2 + travel | **yes** | Pathfind and move; blocks until arrival or failure. **Tracks moving targets** (re-paths — there is no `chase()`; `move_to` *is* the chase). Safe because retreat *is* the canonical handler. **Paint-routed (Q95/Q96)**: `only=`/`avoid=` take a paint-color constant or a list of them (`unpainted` is a color too) and make forbidden colors impassable to this route search, like water — unreachable = the normal no-path fault; per call, no persistent binding; omitted = paint-blind ([05-terrain.md](05-terrain.md) Tile Composition) |
+| `try_move_to(target, only=None, avoid=None)` → bool | 2 + travel | **yes** | The fault-free walk: `target` may be an entity **or a `Result`** — a `Result.Err` (or an unreachable goal) is no action and `False`, never a fault. Start kit |
 | `mine()` | 2 + action | no | Extract from resource node in range |
+| `try_mine()` → bool | 2 + action | **yes** | The fault-free swing: extracts if an in-range node is workable by this bot's drill and not empty, else `False`. Start kit — the starter's verb |
 | `deposit()` | 1 + action | no | Unload cargo into the adjacent **accepting structure** (Q79): Depot storage, refinery input, Generator intake, Station coolant tank, Request Box — and a Feral's nest is *their* depot. If several adjacent structures accept, lowest entity ID wins; **no acceptor / full buffer = a fault**, like any failed action (round 4) |
 | `try_deposit()` → bool | 1 + action | **yes** | The fault-free form (mirrors `try_send`): unloads if an acceptor has room, else returns `False` — the branching hauler's verb |
 | `withdraw(kind)` | 2 + action | no | **The take verb** (Q79): load `kind` from any adjacent holder — Depot stock, refinery output buffer, Pump tank, dropped cargo — up to cargo capacity. **Empty holder / nothing of `kind` = a fault** (round 4). Start kit |

@@ -30,7 +30,7 @@ Function blocks are **learned from Template Caches**: ruined installations holdi
 
 ```mermaid
 flowchart TD
-    START([Game start:<br/>straight-line programs + the start kit:<br/>move_to, mine, deposit + try_deposit,<br/>withdraw + try_withdraw, study, closest,<br/>exists, wait, rng, drop_cargo, abort,<br/>wander, cargo_count, is_seen])
+    START([Game start:<br/>straight-line programs + the start kit:<br/>move_to + try_move_to, mine + try_mine,<br/>deposit + try_deposit, withdraw + try_withdraw,<br/>study, closest, closest_minable, exists,<br/>exists_minable, wait, rng, drop_cargo, abort,<br/>wander, cargo_count, is_seen])
 
     subgraph Constructs["Language constructs (one-time Data cost, PERMANENT)"]
         VAR["Variables — 10"]

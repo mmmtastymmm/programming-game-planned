@@ -461,21 +461,32 @@ once, then the tight loop is identical for specialist and generalist.)
     guard (the node can vanish between them) and makes `match` the
     consistent form:
 
+    **AMENDED 2026-07-28.** The `match` form first written here was
+    impossible: `enum + match` is a **Tier-6** construct (70 Data) and the
+    shipped starter is defined by docs/01 as **Tier-0 straight-line code**
+    with no branching at all (`if` alone costs 20). A starter written in
+    locked syntax cannot be edited or redeployed by the player who owns it.
+    The fault-free family was always the Tier-0 answer — `try_deposit` and
+    `try_withdraw` are *already* in the start kit — so the starter is:
+
     ```python
-    match closest_minable(ore):
-        case Result.Ok(t):
-            move_to(t)
-            mine()
-            haul_home()
-        case Result.Err(msg):
-            explore()
+    try_move_to(closest_minable(ore))
+    try_mine()
+    try_move_to(closest(depot))
+    try_deposit()
     ```
 
-    Six lines instead of four, teaching `match` exactly where the player
-    needs it. GREEN/RED (`crates/game/src/editor/mod.rs`) and the Feral
-    Harvester (`crates/sim/src/feral.rs`) both need it, and docs/04's
-    verbatim sources need re-syncing — they were already found stale
-    against Q110's ruling.
+    Still four lines, no branching, and it cannot fault. This needs one new
+    rule, recorded in docs/01 beside `Result`: **a `try_*` verb handed a
+    failed query treats it as "nothing to do" — no action, no fault,
+    returns `False`.** `try_move_to` and `try_mine` join the start kit
+    alongside the `try_*` verbs already there. A bot with no workable ore
+    idles rather than exploring, which is the honest outcome: idle miners
+    are a thing the player should notice and answer.
+
+    GREEN/RED (`crates/game/src/editor/mod.rs`) and the Feral Harvester
+    (`crates/sim/src/feral.rs`) both take this form, and docs/04's verbatim
+    sources need re-syncing — they were already found stale against Q110.
 
   **`try_mine()` joins the `try_*` family** rather than being a one-off: a
   fault-free swing for the case where the node empties between arriving and
