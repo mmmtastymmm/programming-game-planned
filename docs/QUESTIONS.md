@@ -603,25 +603,42 @@ every mechanical tool cost Water.
   (flagged for the HUD pass, not a design question).
 
 **Q120 — what happens when a structure completes on an occupied tile? ANSWERED
-2026-07-27: SHOVE, and entombment kills.** A pending designation is *not*
-solid and never becomes so: making blueprints block pathing was rejected
-because it hands every player a free terrain weapon — designate, never
-build, and wall off any ground you like. So bots walk over designations,
-and the completing build **shoves** whatever stands on the site to a
-deterministically-chosen free adjacent tile. If there is no free tile the
-occupant is **destroyed and drops a black box**, skipping the wreck stage
-entirely: there is no wreck to rescue because it is under a building.
-Two consequences are accepted rather than discovered later: this is a
-**cross-faction kill primitive** (an enemy finishing a build on a cornered
-bot of yours kills it — judged fine, since it costs a designation, its
-materials, and ~25 ticks of labour against a target that must stay
-cornered throughout), and the shove must pick its destination in sorted
-order and replan the shoved bot's in-flight action, the way a bump already
-does. What this rules OUT is the M16 implementation and both its repairs:
-the build must never *hold* (a silent stall that mints XP and progress, or
-a fault every tick that grinds the builder to a wreck under Q109), and it
-must never *delete* the designation, which destroyed the player's
-materials outright.
+2026-07-27: DISPLACE the occupant. AMENDED 2026-07-28: nothing dies.** A
+pending designation is *not* solid and never becomes so: making blueprints
+block pathing was rejected because it hands every player a free terrain
+weapon — designate, never build, and wall off any ground you like. So bots
+walk over designations, and the completing build **displaces** whatever
+stands on the site.
+
+  The destination is found by **breadth-first search outward from the site**
+  over passable tiles, first free tile wins, ties on lowest `(x, y)`; free
+  means in bounds, walkable, no structure/printer/depot/nest and no other
+  bot, with paint filters excluded (they are per-call route preferences, not
+  terrain). BFS rather than a chebyshev-radius sweep because the destination
+  must be **somewhere the bot could have walked** — a radius scan can push a
+  bot through a mountain into a sealed pocket. The displaced bot's path is
+  invalidated (a `move_to` re-paths next tick, anything else fails its own
+  range check); no fault, no HP chip, and no terrain trigger on landing,
+  since a displacement is not a walk.
+
+  **The amendment:** as first written, an occupant with no free *adjacent*
+  tile was destroyed and dropped a black box, skipping the wreck stage. The
+  doc-spec review found that broke three things at once — docs/02 states
+  three separate times that "there is no instant-destruction path"; the
+  black box's landing tile was undefined once the tile became a solid
+  building, so the one death in the game whose forensics silently vanish;
+  and it handed every faction a cross-faction kill primitive that had to be
+  separately justified. **Widening the search from adjacent to the whole map
+  removes all three**, because the case the death rule existed for cannot
+  arise: a colony's fleet cap sits far below the map's tile count, so a legal
+  state always has a free tile somewhere. Simpler rule, fewer interactions,
+  and docs/02's invariant survives untouched.
+
+  What the ruling forbids matters as much as what it allows: the build must
+  **never hold** (a silent stall mints XP and progress for no output; one
+  that faults grinds the builder to a wreck under Q109) and must **never
+  delete the designation**, destroying the player's up-front materials. Both
+  were tried during M16 and both were wrong.
 
 The **playtest-tuning** bucket also remains (numbers that need the prototype, not a choice, so they never block design): upkeep mix balance ([02-agents.md](02-agents.md)), Corruption spread/re-corruption/cleanse rates ([05-terrain.md](05-terrain.md)), and — per the 2026-07-26 sweep — the first-pass figures shipped inside completed milestones: body-perk magnitudes (+ Age's deferred max-HP growth), quirk weights and the per-slot dial shape, upgrade-catalog times, upkeep.ron figures, guard/escort leash and cooldown, the Feral footprint metric and nest income, and the 14-ticks/tile pacing floor (with the boot/print-tick spec pass flagged in TASKS.md). Implementation-milestone work (e.g. the deferred PvP mapgen symmetry) is tracked in [TASKS.md](TASKS.md), not here.
 
