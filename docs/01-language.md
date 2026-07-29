@@ -458,6 +458,8 @@ The full catalog and unlock order live in [06-progression.md](06-progression.md)
 | Function | Cost | Signal-safe | Effect |
 |---|---|---|---|
 | `move_to(entity, only=None, avoid=None)` | 2 + travel | **yes** | Pathfind and move; blocks until arrival or failure. **Tracks moving targets** (re-paths — there is no `chase()`; `move_to` *is* the chase). Safe because retreat *is* the canonical handler. **Paint-routed (Q95/Q96)**: `only=`/`avoid=` take a paint-color constant or a list of them (`unpainted` is a color too) and make forbidden colors impassable to this route search, like water — unreachable = the normal no-path fault; per call, no persistent binding; omitted = paint-blind ([05-terrain.md](05-terrain.md) Tile Composition) |
+| `closest_minable(kind)` → `Result` | 4 | **yes** | Nearest node of `kind` this bot can work **right now** — within the grade of its installed drill **and** with ore remaining (Q117). The plain `closest` stays tier-blind by ruling (sensing isn't harvesting); this is the verb that asks the other question. Start kit |
+| `exists_minable(kind)` → bool | 2 | **yes** | Is there anything of `kind` this bot can work right now? Same predicate as `closest_minable`. Start kit |
 | `try_move_to(target, only=None, avoid=None)` → bool | 2 + travel | **yes** | The fault-free walk: `target` may be an entity **or a `Result`** — a `Result.Err` (or an unreachable goal) is no action and `False`, never a fault. Start kit |
 | `mine()` | 2 + action | no | Extract from resource node in range |
 | `try_mine()` → bool | 2 + action | **yes** | The fault-free swing: extracts if an in-range node is workable by this bot's drill and not empty, else `False`. Start kit — the starter's verb |

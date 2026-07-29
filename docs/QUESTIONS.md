@@ -483,7 +483,18 @@ once, then the tight loop is identical for specialist and generalist.)
     answer the other question explicitly. The name carries the meaning
     instead of `ore` silently behaving unlike the union of its members.
     Both take a kind, so `closest_minable(copper)` means "the copper, if my
-    drill reaches it". `scan_resources()` stays complete — it is the
+    drill reaches it".
+
+    **`minable` means WORKABLE RIGHT NOW** (settled 2026-07-28), which is two
+    conditions, not one: the node's tier is within the **grade of the drill
+    this bot has installed**, *and* it has **ore remaining**. Grade alone is
+    not enough — node existence is permanent map knowledge while amounts are
+    live (docs/03), so a grade-only predicate keeps returning an Iron seam
+    the colony emptied an hour ago, and the fleet walks to it and grinds
+    itself down exactly as it would on an over-grade seam. That is the same
+    failure the ruling exists to close, re-entered through depletion instead
+    of tier. It is the **installed drill**, not the licence: a bot licensed
+    for a grade-3 drill that has not bought one still cannot mine Silver. `scan_resources()` stays complete — it is the
     survey/planning list.
     **Doing this as a query rather than an entity attribute also closes a
     hole by construction**: M16's `workable` attribute read `world.nodes`
