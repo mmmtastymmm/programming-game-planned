@@ -123,7 +123,6 @@ Slotted modules — **made at the Fabricator** (slotted at print time, materials
 
 | Module | Cost | Effect |
 |---|---|---|
-| Backup Core | 12 Chips, 4 **Gold Chips** | Preserve every capability **tier** into the reprint and **wipe all XP** (Q100 — it protects what you *bought*, never what you *earned*; see [02-agents.md](02-agents.md)). Preserves itself, so it re-arms once bought. |
 | Optics | 2 Lens, 1 Bronze | +2 sensor range — one stat, so both circles widen ([05-terrain.md](05-terrain.md)); on a one-slot rookie this is the whole build (Q53) |
 
 Hardware is where the "compute vs. claws" economy bites — as two material streams (Q72): **Bronze arms, Chips think.** Tools and weapons price up the ladder (tier-2 in Steel, tier-3 in Bronze, tier-4 in Bronze + Gold — [03-resources.md](03-resources.md)); Chips buy compute only. Both compete for the same mining and hauling budget, so a colony that maxes CPUs still starved its armory — and every compute upgrade is a round trip to the station, paid in time and exposure.

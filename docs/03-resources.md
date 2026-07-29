@@ -55,7 +55,7 @@ flowchart TD
     WIRE -->|powered structures, electronics| SINK3[The grid]
     CHIP -->|compute upgrades, hardware| SINK4[Brains]
     AU -->|tier-4 tools| SINK5[Late hardware]
-    GCHIP -->|top-tier compute:<br/>high Processor tiers, Backup Core| SINK4
+    GCHIP -->|top-tier compute:<br/>the highest CPU tool grades| SINK4
     WAT -->|coolant| SINK6[Upgrade Station]
     STONE -->|walls, bridges, civil structures| SINK9[Fortification]
     GLASS -->|glazing for sensor structures| SINK10[Seeing]
@@ -92,7 +92,7 @@ Refined:
 | **Chips** | 1 Silver + 2 Crystal + 1 Wire (Foundry) | Compute upgrades ([06-progression.md](06-progression.md)); Gold Chip input | *How big is the brain budget?* Brains are bought, and Chips are the only way to think bigger — every Chip spent on thought is mining and hauling not spent on claws. |
 | **Glass** | 2 Sand (Smelter) | Lens stock; glazing for sensor structures (Sentry Post) | *Can you see?* — the seeing material. |
 | **Lens** | 2 Glass (Foundry) | The **Optics module** (2 Lens + 1 Bronze — Q53 answered, [06-progression.md](06-progression.md)) | *How far can you see?* Sensor range gets a supply chain. |
-| **Gold Chip** | 1 Chip + 1 Gold (Foundry) | Top-tier compute — the highest Processor tiers and the Backup Core price in these ([06-progression.md](06-progression.md)) | *Is your colony rich enough to think this hard?* The best brains are gilded. |
+| **Gold Chip** | 1 Chip + 1 Gold (Foundry) | Top-tier compute — the highest CPU tool grades price in these ([06-progression.md](06-progression.md)) | *Is your colony rich enough to think this hard?* The best brains are gilded. |
 
 Rates & currency:
 

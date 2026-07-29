@@ -43,8 +43,8 @@ rather than resolving, Q112/Q114 are moot, and Q113/Q115 become trivial.
 pessimistic-rounding rule: gains floor), so seniority is a real
 route to capability and staying alive is how it is earned. **Tools are
 bought and licensed by level** — either the specific skill's or the total —
-with quirks able to grant them outright. The **Backup Core inverts**: a
-cloud backup keeps all XP and loses all tools. This deletes `Capability`,
+with quirks able to grant them outright. The **Backup Core is cut** (Q115,
+amended 2026-07-28): tiers were the only thing it preserved. This deletes `Capability`,
 the tier catalog, every tier stat, the scale factor, the level cap, the
 settle-time clamp and the two XP carry fields — the root cause of roughly 26
 of M16's 45 findings, removed rather than repaired. Newly open: **Q121**
@@ -381,14 +381,36 @@ because tier-scaled storage made "XP" mean different things on different bots.
 2026-07-27: moot** — nothing resets. The inspector shows level and
 centi-points per track, plus the total level (the mean).
 
-**Q115 — what does `investment()` measure? ANSWERED 2026-07-27:**
-`xp_total()` is meaningful again (one unit, plain addition), so investment is
-earned XP plus the value of installed tools. **The Backup Core inverts**: it
-is a *cloud backup*, so it preserves **all XP and loses all tools** — the
-tools were far away when the body died. The reprint arrives fully
-experienced and completely naked, and must re-buy its kit, which it is
-licensed for precisely because the XP survived. (The old definition — keeps
-tiers, wipes XP — described a thing that no longer exists.)
+**Q115 — what does `investment()` measure? ANSWERED 2026-07-27; AMENDED
+2026-07-28: the Backup Core is CUT, and `investment()` is XP plus installed
+tools.** Two parts:
+
+  **The Backup Core is removed from the game.** Its whole definition was
+  "preserves every capability tier and wipes XP", and Q111 deleted tiers, so
+  it had nothing left to preserve. The inversion first written here — a
+  cloud backup keeping all XP and losing all tools — collided immediately
+  with Q118's "grade 1 free with the chassis": taken literally the reprint
+  had *no optics*, hence sensor range 0, contradicting docs/02's ratified
+  "a bot is never blind, so the Tier-0 starter works on every print
+  forever", and no drill, so the most expensive item in the game produced a
+  blind bot that could never mine its way back and wandered until upkeep
+  scrapped it. Rather than patch a third definition onto an item whose
+  original purpose no longer exists, it is cut. **Total loss on destruction
+  is now unconditional** — nothing in the game preserves XP across a death,
+  which is a cleaner statement of pillar 3 than any softening item was.
+  Gold Chips keep a sink: the highest CPU tool grades.
+
+  **`investment()` is earned XP plus the value of installed tools.** With
+  one unscaled unit (Q111), `xp_total()` is meaningful again and plain
+  addition works. This is the "what would I lose" number, and it is what the
+  scrap valve and `SelectKey::TotalXp` rank on. **Salvage deliberately reads
+  something different** — the *build receipt*, what was actually spent —
+  because a refund must not return value that was never paid: a
+  quirk-granted tool (Q111 lets quirks grant tools outright) counts toward
+  investment, since losing the bot loses it, but refunds nothing, since
+  nobody bought it. Three formulas were live across the docs before this
+  ruling; these are the two that survive, and the distinction between them
+  is the point rather than an inconsistency.
 
 **Q116 — does the Processing track survive? ANSWERED 2026-07-27: yes, and
 neither it nor Mileage gets an anti-farm guard.** Processing is one of the
@@ -792,7 +814,7 @@ The **playtest-tuning** bucket also remains (numbers that need the prototype, no
 - **Q123** (Agents/Progression): **per-track `curve_base`, two-tier pacing, and Age slowed to 0.2 deci/tick.** `curve_base = dedicated_rate × target_ticks_to_L5 / 15`; job tracks target L5 in ~10 min of dedicated work, ambient tracks ~50 min, and that gap is what lets a specialist out-level the seniority clock. Corrects the question's original premise: the skill route was not "dead on arrival" — in levels it came out tied, because the mean over ten tracks with several at zero cancels the passive lead. Specialisation itself fixes the 1.4% mining duty cycle, so "pay the loop" was rejected as unnecessary ([02-agents.md](02-agents.md)).
 - **Q122** (Agents): **upkeep takes Q121's bounded hyperbolic, and its module term re-bases on installed tools.** `Σ levels` was capped at 60 and is now unbounded, so an ancient fleet would have browned out a colony purely by being old; one shape for both questions because they are the same question ([02-agents.md](02-agents.md)).
 - **Q121** (Agents/Progression): **tools carry the power; levels license, with sparse milestones and bounded continuous perks.** Continuous perks take the integer hyperbolic `max × level / (level + K)`, which makes the uncapped ladder safe by construction and stops `+1 sensor/level` switching off fog of war at a reachable level. **Learning is retired entirely** — perk and track — because the mean-across-tracks total level already measures what it measured. Ten tracks remain ([02-agents.md](02-agents.md), [06-progression.md](06-progression.md)).
-- **Q115** (Agents): **the Backup Core inverts — a cloud backup keeps all XP and loses all tools**, which were far away when the body died. The reprint arrives fully experienced and naked, and is licensed to re-buy its kit precisely because the XP survived. `investment()` is earned XP plus installed tool value, meaningful again now that one unscaled unit makes addition work ([02-agents.md](02-agents.md), [06-progression.md](06-progression.md)).
+- **Q115** (Agents): **the Backup Core is CUT; `investment()` is earned XP plus installed tool value.** The Core existed to preserve capability tiers, and Q111 deleted tiers; the "cloud backup" inversion that briefly replaced it produced a blind, drill-less reprint that could never earn its kit back. Total loss on destruction is now unconditional, which states pillar 3 more cleanly than any softening item did. Salvage still reads the *build receipt* rather than investment, so a quirk-granted tool counts toward what you lose but refunds nothing ([02-agents.md](02-agents.md), [06-progression.md](06-progression.md)).
 - **Q114** (Agents): **moot** — nothing resets, so there is no reset to present. The inspector shows level and centi-points per track plus the total level.
 - **Q113** (Agents): **`SelectKey::Xp` ranks by the track's centi-points, directly** — unambiguous and comparable across bots once storage stops being tier-dependent.
 - **Q112** (Agents): **moot** — one kind of level. What it was carrying survives as Q122 (upkeep lost its `tier_value()` basis and, with the cap gone, its ceiling).

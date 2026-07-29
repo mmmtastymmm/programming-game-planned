@@ -1063,9 +1063,10 @@ free-structure laundering, and a handful of genuinely repaired tests.
 - [ ] **Coolant (Q119)** — declared **per catalog entry in data**, not by code
       branch. Compute family only. Surface what a blocked Station order is
       waiting on. [sim][game]
-- [ ] **Backup Core (Q115)** — inverts: keeps **all XP**, loses **all tools**.
-      A cloud backup; the reprint arrives experienced and naked, licensed to
-      re-buy its kit. [sim]
+- [ ] **Backup Core: DELETE it (Q115)** — the item preserved capability tiers
+      and Q111 deleted tiers, so it has nothing left to preserve. Remove the
+      catalog entry, `UpgradeEffect::BackupCore`, and every doc reference;
+      total loss on destruction becomes unconditional. [sim][game][docs]
 - [ ] **Structures by labor (Q120)** — a completing build **shoves** the
       occupant to a deterministically-chosen free adjacent tile; with no free
       tile the occupant is **destroyed and drops a black box**, skipping the
