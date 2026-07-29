@@ -112,7 +112,7 @@ Rates & currency:
 
 ## Harvest Tool Tiers
 
-Harvesting reads a bot's **Mining capability tier** ([02-agents.md](02-agents.md), Q105): tier N works every resource of tier ≤ N. **Base tier is 1**, so a fresh print works its whole start zone and the opening program never stalls; each resource declares its required tier (data-driven; numbers below are made-up tuning values):
+Harvesting reads the **grade of the drill the bot has installed** ([02-agents.md](02-agents.md), Q111/Q118): grade N works every resource of tier ≤ N. **Grade 1 is free with the chassis**, so a fresh print works its whole start zone and the opening program never stalls; each resource declares its required tier (data-driven; numbers below are made-up tuning values):
 
 | Resource | Required tool tier |
 |---|---|
@@ -123,7 +123,31 @@ Harvesting reads a bot's **Mining capability tier** ([02-agents.md](02-agents.md
 | Crystal | 4 |
 | Water | — (pumped by a structure, not mined) |
 
-The tier ladder is the arc of the colony: chop, dig, electrify, get rich, get brave. **The ladder rule (Q72): tier-N+1 tools price only in materials mineable at tier ≤ N** — no tier's key is ever locked behind its own door. Tiers are bought at the **Upgrade Station** (Q105 folds the Fabricator's tool-making role into the one pad flow), and buying one **resets that capability's earned level** — the drill is better, the hands are new.
+The tier ladder is the arc of the colony: chop, dig, electrify, get rich, get brave.
+
+**Only the DRILL has a reach ladder, and it tops out one grade early.** Grade 4
+already reaches Crystal, the deepest resource tier, so **grade 5 is a quality
+step** — more yield per swing, faster swings — rather than a new reach. That is
+not a special case so much as the normal one: the other nine tools never had a
+reach dimension at all, so every grade of theirs is a quality step. The drill
+is simply the tool where the first three grades happen to buy *access* as well.
+Grades 2–5 are purchasable for every tool, which is what keeps the catalog
+dense enough that no level is dead (Q118, assertion 3).
+
+**The ladder rule (Q72, narrowed by Q118): no tool may be priced in a material
+that its own ladder unlocks at or above the grade being bought** — no tier's
+key is ever locked behind its own door. Because only the drill unlocks
+materials, this binds on the drill alone today; it is written generally so a
+future unlocking tool (a Pump gating Water, say) is covered without an
+amendment. Refined goods resolve through their recipes, so the effective
+mining tier of a price is the deepest raw input it needs: Glass and Lens 0,
+Steel 1, Bronze and Wire 2, Chips and Gold Chip 4.
+
+Tools are bought at the **Upgrade Station** (Q105 folded the Fabricator's
+tool-making role into the one pad flow) and are **licensed by level** — a bot
+may buy a grade-N tool once *either* that track's level *or* its total level
+reaches N. **Buying costs no XP and resets nothing** (Q111): the licence is
+what the level bought, and the level stays.
 
 | Tool tier | Priced in | Made from what you already mine |
 |---|---|---|

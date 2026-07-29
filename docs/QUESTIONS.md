@@ -555,9 +555,19 @@ catalog first revealed that the *rule* was the problem, not the data:
   contradiction with Q121 and is not: Q121 says most levels grant no
   *automatic* perk, this says every level opens a *shopping option*. A level
   is a licence, and there is always something newly licensed. Assertion (3)
-  enforces it. **Ceiling: GRADE 5** (decided 2026-07-27 — five
-  rungs, matching the resource ladder 0–4), grade 1 free with the chassis,
-  2–5 purchasable, and levels past 5 are pure score. That sizes the catalog at **10 tools × 4 grades ≈
+  enforces it. **Ceiling: GRADE 5**, grade 1 free with the
+  chassis, 2–5 purchasable, and levels past 5 are pure score. **CORRECTED
+  2026-07-28:** the original wording ("five rungs, matching the resource
+  ladder 0–4") assumed grade N unlocks resource tier N−1, which would have
+  left the free grade-1 drill reaching tier 0 only — both starting bots
+  fault on their first `mine()` against an Iron/Coal start zone and the
+  colony soft-locks at tick 0. docs/03's mapping is the correct one:
+  **grade N works resource tier ≤ N**, so the free drill covers the start
+  zone. That makes grade 4 the deepest *reach* (Crystal), so **the drill's
+  grade 5 is a quality step** — more yield, faster swings — which keeps
+  four purchasable grades per tool and leaves no level dead. The other nine
+  tools never had a reach dimension, so all of their grades are quality
+  steps anyway; the drill is the only tool where grades buy access too. That sizes the catalog at **10 tools × 4 grades ≈
   40 entries** against today's 12; every one needs a price obeying the
   invariant and the resource roles, which is a tuning pass.
 
