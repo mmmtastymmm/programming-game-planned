@@ -645,6 +645,140 @@ stands on the site.
   delete the designation**, destroying the player's up-front materials. Both
   were tried during M16 and both were wrong.
 
+**Q121 — what shape do per-level perks take now the ladder is uncapped?
+ANSWERED 2026-07-27: TOOLS carry the power; LEVELS license, with sparse
+MILESTONES and bounded CONTINUOUS perks.** The premise of the question was
+that every number in the perk table was authored against a cap of 5 —
+`+10% mine yield per level` and `+1 sensor per level` were chosen knowing
+the maximum multiplier was 5×. Uncapping the ladder does not merely risk
+runaway; it leaves the table with no authored intent past L5 at all. The
+ruling has three parts:
+
+  - **Tools carry the step changes.** Now that tools are bought and
+    licensed by level, the tool holds the big numbers. This is the piece
+    that makes an uncapped ladder harmless *by construction*: levels barely
+    multiply anything, so there is nothing to run away.
+  - **Qualitative growth arrives as sparse milestones** at named levels.
+    The shape already exists and is proven — five perks are L3 thresholds
+    today (Mining swing −25%, Building repair +25%, Hauling loaded speed,
+    Combat hearing, Scouting corruption immunity). Most levels grant
+    nothing; they are licence and score.
+  - **Where a perk genuinely reads as continuous** — hull toughening with
+    age, bearings wearing in, optics sharpening — it uses a **bounded
+    hyperbolic**: `bonus = max_bonus × level / (level + K)`. Pure integer,
+    deterministic, no floats: half of `max_bonus` at level K, 80% at 4K,
+    asymptotic and never exceeding it.
+
+  The hyperbolic settles the sharpest case without a special-case clamp.
+  `+1 sensor/level` on a 34×20 map put a Scouting-L10 bot's vision at 15
+  tiles — a 31×31 square, most of the board — and L15 saw everything, so
+  **fog of war switched off at a reachable level**. Under an asymptotic
+  bonus vision approaches a ceiling instead, and fog cannot be ground away.
+  The self-saturating perks (Flinch −10%/lvl floors at L10, Mileage at L25,
+  Hiding signature once below any hearing radius) already behaved and need
+  no change beyond restatement in the new form.
+
+  **Learning is retired entirely — both the perk and the track.** It was
+  the lifetime-achievement track, defined as 10% of every other award; the
+  mean-across-tracks total level now measures exactly that, derived from
+  the same data without a stored copy. Deletes `XpTrack::Learning`,
+  `learning_feed_pct`, `learning_gain_pct_per_level`, `learning_carry`, the
+  `feeds` map and `settle_xp`'s entire second pass, the Learning term in
+  `xp_gain_pct` (quirk `XpPct` effects — 10x Developer, Tech Debt — stay),
+  and the Learning award site. Ten tracks remain.
+
+  Per-perk magnitudes (`max_bonus`, `K`, which levels carry milestones) are
+  tuning and deferred; the *shape* is what this ruling fixes.
+
+**Q122 — what does energy upkeep scale on now? ANSWERED 2026-07-27: the
+hyperbolic, and tools replace the module term.** Two problems, one answer.
+The per-bot draw was `base + per_upgrade × upgrades + per_module ×
+tier_value() + per_track_level × Σ levels`. `tier_value()` no longer exists,
+so that term's basis becomes **installed tools** — and note M16 had already
+silently changed it from a 3-slot cap to a 12-tier sum, quadrupling the
+ceiling with no retune and no mention in any commit. The level term had a
+worse problem: `Σ levels` was bounded at 5 × 12 = 60 and is now
+**unbounded**, so an ancient fleet would brown out a colony purely by being
+old. It takes **the same bounded hyperbolic Q121 gives the perks** —
+`max × Σlevels / (Σlevels + K)` — so veteran upkeep approaches a ceiling
+instead of growing without limit. Using one shape for both is deliberate:
+the two questions are the same question (an uncapped ladder feeding a
+linear term), and a single mechanism means a future reader has one thing to
+understand rather than two. Magnitudes are tuning.
+
+**Q123 — how are track incomes rebalanced so specialisation beats
+seniority? ANSWERED 2026-07-27: per-track CURVE BASES, plus one income
+change — Age drops to 0.2 deci/tick (2 centi).** Two corrections to how this
+question was first written, because the original framing was half wrong:
+
+  - It claimed the passive tracks out-earn the active ones so badly that
+    the skill route to a tool licence was "dead on arrival". True in raw
+    deci/tick, **false in levels**: levels go as √XP, and total level is the
+    *mean over ten tracks* with several sitting at zero for any given bot.
+    That dilution very nearly cancels the passive lead — worked forward,
+    a pure miner at 50,000 ticks has Mining L3 against a total level of 3.
+    Tied, not dead. The sharper true statement is that the skill route
+    only *beats* the clock for tracks whose rate substantially exceeds
+    Age's, which was **Combat and nothing else** — so the skill route
+    worked for fighters and was denied to workers, backwards for a game
+    about programming an economy.
+  - **Specialisation dissolves most of the problem by itself**, which is
+    why the "pay the loop, not the verb" option was rejected as
+    unnecessary. The 1.4% mining duty cycle came from one bot doing the
+    whole mine→walk→deposit→walk loop. A bot that parks at a vein and
+    lets a hauler carry runs ~80% duty and earns ~8 deci/tick. The travel
+    that ate everything now belongs to the hauler, whose travel *is* its
+    job.
+
+  **The ruling: each track carries its own `curve_base`**, so income rate
+  and progression pace are tuned independently — an event's payout keeps
+  its fiction while the ladder normalises the pace. The pacing intent is
+  deliberately **two-tier**, because normalising everything to one pace
+  would silently undo the Age slowdown:
+
+  - **Job tracks** (Mining, Building, Scouting, Combat, Hauling): a
+    dedicated specialist reaches **L5 in ~10 minutes** (6,000 ticks).
+  - **Ambient tracks** (Age, Mileage, Processing, Hiding, Flinch): **L5 in
+    ~50 minutes** (30,000 ticks) — these are seniority, not skill.
+
+  That gap is what makes the specialist route beat the clock, which is the
+  entire point of the question. Sanity check: a dedicated miner at ten
+  minutes holds Mining **L5** against a **total level of 0** (Age L2,
+  Processing L2, Mileage 0 because it never walks, the rest zero).
+
+  First-pass values, in centi (1 whole XP = 100 centi):
+
+  | Track | Income | Dedicated rate | `curve_base` | L5 at that rate |
+  |---|---|---|---|---|
+  | Mining | 100/unit | ~80 /tick | 32,000 | 10 min |
+  | Building | 10/tick building | 10 /tick | 4,000 | 10 min |
+  | Scouting | 500/node, 1,000/survey | ~20 /tick | 8,000 | 10 min |
+  | Combat | 10/HP, 2,500/kill | ~10 /tick effective | 4,000 | 10 min |
+  | Hauling | 10/unit-tile | ~1.4 /tick | 600 | 11 min |
+  | Processing | 10/op | ~15 /tick | 30,000 | 50 min |
+  | Mileage | 100/tile | ~7 /tick | 14,000 | 50 min |
+  | Hiding | 2,500/episode | ~5 /tick | 10,000 | 50 min |
+  | **Age** | **2/tick** | 2 /tick | 4,000 | 50 min |
+  | Flinch | 1,000/flinch | ~1 /tick | 2,000 | 50 min |
+
+  Cumulative cost to level N is `curve_base × N(N+1)/2`, so every value
+  above is one substitution into **`curve_base = dedicated_rate ×
+  target_ticks_to_L5 / 15`**. That formula and the two-tier intent are the
+  durable part; the numbers are guesses and belong to the playtest bucket.
+
+  **Three to watch.** *Combat* is a guess wearing a number — its in-fight
+  rate is ~100 centi/tick and its duty cycle is whatever the match gives
+  it, so "10 effective" is a placeholder, and the 2,500 kill bonus is 60%
+  of a first level. *Hauling's 600* is the lowest base by far, so hauling
+  levels are cheap for everyone, not just haulers — a dedicated hauler
+  out-levels a part-timer by only ~1.8× (mining's margin is far wider),
+  and if that feels wrong the honest fix is raising Hauling's income
+  rather than cutting its base further, which would mean revisiting the
+  B-only decision for that one track. *Processing at 30,000* assumes ~1.5
+  ops/tick, which scales with cycles — so a better CPU levels Processing
+  faster, which buys more cycles through its tool. Bounded by Q121's
+  hyperbolic, but a loop worth watching.
+
 The **playtest-tuning** bucket also remains (numbers that need the prototype, not a choice, so they never block design): upkeep mix balance ([02-agents.md](02-agents.md)), Corruption spread/re-corruption/cleanse rates ([05-terrain.md](05-terrain.md)), and — per the 2026-07-26 sweep — the first-pass figures shipped inside completed milestones: body-perk magnitudes (+ Age's deferred max-HP growth), quirk weights and the per-slot dial shape, upgrade-catalog times, upkeep.ron figures, guard/escort leash and cooldown, the Feral footprint metric and nest income, and the 14-ticks/tile pacing floor (with the boot/print-tick spec pass flagged in TASKS.md). Implementation-milestone work (e.g. the deferred PvP mapgen symmetry) is tracked in [TASKS.md](TASKS.md), not here.
 
 ---

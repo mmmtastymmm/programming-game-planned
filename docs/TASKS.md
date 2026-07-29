@@ -1037,7 +1037,7 @@ free-structure laundering, and a handful of genuinely repaired tests.
       stat, `tier_xp_scale_pct`, `track_scale`, `capability_level`,
       `track_cap_deci(_scaled)`, the settle-time clamp, `UpgradeOrder::Tier`,
       the Q105-R1/R3 validations, `learning_carry`, and `settle_xp`'s second
-      pass. Age income → **0.2 deci/tick**; per-track bases per Q123's table.
+      pass. Age income → **0.2 deci/tick**; per-track bases per Q123's table (also carried in [02-agents.md](../docs/02-agents.md), the owning doc).
       ⚠HASH + units migration. [sim]
 - [ ] **Tools (Q111, Q118)** — ten tools, one per track (drill, build tool,
       weapon, optics, CPU, hull plating, drivetrain, signature dampener, gyros,
