@@ -103,26 +103,63 @@ Reading the tree: **constructs gate expressiveness, functions gate verbs**, and 
 3. **Enemies preview unlocks.** Ferals use constructs before you have them ([04-enemies.md](04-enemies.md)) — Warden's `for`-loop patrol is an ad for Tier 5, readable once you've killed enough Wardens to decrypt it. The preview is earned like everything else.
 4. **Data sources force breadth** — milestones span mining, exploring, combat, analysis, so a one-note strategy starves research (see Data rules in [03-resources.md](03-resources.md)).
 
-## Hardware Upgrades (Chips, per-bot)
+## Tools & capacity buys (per-bot, at the Upgrade Station)
 
-Compute is **bought at the Upgrade Station** ([03-resources.md](03-resources.md)): the bot physically walks to the structure, mounts the pad, and sits inert for the upgrade time — **no slot consumed by anything** — Q105 replaced generic module slots with four permanent capability slots (Mining, Building, Combat, Optics) plus the Processor; memory, variable slots, stack depth, log buffer and the Backup Core are flat buys. **No per-bot cost escalation** (Q68): the catalog's tier prices below are the whole cost curve.
+Everything above the floor statline is **bought at the Upgrade Station**
+([03-resources.md](03-resources.md)): the bot physically walks to the structure,
+mounts the pad, and sits inert for the entry's build time. Two families are sold.
 
-Upgrade Station catalog:
+### Tools — one per XP track, grades 1–5
+
+Grade 1 ships free with the chassis; **grades 2–5 are bought, and each is
+licensed by level** — a bot may buy grade N once *either* that track's level
+*or* its **total level** (the floored mean across the ten tracks) reaches N
+(Q111/Q118). Levels rarely change a stat by themselves; **the tools carry the
+power**, which is what keeps an uncapped ladder from running away (Q121).
+
+| Track | Tool | What its grades buy |
+|---|---|---|
+| Mining | **drill** | Harvest reach (grades 2–4 add resource tiers 2/3/4), then quality at 5 |
+| Building | **build tool** | Build and repair rate. **Grade ≥ 2 gates the heavy verbs**: field repair, `hijack`, nest claim/raze (Q105-R2) |
+| Combat | **weapon** | Damage per hit |
+| Scouting | **optics** | Sensor range — one stat, so both circles widen ([05-terrain.md](05-terrain.md)) |
+| Processing | **CPU** | Cycles per tick |
+| Hauling | **cargo rack** | Cargo capacity |
+| Age | **hull plating** | Max HP |
+| Mileage | **drivetrain** | Move rate |
+| Hiding | **signature dampener** | Movement signature |
+| Flinch | **gyros** | Flinch duration |
+
+**Pricing follows resource ROLE, not a uniform rung** — *Bronze arms, Chips
+think*. The one hard constraint is anti-circularity (Q118): **no tool may be
+priced in a material its own ladder unlocks at or above the grade being
+bought**, which binds on the drill alone, since only the drill unlocks
+materials. So the drill climbs Steel → Bronze → Bronze+Gold, weapons and civil
+kit price in Bronze, sensing in the Sand → Glass → Lens chain, and compute
+starts cheap and escalates: **CPU 2 in Wire, 3 in Silver + Wire, 4 in Chips, 5
+in Gold Chips**. Three invariants are checked at load: anti-circularity, no
+orphan materials, and **no gaps** — every grade from 2 to a tool's ceiling has
+an entry, so no reachable level is dead.
+
+**Only the compute family draws coolant** (Q119) — the CPU tool and the
+capacity buys below. Mechanical tools are not thermal and pay none; the
+requirement is declared per catalog entry in data.
+
+### Capacity buys — flat, unlicensed
+
+Not tied to a track and not graded: capacities, not things a bot *does*.
 
 | Upgrade | Cost | Effect |
 |---|---|---|
-| CPU Mk2 / Mk3 | 5 / 15 Chips | 2 / 4 cycles per tick |
-| Memory bank | 5 Chips | +32 program lines, +4 variables, +8 log ring-buffer entries |
-| Stack extension | 8 Chips | +4 call depth (base cap is 4; recursion is legal but overflows fault — stack is what makes recursive style viable, [01-language.md](01-language.md)) |
-| **Processor tier** | per-tier, Chips → **Gold Chips** at the top (Q72's ladder) | More cycles per tick. Q100 **retired the Coprocessor** — thinking and acting never overlap, because think-while-acting is a *language* feature (async actions), not hardware. Compute is a capability instead: buy the tier, sharpen it with the **Processing** track. |
+| Memory bank | Wire, escalating | +32 program lines, +4 variables, +8 log ring-buffer entries |
+| Stack extension | Wire, escalating | +4 call depth (base cap is 4; recursion is legal but overflows fault — stack is what makes recursive style viable, [01-language.md](01-language.md)) |
+| Log buffer | Wire | More ring-buffer entries — richer `upload_log()`, richer Black Boxes |
 
-Slotted modules — **made at the Fabricator** (slotted at print time, materials added to the print cost) or **swapped at the Upgrade Station** (Q72). Swap economics (audit round 2): the Station fabricates the incoming module on the spot (its materials paid there); the removed module is **destroyed, no refund** — refits waste the old part — and it **drops off the build receipt**, which always reads *currently-installed* hardware (keeping salvage honest, [02-agents.md](02-agents.md)). Milestone-opened 2nd/3rd slots fill the same way. Module work draws no coolant (mechanical, not thermal — coolant is for compute):
+These start on **Wire** rather than Chips deliberately: how large a program a
+player may write must not be the last thing a colony unlocks (Q118).
 
-| Module | Cost | Effect |
-|---|---|---|
-| Optics | 2 Lens, 1 Bronze | +2 sensor range — one stat, so both circles widen ([05-terrain.md](05-terrain.md)); on a one-slot rookie this is the whole build (Q53) |
-
-Hardware is where the "compute vs. claws" economy bites — as two material streams (Q72): **Bronze arms, Chips think.** Tools and weapons price up the ladder (tier-2 in Steel, tier-3 in Bronze, tier-4 in Bronze + Gold — [03-resources.md](03-resources.md)); Chips buy compute only. Both compete for the same mining and hauling budget, so a colony that maxes CPUs still starved its armory — and every compute upgrade is a round trip to the station, paid in time and exposure.
+Hardware is where the "compute vs. claws" economy bites, as two material
+streams (Q72): **Bronze arms, Chips think.**
 
 ## Pacing Targets (a NEW player's first co-op session)
 

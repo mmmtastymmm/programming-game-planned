@@ -1067,11 +1067,14 @@ free-structure laundering, and a handful of genuinely repaired tests.
       and Q111 deleted tiers, so it has nothing left to preserve. Remove the
       catalog entry, `UpgradeEffect::BackupCore`, and every doc reference;
       total loss on destruction becomes unconditional. [sim][game][docs]
-- [ ] **Structures by labor (Q120)** — a completing build **shoves** the
-      occupant to a deterministically-chosen free adjacent tile; with no free
-      tile the occupant is **destroyed and drops a black box**, skipping the
-      wreck stage. The build must **never hold** and **never delete the
-      designation**. Blueprints stay passable. [sim]
+- [ ] **Structures by labor (Q120, amended)** — a completing build
+      **displaces** the occupant: BFS outward from the site over passable
+      tiles, first free tile, ties on lowest `(x, y)`. **Nothing dies** — the
+      entombment death was cut. If the BFS exhausts the component (a bot
+      sealed in a pocket) the build **holds silently**: re-park, no progress,
+      no XP, no fault. The displaced bot's action is **re-planned, not
+      failed**, so being pushed never costs HP. Never delete the designation.
+      Blueprints stay passable. [sim]
 - [ ] **Queries (Q117)** — add `closest_minable(kind)` and
       `exists_minable(kind)` beside the untouched tier-blind `closest`/`exists`
       (docs/01 needs no amendment). Add `try_mine()` with the backlogged
@@ -1139,7 +1142,8 @@ written-up quirks are unbuildable. ⚠HASH.
       `region(tile(base + largest cost-raising per-bot delta))`, not overlays alone. Validating
       overlays only leaves quirked bots outside the certified invariant and freeze-forever
       reachable for them. [pyrite][sim]
-- [x] **Q105-R1** — load-time assert that each capability tier's grant ≥ the L5 bonus of the
+- [~] **Q105-R1** — SUPERSEDED by Q111 (tiers deleted); replaced by Q118's three
+      catalog asserts. Original: load-time assert that each capability tier's grant ≥ the L5 bonus of the
       tier below, so a bought upgrade is never a net downgrade of the stat it buys (Optics
       tier 2 must not leave a Scouting-L5 scout seeing less). [sim]
 - [~] **Q105-R2** — RESTATED for Q111: a **build tool of grade ≥ 2** gates field repair (wreck rescue), `hijack`, and nest
