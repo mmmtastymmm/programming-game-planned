@@ -1142,7 +1142,7 @@ written-up quirks are unbuildable. ⚠HASH.
 - [x] **Q105-R1** — load-time assert that each capability tier's grant ≥ the L5 bonus of the
       tier below, so a bought upgrade is never a net downgrade of the stat it buys (Optics
       tier 2 must not leave a Scouting-L5 scout seeing less). [sim]
-- [x] **Q105-R2** — `Building tier ≥ 2` gates field repair (wreck rescue), `hijack`, and nest
+- [~] **Q105-R2** — RESTATED for Q111: a **build tool of grade ≥ 2** gates field repair (wreck rescue), `hijack`, and nest
       claim/raze; base tier 1 covers `build()` and structure `repair()`. Base weapon damage
       comes from Combat tier 1. Replaces the deleted build-tool gate. [sim]
 - [x] **Q105-R3** — the scrap valve and `SelectKey::TotalXp` rank by INVESTMENT (lifetime XP +

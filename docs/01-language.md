@@ -470,10 +470,10 @@ The full catalog and unlock order live in [06-progression.md](06-progression.md)
 | `wander(only=None, avoid=None)` | 2 + action | no | A seeded random walk leg (stream `rng.wander`) — the dumb explorer; takes the Q95 paint args (`wander(only=green)` = drift inside the green zone). Start kit |
 | `explore(only=None, avoid=None)` | 2 + action | no | The smart explorer (Q79): picks a random **currently-fogged** tile within ~15 tiles (tuning; stream `rng.explore`), walks there under the Q95 paint args, and drops into the scouting stance; resolves when the survey completes |
 | `health_low()` | 1 | **yes** | True iff own HP is below the bot's own `hurt_line` — the pre-handler polling idiom |
-| `repair(target)` | 2 + action | no | Repairs structures and bots at any Building tier; **on a wreck = field repair** (the rescue verb), which needs **Building tier ≥ 2** (Q105-R2 — the replacement for the deleted build-tool gate) |
+| `repair(target)` | 2 + action | no | Repairs structures and bots with any build tool; **on a wreck = field repair** (the rescue verb), which needs **Building tier ≥ 2** (Q105-R2 — the replacement for the deleted build-tool gate) |
 | `guard(entity)` | 2 + action | no | Blocking stance: hold near the target **entity** (never a tile), engage perceived enemies; any signal ends it |
 | `escort(entity)` | 2 + action | no | Follow + guard the target entity |
-| `hijack(wreck)` | 2 + action | no | Needs **Building tier ≥ 2** (Q105-R2); the slowest race verb (Q84) — boots the wreck under your remainder color ([04-enemies.md](04-enemies.md)) |
+| `hijack(wreck)` | 2 + action | no | Needs a **build tool of grade ≥ 2** (Q105-R2, restated for Q111's tool model); the slowest race verb (Q84) — boots the wreck under your remainder color ([04-enemies.md](04-enemies.md)) |
 | `scan_resources()` | 8 | **yes** | List of perceived + known resource nodes nearby (map knowledge included) |
 | `my_quirks()` | 2 | **yes** | List of this bot's **manifested** quirks (latent ones invisible); free of any unlock whenever quirks are on |
 | `has_quirk(q)` | 1 | **yes** | Quirk names are **pre-bound constants like kind constants** (no third builtin enum) |

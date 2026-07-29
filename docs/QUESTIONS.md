@@ -412,6 +412,15 @@ tools.** Two parts:
   ruling; these are the two that survive, and the distinction between them
   is the point rather than an inconsistency.
 
+**Q105-R2 RESTATED 2026-07-28.** Its gate on field repair, `hijack` and
+nest claim/raze read "Building tier ≥ 2", and Q111 deleted tiers — orphaning
+the rule in docs/01, docs/02 and docs/03 while TASKS.md still marked it done.
+The direct translation is **a build tool of grade ≥ 2**: the grade is licensed
+by the Building track, so the gate still means "an experienced builder", and
+the heavy verbs stay the heavy verbs. Without it a zero-XP rookie print can
+hijack a veteran's wreck, which collapses the wreck race that made `hijack`
+the slowest and most gated verb of the four.
+
 **Q116 — does the Processing track survive? ANSWERED 2026-07-27: yes, and
 neither it nor Mileage gets an anti-farm guard.** Processing is one of the
 ten, with the CPU as its tool. The objection was that it and Mileage are the
