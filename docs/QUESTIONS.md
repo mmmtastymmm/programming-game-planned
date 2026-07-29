@@ -14,7 +14,7 @@ Q123 claim that the skill route was "dead on arrival" was true in deci/tick
 but **false in levels** (the mean over ten tracks, several at zero, very
 nearly cancels the passive lead — a pure miner comes out tied); and
 **specialisation dissolves the duty-cycle problem by itself**, which is why
-"pay the loop, not the verb" was rejected as unnecessary. Still open: **Q118–Q119**.
+"pay the loop, not the verb" was rejected as unnecessary. Still open: **Q119**.
 
 **Status 2026-07-27 (M16 rethink, earlier): Q121 ANSWERED — tools carry the
 power, levels license.** Perks take three shapes: tools hold the step
@@ -492,11 +492,67 @@ once, then the tight loop is identical for specialist and generalist.)
   table, and both sort `(distance, id)` like `closest` for determinism.
 
 **Q118 — should the tool catalog be validated against Q72's ladder rule at
-load?** Still open, and still live: tools are bought with materials, so
-"tier N+1 prices only in materials mineable at tier ≤ N" still has to hold,
-and M16's catalog violated it (Optics t3 priced in Chips, which need Crystal
-— the top of the mining ladder). Fix the prices, add the load-time
-invariant, or both.
+load? ANSWERED 2026-07-27: yes — but the rule is narrower than docs/03
+states, and the catalog gets three assertions.** Checking the shipped
+catalog first revealed that the *rule* was the problem, not the data:
+
+  | Tool | Grade | Cost | Max material tier | Allowed (≤N−1) | |
+  |---|---|---|---|---|---|
+  | Mining | 2/3/4 | Steel · Bronze · Bronze+Gold | 1 / 2 / 3 | ≤1/2/3 | ✓ |
+  | Building | 2/3 | Steel · Bronze | 1 / 2 | ≤1/2 | ✓ |
+  | Combat | 2/3 | Bronze · Bronze+Gold | 2 / 3 | ≤1/2 | ✗ |
+  | Optics | 2/3 | Lens+Bronze · Lens+Chips | 2 / 4 | ≤1/2 | ✗ |
+  | Processor | 2/3/4 | Chips · Chips · Chips+GoldChip | 4 / 4 / 4 | ≤1/2/3 | ✗ |
+
+  **Mining and Building comply; every other ladder violates, and Processor
+  violates at every grade.** But the catalog is not sloppy — it follows the
+  *resource-role* rules immaculately (Bronze arms, Chips think, the
+  Sand→Glass→Lens seeing chain). The two stated rules are in **direct,
+  arithmetic conflict**: Chips require Crystal, Crystal is mining tier 4, so
+  under a literal ladder rule *no compute tool below grade 5 could ever be
+  priced in Chips*. One of them had to give.
+
+  The ladder rule's own justification — "no tier's key is ever locked behind
+  its own door" — is about **circularity**, and circularity is only possible
+  on a ladder that *unlocks materials*. A drill priced in what it unlocks is
+  a deadlock; an Optics tool priced in Chips is merely late, because Optics
+  unlocks nothing. Materials come from colony stock mined by miners, so a
+  scout's tool never depended on that scout's own mining. The rule was
+  always about drills and was simply written down too broadly.
+
+  **The invariant, generalised so a future unlocking tool is covered
+  without an amendment:** *no tool may be priced in a material that its own
+  ladder unlocks at or above the grade being bought.* Refined goods resolve
+  through their recipes — `mining_tier(resource)` is the max tier over the
+  transitive raw inputs (Glass/Lens 0, Steel 1, Bronze/Wire 2, Chips and
+  Gold Chip 4). Three load-time assertions, all cheap:
+  **(1) anti-circularity** as above; **(2) no orphans** — every material
+  named in a price is obtainable at all; **(3) no gaps** — every grade from
+  2 to a tool's ceiling has an entry, so no level is dead.
+
+  **Compute is NOT meant to sit behind maxed mining** (ruled here). Chips →
+  Crystal → Mining 4 meant every compute purchase, *and with it
+  `memory_bank` and `stack_ext` — program lines, variable slots and stack
+  depth* — was gated on the entire mining ladder. In a game about
+  programming, the size of program a player may write was the last thing
+  unlocked. The fix keeps "Chips think" by letting the compute ladder
+  **start cheap and escalate**: CPU 2 in **Wire** (Copper, tier 2, right
+  after the first drill upgrade), 3 in Silver+Wire, 4 in Chips, 5 in Gold
+  Chips — and program-capacity upgrades start on Wire for the same reason.
+
+  **Every level licenses a purchase** (ruled here). This reads as a
+  contradiction with Q121 and is not: Q121 says most levels grant no
+  *automatic* perk, this says every level opens a *shopping option*. A level
+  is a licence, and there is always something newly licensed. Assertion (3)
+  enforces it. **Open sub-detail:** levels are uncapped, so the catalog
+  needs a ceiling — proposed **grade 5** (five rungs, matching the resource
+  ladder 0–4), grade 1 free with the chassis, 2–5 purchasable, and levels
+  past 5 are pure score. That sizes the catalog at **10 tools × 4 grades ≈
+  40 entries** against today's 12; every one needs a price obeying the
+  invariant and the resource roles, which is a tuning pass.
+
+  Doc-sync regardless: docs/03's ladder paragraph still says buying a tier
+  "resets that capability's earned level", which Q111 deleted.
 
 **Q119 — which tool purchases draw coolant?** Restated: docs/06 says
 mechanical work is "not thermal — coolant is for compute". With tiers gone
@@ -667,6 +723,7 @@ The **playtest-tuning** bucket also remains (numbers that need the prototype, no
 
 ## Answered log
 
+- **Q118** (Resources/Progression): **the ladder rule is narrower than docs/03 states, and the catalog gets three load-time assertions.** Only a ladder that *unlocks materials* can be circular, so the invariant is "no tool may be priced in a material its own ladder unlocks at or above the grade being bought" — which binds on Mining alone today and covers a future unlocking tool without amendment. The literal rule and "Chips think" were in arithmetic conflict (Chips need Crystal, tier 4), and the shipped catalog had silently chosen the resource roles. Assertions: anti-circularity, no orphan materials, no gaps. **Compute is not meant to sit behind maxed mining** — the compute ladder starts on Wire and escalates to Chips, and program-capacity upgrades with it. **Every level licenses a purchase** (dense catalog), which complements rather than contradicts Q121's sparse automatic perks ([03-resources.md](03-resources.md), [06-progression.md](06-progression.md)).
 - **Q117** (Language/Resources): **named `closest_minable` / `exists_minable`, plus shipped programs that handle the miss.** `closest(ore)` and `exists(ore)` are untouched, so docs/01's tier-blind ruling stays literally true and needs no amendment; the name carries the meaning instead of `ore` silently behaving unlike its members. As queries rather than an entity attribute they are already scoped to `known_nodes`, closing the perception leak M16's `workable` attribute had. The shipped starters and the Feral Harvester `match` on the result — per Q108 (shipped sources must not crash-loop) and Q110 (bind once, never check-then-act) — which covers the mid-game case where no workable ore exists at all. `try_mine()` joins the backlogged `try_*` family ([01-language.md](01-language.md), [03-resources.md](03-resources.md)).
 - **Q116** (Agents): **Processing survives; neither it nor Mileage gets an anti-farm guard.** Farming them costs the bot's entire output while Q121 bounded the prize and Q123 made it slow — an exploit is something that beats playing properly, and these lose to it. Records the reusable rule: guard a track when farming is free (as Hauling, Flinch and Hiding still are), leave it alone when farming costs the work ([02-agents.md](02-agents.md)).
 - **Q123** (Agents/Progression): **per-track `curve_base`, two-tier pacing, and Age slowed to 0.2 deci/tick.** `curve_base = dedicated_rate × target_ticks_to_L5 / 15`; job tracks target L5 in ~10 min of dedicated work, ambient tracks ~50 min, and that gap is what lets a specialist out-level the seniority clock. Corrects the question's original premise: the skill route was not "dead on arrival" — in levels it came out tied, because the mean over ten tracks with several at zero cancels the passive lead. Specialisation itself fixes the 1.4% mining duty cycle, so "pay the loop" was rejected as unnecessary ([02-agents.md](02-agents.md)).
