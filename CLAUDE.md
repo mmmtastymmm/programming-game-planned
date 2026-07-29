@@ -22,3 +22,4 @@ Testing expectation: golden-replay tests (`(seed, command log) → state hash`) 
 
 - Every numeric value in docs (cycle costs, XP curves, timers) is a tuning constant, expected to live in data files (`costs.ron` etc.), not code.
 - When a design decision is made, it moves to the owning doc's **Decided** section; open items live in `docs/QUESTIONS.md` (numbered — don't renumber, append).
+- Known defects in *already-decided* text — a ruling that never propagated to its owning doc, or a tuning number that fails arithmetic against its inputs — live in `docs/PROBLEMS.md` (numbered P1…, same append-only rule). Fixing one moves it to that file's **Fixed** log with the commit hash.

@@ -2,6 +2,8 @@
 
 All design questions collected from docs 01–08. As each is decided, it moves to the owning doc's *Decided* section and is marked answered here. Numbering is stable — append new questions, never renumber.
 
+This file is for things **not yet decided**. Text that is already wrong — a decision contradicted, or a number that fails arithmetic — is tracked in [PROBLEMS.md](PROBLEMS.md), numbered P1… on the same append-only rule.
+
 **Status 2026-07-27 (M16 rethink, latest): Q122 and Q123 ANSWERED — the XP
 model is fully specified.** Each track carries **its own `curve_base`**
 (`curve_base = dedicated_rate × target_ticks_to_L5 / 15`), with a deliberate
