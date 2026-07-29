@@ -348,8 +348,15 @@ monotonic — buying never costs XP, nothing ever resets. The model:
     included. Seniority is a legitimate route to capability and staying
     alive is how it is earned — deliberately rewarding careful play.
   - **Tools are BOUGHT, and level licenses the purchase.** Every track has
-    one: drill, build tool, weapon, optics, CPU, hull plating, drivetrain,
-    signature dampener, gyros, cargo rack, training module. A bot may buy a
+    exactly one, and the mapping is fixed here so it is not guesswork:
+    **Mining → drill · Building → build tool · Combat → weapon · Scouting →
+    optics · Processing → CPU · Hauling → cargo rack · Age → hull plating ·
+    Mileage → drivetrain · Hiding → signature dampener · Flinch → gyros.**
+    (An earlier draft listed eleven names for ten tracks, the extra being a
+    "training module" for the Learning track Q121 had already deleted — it
+    would have been a tool licensed by a track that does not exist, so
+    either the no-gaps assertion rejects the catalog or the entry is
+    permanently unbuyable.) A bot may buy a
     tool whose requirement is met by **either** that skill's level **or** its
     total level. Because XP never decreases and the gate sits at purchase, a
     separate use-gate is redundant — a bot can never hold a tool it is not
