@@ -2,201 +2,35 @@
 
 Rule: **every terrain type must change what a good program looks like.** If a tile type doesn't alter movement, sensing, resources, or computation, it doesn't ship. The map is a tile grid (fits the deterministic sim and integer math — see [08-multiplayer.md](08-multiplayer.md)).
 
-## Tile Types
+## The parts
 
-| Terrain | Move cost | Effects | The program it demands |
-|---|---|---|---|
-| **Plains** | 1× | none | baseline |
-| **Rubble** | 2× | — | Pathing tradeoffs: `move_to` auto-paths, but route *choice* (waypoints) is player code |
-| **Ore Vein** | 1× | minable mineral node — Iron, Coal, Copper, Tin, Silver, or Gold variant ([03-resources.md](03-resources.md)); deeper/rarer kinds sit farther from start zones | mining loops |
-| **Grove** | 1× | harvestable Wood; **regenerates** | renewable-but-thin logging loops |
-| **Outcrop** | 1× | harvestable Stone node — plentiful, near everywhere ([03-resources.md](03-resources.md)) | fortification supply lines: walls are hauled |
-| **Sand Flat** | 1× | harvestable Sand — shoreline flats and dune fringes ([03-resources.md](03-resources.md)); deep **Dunes** (below) make *interior* sand risky to work: a harvesting bot is standing still, and the sinking clock ticks | glassworks supply; another reason coasts are contested |
-| **Crystal Field** | 1× | minable Crystal; usually spawns near Corruption | risk-managed harvesting (`if exists(enemy): move_to(closest(repair_bay).expect())`) |
-| **Geothermal Vent** | 1× | only tile allowing Geothermal Tap | expansion targets worth fighting over |
-| **Mud** | 3×, and loaded bots 4× | — | haulers should route *around*; naive `move_to(depot)` straight-lines through it |
-| **Water** | impassable (ground) | blocks ground bots; shoreline tiles accept a **Pump** (the Water resource, [03-resources.md](03-resources.md)) | natural walls; chokepoint defense — and now a resource worth holding |
-| **High Ground** | 1×, enter only via Ramp tiles | +2 sensor range, +25% ranged damage down | king-of-the-hill fights; scout perches |
-| **Corruption** | 1× | bots suffer **+1 cycle cost on every operation**; no channel traffic (`send`/`receive`) in/out; Ferals spawn here | *the signature tile*: your code literally runs worse here — simple short programs outperform clever long ones inside Corruption |
-| **Dunes** | 2× | **idling sinks** (Q35): stand still longer than N ticks and the exit cost escalates | sand punishes loitering — `wait(n)` staging and rally points are unsafe here; keep moving |
-| **Mountain** | **edge-cost** (Q36): climbing on is expensive, descending moderate, ridge-to-ridge 1× | summit tiles carry High Ground's +2 sensor state — the soft-slope sibling of ramp-gated High Ground | ranges are highways with costly on-ramps: route *along* them, budget the climb |
-| **Ice** | 1×/tile, **uncontrolled** | entering continues the move in the same direction until non-ice — a deterministic slide (Q37); an arrow overlay mid-slide *redirects* it; sliding into an occupied tile is a normal bump (slider = rammer) and ends the slide — except engine walks (recall), which never bump the mover (Q73) | plan slide endpoints; mass-produces `on bump:` use |
-| **Ford** | 4× | mapgen-placed shallow crossings — *specific* tiles, not all water (Q38); wading grants a **signature bonus** (the water masks you — see Fog of War) | the slow, sneaky back door; bridges stay the fast contested chokepoint |
-| **Road** | ½× | terraformed (the Road blueprint, Stone — see Terraforming); the ½ exists because move costs store at ×2 scale (Q39, below) | logistics arteries worth paving — and worth raiding |
-| **Scree** | 2× | **collapses to Rubble after N crossings** (per-tile counter, Q40 — the natural-bridge-HP precedent) | the shortcut wears out: optimal programs rotate routes |
-| **Snow** | 1× | **mutes movement** (Q78): a bot on Snow makes no movement noise — undetectable by *hearing* regardless of signature; only **seeing** finds it | the silent-approach biome: attackers route assaults over snow without creeping; defenders need *eyes* on the snowline (Sentries, Lanterns, patrols) — ears are useless there |
+| File | Owns |
+|---|---|
+| [tiles.md](05-terrain/tiles.md) | The tile types and the per-biome cost overlays. |
+| [terraforming.md](05-terrain/terraforming.md) | Building and deconstructing terrain. |
+| [tile-composition.md](05-terrain/tile-composition.md) | The layer model (paint as the routing layer) and narrow-corridor traffic tools. |
+| [fog-of-war.md](05-terrain/fog-of-war.md) | What a faction knows, and how seeing differs from hearing. |
+| [corruption.md](05-terrain/corruption.md) | The thematic centerpiece and its spread. |
+| [map-generation.md](05-terrain/map-generation.md) | Authoring guidelines and the procedural generator. |
+| [decided.md](05-terrain/decided.md) | Settled rulings owned by this doc. |
 
-Move costs are integers in `costs.ron` stored at **×2 scale** (Plains 2, Road 1, Rubble 4, Mud 6/8 …) so Road's half-plains cost exists (Q39) — the same fine-grained-units medicine as Q56, and a one-time migration that buys tuning granularity everywhere. Footprints and a `tracks_at()` sensor (Q40's second half) are **deferred post-v1** — per-tile trace state and a new sensor surface haven't earned their sim cost yet.
+## What holds across all of them
 
-## Biome cost overlays
-
-The Pyrite cycle-cost table is data with **per-biome overlays** ([01-language.md](01-language.md), [07-architecture.md](07-architecture.md)): any map or biome can override any operation's cost, including the fault penalty. This is the general mechanism for terrain that stresses *program designs* rather than stats. Shipped and speculative examples:
-
-| Biome overlay | Override | Design it punishes / rewards |
-|---|---|---|
-| **Corruption** (shipped first) | every op +1 | punishes long clever programs |
-| Static Wastes | `send` ×3 | punishes swarm coordination |
-| Loop Desert | loop iteration ×3 | punishes iteration-heavy code, rewards unrolled/flat code |
-| Overclock Field | all ops −1 (min 1), crash-dump cost ×2 | rewards bold code, makes bugs expensive |
-
-Overlays live on **authored regions** (Q101, 2026-07-26) — arbitrary areas the map defines, not tile kinds — which is what lets a biome have any shape and makes regions the natural home for **boss biomes**: a punishing zone around a boss, unrelated to the ground beneath it. Corruption is the exception that proves the rule: its tax stays **tile-based**, because the creep spreads tile by tile and killing a Blight Core must leave taxed ground behind (a region-scoped tax would die with the core and strip Cleanse of its purpose). The editor shows *effective* per-line costs for the tile the selected bot stands on.
-
-Effective cost resolves in **three layers**, machine outward:
-
-    floor₁( region_rule( tile_rule( base + Σ per-bot deltas ) ) )
-
-Per-bot deltas (quirks, perks) apply **first, so terrain amplifies them**: Dial-Up (`send` +1) inside Static Wastes (`send` ×3) pays `(3+1)×3 = 12`, not `9+1`. A loud radio is *worse* in a jamming field — quirks get more dramatic under hostile ground rather than merely additive. **Each layer defines one RULE per key** (a specific row beats a general one — Overclock's crash-dump row wins over its all-ops row), so stacking is never ambiguous; only the bot standing there varies the result. No overlay or quirk can push an op below **1 cycle** (the global floor), and **forced charges are taxable** (Overclock's doubled crash dump works as written): they are charged as debt, so no overlay can strand a bot by making dying expensive. `bank_cap` is a flat generous ceiling validated at load. The check must evaluate the **whole pipeline at its worst case** — `region(tile(base + the largest cost-raising per-bot delta any quirk or perk can contribute))` for every key — not the overlays alone: per-bot deltas apply *inside* the multipliers, so a quirked bot (Dial-Up, Telemetry Enabled) in a multiplier region would otherwise sit outside the certified invariant and could face an op it can never bank for. Quirks are data too, so the worst case is computable at load. That keeps Q75/Q82's "freeze-forever is impossible" guarantee as a checked invariant instead of per-tick arithmetic — for *every* bot, not just unquirked ones.
-
-## Terraforming (build & deconstruct)
-
-The map is editable — both directions. **Designation is the player's; labor is code**: the player places a **blueprint** on a target tile (a UI act — one lockstep Command, charged on placement), and bots service it with `move_to(closest(blueprint).expect())` + `build()` (1 progress/tick, adjacent, earns Building XP; several bots stack). Programs never name tiles — Pyrite has no position literals, and doesn't need them. Terraform **blueprint types** (Q80 — these are *not* functions: placing one is a Command, the Cache find unlocks the ability to place them, and bots service them with `build()`; unlocked after `build`/`repair`, [06-progression.md](06-progression.md)):
-
-| Blueprint | Effect | Cost |
-|---|---|---|
-| **Clear** | Rubble → Plains; yields a little **Stone** | build time |
-| **Bridge** | Water → Bridge (ground-passable) | Stone + build time |
-| **Barricade** | Plains → Barricade (blocks movement **and vision** — it's tall). **Has HP; attackable** (Q99): a wall is a target, so a siege is a real option beside the Demolish crew | Stone + build time |
-| **Demolish** | remove Bridge / Barricade | build time |
-| **Cleanse** | Corruption → Plains (see Corruption dynamics — it grows back) | build time, slow |
-| **Road** | Plains / Rubble → Road (half plains move cost) | Stone + build time |
-
-Deconstruction is symmetric and adversarial: enemies can `demolish` **your** bridge — behind your raiding party. Chokepoints stop being facts of the map and become claims you defend.
-
-Beyond buildings, two **designation layers** sit on top of any tile:
-
-- **Overlays** — traffic rules, instant signage (no build labor). An **Arrow** makes its tile one-way (enter and leave only along the arrow; small cost; clearable). Arrows on a bridge = a directional crossing; opposing arrowed bridges = a deadlock-free roundabout; arrows on plain ground = dedicated lanes.
-- **Paint** — tile color, promoted (2026-07-26) from cosmetic to the **routing layer**: the pathing calls take `only=`/`avoid=` color arguments (see Tile Composition, below). Painting follows the **blueprint flow** (Q97): the player draws the colors — a designation Command — and a bot must travel there to apply them (quick per tile, no material cost; labor and exposure are the price). **The layer is global**: one physical coat per tile, no faction ownership — anyone's bot can repaint anyone's ground, so paint sabotage is legal, visible, and fightable (the demolish-their-bridge precedent). Erasing is painting `unpainted`. Paint still doubles as zoning and notes-to-self, and the `paint_at()` sensor hook stands.
-
-## Tile Composition (the layer model)
-
-*Decided 2026-07-26.* Every tile is two independent axes: **what the viewer knows** (the three fog states — in view / discovered-but-stale memory / undiscovered; see Fog of War) and **what is physically there**. The physical side is a strict either/or:
-
-1. **An unwalkable building (exclusive).** A building that can't be walked on — the Barricade today — owns its tile outright: it shares with *nothing*. No terrain surface renders under it, no overlay, no paint. Placing one clears the tile's designations (they're signage about traffic, and a blocked tile has none); demolishing it leaves bare ground to re-mark. The sim already models this shape — a blocking building replaces the tile kind (`Plains → Barricade`).
-2. **Ground (a three-slot stack).** Anything walkable carries:
-   - **Surface** — the terrain type (the table above). *Walkable buildings* provide a surface the same way: a Bridge's deck stands in for the Water under it, and future walkable structures (an elevator, who knows) would slot in identically. The surface sets move cost and terrain effects.
-   - **Overlay** (at most one) — traffic rules: the Arrow. Composes with any surface, bridges included (the roundabout idiom depends on it).
-   - **Paint** (at most one) — a color, and the new **routing layer**: the pathing builtins take optional per-call **`only=` / `avoid=`** paint arguments (Q95 — a color constant or a list of them; signatures in [01-language.md](01-language.md)), and the pathfinder plans only across colors the call allows. Programs never name tiles (Q80) — paint is spatial vocabulary without coordinates: paint the haul road green, write `move_to(depot, only=green)`, and route policy is a brush stroke plus one keyword instead of waypoint code.
-
-Paint semantics (v1, Q95/Q96): the constraint binds route *choice*, not physics — for that one route search the forbidden colors are impassable exactly like water (unreachable destination = the standard no-path fault), but a bump-shove, an Ice slide, or an engine walk that lands a bot on one is legal and faults nothing (a hard wall of paint would be a free Barricade). Constraints are **per-call, never per-bot**: no persistent binding, no new sim state beyond the paint map, and code that passes no colors is paint-blind. **Paint sabotage is legal play, destination tiles included** (Q109): painting the ground under a rival's Depot in a color their haulers `avoid=` strands that color — the same weapon as demolishing a bridge behind a raiding party, with the same counters (repaint it, kill the painter who had to stand in your territory, or stop passing `avoid=` on a critical route). No final-step exemption and no paint cooldown: the router rule stays clean, and the bite was mostly `fault_damage`, since a crash-looping bot dies on one clock whatever caused the loop. **`unpainted` is a color** — a pre-bound constant, so the args stay literal (`only=green` is a strict road; `only=[green, unpainted]` admits bare ground; `avoid=unpainted` pins a bot to painted surface) and the paint tool's eraser is just painting `unpainted`. The args ship free with their verbs. Ownership is ruled too (Q97): **paint is global** — one physical layer, no per-faction copies; a bot reads whatever is actually on the ground. Painting is **labor, not a click** (the blueprint flow: the player designates, a bot applies), so repainting a rival's road is legal play with a body on the line — seen, fought, and repainted back.
-
-## Narrow Corridors & Traffic Tools
-
-Bots are solid and bump-freezes are expensive ([02-agents.md](02-agents.md)), so a one-tile corridor is a real engineering problem: two bots meeting head-on inside one **deadlock** — mutual bump, freeze, re-plan (no route), bump again, forever. **The engine will not solve this for you.** Traffic is player code; the toolkit is a ladder:
-
-| Tier | Tool | The fix it enables |
-|---|---|---|
-| 0 | `wait(n)` + `rng(n)` | `wait(rng(20))` desynchronizes identical programs — stagger departures, time-slice the corridor |
-| 2 | sensors + `if` | Check before committing (`path_blocked()` — real as of Q79 — plus occupancy peeks) |
-| 6–7 | enums + **channels** | The real answer: a one-receiver channel token is a **mutex with a lease** (round 4) — hold the token to enter, `send` it back on exit, and the gatekeeper's `receive` timeout is the lease: a holder that crashes (handler restarts clear its token variable) or wrecks simply times out, and the gatekeeper's own fault-restart mints a fresh token. Lost locks recover; a wrecked holder still *physically* plugs a one-tile corridor — that's the drama, not a bug. (Give the gatekeeper an `on error:` window, or each lease expiry chips it — timeouts are ordinary faults) |
-| terraform | bridges + **arrow overlays** / the Clear blueprint | Widen the corridor — or arrow two crossings in opposite directions: a deadlock-free roundabout, no mutex required ([Terraforming](#terraforming-build--deconstruct)) |
-
-Design intent: corridor congestion is the first *systems* problem a colony hits — visible (frozen bots stare at each other), diagnosable (crash-free, just slow), and solvable at every tier with the tools of that tier. A deadlocked corridor is not a bug; it's the tutorial for channels.
-
-## Fog of War (decided: eyes only)
-
-**Vision is the live union of every friendly bot's and structure's sensor range. Nothing else.**
-
-- No permanent "explored" reveal *of live state* — units, resources remaining, nest status exist only where something of yours is looking *right now*. But **which tiles you have seen is durable, per-faction sim knowledge** (Q94, 2026-07-26 — fulfilling docs/07's phase-5 "map-knowledge writes"): the perception phase records every tile that enters a faction's seeing union, deterministically, in the state hash, so map knowledge survives save/load and reconnect exactly like discovered nodes always have. The UI's **greyed terrain snapshot** (you remember the shape of the land) renders *from* that knowledge.
-- Scouting is therefore **infrastructure, not an event**: standing watch is a job bots do (and earn Scouting XP for, [02-agents.md](02-agents.md)). A cheap Sentry Post structure exists for fixed sightlines ([03-resources.md](03-resources.md)).
-- **Tall things block vision.** Sensors are line-of-sight: Barricades and cliff faces cut sightlines. High Ground sees *over* Barricades — height beats walls, which is half of why perches matter. Corollary: walling your base in also blinds it; pair walls with Sentry Posts or high ground.
-- Terrain hooks apply: High Ground +2 sensor range, Scouting-track veterans see (and hear) farther.
-- **Seeing and hearing (Q74, superseding Q57's two-radii phrasing)**: one stat, two concentric circles. **Seeing** (inner — the sensor-range stat, base 5): *total information* — fog lifted, entities fully tracked, resource amounts exact, geology known. **Hearing** (outer — `sensor range × sense_factor`, tuning ~150%: base 5 sees / 7 hears): *movement detection only* — a moving bot registers as a contact, but the ground stays fogged and nothing stationary registers at all. **Only moving things make noise.** One improvement to the stat widens both circles; per-kind bonuses (Combat L3 "+1 vs enemies") widen the *hearing* circle for their kind. Queries follow the circles: full returns within seeing, movers only within hearing — plus **discovered resource nodes from map knowledge at any range** (a known vein is a fact, not a perception).
-- **Line of sight blocks both circles** (v1): Barricades and cliff faces cut seeing *and* hearing — thick walls muffle. (Loud-through-walls is a parked later idea.)
-- **Structures see and hear too**: the Sentry Post's wide radius and the Lantern's small one are seeing circles, with hearing derived the same way — a Sentry detects the creeping infiltrator the moment it moves, and structure detection triggers Hiding episodes like any bot's.
-- **Signature offsets the heard-at distance (Q54, reworked)**: a *moving* bot B is heard by E at `E.hearing radius + B.signature`, floored at 1. Loud (+, Loud Fans) is heard from beyond the normal circle; quiet (−, Hiding levels) must be approached. **Sight is absolute** — inside the seeing circle nothing hides, whatever its signature. **Creeping is an argument, not a technique** (Q103, 2026-07-26): every pathing call takes `creep=True` (`move_to`/`wander`/`explore` — [01-language.md](01-language.md)), which trades much slower steps for a signature cut, so a creeping bot is heard only from much closer. It shrinks the *radius* at which you are audible rather than the fraction of ticks you make noise — which is what makes it work against a **static** listener, where the old "move in bursts, freeze often" idea failed: perception is a per-tick geometric check, so a stationary Sentry catches an intermittent mover on its first moving tick in range. Bots only (structures and nodes have no signature).
-- **Detection = seen or heard.** A Hiding episode opens when any unit or structure of an enemy faction first sees or hears the bot, and re-arms only after the bot is unseen *and* unheard by that whole faction for M ticks (tuning). The perception check is passive and geometric, every tick — it doesn't care what the enemy's program is doing.
-- **Seeing discovers — the scouting stance surveys (Q74, superseding "buried until prospected").** A *seen* tile is fully known, geology included: resource veins are discovered by sight. The **scouting stance** (`search()`, [01-language.md](01-language.md)) is the wide survey: the bot roots in place and its *seeing* circle expands one ring per N ticks out to its hearing radius — full sight at range, each new node earning Scouting XP; moving or any signal ends it. In practice expansion still has a survey step: walking every tile with your eyeballs is slow and dangerous, and a rooted scout is the cheap safe alternative. **Discovered nodes are permanent map knowledge** — the one deliberate exception besides the terrain snapshot to "no persistent intel" — but their *remaining amounts* are live-only, like everything else. **Ferals play by the same rules**: a nest knows only the veins its units have seen.
-- Rendering (2026-07-25 restyle — three states, no translucent overlay planes): **undiscovered** tiles are true black — terrain and objects hidden outright, only a flat opaque near-black cover renders. **Discovered-but-unseen** tiles draw the terrain itself in "memory" materials — unlit, darkened blue-grey twins of the live materials, glow stripped, ambient animations **frozen** — the world visibly stops where you stop watching, and resumes on reveal (live materials restored). *Frozen means still, not frame-exact* (Q93): memory twins are shared per live material and capture whatever frame was showing at first memorization — a re-fogged tile may hold a different frame than the one it left on, a distinction judged imperceptible on dimmed unlit tiles and not worth trading material batching for. **In-view** tiles render live with nothing layered on top. **The memory is a strict snapshot (Q92)**: view mutations happen only on watched tiles — objects that appear, vanish, move, or change state unseen (an enemy printer ruined, a wreck salvaged, a bridge demolished, terrain corrupted) keep their last-seen picture until the viewer actually looks again, and live *indicators* (progress bars, job cubes) never render over a memory tile. Discovered ore gems are the Q70 exception — permanent existence, scale frozen while unwatched, exhaustion applied on observation. **Heard-only contacts render as pulsing blips** — a position, not a picture. The layering after Q94 (2026-07-26): the **known-tiles set is sim state** (per-faction, hashed, replay-real); the *appearance* — memory materials, frozen frames, Q92's ghost pictures — stays pure view, no replay exposure. Consequence on relaunch: knowledge survives but pictures don't — remembered ground re-renders from the sim's *current* terrain, dimmed, so a change made unseen (a bridge demolished behind your back) shows after a reload where the live session would still show the ghost. Accepted: a rare, mild intel leak beats persisting view snapshots to disk. The ally vision grant pools **ears with eyes** (heard contacts share along with sight — one grant).
-- **Lanterns are the cheap ward** ([03-resources.md](03-resources.md)): a tiny fixed sensor radius for pocket change — string them along perimeters and roads. Sentry Posts stay the real watchtowers; Lanterns make *lit territory* a visible map feature.
-- **Ally vision sharing is a grant**, like channels ([01-language.md](01-language.md)) — allied colonies choose to pool eyes; it isn't automatic. **The grant includes prospected node knowledge** (Q70): allies pool maps as well as eyes — one grant, no second stingier dial.
-- **Prospecting details (Q70)**: a surveying bot is **visibly searching** — a thought-cloud tell, so a prospector deep in neutral ground is a readable target (pillar 2). The greyed snapshot shows a discovered node's **existence only**, never amounts (amounts are live-only everywhere). An **emptied node** updates your map knowledge only when observed — you learn your vein ran dry when you look — and a re-run `search()` reports it as *discovered-but-exhausted*, distinguishing "ran dry" from "never there."
-- **Terrain modifies the hearing model** (with Q54/Q74): **Fords quiet** the wader — a wading mover is heard at reduced range (a signature offset). **Snow mutes** (Q78) — movement on Snow makes *no* noise at all: a hearing-immunity state, stronger than any signature offset; only seeing detects a bot on snow. Signature is moot there — even Loud Fans is silent on the white (signature is movement noise, and snow swallows it).
-
-## Corruption is the thematic centerpiece
-
-Corruption attacks the player's core resource — computation:
-
-- Every Pyrite operation costs +1 cycle inside it (via its biome overlay) → a 10-line smart program crawls; a 3-line dumb one barely notices. **Terrain that inverts the "better code wins" rule locally.**
-- Channel traffic (`send`/`receive`/`broadcast`) is jammed → coordinated squads decohere, blocked receivers inside never wake; bots must be individually competent to fight there. **Cloud telemetry is exempt** (Q76): `upload_log()`, crash dumps, and black-box banking always get through — the jam blocks bot-to-bot radio, not the engine's uplink. The logs always go home, even from inside the static.
-- Crystal (needed for Chips → better CPUs) spawns near Corruption → the resource that buys computation lives where computation is worst. Deliberate loop.
-- Scouting-track L3 veterans are immune to the cycle tax ([02-agents.md](02-agents.md)) — XP as terrain key: the only bots whose *code* runs clean in there.
-
-### Corruption is alive (dynamics)
-
-- **Corruption radiates from sources** — Blight Cores seeded by mapgen, and nests that spread it (the Devil, [04-enemies.md](04-enemies.md)). Tiles corrupt outward slowly toward each source's radius.
-- **Cleansing works, and doesn't last** (the Cleanse blueprint). Cleansed tiles re-corrupt while their source survives. Treating symptoms buys time (a corridor to the Crystal, a breathing spell for a claim); **rooting out the source is the only cure** — and sources sit deep in the zone, where your code runs worst.
-- Left alone, Corruption **comes back and keeps coming**: an untended frontier slowly re-corrupts, pressuring claims, channels, and supply lines. It's the PvE antagonist that never idles.
-
-## Map Composition Guidelines
-
-These are the *goals* a generated map must exhibit; the generation **procedure** that produces them is specified below in **Map Generation** (2026-07-17, answers Q71).
-
-```mermaid
-flowchart TD
-    subgraph MapRing["Typical map, center-out"]
-        S[Start zones:<br/>Plains + Iron/Coal/Wood/Stone + 1 Vent] --> M[Midfield:<br/>Rubble, Mud, Copper/Tin veins,<br/>contested Vents + shorelines<br/>with Pumps & Sand Flats]
-        M --> C[Deep field:<br/>Silver/Gold, Crystal + Corruption,<br/>Feral Nests, High Ground overlooks]
-    end
-```
-
-- **Start zones are safe and legible** — a Tier-0 program works there. Difficulty is geographic.
-- **Template Caches ring each start zone** ([06-progression.md](06-progression.md)): basic ones close, advanced ones toward the midfield. They're non-consumable study sites — everyone can learn from them, so the deep ones are worth *holding*, not racing. The opening toolkit sweep is the first thing eyes-only fog makes interesting.
-- **Every expansion is a tradeoff**: more veins = longer haul routes; the tier ladder (Copper/Tin → Silver/Gold → Crystal, [03-resources.md](03-resources.md)) is laid out center-out, so richer material is farther material; Crystal = Corruption exposure; Vents and shorelines = contested.
-- **Chokepoints from Water/High Ground** give defensive programs something to anchor on — `guard()` takes an **entity**, never a tile (Q79), so the idiom is a Sentry Post or Lantern at the choke: `guard(closest(sentry).expect())`.
-- PvP maps are **mirror-symmetric**; co-op maps are asymmetric with a shared frontier.
-
-## Map Generation
-
-*The procedure that produces the composition above (2026-07-17, answers Q71). v1 is **co-op-first**: PvP mirror symmetry is designed here but deferred (see PvP Symmetry, below).*
-
-### Determinism: generate a `MapSpec` at setup, then bake it
-
-Map generation is a **deterministic, seeded, integer-only function** — `sim::mapgen::generate(config, seed) → MapSpec` — run **once** when a match is created, *not* inside the tick loop. It draws from a dedicated `mapgen` RNG (seeded `stream_seed(seed, "mapgen")`, advanced with the same SplitMix64 as every other stream — no floats, no wall clock, BTree/sorted iteration). Its output, a concrete `MapSpec`, is distributed to every peer and stored in the replay exactly as authored maps already are ([07-architecture.md](07-architecture.md)).
-
-That one choice buys every determinism property at once:
-
-- **Seed-reproducible** — the same seed (+ config + generator version) yields the same map on any machine, so friends can share a seed.
-- **Replay-proof** — because the *concrete* `MapSpec` is baked into the replay, an old replay still plays back after the generator's code changes; the map travels with the recording, not as a seed to re-run. Storing the output is strictly more robust than storing the seed.
-- **Zero lockstep surface** — mapgen never runs per-tick and never enters the phase-9 state hash. It's a setup-time producer, so it carries none of the desync risk of in-tick code. The map's determinism contribution is the stored `MapSpec`, which world-build already folds into `terrain_hash`.
-
-### The pipeline: skeleton → fill → validate
-
-Three stages, deterministic end to end:
-
-1. **Skeleton — place the guarantees by construction.** Nothing load-bearing is left to chance. The generator lays the map out **center-out in bands** and *directly places* every must-have: one **start zone per player** on the rim (safe Plains, the guaranteed kit — an Iron vein, a Coal seam, a Grove, a Stone outcrop — a Vent, and a reachable shore strip), the **midfield band** (Copper/Tin veins, contested Vents, shorelines with Sand Flats, Rubble/Mud), and the **deep field** (Silver/Gold, Crystal seeded *next to* Corruption sources, Feral nests placed by arcanum — higher arcanum farther out, capped at `max_arcanum` — High Ground overlooks). Template Caches ring each start (basic close, advanced toward the midfield). *If you can place it, place it* — the skeleton is where every hard composition goal is satisfied on purpose.
-
-2. **Fill — organic variety with integer value-noise.** Within each band the generator paints the *decorative* terrain — Rubble, Mud, Snow, Dunes, Ice, Scree, extra Water/High Ground — from a deterministic integer noise, against per-band budgets. This is the only "random-looking" stage, and it touches **nothing** the floor depends on: it fills the gaps *around* the placed guarantees, never overwriting them.
-
-3. **Validate — check the emergent floor, regenerate on failure.** Some requirements aren't a tile you can place — they're global properties of the finished layout (is every start actually *walkable* to its kit and the midfield, or did a fill-stage Water band wall it off?). A cheap integer **BFS/flood-fill validator** checks the **playability floor**; on any failure the generator derives the next sub-seed and regenerates, capped at N attempts. The retry counter is folded into the seed, so `seed S` always resolves to "the first candidate that passed" — identically on every machine. If the cap is hit, that's a config bug (bands too dense), surfaced loudly, not shipped silently.
-
-### The guarantee ledger
-
-Three tiers, and the difference is the whole discipline of "ensuring things happen":
-
-- **By construction (the skeleton places them, so they cannot fail):** the start-zone kit (Iron + Coal + Wood + Stone), a start Vent, the center-out tier bands, nest rings by arcanum, Crystal beside Corruption, Template Caches ringing starts.
-- **Validated, regenerate-on-failure (the playability floor):**
-  - every start's kit is **walkable** from its printer;
-  - at least one start vein sits **within the starting bots' sight** (base 5, [02-agents.md](02-agents.md)) so the shipped `closest(ore).expect()` answers on tick 1;
-  - a **reachable shoreline** per start (Water is the only coolant *and* Sand the only Glass feedstock — no start may starve both compute and optics);
-  - **Copper + Tin reachable** in the first-expansion band (no Bronze soft-lock);
-  - **no start sealed** from the midfield / shared frontier.
-- **Weighted tendencies (never validated):** exact biome proportions, where snow/dunes/ice sit, midfield richness variance, decorative terrain — aesthetic, allowed to vary freely.
-
-### Co-op layout (v1)
-
-Co-op maps are **asymmetric with a shared frontier**, which means starts need only be *individually* playable — never identical. Players sit around the rim; richness and danger climb toward a shared, contested **deep-field center** — the frontier the team pushes into against Ferals and Corruption. Each start is built and validated on its own; there is no cross-start bookkeeping. This is the whole v1 target, and it deliberately sidesteps symmetry.
-
-### PvP symmetry (designed, deferred)
-
-PvP maps are **mirror-symmetric, resource-exact**, via **rotational (point) symmetry**: generate one player's wedge, then **rotate-copy** it N times about the center (N = players). Rotational over reflective — no mirror seam, no handedness bias; each player's start is *truly identical*, same vein amounts and distances. It layers cleanly on the co-op generator (generate a wedge, rotate) and is **out of v1 scope** — noted here so the co-op design doesn't foreclose it.
-
-### Scaling
-
-Map size scales with player count: each player gets a rim **wedge of roughly constant start-zone area and band depth** (so opening pace and expansion distance feel the same at any count), the overall radius grows with the number of wedges, and the shared center scales to stay contested. All figures — band widths, resource densities per band, Corruption amount, retry cap, wedge size — are **tuning constants** in a `mapgen` config (data, per the doc convention), not code.
-
-### Integration & scope
-
-`sim::mapgen` is a fresh module: a pure `fn generate(&MapgenConfig, seed) → MapSpec` (co-op v1: one `MapSpec` with N rim start zones) emitting the same paint-lists `build_colony` fills by hand today, consumed unchanged by `Sim::new` / `World::from_spec`. It ships with a **`MapSpec` validator** (bounds, no fatal overlaps, the floor checks) — none exists today. It never touches the tick or the state hash. Dependencies to respect: Template-Cache placement needs the progression system's Cache entity; nest arcanum placement uses the existing `max_arcanum` gate; Corruption sources reuse Blight Cores. Implementation is follow-on milestone work (flagged in [TASKS.md](TASKS.md)).
+- **A tile that changes no program doesn't ship.** The rule above is the filter
+  every addition in these files has to pass.
+- **A tile is layers, not a kind** (2026-07-26). Base terrain, paint, and
+  contents compose; paint is the *routing* layer and carries no material cost.
+  Forbidden paint is impassable-like-water, which routes into the standard
+  no-path fault rather than a special case (Q95–Q97).
+- **Overlays attach to regions, not tile kinds — with Corruption the exception**,
+  which keeps its tile-based tax. That is why the pipeline has three layers
+  (Q101): `floor₁( region_rule( tile_rule( base + Σ per-bot deltas ) ) )`.
+- **Effective cost is bounded by `bank_cap`**, verified at load against the worst
+  case rather than per tick. Any new overlay here must keep that check passing —
+  see [01-language.md](01-language.md).
+- **Seen tiles are sim state** (Q94), not a rendering artifact, so fog belongs to
+  the deterministic world and not the `game` crate.
+- **All numbers here are tuning constants** bound for data files, never code.
 
 ## Terrain × Systems Matrix
 
@@ -208,26 +42,7 @@ Map size scales with player count: each player gets a rim **wedge of roughly con
 | Enemies ([04](04-enemies.md)) | Nests anchor in Corruption; Feral patrol routes follow terrain graph |
 | Multiplayer ([08](08-multiplayer.md)) | Tile grid + integer move costs keep pathing deterministic |
 
-## Decided
-
-- **Terraforming is in scope** — build (bridges, barricades) and deconstruct (clear, demolish, cleanse), symmetric and adversarial (see Terraforming).
-- **Fog of war is eyes-only** — live union of friendly bot + structure sensors; greyed terrain memory, no persistent live intel (see Fog of War).
-- **Seeing and hearing** (2026-07-14, answers Q74; supersedes Q57's two-radii phrasing) — one stat, two concentric circles: **seeing** (the sensor-range stat) is total information — fog lifted, entities tracked, geology known; **hearing** (× `sense_factor`, ~150%) detects *movement only* — **only moving things make noise**, so standing still is silence *(and creeping, once an act rather than a rhythm, is the stealth play — Q103)*. LoS blocks both (v1). Structures see and hear too. Signature offsets the heard-at distance of movers; sight is absolute. Detection (for Hiding episodes) = seen or heard, passive geometric check, per-faction episodes. Water's "conducts pings farther" line is cut.
-- **Snow mutes movement** (2026-07-14, answers Q78) — bots on Snow make no movement noise: undetectable by hearing regardless of signature; only seeing finds them. The silent-approach biome — snow is where armies move unheard, so defenders need eyes on the snowline, not ears. The first terrain hook that modifies the hearing model itself.
-- **Seeing discovers; the scouting stance surveys** (2026-07-14, with Q74; supersedes "buried until prospected") — a seen tile is fully known, veins included; `search()` is the scouting stance (root in place, seeing expands ring-by-ring to the hearing radius). Discoveries are permanent map knowledge, remaining amounts live-only; node queries answer from map knowledge at any range. Ferals play by the same rules (see Fog of War; builtin in [01-language.md](01-language.md), node rules in [03-resources.md](03-resources.md)).
-- **Fog renders as greyed tiles with frozen animations** (2026-07-14) — the snapshot holds a frozen frame; motion resumes on reveal. View layer only. *Refined 2026-07-25 — three states at the material level, no translucent overlay planes*: undiscovered = true black (terrain and objects hidden under an opaque cover); discovered-but-unseen = the terrain itself in unlit, darkened "memory" materials with animations frozen; in-view = live rendering, nothing layered on top (see Fog of War → Rendering). *Refined 2026-07-26, answers Q93*: **frozen means still, not frame-exact** — one shared twin per live material, captured at first memorization, is the shipped and intended behavior; per-tile last-seen frames were rejected (imperceptible on dimmed unlit tiles; costs a material per remembered tile and the terrain's render batching).
-- **Fog memory is a strict snapshot** (2026-07-25, answers Q92) — a remembered tile shows exactly what the viewer last saw there: no view mutation (spawn, despawn, move, state flip, scale/progress update, terrain-art rebuild) happens on an unwatched tile; changes made under fog apply when the viewer next looks. Live indicators (bars, job cubes) never render on memory tiles. Q70's node rules compose: gem existence is permanent map knowledge, amounts freeze while unwatched, exhaustion lands on observation. Blueprints were provisionally exempt until the sim's `Blueprint.faction` landed (2026-07-26) — enemy designations now snapshot-gate like every other class; your own always render live. Pure view layer, as before.
-- **Seen tiles are sim state** (2026-07-26, answers Q94) — the per-faction known-tiles set joins the world during the perception phase (docs/07 phase 5 already specified the write; `known_nodes` was the precedent), deterministic and in the state hash, so map knowledge survives save/load and reconnect. The renderer draws the greyed snapshot *from* it instead of mirroring the eye math view-side. The split: **knowledge is sim; appearance is view** — memory materials, frozen frames, and Q92's ghost pictures stay view-local and reset on relaunch (remembered ground then re-renders from current sim terrain, dimmed — a rare, mild intel leak, accepted over persisting view snapshots). ⚠HASH when it lands.
-- **Tall things block vision** — sensors are line-of-sight; Barricades are true walls; High Ground sees over them.
-- **Corruption is dynamic** — radiates from sources, re-corrupts cleansed ground until the source is destroyed (see Corruption dynamics).
-- **The terrain backlog lands** (2026-07-14, answers Q35–Q40, Q67): Dunes sink idlers (2×, escalating exit cost after N idle ticks); Mountains use **edge costs** (climb dear, descend moderate, ridge-run free; summits carry the High Ground sensor state) and coexist with ramp-gated High Ground; Ice slides deterministically (arrows redirect, bumps end it, slider = rammer); Fords are mapgen-placed slow crossings that quiet the wader's signature; the cost table stores **×2** so Stone-built Roads run at half plains; Scree collapses to Rubble after N crossings; Snow conceals the stationary (large signature cut after N idle ticks — *superseded 2026-07-14: movement-only hearing made this redundant; replaced same day by Q78's snow-mutes-movement*). Footprints/`tracks_at()` deferred post-v1. Edge costs and the ×2 migration touch A*/`move_to` — replay hashes change when these land.
-- **Prospecting edges** (2026-07-14, answers Q70) — the ally grant shares prospected maps; searching is visible (thought-cloud tell); snapshots show node existence only; exhausted nodes update on observation, and `search()` distinguishes exhausted from absent (see Fog of War).
-- **Barricades have HP and are attackable** (2026-07-26, answers Q99 — the doc's table was always right; the code shipped them indestructible) — a wall is a **target**, so deconstruction is symmetric in both registers: a Demolish crew un-builds your own works, an assault force shoots through a rival's. Model follows the **Blight Core precedent**: a barricade is an entity (position + HP, hashed) whose tile stays `Barricade` for movement and line-of-sight; at 0 HP the tile reverts to Plains exactly as Demolish leaves it, and the ground stack it swallowed on completion stays gone. Programs need a handle, so barricades get a **`barricade` kind constant** (Q79's rule: every registry kind gets one — "attackable, so it must be findable"), and unlike the creep front they are **perception-gated like structures**: a wall's position is precisely the intel fog protects, so finding one takes eyes. HP is tuning, first-pass scaled to the 20-Stone price. Damage rides the damage phase with everything else — Q102's second half landed 2026-07-26, so `DamageTarget` is already the path a barricade plugs into. ⚠HASH when it lands.
-- **Creeping is a movement argument** (2026-07-26, answers Q103) — `creep=True` on `move_to`/`wander`/`explore` (never its own verb): much slower steps in exchange for a **signature cut**, so the creeping bot is heard only from much closer. This replaces the "emergent creeping" claim, which could not work twice over: `move_to` blocks until arrival and there are no position literals, so *move-a-little-then-freeze* was never expressible; and even expressible, pausing loses you to a static listener the first tick you move in range, because detection is a per-tick geometric check. Shrinking the audible **radius** is what makes stealth positional and reliable. Sight is untouched (Q74: sight is absolute), heard-at still floors at 1 (adjacency always detects), and the cut stacks with earned Hiding levels, Ford quieting, and Snow's total mute. Free with its verbs (Q96's rule for call arguments) and engine walks never creep.
-- **Tile composition is a strict layer model** (2026-07-26 — see Tile Composition): a tile is fog knowledge × physical content, and the physical side is either an **unwalkable building** owning the tile outright (Barricade — no surface, no overlay, no paint; placing clears designations, demolish leaves bare ground) or **ground**: a movement surface (terrain type, or a walkable building's deck — Bridge today, elevators later) + at most one overlay + at most one paint color. **Paint is promoted from cosmetic to the routing layer**, and the mechanism is **per-call** (2026-07-26 later, answers Q95): the pathing builtins take optional `only=`/`avoid=` paint arguments — route choice as a brush stroke plus a keyword, with programs still never naming tiles and no persistent binding anywhere. Constraints enter route *choice* only (shoves, slides, and engine walks across forbidden paint are legal); omitted args = paint-blind. The router's contract is ruled too (2026-07-26 later still, answers Q96): **`unpainted` is a pre-bound color constant** (args literal; the eraser paints `unpainted`), **forbidden paint is impassable-like-water** for that search (unreachable = the standard no-path fault), and **the args are free with their verbs**. Ownership closed the series (same day, answers Q97): **paint is global and physical** — one shared layer, a bot reads what's on the ground — and **painting is blueprint-flow labor** (player designates, a bot travels and applies; quick, material-free), so cross-faction repainting is legal, visible, fightable play.
-- **Map generation is a setup-time seeded producer** (2026-07-17, answers Q71 — see **Map Generation**). A deterministic integer-only `sim::mapgen::generate(config, seed) → MapSpec` runs **once at match creation**, emits a concrete `MapSpec`, and that spec is distributed and stored in the replay (never run in the tick, never in the state hash) — seed-reproducible *and* replay-proof against generator code changes. The pipeline is **skeleton → fill → validate**: place every guarantee by construction (start-zone kit, tier bands center-out, nest rings, Crystal-by-Corruption, Caches), fill decorative biome variety with seeded integer noise, then **BFS-validate the playability floor and regenerate on failure** (kit walkable, a start vein in sight, a reachable shoreline per start, Copper+Tin reachable, no sealed start). **v1 is co-op-first** (asymmetric, rim starts, shared contested center — no symmetry bookkeeping); **PvP mirror symmetry is rotational + resource-exact** (generate a wedge, rotate-copy) and deferred. Implementation is follow-on milestone work.
-
 ## Open Questions
 
 - Corruption spread/re-corruption rates, source radii, and cleanse speed — pure tuning, needs the prototype.
-- *(The paint-routing series Q95–Q97 is fully answered as of 2026-07-26 — per-call `only=`/`avoid=` args, `unpainted` a named color, forbidden = impassable-like-water, args free with the verbs, paint global and applied by blueprint-flow labor; see Tile Composition and [01-language.md](01-language.md).)*
+- *(The paint-routing series Q95–Q97 is fully answered as of 2026-07-26 — per-call `only=`/`avoid=` args, `unpainted` a named color, forbidden = impassable-like-water, args free with the verbs, paint global and applied by blueprint-flow labor; see [tile-composition.md](05-terrain/tile-composition.md) and [01-language.md](01-language.md).)*

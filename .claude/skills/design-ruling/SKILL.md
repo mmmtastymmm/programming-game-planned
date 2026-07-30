@@ -53,8 +53,14 @@ was decided, what it replaces, and *why the alternative was rejected*. The "why"
 is not decoration — P1 exists because Q118 narrowed a rule without recording that
 the narrowing stopped covering a case the wider version caught.
 
-Then mark it answered in `docs/QUESTIONS.md` with the same date, and update that
-file's status block at the top.
+Then record the ruling with the same date. Two files, not one:
+
+- **Append the ruling to the top of `docs/history/questions-answered.md`** —
+  that file is the answered log (newest first), moved out of QUESTIONS.md on
+  2026-07-29. Remove the `Q` from `## Open` in `docs/QUESTIONS.md`.
+- **Update the status block at the top of `docs/QUESTIONS.md`.** It holds the
+  *current* board state only. Move the block it replaces to the top of
+  `docs/history/questions-status-log.md` — do not let them stack up again.
 
 **Every number is a tuning constant** — it belongs in a data file (`costs.ron`,
 `xp.ron`, …), never in code. State the formula and its inputs in the doc so the
@@ -66,6 +72,20 @@ All of them, every time, in order: `00-overview`, `01-language`, `02-agents`,
 `03-resources`, `04-enemies`, `05-terrain`, `06-progression`, `07-architecture`,
 `08-multiplayer`, `09-quirks`, then `QUESTIONS.md`, `PROBLEMS.md`, `TASKS.md`.
 
+**Four docs are split into parts** (2026-07-29), Rust-module style — `01-language`,
+`02-agents`, `03-resources`, `05-terrain` each keep a doorway `NN-name.md` beside
+a `NN-name/` directory. **Reading one of those means the doorway plus every file
+in its directory.** The doorway is not a summary and does not stand in for them:
+it carries the invariants that cross its parts, a table of what each part owns,
+and nothing else. Start there to find the owning part, then read the parts.
+
+The unsplit docs (`00`, `04`, `06`, `07`, `08`, `09`) are single files as before.
+
+**Do not read `docs/history/` in this step.** It is closed history — answered
+rulings, dated status blocks, finished milestones, fixed review rounds — and it
+is never the authority on current design. Consult a specific file there only to
+recover *why* a past call was made. It still gets grepped in step 4a.
+
 For each, ask **both** directions:
 
 - Does it state anything the ruling changed?
@@ -74,9 +94,17 @@ For each, ask **both** directions:
   Optics module deleted the only recipe that consumed it.)
 
 Two places get a **separate, explicit pass**, because the general read
-demonstrably skims them: **every doc's own Decided section** (I3) and **docs/02's
-stat sheet** (I6). Also resolve every citation the ruling touches (I9) — P1's
-root cause was a citation whose summary drifted from the ruling it cited.
+demonstrably skims them: **every doc's own Decided section** (I3 — now
+`01-language/decided.md`, `02-agents/decided.md`, `03-resources/decided.md`,
+`05-terrain/decided.md`, and the in-file `## Decided` of the unsplit docs) and
+**the stat sheet** (I6 — `02-agents/stat-sheet.md`). Also resolve every citation
+the ruling touches (I9) — P1's root cause was a citation whose summary drifted
+from the ruling it cited.
+
+**A ruling that changes a cross-part invariant must update the doorway too.** The
+doorway's *What holds across all of them* list is the contract between parts; if
+a ruling moves one of those and only the part file changes, the doorway starts
+lying. This is the split's version of the drift I3 exists to catch.
 
 ## Step 4 — the mechanical gates
 
@@ -87,8 +115,10 @@ change; do not eyeball them. Each is an invariant from
 full statement and the case that motivates it.
 
 **4a. Deleted terms grep to zero (I2).** List every term the ruling retires and
-grep all of `docs/`. Each hit is a needed edit or deliberate history in an
-Answered log — decide per hit.
+grep all of `docs/`. Each hit is a needed edit or deliberate history — decide
+per hit. Hits under `docs/history/` are almost always the second kind: that text
+records what was true when it was written and is *meant* to keep the old term.
+Leave it, unless the entry would now read as current spec.
 
 ```
 grep -rn "Building tier\|capability tier\|Backup Core\|module slot" docs/

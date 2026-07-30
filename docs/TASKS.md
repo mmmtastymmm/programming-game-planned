@@ -18,7 +18,8 @@ make every one of them pay the explain-your-hash-change toll the docs prescribe
 (`UPDATE_GOLDEN=1` regenerates; the PR explains why).
 
 Milestones are dependency-ordered. Within a milestone, tasks are roughly sequenced. Milestones
-marked ∥ can proceed in parallel once their prerequisites land.
+marked ∥ can proceed in parallel once their prerequisites land. **M0–M3 are fully closed and
+archived** in [history/tasks-completed.md](history/tasks-completed.md); this file starts at M4.
 
 **2026-07-26 sweep:** the *NEEDS DISCUSSION* markers below were audited and promoted into
 [QUESTIONS.md](QUESTIONS.md) — genuine judgment calls are now **Q98–Q108** (Pump/water source,
@@ -32,177 +33,26 @@ records — QUESTIONS.md is the live registry.
 
 ---
 
-## M0 — Test & data groundwork ✅ COMPLETE (2026-07-15)
+## Carried forward from completed milestones
 
-- [x] **Serde on `Command` + serialized `(seed, command log)` replay artifact.** `sim::replay`
-      module (`Replay { spec, commands, ticks }` ↔ RON); golden fixture checked in at
-      `crates/sim/tests/golden/` (a 300-tick scenario exercising every Command variant,
-      printer prints/boots, a mid-run hot-swap, sidestep RNG, and a kill); regenerate with
-      `UPDATE_GOLDEN=1 cargo test -p sim --test golden` and explain the hash change in the PR.
-      CI added (`.github/workflows/ci.yml`, sim+pyrite tests). *Note: no rustfmt gate — the
-      tree has pre-existing fmt drift; add one after a dedicated whole-tree `cargo fmt`
-      commit.* [sim] (M)
-- [x] **Cross-process replay test** — `cross_process_replay_matches` re-runs the golden
-      replay in a spawned process and compares final hashes. [sim] (S)
-- [x] **Extract tuning to data files**: `crates/sim/data/tuning.ron` +
-      `crates/pyrite/data/costs.ron` (values verbatim, `include_str!` + RON parse,
-      `deny_unknown_fields`, load-time validation asserts). *Note: `stats.ron` deferred to
-      M5 — no stat sheet exists yet to extract; the printed_* chassis defaults stay in
-      tuning.ron until then.* [pyrite][sim] (S)
-- [x] **Named RNG streams**: `World.rng: RngStreams` (combat / wander / explore / sidestep /
-      quirk_roll / feral_mutation, each seeded from (match seed, stream name)) + per-bot
-      `BotData.rng_program` seeded by (match seed, entity ID), feeding the `rng()` builtin.
-      *Judgment call to review: death cargo-spill scatter draws from `rng.combat` — that use
-      isn't in docs/07's inventory; flagged in a code comment.* [sim] (S) ⚠HASH
-- [x] **Program versions = source-byte hashes**: `ColorProgram.hash` (FNV-1a over source
-      bytes) replaces `version: u32`; `World.program_library: BTreeMap<hash, source>` retains
-      every deployed version; the editor shows short hashes. [sim] (S)
+Notes left inside finished milestones that still bind on unbuilt work. Full
+context for each is in [history/tasks-completed.md](history/tasks-completed.md).
 
-## M1 — Language core: cost model & semantics cluster ✅ COMPLETE (2026-07-15)
+- [ ] **`rng.combat` isn't in docs/07's inventory** (M0) — the death cargo-spill
+      scatter draws from it; flagged in a code comment, never ratified. Either
+      add the stream to docs/07 or move the draw. [sim] (S)
+- [ ] **Shallow VM hashing** (M2) — per-bot movement intent (path/ticks/goals)
+      and the recall path aren't hashed, so a peer divergence there stays
+      invisible until a position changes. Known TODO. [sim] (M) ⚠HASH
+- [ ] **Recall home is an engine state machine** (M3), not a literal Pyrite
+      `move_to(home_printer)` program on the VM. Observable semantics match the
+      doc; flagged for discussion. [pyrite][sim] (M)
 
-Landed as one change set with one golden-fixture regeneration (the hash explanation:
-full charges + centicycles + wrap-surviving variables move every replay hash at once).
+*M7 also carries two live deferrals — Ford quieting waits for M8's Ford tile,
+and the fog-of-war rendering pass (per-tile ambient freezing, signature tells in
+the world view) — both recorded in place under M7 below.*
 
-- [x] **Full-charge cost convention** (Q80): `call_base` deleted; registry figures are total
-      prices (`closest` = 4, `mine` = 2); a bare-call statement pays only the call's figure
-      (the statement overhead is folded in). [pyrite] (S) ⚠HASH
-- [x] **Centicycle storage** (Q56/Q75): budgets/debt stored ×100 (`CENT`), table entries stay
-      whole cycles, converted at charge time; `Vm::budget()` returns centicycles (the HUD
-      divides for display). [pyrite][sim] (S) ⚠HASH
-- [x] **Variables survive the loop-around** (Q80): the wrap keeps globals; fault/handler
-      restarts (and redeploys landing at the wrap) clear them. Tests inverted. [pyrite] (S) ⚠HASH
-- [x] **Grace-window/overtime tax deleted** (`grace_window_ticks`, `overtime_mult`,
-      `adjusted()`, the handler tick clock) — per-signal caps replace it in M3. [pyrite] (S) ⚠HASH
-- [x] **Payload-sized costs**: `CostSpec::{Fixed, PlusPayload, LogSized}`;
-      `Value::payload_units()` (int/bool/entity/bare-enum 1, string = length, containers
-      1 + contents recursively); `send`/`broadcast` price + payload; `upload_log` =
-      min(5+buffer, 25) via a new `Host::log_len()` hook; `payload_cap` 8, oversize faults
-      `err_payload` before the host sees the call. *Judgment call: the doc's "1 + elements/
-      fields" was read as recursive units so nesting can't smuggle bulk — flag if you meant
-      flat counts.* *Note: `blackbox_budget` 10→20 so the factory death report (log + full-
-      buffer upload at new prices) still fits; the field dies in M3 (abort's upload charges
-      as debt).* [pyrite][sim] (M) ⚠HASH
-- [x] **Keyword args & optional defaults**: `f(a, key=v)` parses (positionals-first, Python
-      rules); `def f(a, b=5)` with literal defaults (trailing-defaults enforced); user defs
-      and registry builtins bind by name with defaults filled; the host always receives the
-      canonical positional form (`log` always gets `[val, level]`). [pyrite] (M)
-- [x] **`None` reserved** = `Option.None` (assignment is a parse error; `case None:` sugar;
-      `Option.Some(v)` / `Result.Ok/Err` constructible from source). [pyrite] (S)
-- [x] **Fault-id constants**: `pyrite::faults` registry (err_type / err_name /
-      err_unknown_function / err_arity / err_stack / err_index / err_key / err_div_zero /
-      err_overflow / err_no_match / err_expect / err_range / err_payload / err_control /
-      err_action / err_timeout), auto-bound as VM constants; every fault site carries an id;
-      `HostCall::Fault(Fault{id, msg})`; `last_error()` returns the id constant (the message
-      still rides in `Signal.Error(msg)` and crash dumps). *Judgment call: the language-level
-      id list is my drafting — docs only name examples; ratify or trim before it fossilizes.
-      Host-domain ids (err_tool_jam, err_unknown_contact) land with their systems (M4/M7).*
-      [pyrite][sim] (M) ⚠HASH
-- [x] **Match arity fall-through** (Q80): name+variant+arity is the identity; wrong arity is
-      a non-match that falls to the next arm, not a fault. [pyrite] (S) ⚠HASH
-- [x] **Function registry as data**: `pyrite/data/builtins.ron` — name → (cost, signal_safe,
-      params+defaults, signature, summary, cost_note) for the FULL docs/01 table, including
-      not-yet-implemented verbs (calling one faults err_unknown_function until its system
-      lands). Replaces sim's `BUILTIN_DOCS`; editor hover reads it (`builtin_doc(costs, name)`
-      + `cost_display`); `signal_safe` recorded for M3's static checks. [pyrite][sim] (M)
-
-## M2 — Nine-phase tick skeleton ✅ COMPLETE (2026-07-15)
-
-- [x] **Reorder `Sim::step()` into the nine phases** (07): Commands → VM step → collect →
-      resolve → **Perception (5, stub)** → damage/countdowns/blasts (6) → **XP settlement (7)**
-      → economy (8, regen moved in) → snapshot hash (9, stored as `Sim.last_hash` for the
-      lockstep relay). Damage moved out of inline resolution (attack, bump crunch, fault chip
-      all queue to `pending_damage`, settled 6a); XP credits queue to `pending_xp`, settled
-      phase 7 under an identity Learning multiplier (M6b makes it real — awards for bots that
-      died in phase 6 drop with them). Phase-0 perception seed hook at match start.
-      *Note: the ⚠HASH toll wasn't owed — end-of-tick states came out identical in the golden
-      scenario (the reorder only moves work within a tick), so the fixture stands unchanged.*
-      [sim] (M)
-- [x] **Severity-order co-arrival**: signals queue to `pending_signals`, dispatched once per
-      bot at the phase-6 op boundary; `Signal::severity()` orders abort > error > recall >
-      hurt > bumped > bump (Death holds the reserved top tier until M3's abort; error is sync
-      and never queued; gaps left for M3's ranks), extras dropped; co-arrival ≠ double-handle
-      (Q81) — regression-tested (`co_arriving_signals_resolve_by_severity_not_double_handle`:
-      under the old immediate-raise code that scenario exploded the bot). [pyrite][sim] (M)
-- [x] **Spatial index** (bots per tile): `World.occupancy: BTreeMap<pos, BTreeSet<id>>`, kept
-      in sync by `index_bot`/`unindex_bot`/`move_bot` at every spawn/move/death/scrap/explode;
-      `tile_occupied`, the bump blocker lookup, and both replan obstacle sets read the index
-      (`occupied_tiles`). [sim] (S)
-
-*Audit follow-ups (2026-07-15 M1–M4 verification) — swept 2026-07-26: the sub-order is FIXED
-(Q102 first half, below); inline structure damage is Q102's open second half; the
-hash-shallowness was fixed by the 2026-07-16b review (`hash_bot_data` covers all in-flight
-state):*
-- [x] *Phase-4 sub-order* — **done 2026-07-26 (Q102)**: phase 4 runs docs/07's three passes
-  (move → combat → work; engine walks ride the move pass; pass classification snapshotted at
-  phase entry so no bot acts twice). Combat now sees a settled world — a measured artifact
-  (same fight, 90 hp attacker-first vs 100 hp victim-first) is gone, guarded by
-  `combat_outcome_does_not_depend_on_spawn_order`. ⚠HASH, golden regenerated.
-- [x] *Structure damage inline in phase 4* — **done 2026-07-26 (Q102, second half)**:
-  `PendingDamage` carries a `DamageTarget` (bot / structure / nest / blight / wreck), so one
-  phase-6 settle owns every hp change, XP credit, and destruction (deferred to the end of the
-  drain). Two blows on one mass in a tick no longer fault the higher-id attacker — measured
-  before the fix (1 fault + 5-hp chip), guarded by
-  `a_felled_structure_does_not_punish_the_other_attacker`, verified against the old code.
-  Golden unchanged (the fixture exercises none of the touched paths).
-- *Phase-9 hash is shallow on in-flight state*: `bot.data.requested`, `bot.data.action`
-  (path/ticks/goals) and the recall path aren't hashed — a peer divergence there stays
-  invisible until a position changes. (Shallow VM hashing is already a known TODO.)
-
-## M3 — Signals v3: the seven-template model ✅ COMPLETE (2026-07-15)
-
-- [x] **Per-signal reserved templates**: `on error/hurt/bump/bumped/boot:` player windows
-      (`SignalKind` reshaped; `on signal(s):`/`on death:`/`SignalKind::Death` deleted);
-      `abort`/`recall` fully reserved — writing them is a parse error. Every signal ALWAYS
-      enters its sandwich: forced `handler_init()` prologue (boot: forced `upload_log()` when
-      the buffer is non-empty), then the player window or its FACTORY contents (error:
-      `upload_crash_dump()`, bump: the `wait(35)` stun; hurt/bumped/boot ship empty — the
-      flinch is the reaction), then restart at line 1. `RaiseOutcome::Ignored` is gone for live
-      bots — nothing is unhandled, just uncustomized. Black box = whatever you logged while
-      alive (wrecks carry leveled logs + env snapshot for M10's drop). *Note: the tuning field
-      `bump_victim_freeze_ticks` died — the victim stagger IS the flinch.* [pyrite][sim] (L) ⚠HASH
-- [x] **`abort()` verb** — the only player scuttle: VM-intercepted, runs the fully reserved
-      sequence (forced `upload_log()` charged as debt → `become_disabled()`), un-interruptible,
-      absorbs signals afterwards. `become_disabled` is off the registry (player calls fault
-      err_unknown_function; the host arm stays engine-only). `KillBot` kept, doc'd dev-only
-      (the replay fixture exercises it). [pyrite][sim] (S) ⚠HASH
-- [x] **Double-handle → abort**: `explode()`, `Outcome::Exploded`, and `State::Exploded` are
-      gone — a signal or fault landing on ANY running template (factory contents included,
-      Q50 — the humble-defaults carve-out is deleted) or engine context forces abort; the bot
-      wrecks where it stands. No instant-destroy path exists. [pyrite][sim] (M) ⚠HASH
-- [x] **Recall via the signal system**: `Signal::Recall` (severity 4) — `raise` interrupts
-      Running AND Blocked, records the engine context, and double-handles mid-template;
-      engine-fired selection (rebalance + scrap) now also skips **mid-template** bots, not just
-      booting/recalling ones (Q85 — scrap re-selects the next-lowest). *Judgment call: the walk
-      home stays an engine state machine rather than a literal Pyrite `move_to(home_printer)`
-      program on the VM — observable semantics match the doc; flagged for discussion.*
-      [pyrite][sim] (M) ⚠HASH
-- [x] **Per-signal instruction caps + `signal_safe`**: `pyrite::analysis::check_windows` at
-      deploy (sim `DeployProgram`/`SpawnBot` + the editor's live parse) — worst-case statement
-      counts (longest branch; user-def calls charge their deploy-computed worst case),
-      signal-safe-only calls from the registry flag (defs derive; methods exempt), loop +
-      recursion ban window-reachable. Caps live in costs.ron (`window_cap_error` 8 / hurt 6 /
-      bump 4 / bumped 4 / boot 4). [pyrite] (L)
-- [x] **Unlock surgery**: `OnError`/`OnHurt`/`OnBumpBumped` (one unlock for both, per 06's
-      tree)/`OnBoot` replace `OnSignal`/`OnDeath`; `Import` its own construct (gates both
-      import forms); `Channels` added (syntax lands M11). [pyrite] (S)
-- [x] **Run-state enum to 07's shape**: `RunState { Running | Faulted | Blocked |
-      Template{signal, flinching} | Boot | Recall | PadSit | Disabled }` as `Vm::run_state()`
-      — a projection the clouds/tests/inspector switch on (Blocked's channel variant lands
-      M11; PadSit is wired but unreachable until M5). [pyrite] (S)
-- [x] **Editor**: one file per signal window assembling to `on <signal>:` blocks (the unified
-      `match s:` splicer deleted); sandwich rendered as locked phantom prologue/epilogue lines;
-      live cap meter (worst-case/cap, red on overrun) in the window chrome and file-viewer
-      outline; signal-safe verdict on hover docs; deploy checks run in the live parse; thought
-      clouds switch on `run_state()` with the skull for abort/disabled. [game] (M)
-- [x] **Env registry**: `setenv`/`getenv` host arms over `ENV_KEYS` (`hurt_line` 1–99, default
-      = tuning `hurt_line_pct`; `log_min_level` 0–4) — unknown key faults err_key, out-of-range
-      err_range, unset reads default; `hurt_line` read live by the hurt latch, regen re-arm,
-      and `health_low()`; env snapshot rides wrecks (→ M10 black boxes) and the state hash.
-      [pyrite][sim] (S) ⚠HASH
-- [x] **Log levels**: `log(msg, level=info)` with `trace…error` pre-bound INT constants (ints
-      so the same names work as env values); below-`log_min_level` entries discarded at the
-      call (cost still paid); ring buffer, wrecks, black boxes, and archive entries all carry
-      the level; the inspector prints `[level]` prefixes. [pyrite][sim] (S)
+---
 
 ## M4 — Typed resources & economy ✅ CORE COMPLETE (2026-07-15) — discussion items below
 
@@ -775,159 +625,12 @@ colony may CALL this match, LEARNED at Caches).
       builtin-gating scope here); construct *research* economy already exists (M4's `Research`).
 
 ---
+## Review rounds
 
-## Review round 2026-07-16 (xhigh, M10–M13 working tree) — all 15 findings fixed
+Six review rounds closed between 2026-07-16 and 2026-07-20; every finding was
+fixed. Archived in full at [history/reviews.md](history/reviews.md).
 
-Crashes/losses: `PostRequest` clamps on a char boundary (a mid-codepoint `String::truncate`
-was a remote-triggerable lockstep panic); `LockstepPeer::submit` claims a fresh tick per
-frame (`next_submit`), so a stalled barrier no longer overwrites queued commands. Harm &
-perception gates: guard/escort swings now pass `harm_allowed` + never hit declared allies +
-require the victim in the perception cloud; `attack()`'s victim lookup covers nests (a
-CLAIMED nest is the claimant's property on Non-PvP); `move_to`'s stale-handle exemption is
-owner-scoped (foreign nests need eyes, killing the entity-id fog sweep); channel verbs
-accept faction 0 (per-site range checks replaced the shared `> 0` guard; out-of-u8 factions
-fault instead of truncating). Hash coverage (⚠HASH, golden regenerated — every replay hash
-moves; fixture behavior unchanged): `hash_bot_data` now hashes EVERY BotData field and is
-shared by live bots and wrecks (upgrade/module identity, per-track XP, quirks, carries,
-rng_program, crash_seen — plus in-flight `Action`/`ActionRequest` state incl. channel
-`waited`/parked payloads via exhaustive `hash_action`/`hash_request`); `harm_enabled` +
-vote plumbing and `BlackBox.pos` joined phase 9. Game rules: hijack AND rescue hold at the
-fleet cap (ghosts exempt — the countdown keeps burning, so a stuffed roster can lose the
-race); `try_send`/`try_receive` are jammed from the CALLER's tile too (Corruption blocks
-both ways, matching the blocking verbs); vision grants copy from a pre-grant snapshot
-(never transitive, faction-number independent); nests are solid (structure_at,
-A* blocked set, spawn tiles, PlacePrinter's free check); repair pays Building XP only for
-work actually done. Regression tests in multiplayer/lockstep/channels/ferals/wreckrace/
-building suites.
-
-## Review round 2026-07-16b (max, full working tree) — all 15 findings fixed
-
-Lockstep redesign (`sim::lockstep`): `submit` now covers EVERY owed tick through the input
-horizon (`next_tick + delay`) — a catch-up burst back-fills instead of skipping keys (the
-old `.max()` could deadlock every peer), and when frames outpace ticks empty frames send
-NOTHING (bounded drift; only a command-bearing frame claims one extra tick). `pump` drops
-messages from ids outside the roster (arrival-timing-dependent application was a silent
-desync vector). XP integrity: the Repair WRECK lane pays only while progress accrues (a
-rescue HELD at full progress mints nothing) and a rescuer standing ON the wreck tile now
-fails loudly instead of holding forever; nest attacks pay Combat XP for damage DEALT
-(a Defeated site at 0 hp is no longer an infinite farm). Q52: rescue/hijack boots filter
-the color artifact against the chassis bars (over-bar → the inert fallback; note the
-deploy layer already stock-caps REMAINDER artifacts, so hijack was closed at the source —
-the live exposure was rescue-after-redeploy). Diplomacy: SetAlliance(false) strips grants
-only when an alliance actually existed. Wreck race: `countdown_carry` re-arms when the
-chassis is fully mended (docs/02: None = never wrecked since the last FULL window) — no
-more one-way ratchet to insta-blast. Escalation: `ferals_killed` counts in settle_damage
-where ATTRIBUTION is known — only non-Feral-attributed kills raise the footprint (docs/04:
-fault-loops and blast chains are not player activity). `black_box` joined KINDS +
-find_kind (recover_black_box() was unreachable from real programs). Feral deposits
-re-check nest state at settle (a site beaten to Defeated mid-deposit absorbs nothing).
-[game] view: wrecks get a retain/despawn pass (salvage/rescue removal is routine now);
-black boxes are keyed by entity id instead of an append-only cursor, and recovered cubes
-despawn. docs/02 updated to the docs/01 ruling: the scrap recall is the ECONOMY valve
-(sustained Steel shortfall, `rust_scraps`); being over cap only stops prints. Regression
-tests: 2 lockstep, 5 wreckrace, 3 ferals, 1 multiplayer. Golden unchanged (the fixture
-exercises none of the touched paths).
-
-## Spec-conformance review 2026-07-17 (max, M9–M13 vs docs) — 8 divergences fixed, 6 questions opened
-
-Fixed where code contradicted a clear doc: **`attr`** now implemented in BotHost — entity property
-reads (`t.distance`, docs/01) worked in no real game before (the trait method was never overridden,
-so every read faulted); the fault carries the id so heard-only reads give err_unknown_contact.
-**Hardware bars** (`analysis::artifact_requirements`) now derive from the parsed program — variable
-slots count TOP-LEVEL names only (docs/01 Q80: def params/locals are frame-local), and program-memory
-LINES count distinct statement-bearing lines (docstrings/comments/blanks/imports are not runtime code).
-**comm_keys** hash gained a per-viewer length prefix (a missing one collided {1:{2},5:{6}} with
-{1:{2,5,6}}, blinding the desync detector — ⚠HASH, golden regenerated: the length-prefix changes the
-hash format unconditionally; the fixture has no comm keys, so this is format-only). **`study()`** faults
-err_action "no Template Cache in range" instead of the misleading err_unknown_function the fallthrough
-gave an advertised builtin. **Feral Calm** prints Drones only (docs/04's tutorial state), not Harvesters.
-**Attack XP** on wrecks/structures is clamped to damage DEALT (matching the nest rule — an over-kill no
-longer over-credits). **incoming_recolors** counts only queued recolors (color_population already counts
-walkers — the sum double-counted). Regression tests: `tests/conformance.rs` (attr, study, comm-key hash),
-`hardware_bar_counts_code_not_comments_or_frame_locals` (pyrite), feral-mix test updates.
-
-Opened as design questions (docs/QUESTIONS.md Q86–Q91): lockstep command authorization (Q86 — cross-faction
-commands trust their faction operand), nest→printer dormancy binding (Q87), the ruined-remainder-printer
-ghost edge (Q88), faction ownership of depots + the archive/cloud (Q89), `try_receive` vs broadcasters
-(Q90), alliance vs explicit harm (Q91). **ALL ANSWERED + IMPLEMENTED 2026-07-17** (QUESTIONS.md ruling;
-sim/game changes; goldens regenerated for Q87/Q89's ⚠HASH state-format changes): **Q86** relay binds each
-peer to its owned faction and drops mismatched commands at `try_step` (`Command::actor_faction` /
-`Sim::command_actor_faction`; guards the relay, not the trusted golden log); **Q87** over-base printers bind
-to their gating nest and go `PrinterState::Dormant` on its loss (`Sim::reconcile_dormancy`), closing the
-nest-loss dormancy gap above; **Q88** the remainder printer can never be Ruined/Dormant (indestructible);
-**Q89** Depots gained a `faction` field (see/hear for their owner) and the archive split into per-faction
-clouds (`analyze()` files to the analyzer); **Q90** `try_receive` documented send-only (was already so);
-**Q91** the alliance/explicit-harm split ratified as intended. The one remaining DECIDED-but-UNIMPLEMENTED
-gap (not re-opened): **Template Caches** (Q79's `study()` has nothing to learn from — the whole
-Cache/progression-learning system is unbuilt), follow-on milestone work flagged here so it isn't mistaken
-for complete.
-
-## Review round 2026-07-18 (high, M14 mapgen + game wiring) — all 8 findings fixed
-
-Correctness: **seed variety was skin-deep** — the whole strategic skeleton (starts, veins, nests,
-crystal, core) derived from geometry/player-count alone, so different seeds changed only the decorative
-fill. Now the start ring is rotated by a seed-derived offset and per-wedge vein radii + nest arcanum +
-the core's apex-nest/overlook diagonal are seed-jittered; the floor check was decoupled from geometry
-(it reads the faction's remainder printer, its in-sight veins, its water, and its nearest Copper/Tin
-from the SPEC — only band membership, which is seed-independent, still comes from geometry) so the
-skeleton is free to vary. **Unbounded `MAPGEN_PLAYERS` panicked** (overcrowded rim → DuplicatePrinter or
-an unsatisfiable floor, identical every retry): `generate` now clamps players to `max_supported_players`
-(rim capacity at `max_size` / `MIN_START_SPACING`). **Guarantee tiles weren't bounds-clamped** like
-`reserve` is: a new `Skeleton::place` reserves + routes + skips off-grid tiles, so a mis-tuned config
-drops a guarantee (floor catches it → regenerate, now meaningful since the skeleton varies) instead of
-emitting an OOB spec that panics world-build. **Malformed env vars swallowed silently**: `setup_sim`
-now warns on a non-numeric `MAPGEN_SEED` (falls back to the showcase) or `MAPGEN_PLAYERS` (uses 1), and
-`build_generated_colony` deploys to the factions actually seated (deterministic BTreeSet), not the raw
-requested count. Cleanups: `paint_grid` is computed once per candidate (new `MapSpec::validate_grid`
-returns the painted grid, shared by the authoring check and `floor_on_grid`); the sealed-start check is
-folded into the flood (`Reach.non_rim`) instead of an O(players·size²) whole-grid rescan; the 4-neighbor
-offset literal is one `NEIGHBORS4` const. Also folded the two verifier-refuted micro-nits (the `snow`
-bounds loop into the array, the dead `let _ = kind`). +2 regression tests (seed varies the strategic
-layout; huge player count clamps not panics). All sim + game suites green; golden replay unchanged
-(mapgen never touches the tick or the state hash).
-
-## Spec-conformance review 2026-07-19 (xhigh, full codebase vs docs) — 11 of 12 fixed
-
-A whole-codebase audit against docs/00–09. **Income/XP over-credits** (all echoing already-hardened
-sibling paths): Combat XP now pays for HP actually removed, not the full swing — the bot-attack and
-guard/escort paths moved their per-damage credit into `settle_damage` (keyed on the attacker tag,
-clamped to the real HP delta), and the Blight-Core path clamps inline like structures/nests/wrecks
-(docs/02 "1 XP per 10 damage"). Same-tick **gank double-counts** fixed: the kill XP + first-kill Data
-now sit under the `hp_before > 0` guard the escalation counter already carried, so two attackers dropping
-one bot in a single settle mint ONE kill. **Hauling XP** is provenance-guarded (`credit_travel` accrues
-only the mined share, `cargo_total − withdrawn_aboard`) so withdraw→lap→deposit farms nothing, matching
-the Data-milestone rule. **Perception/API**: heard-only contacts expose `.distance` (from the blip, per
-Q74) instead of faulting; `closest()`/`scan_*`/the `nearest_*` helpers rank by **Chebyshev** to match
-`.distance` and the perception circles (was Manhattan); a multi-tick mover stays audible on its
-in-between traverse ticks (`moved_tick` stamped every traverse tick, not only on tile change). **VM**:
-`%` is checked like `//` (`i64::MIN % -1` faults err_overflow, no debug panic / release-0 split).
-**Tuning-to-data**: High-Ground sensor bonus, Combat-L3 "+1 hearing vs enemies" (now implemented), and
-guard/escort leash distances moved to `tuning.ron`. Regression tests added (combat overkill + gank,
-hauling farm + mined control, multi-tick hearing, Mod overflow — the hearing and Mod tests verified to
-fail without their fix). ⚠HASH (income/perception/closest feed phase 9; golden regenerated). ~~Not fixed:
-Template Caches~~ — **now built (M15, 2026-07-20)**: the Cache entity, `study()`, per-match
-function-block gating, and mapgen placement all landed.
-
-## Test-coverage review 2026-07-20 (max, whole design) — 4 fixes + 11 coverage gaps closed
-
-A max-effort audit of test coverage across docs/00–09 / M0–M15. **Correctness fixes**: the survey &
-fog line-of-sight elevation flag now uses `on_high_ground` (Mountain summits see over walls too, not
-just HighGround — `actions.rs` survey + `tile_visible`); `perceived()` no longer short-circuits black
-boxes to always-seen (they're sight-gated like `find_kind`/`is_seen`, so `is_seen` agrees with
-`exists`/`closest`); the decided **Scouting-L3 Corruption immunity** (Q75) is now implemented (an L3
-scout skips the op-tax) and raced-tested; `env_read` clamps to the ENV_KEYS range so a quirk's
-`EnvDefault` can't smuggle in an out-of-range value `setenv` would reject. **Coverage added** (tests
-that fail if the mechanic breaks): the scouting stance (`search()` → node discovery + Scouting XP),
-`scan_resources` distance-ordering, `is_seen`/`cargo_count`/`path_blocked` start-kit queries
-(`tests/perception.rs`); `setenv`/`getenv` round-trip + range, `my_quirks`/`has_quirk` manifested-only
-(`tests/env_quirks.rs`); a two-run state-hash guard exercising the `feral_mutation`/`wander`/`explore`/
-`quirk_roll` RNG streams the golden never touches (`tests/determinism.rs`); Snow-mutes-movement + the
-Scouting-L3 corruption race (`terrain.rs`); `try_receive`/`try_broadcast` success paths (`channels.rs`);
-the Hiding XP track (`growth.rs`); the Crystal→Chips compute loop mined + refined from scratch
-(`economy.rs`). All sim/pyrite/game suites green; golden unchanged (the fixes only alter previously
-untested edges). *Not isolable under current tuning: the survey/passive elevation ranges coincide, so
-finding [0]'s fix is defensive (guarded by the general survey test); the env-clamp fix has no shipped
-out-of-range quirk to trigger it (guarded by the setenv-range test exercising the same path).*
+---
 
 ## Cross-cutting quick wins (small, independent, grab anytime)
 

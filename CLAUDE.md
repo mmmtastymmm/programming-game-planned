@@ -1,6 +1,8 @@
 # Programming Game (working title)
 
-A Bevy multiplayer RTS where players program their units in **Pyrite**, a custom Python-like DSL interpreted one operation at a time. Design lives in `docs/00`–`08`; unresolved design questions in `docs/QUESTIONS.md`.
+A Bevy multiplayer RTS where players program their units in **Pyrite**, a custom Python-like DSL interpreted one operation at a time. Design lives in `docs/00`–`09`; unresolved design questions in `docs/QUESTIONS.md`.
+
+Four docs are **split into parts**, Rust-module style: `01-language`, `02-agents`, `03-resources` and `05-terrain` each keep a doorway `NN-name.md` beside a `NN-name/` directory. The doorway holds only the invariants that cross its parts plus a table of what each part owns — **it is not a summary and does not substitute for the parts.** Reading one of those docs means the doorway *and* its directory. The rest (`00`, `04`, `06`–`09`) are single files.
 
 Crate layout: `crates/pyrite` (language), `crates/sim` (deterministic world — **plain Rust, no Bevy**), `crates/game` (Bevy app). See `docs/07-architecture.md`.
 
@@ -21,5 +23,7 @@ Testing expectation: golden-replay tests (`(seed, command log) → state hash`) 
 ## Design-doc conventions
 
 - Every numeric value in docs (cycle costs, XP curves, timers) is a tuning constant, expected to live in data files (`costs.ron` etc.), not code.
-- When a design decision is made, it moves to the owning doc's **Decided** section; open items live in `docs/QUESTIONS.md` (numbered — don't renumber, append).
+- When a design decision is made, it moves to the owning doc's **Decided** section — `NN-name/decided.md` for a split doc, the in-file `## Decided` otherwise. Open items live in `docs/QUESTIONS.md` (numbered — don't renumber, append).
+- A ruling that changes a **cross-part invariant** must update the doorway's *What holds across all of them* list too, not just the part file. That list is the contract between parts; letting it drift is the split's characteristic failure.
 - Known defects in *already-decided* text — a ruling that never propagated to its owning doc, or a tuning number that fails arithmetic against its inputs — live in `docs/PROBLEMS.md` (numbered P1…, same append-only rule). Fixing one moves it to that file's **Fixed** log with the commit hash.
+- `docs/history/` is **closed records, not spec** — the answered-question log, dated status blocks, completed milestones, fixed review rounds. It is expected to contradict current design and is never the authority on it. Don't read it in a normal doc pass; open a file there only to recover *why* a past call was made. Answering a question appends the ruling to `docs/history/questions-answered.md` and moves the displaced `QUESTIONS.md` status block to `docs/history/questions-status-log.md`. See [docs/history/README.md](docs/history/README.md).

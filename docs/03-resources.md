@@ -1,234 +1,31 @@
 # Resources
 
-**Eleven raw materials → seven refined products**, plus **Energy** (a rate, not a pile) and **Data** (a currency, not a mineral). Each exists to gate a *different verb*, so shortages push players toward different behavior instead of "more of everything." (All recipes/rates below are tuning values.)
+**Eleven raw materials → seven refined products**, plus **Energy** (a rate, not a pile) and **Data** (a currency, not a mineral). Each exists to gate a *different verb*, so shortages push players toward different behavior instead of "more of everything." (All recipes/rates are tuning values.)
 
-## The Tree
+## The parts
 
-```mermaid
-flowchart TD
-    subgraph Raw["Raw (harvested from terrain)"]
-        WAT[Water<br/><i>pumped at shorelines</i>]
-        SAND[Sand<br/><i>shoreline flats & dune fringes</i>]
-        STONE[Stone<br/><i>outcrops, plentiful</i>]
-        WOOD[Wood<br/><i>groves, regenerating</i>]
-        COAL[Coal<br/><i>seams</i>]
-        FE[Iron<br/><i>veins</i>]
-        CU[Copper<br/><i>veins</i>]
-        SN[Tin<br/><i>sparse veins</i>]
-        AG[Silver<br/><i>deep veins</i>]
-        AU[Gold<br/><i>deep veins, rare</i>]
-        CRY[Crystal<br/><i>fields near Corruption</i>]
-    end
-
-    subgraph Refined["Refined (processed in structures)"]
-        STEEL[Steel<br/><i>Smelter: 2 iron + 1 coal</i>]
-        BRZ[Bronze<br/><i>Smelter: 1 copper + 1 tin</i>]
-        WIRE[Wire<br/><i>Foundry: 1 copper</i>]
-        CHIP[Chips<br/><i>Foundry: 1 silver + 2 crystal + 1 wire</i>]
-        GLASS[Glass<br/><i>Smelter: 2 sand</i>]
-        LENS[Lens<br/><i>Foundry: 2 glass</i>]
-        GCHIP[Gold Chip<br/><i>Foundry: 1 chip + 1 gold</i>]
-    end
-
-    subgraph Special["Rates & currency"]
-        NRG[Energy<br/><i>Generator burns wood/coal,<br/>free at geothermal vents</i>]
-        DATA[Data<br/><i>earned by doing, not mining</i>]
-    end
-
-    FE --> STEEL
-    COAL --> STEEL
-    CU --> BRZ
-    SN --> BRZ
-    CU --> WIRE
-    AG --> CHIP
-    CRY --> CHIP
-    WIRE --> CHIP
-    SAND --> GLASS
-    GLASS --> LENS
-    CHIP --> GCHIP
-    AU --> GCHIP
-    WOOD --> NRG
-    COAL --> NRG
-
-    STEEL -->|structures, printing, terraforming| SINK1[Building]
-    BRZ -->|tool & weapon modules| SINK2[Claws]
-    WIRE -->|powered structures, electronics| SINK3[The grid]
-    CHIP -->|compute upgrades, hardware| SINK4[Brains]
-    AU -->|tier-4 tools| SINK5[Late hardware]
-    GCHIP -->|top-tier compute:<br/>the highest CPU tool grades| SINK4
-    WAT -->|coolant| SINK6[Upgrade Station]
-    STONE -->|walls, bridges, civil structures| SINK9[Fortification]
-    GLASS -->|glazing for sensor structures| SINK10[Seeing]
-    LENS -->|Optics & sensor hardware| SINK10
-    DATA -->|research| SINK7[Language & function unlocks]
-    CRY -->|ammo/repair consumables| SINK8[Consumables]
-```
-
-## Resource Roles
-
-Raw:
-
-| Resource | Source | Primary sink | The question it asks the player |
-|---|---|---|---|
-| **Water** | Pumped at shorelines (Pump structure) | Coolant — the Upgrade Station consumes it per compute upgrade | *Do you hold shoreline?* Compute is water-cooled: colonies near rivers think better. |
-| **Stone** | Outcrops — plentiful, everywhere | Barricades, bridges, civil structures (Depot, Sentry Post, Request Box) | *Can you dig in?* Fortification is cheap in value but heavy in logistics — walls are hauled, not conjured. |
-| **Sand** | Shoreline flats and dune fringes (interacts with Q35's dune terrain) | Glass | *The other coastal claim* — water cools compute, sand feeds optics; shorelines are double-valuable. |
-| **Wood** | Groves — the flagship **regenerating** node type | Generator fuel (weak); Lanterns | *Renewable but thin* — enough to idle on, never enough to grow on. |
-| **Coal** | Seams | Generator fuel (strong) + Steel | *Energy logistics* — the fuel line is a supply line. |
-| **Iron** | Veins, common | Steel | *Can your mining programs scale and reach?* |
-| **Copper** | Veins | Wire + Bronze | *Electrification* — one ore, two competing futures. |
-| **Tin** | Sparse veins | Bronze (nothing else) | *Prospect wide* — copper is everywhere, its alloy partner isn't. |
-| **Silver** | Deep veins | Chips | *Contested wealth* — the midgame's fight-worthy vein. |
-| **Gold** | Deep veins, rare; the Data Exchange's densest *output* | **Gold Chips** (top-tier compute) + **tier-4 tools** | *Raid bait* — high value per unit of cargo, worth escorting, worth stealing. |
-| **Crystal** | Fields in risky terrain ([05-terrain.md](05-terrain.md)) | Chips, consumables | *Will you venture into dangerous ground?* |
-
-Refined:
-
-| Product | Recipe (structure) | Primary sink | The question it asks the player |
-|---|---|---|---|
-| **Steel** | 2 Iron + 1 Coal (Smelter) | Structures, terraforming, tier-2 tools, per-bot maintenance, printing when priced ([02-agents.md](02-agents.md)) | *The industrial base* — everything standing is made of it; when prints are priced, also *how much are you willing to lose?* |
-| **Bronze** | 1 Copper + 1 Tin (Smelter) | Tool & weapon modules | *Claws* — the arming material. |
-| **Wire** | 1 Copper (Foundry) | Powered structures, cheap electronics, Chip input | *The grid* — everything electrified pays a copper tax. |
-| **Chips** | 1 Silver + 2 Crystal + 1 Wire (Foundry) | Compute upgrades ([06-progression.md](06-progression.md)); Gold Chip input | *How big is the brain budget?* Brains are bought, and Chips are the only way to think bigger — every Chip spent on thought is mining and hauling not spent on claws. |
-| **Glass** | 2 Sand (Smelter) | Lens stock; glazing for sensor structures (Sentry Post) | *Can you see?* — the seeing material. |
-| **Lens** | 2 Glass (Foundry) | The **Optics module** (2 Lens + 1 Bronze — Q53 answered, [06-progression.md](06-progression.md)) | *How far can you see?* Sensor range gets a supply chain. |
-| **Gold Chip** | 1 Chip + 1 Gold (Foundry) | Top-tier compute — the highest CPU tool grades price in these ([06-progression.md](06-progression.md)) | *Is your colony rich enough to think this hard?* The best brains are gilded. |
-
-Rates & currency:
-
-| Resource | Source | Primary sink | The question it asks the player |
-|---|---|---|---|
-| **Energy** | Generators (burn Wood weakly or Coal strongly) or free at geothermal vents | Powers Fabricators/Smelters/Foundries; per-bot **upkeep** | *How big can the colony get?* Soft population cap |
-| **Data** | Task milestones, exploring, `analyze()`-ing other factions' wrecks, first-time achievements | Construct research (one-time, permanent — [06-progression.md](06-progression.md)), repairing the ruined **Red printer**, and the **Data Exchange**: convert Data into other resources at the Research Archive (tuned rates, Chips-favored) | *Are you doing new things or the same thing?* |
-
-## Design Rules
-
-1. **Data is not minable.** It comes from *activity* — first kill, tiles explored, **other factions' wrecks analyzed** (never your own — no staged Data, Q76), milestones ("deliver 500 ore"), and repairing the ruined Red printer is its flagship early sink. This ties progression to playing broadly, and it means a turtling player unlocks slower than an active one.
-2. **Energy is upkeep, not stockpile.** It's a rate (generation vs. drain), not a pile. Exceeding generation causes **brownout**: all bot cycle budgets are halved (the Fabricator's backup trickle exempts one bot — Q84). A colony that overbuilds *gets visibly dumber* — a thematic and legible failure state. **Steel shortfall rusts** (Q84): unpaid chassis maintenance halts self-repair fleet-wide and adds a slow HP decay; sustained shortfall joins the scrap-recall trigger. All of it configurable in `upkeep.ron` — decay rate, thresholds, and whether rust scraps.
-3. **Raw resources are spatial.** Nodes are placed by terrain generation and **mostly finite**, forcing expansion — which forces longer supply lines — which rewards better hauling/escort programs. The resource system exists to create *routing problems for player code*. **Regeneration is a per-node-type data flag**: the engine supports it, most node types ship with it off — **Wood groves are the flagship exception** (renewable, low-yield) — and maps can place other regenerating variants (e.g. a slow *seeping vein*) as design accents or for long-running servers.
-4. **Seeing discovers; the scouting stance surveys** (2026-07-14, Q74 — supersedes "buried until prospected"). A *seen* tile is fully known, veins included; `search()` is the **scouting stance** (root in place, seeing expands ring-by-ring to the hearing radius — [01-language.md](01-language.md), [05-terrain.md](05-terrain.md)). Discoveries are **permanent map knowledge**; remaining amounts are live-only; node queries answer from map knowledge at any range. Start-zone nodes sit within the starting units' sight, so the pre-deployed starter program works from tick one. Expansion still has a survey step in practice: beyond the start zone, walking every tile with your eyeballs is slow and dangerous — a rooted scout is the cheap alternative. Ferals discover by the same rules.
-5. **Refinement is a logistics step, not a click.** Smelters/Foundries have input/output buffers that bots must physically feed (`deposit()`) and empty (`withdraw()` — Q79). Factory-game DNA: throughput is a program-quality problem.
-6. **Payments are abstract; feeds are physical** (Q84). Anything `deposit()`ed into a Depot enters **colony stock**, and every *payment* — blueprints, research, station purchases, upkeep — draws from stock with no haul-to-site. The *feeds* stay physical: refinery inputs/outputs, Generator fuel, and Station coolant must actually be hauled. Logistics is gameplay where flow is the point, bookkeeping where it isn't.
-
-## Harvest Tool Tiers
-
-Harvesting reads the **grade of the drill the bot has installed** ([02-agents.md](02-agents.md), Q111/Q118): grade N works every resource of tier ≤ N. **Grade 1 is free with the chassis**, so a fresh print works its whole start zone and the opening program never stalls; each resource declares its required tier (data-driven; numbers below are made-up tuning values):
-
-| Resource | Required tool tier |
+| File | Owns |
 |---|---|
-| Wood, Stone, Sand | 0 |
-| Iron, Coal | 1 |
-| Copper, Tin | 2 |
-| Silver, Gold | 3 |
-| Crystal | 4 |
-| Water | — (pumped by a structure, not mined) |
+| [the-tree.md](03-resources/the-tree.md) | The raw → refined tree, what each resource's role is, and the design rules the tree has to satisfy. |
+| [harvest-tiers.md](03-resources/harvest-tiers.md) | Which tool grade works which material tier. |
+| [structures-and-start.md](03-resources/structures-and-start.md) | The resource-relevant buildings, the ally Request Box, and what each player begins with. |
+| [decided.md](03-resources/decided.md) | Settled rulings owned by this doc. |
 
-The tier ladder is the arc of the colony: chop, dig, electrify, get rich, get brave.
+## What holds across all of them
 
-**Only the DRILL has a reach ladder, and it tops out one grade early.** Grade 4
-already reaches Crystal, the deepest resource tier, so **grade 5 is a quality
-step** — more yield per swing, faster swings — rather than a new reach. That is
-not a special case so much as the normal one: the other nine tools never had a
-reach dimension at all, so every grade of theirs is a quality step. The drill
-is simply the tool where the first three grades happen to buy *access* as well.
-Grades 2–5 are purchasable for every tool, which is what keeps the catalog
-dense enough that no level is dead (Q118, assertion 3).
-
-**The ladder rule (Q72, narrowed by Q118): no tool may be priced in a material
-that its own ladder unlocks at or above the grade being bought** — no tier's
-key is ever locked behind its own door. Because only the drill unlocks
-materials, this binds on the drill alone today; it is written generally so a
-future unlocking tool (a Pump gating Water, say) is covered without an
-amendment. Refined goods resolve through their recipes, so the effective
-mining tier of a price is the deepest raw input it needs: Glass and Lens 0,
-Steel 1, Bronze and Wire 2, Chips and Gold Chip 4.
-
-Tools are bought at the **Upgrade Station** (Q105 folded the Fabricator's
-tool-making role into the one pad flow) and are **licensed by level** — a bot
-may buy a grade-N tool once *either* that track's level *or* its total level
-reaches N. **Buying costs no XP and resets nothing** (Q111): the licence is
-what the level bought, and the level stays.
-
-**The drill ladder** is the one the anti-circularity rule actually binds, because
-the drill is the only tool that unlocks materials:
-
-| Drill grade | Priced in | Made from what you already mine | Reach |
-|---|---|---|---|
-| 1 | free with the chassis | — | tiers 0–1 (the start zone) |
-| 2 | Steel | Iron + Coal (tier 1) | + tier 2 |
-| 3 | Bronze | Copper + Tin (tier 2) | + tier 3 |
-| 4 | Bronze + **Gold** | tier-2 alloy + tier-3 wealth — *get rich to get brave* | + tier 4 |
-| 5 | Bronze + Gold | — | no new reach: a **quality** step (yield, swing speed) |
-
-**Every other tool prices by resource ROLE, not by rung** — nothing stops a
-weapon costing Bronze or a CPU costing Chips, because neither unlocks the
-material it is priced in. *Bronze arms, Chips think*: weapons and civil kit in
-Bronze, sensing in the Sand → Glass → Lens chain, and compute starting cheap
-and escalating — **CPU 2 in Wire, 3 in Silver + Wire, 4 in Chips, 5 in Gold
-Chips**, with the flat capacity buys (memory, stack, log buffer) starting on
-Wire too, so program size is never the last thing a colony unlocks (Q118).
-
-All ten tools carry grades 2–5, which is what makes the catalog dense enough
-that no reachable level is dead. The full catalog is [06-progression.md](06-progression.md)'s.
-
-Each rung is bought with the previous rung's ore, so reaching Crystal is a wealth investment on top of a territorial risk ([05-terrain.md](05-terrain.md)): the bot that can mine it is expensive, and it's working next to Corruption. Escort it.
-
-**Build tool grade 2 is the ladder's one exception** (Q84, restated for Q111's tool model): the civil-kit grade prices in **Steel**, so the first heavy builder is a free print plus a Steel upgrade, and the Smelter is never locked behind the Bronze it would produce. (Every print already holds build tool grade 1, so ordinary `build()` never waits on anything — only the heavy verbs need grade 2: field repair, `hijack`, and nest claim/raze, per Q105-R2.)
-
-## Ally Aid: the Request Box
-
-No free-form resource gifting. A colony builds a **Request Box** and posts a request on it (*resource, amount*). Allied bots may — entirely voluntarily — haul the requested resource in and `deposit()` it; the owner collects what arrives.
-
-- Aid is **physical logistics**: someone's haulers cross the map to deliver it, through whatever is between the colonies. Charity has supply lines.
-- It's **programmable in spirit, post-v1 in letter** (Q79): allies fulfill requests today by reading the box in the UI and hauling with plain `deposit()`; the request-reading builtins that would make generosity a standing program are deferred.
-- Requests are visible to all allies (and, being on the field, spottable by enemy scouts: a colony begging for Steel is telling everyone something).
-
-## Structures (resource-relevant set)
-
-**Every structure is built by labor** (Q105, 2026-07-26): the player designates a blueprint, a bot walks there and `build()`s it, exactly like bridges, roads, barricades, and paint. Nothing in the colony appears the instant it is clicked — "designation is the player's; labor is code" holds everywhere, and a contested build is a thing you defend.
-
-
-| Structure | Cost | Function |
-|---|---|---|
-| **Fabricator** (printer) | 20 Steel | Prints/reprints bots for **one program color** ([01-language.md](01-language.md)); buildable count gated by controlled nests ([04-enemies.md](04-enemies.md)). Each adds a fixed amount to the colony's **fleet cap**; printers after the first carry a **target share + selection key** for which bots wear their color (the first takes the remainder), enforced by recall ([01-language.md](01-language.md)). Loses its backing nest → **dormant**: cap contribution withdrawn, target voided, color frozen. Printers are also **the cloud**: they always accept `upload_log()` / crash-dump traffic (even dormant), and any printer's inspector is the colony's telemetry viewer — color-coded and filterable by log level ([01-language.md](01-language.md)). The colony heart; losing your last one is near-lethal — and it takes your telemetry with it. Also a **backup generator** (Q84): its trickle always keeps **one bot** powered at full budget (deterministic pick: lowest entity ID) — a total blackout can never deadlock the colony, because someone can always walk out for fuel. |
-| **Depot** | 5 Stone | Cargo drop-off, storage. |
-| **Smelter** | 10 Steel | The heat works: **2 Iron + 1 Coal → 1 Steel**, **1 Copper + 1 Tin → 1 Bronze**, or **2 Sand → 1 Glass** (recipe set per Smelter via the `SetRecipe` Command — round 4). Needs energy. |
-| **Foundry** | 25 Steel, 10 Bronze | The precision works: **1 Copper → 1 Wire**, **1 Silver + 2 Crystal + 1 Wire → 1 Chip**, **2 Glass → 1 Lens**, or **1 Chip + 1 Gold → 1 Gold Chip** (recipe set per Foundry via `SetRecipe`). Needs energy. Priced in Smelter goods only (Q72): **expensive, never impossible** — the electronics age is a big Steel-and-Bronze investment, not a chicken-and-egg. |
-| **Generator** | 8 Steel | Burns fuel → Energy rate: Wood (weak) or Coal (strong). Fed physically (`deposit()` fuel into its intake — Q79/Q84). |
-| **Geothermal Tap** | 12 Steel | Free steady Energy, only on vent tiles. |
-| **Pump** | 6 Steel, 2 Wire | **Two tiles** (Q98, the only multi-tile structure): an **intake** standing in a Water tile — river, lake, or coast, any water is a source — and the **pump house** on orthogonally adjacent walkable ground. Extracts Water into the house's output buffer at a steady rate (tuning) for bots to `withdraw()` and haul. The only source of coolant. Bots deal with the house; the intake is solid, so **you cannot bridge through a pump** — waterfront becomes a footprint that pumps, bridges, and rival pumps compete for, and a visible tell of where a colony draws its coolant. |
-| **Research Archive** | 10 Steel, 5 Stone | The **Data Exchange** (Q106: ships in v1) — Data → other resources at a **flat rate table in data** (everyone, forever; Chips-favored, **Gold trades best per unit**; no scarcity scaling until playtest says otherwise), requiring a built Archive — and the colony's telemetry annex. The Exchange is what keeps Data worth earning all match: construct research is *finite*, so without it a colony that finishes researching keeps earning a currency it can never spend. **Construct research needs no structure** (Q84): it's a player Command spending colony Data, so learning is never gated behind building — the Archive is the bank, not the school. |
-| **Repair Bay** | 8 Steel | Repairs bots in range (energy drain while active). The target of hurt-handler retreat programs ([01-language.md](01-language.md)). |
-| **Upgrade Station** | 10 Steel, 5 Chips, 3 Wire | Bots walk here to buy **per-bot upgrades** — every **tool grade** (one tool per XP track, grades 2–5, licensed by level — Q111/Q118) plus the flat capacity buys (memory, stack, log buffer); catalog in [06-progression.md](06-progression.md). **Only the compute family draws Water as coolant** (Q119): the CPU tool and the capacity buys are silicon and genuinely thermal, while drills, weapons, plating and the rest are mechanical and pay none. Whether an entry needs coolant is declared **per catalog entry in data**, never inferred from which code path handles the purchase — M16 attached the charge to a code branch, a later entry inherited it, and buying a *drill* silently required a water chain the colony had no way to know about. Works like a printer (Q68, decided): the bot **mounts the pad, sits inert for the upgrade time** (tuning, per catalog entry), and steps off upgraded — one pad, one bot, so the queue is physical and everyone in it is exposed. Orders are player-queued per bot (a `QueueUpgrade` Command — designation is the player's); the **program** must bring the bot to a pad. **Bots never path onto the pad** (Q84): they stand adjacent, and the pad *pulls* the next adjacent bot with a queued order (lowest entity ID) — no crash-looping on an occupied tile. Payment charges **at mount**; an unaffordable order is **skipped** — the pad moves to the next queued bot and the skipped order re-arms when stock covers it (no livelock, round 4). The pull silently cancels the bot's pending action (no signal); pad-sit is an **interrupt context** (double-handle applies — upgrading under fire risks the prize); stepping off restarts the program at line 1 (no boot — no re-coloring happened). Player-placed like any structure; parking your veterans on a pad in contested ground is a choice. |
-| **Sentry Post** | 4 Stone, 1 Glass | Wide sensor radius, nothing else. Fog of war is eyes-only ([05-terrain.md](05-terrain.md)) — fixed sightlines are cheap infrastructure, but even a watchtower needs a window. |
-| **Lantern** | 2 Wood | Tiny fixed sensor radius (~2 tiles, tuning) — a light, not a watchtower. The cheapest ward against eyes-only fog: string them along perimeters and haul roads. Its little seeing circle is real sight (Q74): lit ground is surveyed ground, and a mover crossing it is detected. |
-| **Request Box** | 3 Stone | Posts a resource request allies may voluntarily fulfill by hauling and depositing (see Ally Aid). |
-
-## Starting State (per player)
-
-- 1 working Fabricator (the **Green** printer), 1 **ruined Red Fabricator** (repairable for Data — the first colony milestone, [01-language.md](01-language.md)), 1 Depot, 1 Generator
-- 2 bots (Green, **tier-1 mining tools** slotted — the start-zone veins are Iron and Coal, tier 1) with a working starter mining program pre-deployed (the tutorial *is* reading this program)
-- 30 Steel, 10 Iron + 5 Coal in colony stock, 0 everything else (map generation guarantees Iron + Coal + Wood + Stone in the start zone; Copper/Tin within first-expansion reach — Q69)
-- **The Generator starts stoked** (Q84 — a tuning buffer of fuel), and the start guarantee includes *starting upkeep < starting generation*: the opening never brownouts before the player acts. The starter economy's first real job is keeping it fed.
-
-## Decided
-
-- **A completing structure DISPLACES whatever stands on its tile — nothing dies** (2026-07-27, answers Q120; entombment removed 2026-07-28). A pending designation is **not solid** and never becomes so — making blueprints block pathing was rejected outright because it hands every player a free terrain weapon: designate, never build, and wall off any ground you like. Bots therefore walk over designations freely, and the build that completes on an occupied tile **displaces** the occupant to the nearest free tile.
-  - **Finding that tile** is a **breadth-first search outward from the site** over passable tiles, taking the first free one; ties break on lowest `(x, y)`. Free means in bounds, walkable for that bot, no structure/printer/depot/nest, and no other bot; paint filters do not apply, since those are per-call route preferences rather than terrain. BFS rather than a chebyshev-radius scan **because the destination must be somewhere the bot could have walked** — a pure radius sweep can push a bot through a mountain into a sealed pocket. Adjacency is 8-neighbour throughout, docs/05's native metric.
-  - **Nothing dies.** An earlier draft killed an occupant with no free *adjacent* tile, which broke [02-agents.md](02-agents.md)'s "there is no instant-destruction path", left the black box's landing tile undefined under a solid building, and handed every faction a cross-faction kill primitive. Widening the search removes all three. **docs/02's death-path invariant stands untouched.**
-  - **If the search exhausts, the build HOLDS** — silently: the action re-parks and retries next tick, minting **no progress, no XP, and no fault** (so Q109's chip never fires and the builder cannot be ground down by waiting). The BFS runs over the site's *passable connected component*, not the whole map, so this is reachable however rarely: a bot sealed in a one-tile pocket by Mountain, Water or barricades has nowhere to go and no tile count argument covers it. This is the **one** exception to "never hold", and it is narrow by construction — Q120 forbade holding because a stall that *mints or damages* is how M16's version ground builders into wrecks, and a silent hold does neither.
-  - **The displaced bot is not punished, and that has to be explicit** because a failed action is normally a fault and Q109 chips 2 HP for every fault — a 2-HP miner could otherwise *die from being pushed*, inside the ruling headlined "nothing dies". So: the in-flight action is **re-planned, not failed**, the way a bump already re-plans one. A `move_to` re-paths from the new tile; a `mine()` or `build()` whose target is still in range continues, and one whose target is now out of range **re-approaches rather than faulting**. No fault, no HP chip, and no terrain trigger on landing (a displacement is not a walk, so no Ice slide and no Dune reset).
-  - What the ruling forbids is as important as what it allows: the build must **never hold** (a silent stall mints XP and progress for no output; a stall that faults grinds the builder to a wreck under Q109's fault damage) and must **never delete the designation**, which destroys the player's up-front materials. Both were tried during M16 and both were wrong.
-- **The Pump is a two-tile waterworks** (2026-07-26, answers Q98) — the water source is **any Water tile** (river, lake, coast; the intake stands *in* the water), and the structure occupies **two tiles**: the **intake** in water plus the **pump house** on orthogonally adjacent walkable ground. The house is the structure's canonical tile — bots stand beside it and `withdraw()` Water from its output buffer, it holds the entity's position for `closest`/`.distance`, and it carries the structure's one seeing circle; the intake is the second solid tile. **Both tiles are solid**: ground bots never entered water anyway, but the intake now blocks a Bridge on that tile, so waterfront is a contested *footprint* — pumps, bridges, and rival pumps compete for the same bank, and a visible intake tells everyone where a colony draws its coolant. Placement is one Command naming the house tile and its intake side; the sim validates the (walkable house, water intake, orthogonally adjacent) triple. Adjacency to **either** tile counts as adjacency to the pump for damage. This is the **first and only multi-tile structure** — `Structure` gains an optional second tile rather than a general footprint system; a general system would be speculative until a second multi-tile building exists. Extraction rate and buffer cap are tuning. ⚠HASH when it lands.
-- **Raw/refined split** (2026-07-13, supersedes the five-resource model). Eleven raws — Water, Stone, Sand, Wood, Coal, Iron, Copper, Tin, Silver, Gold, Crystal — feed seven refined products: **Steel** (Iron+Coal), **Bronze** (Copper+Tin — bronze is an alloy, so Tin replaced it on the raw list), **Wire** (Copper), **Chips** (Silver+Crystal+Wire), **Glass** (Sand), **Lens** (Glass), and **Gold Chip** (Chip+Gold, added with Q72). Steel replaces the old generic "Metal" for machines and printing; **Stone** (added 2026-07-14) owns fortification and civil works — barricades, bridges, Depot/Sentry/Request Box; **Sand → Glass → Lens** (added 2026-07-14) is the seeing chain — glazing for sensor structures, lenses for Optics-grade sensor hardware (Q53); Gold is direct-use premium hardware + the Exchange's densest good; Water is pumped, not mined, and cools the Upgrade Station. Every raw gates a distinct verb (see Resource Roles). Tier ladder: Wood/Stone/Sand 0 → Iron/Coal 1 → Copper/Tin 2 → Silver/Gold 3 → Crystal 4. Open edges (recipes, kind constants, sim migration): Q69.
-- **Regen is a per-node-type data flag** — most node types are finite (**Wood groves are the flagship regenerating exception**); other regenerating variants exist for map design and long servers (see Design Rules).
-- **Depots are faction-owned** (2026-07-17, answers Q89's depot half, [08-multiplayer.md](08-multiplayer.md)). A Depot carries a real `faction` field and **sees/hears for its owner** — no longer the faction-0 hardcode that sent depot vision to the wrong colony on any map where faction 0 isn't the sole human. One rule across the sim's perception, reachability checks, and the fog view.
-- **Seeing discovers; the scouting stance surveys** (2026-07-14, Q74 — supersedes 2026-07-14's "buried until prospected") — a seen tile is fully known, veins included; `search()` is the rooted wide survey; discoveries permanent, amounts live-only, node queries answer from map knowledge (see Design Rules; fog rules in [05-terrain.md](05-terrain.md)). The **Lantern** (2 Wood) remains the cheap vision ward below the Sentry Post.
-- **The bootstrap works** (2026-07-14, answers Q72). The Foundry prices in Smelter goods only (25 Steel + 10 Bronze — expensive, never impossible) and the Research Archive in Steel + Stone, so the electronics age and construct research are both reachable from the starting kit. **The ladder rule** (narrowed by Q118): no tool may be priced in a material *its own ladder unlocks* at or above the grade being bought — which binds on the drill alone, since only the drill unlocks materials. Other tools price by resource role rather than by rung. **Bronze arms, Chips think**: tools and weapons price in Bronze, Chips buy compute only. **Gold makes better chips**: the Gold Chip (1 Chip + 1 Gold, Foundry) is the seventh refined good, and the top of the compute catalog (the highest CPU tool grades) requires them. **The build receipt is literal** ([02-agents.md](02-agents.md)): refunds and salvage return fractions of what was *actually* spent — a free print's chassis line is 0; upgrades and modules always count. **Every per-bot upgrade is installed at the Upgrade Station** (Q105 folded the Fabricator's tool-making role into the one pad flow — two pad flows for one concept earned nothing); generic modules no longer exist ([06-progression.md](06-progression.md)).
-- **The physical layer works** (2026-07-14, answers Q84). **Build tool grade 2 prices in Steel** (the ladder's civil-kit exception — no Bronze circle; restated for Q111's tool model). **Research is structure-free** (a Command spending colony Data; the Archive is the bank, not the school). **The Generator starts stoked**, starting upkeep < starting generation, and the **Fabricator is a backup generator** — its trickle always keeps one bot powered (lowest entity ID): blackout can never deadlock the colony. **Payments are abstract, feeds are physical** (colony stock vs. hauled refinery/fuel/coolant flows). **Steel shortfall rusts** (self-repair halts + slow decay; configurable in `upkeep.ron`). **Wreck-race verb speeds** (tuning, tool-modifiable, in `costs.ron`): salvage ~4 s < analyze ~6 s < hijack ~10 s; field repair scales with build rate; hijack requires a build tool of grade ≥ 2 (Q105-R2). **Station queue**: adjacent-stand + pad-pull (lowest ID), payment at mount, pad-sit is an interrupt context. **First-pass tuning manifest**: mine yield 2/swing; recipe batch ~30 ticks; fleet cap +15/printer; coolant 1 Water per *compute* upgrade (Q119 — mechanical tools pay none); quirk probability default 0.5/bot; fault chip 2 HP; Generator output comfortably above ~10 bots' idle draw, Coal ≫ Wood per unit — all data, all tunable. **Data income** (round 4 — seen-set-free, like Scouting): node discovered 2 · survey completed 3 · Cache studied 5 · first kill 10 · delivery milestones 20 · Feral wreck analyzed 5–15 by arcanum; the Red printer repair prices at ~60 Data — 06's pacing table finally has arithmetic under it.
-- **Kind constants & typed yields** (2026-07-14, answers Q69's design portion). Every resource gets a Pyrite constant — all eleven raws (`water` included) and, since round 4, all seven refined goods; **`ore` stays the family constant** — any discovered mineral vein or seam — so the starter program and every existing example keep working. **`mine()` yields are typed** by the node's kind: cargo is a typed manifest, hauling routes by kind, refinery buffers accept only their recipe's inputs ([01-language.md](01-language.md)). What's left of Q69 is playtest tuning and implementation, not design: recipe ratios, burn/coolant/Exchange rates, Tin's sparsity floor, and the sim's Ore→Metal migration (replay-hash change). The map-generation *procedure* that must deliver the placement guarantees is its own open question — Q71.
-- **Harvest tools are tiered** — level-N tools work resources of tier ≤ N; Ore low, Crystal high (see Harvest Tool Tiers).
-- **The Data Exchange ships** (2026-07-26, answers Q106) — Data → resources at a flat, data-driven rate table (Chips-favored, Gold densest per unit), gated on a built Research Archive. In for v1 because construct research is finite: without the Exchange, Data becomes a dead currency the moment a colony finishes unlocking, even though Data is precisely what rewards *doing new things*. Scarcity-scaled rates are deliberately deferred — tuning complexity with no playtest evidence behind it.
-- **Ally aid = Request Box** — posted requests, voluntarily fulfilled by physical hauling; no free-form gifting (see Ally Aid).
-
-- **No extra reward for fulfilling requests** — the Hauling XP the trip naturally earns is the reward.
+- **Every resource gates a different verb.** This is the load-bearing rule: a
+  material that gates nothing, or gates what another already gates, does not
+  ship. Adding one means naming the verb it gates.
+- **The ladder must not be circular** (Q118). No tool may be priced in a material
+  its own ladder unlocks at or above the grade being bought. Today that binds on
+  Mining alone, but it is stated generally so a future unlocking tool needs no
+  amendment. Three load-time assertions enforce it: anti-circularity, no orphan
+  materials, no gaps.
+- **Energy is a rate and Data is a currency.** Neither is a pile in a depot, so
+  neither obeys hauling, cargo, or the Request Box.
+- **Only the compute family draws coolant** (Q119), declared per catalog entry
+  rather than per code branch — the failure that made every mechanical tool cost
+  Water.
+- **Compute does not sit behind maxed mining** (Q118). The compute ladder starts
+  on Wire and escalates to Chips; program capacity grows with it.
+- **All numbers here are tuning constants** bound for data files, never code.

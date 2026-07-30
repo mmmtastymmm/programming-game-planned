@@ -56,10 +56,30 @@ in `crates/game`.
 Now read all of it, in order: `00-overview` through `09-quirks`, then
 `QUESTIONS.md`, `PROBLEMS.md`, `TASKS.md`.
 
+**Four docs are split into parts** (2026-07-29): `01-language`, `02-agents`,
+`03-resources` and `05-terrain` each have a doorway `NN-name.md` beside a
+`NN-name/` directory. Reading one means the doorway **plus every file in its
+directory** — the doorway carries only cross-part invariants and a table of what
+each part owns, so auditing it alone audits almost nothing.
+
+The split creates one new failure mode worth hunting deliberately: **a doorway
+invariant that no longer matches the part that owns it.** The doorway's *What
+holds across all of them* list is a contract; check each bullet against the file
+it points at. A drifted bullet is worse than a drifted paragraph, because it
+reads as the authoritative summary.
+
+**`docs/history/` is out of scope for the audit.** Archived rulings, status
+blocks, completed milestones and closed review rounds are records of what was
+true when written — they are *expected* to contradict current design, so
+auditing them manufactures false findings. The corpus under audit is the live
+files above. Open a history file only to answer "why was this decided this
+way?", and never file a finding against its contents.
+
 Two passes get separated out because the general read skims them:
 
-- **Every doc's Decided section, on its own** (I3). These read as settled history
-  and the eye slides past. This is where the worst drift accumulates.
+- **Every doc's Decided section, on its own** (I3) — the four `*/decided.md`
+  files plus the in-file `## Decided` of the unsplit docs. These read as settled
+  history and the eye slides past. This is where the worst drift accumulates.
 - **Behavioral rules, branch by branch** (I7) — including the exhausted, empty
   and absent cases, which is where single-valuedness usually fails.
 
