@@ -16,21 +16,31 @@ Rule: **every terrain type must change what a good program looks like.** If a ti
 
 ## What holds across all of them
 
-- **A tile that changes no program doesn't ship.** The rule above is the filter
-  every addition in these files has to pass.
-- **A tile is layers, not a kind** (2026-07-26). Base terrain, paint, and
+Invariants a change to any part above has to keep. **None of them is canonical
+here.** Each names the file that owns it; if a bullet and its owner disagree, the
+owner wins and the bullet is the bug. This list exists so a change to one part
+cannot silently break another — not to save anyone reading the parts.
+
+- **A tile that changes no program doesn't ship** — canonical in this file's
+  opening rule, above. It is the filter every addition in these parts must pass.
+- **A tile is layers, not a kind** (2026-07-26) — canonical in
+  [tile-composition.md](05-terrain/tile-composition.md). Base terrain, paint, and
   contents compose; paint is the *routing* layer and carries no material cost.
   Forbidden paint is impassable-like-water, which routes into the standard
   no-path fault rather than a special case (Q95–Q97).
-- **Overlays attach to regions, not tile kinds — with Corruption the exception**,
-  which keeps its tile-based tax. That is why the pipeline has three layers
+- **Overlays attach to regions, not tile kinds — with Corruption the exception**
+  — canonical in [tiles.md](05-terrain/tiles.md), which keeps Corruption's
+  tile-based tax. That is why the pipeline has three layers
   (Q101): `floor₁( region_rule( tile_rule( base + Σ per-bot deltas ) ) )`.
-- **Effective cost is bounded by `bank_cap`**, verified at load against the worst
-  case rather than per tick. Any new overlay here must keep that check passing —
+- **Effective cost is bounded by `bank_cap`** — canonical in
+  [01-language/execution-model.md](01-language/execution-model.md), verified at
+  load against the worst case rather than per tick. Any new overlay here must keep that check passing —
   see [01-language.md](01-language.md).
-- **Seen tiles are sim state** (Q94), not a rendering artifact, so fog belongs to
+- **Seen tiles are sim state** (Q94) — canonical in
+  [decided.md](05-terrain/decided.md). Not a rendering artifact, so fog belongs to
   the deterministic world and not the `game` crate.
-- **All numbers here are tuning constants** bound for data files, never code.
+- **All numbers here are tuning constants** bound for data files, never code —
+  canonical in CLAUDE.md's doc conventions.
 
 ## Terrain × Systems Matrix
 

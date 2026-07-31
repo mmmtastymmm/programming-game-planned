@@ -15,24 +15,41 @@ A **bot** is a printed machine that runs exactly one [Pyrite](01-language.md) pr
 
 ## What holds across all of them
 
-- **Brains are bought, bodies are earned.** Tiers come from the Upgrade Station
-  ([06-progression.md](06-progression.md)); levels come from doing the work.
+Invariants a change to any part above has to keep. **None of them is canonical
+here.** Each names the file that owns it; if a bullet and its owner disagree, the
+owner wins and the bullet is the bug. This list exists so a change to one part
+cannot silently break another — not to save anyone reading the parts.
+
+- **Tools are bought, levels are earned** — canonical in
+  [xp-and-specialization.md](02-agents/xp-and-specialization.md). Tools come from
+  the Upgrade Station ([06-progression.md](06-progression.md)); levels come from
+  doing the work.
   Identical rookies diverge from tick one — that is the design, not a gap.
-- **Capabilities are tier × level** (Q105, reshaped by Q111/Q121). Tier is what a
-  capability *can reach*; level is how *well* it performs. Tools carry the step
-  change, levels license. Hauling is the exception — cargo is a body stat, so it
-  carries no tier.
-- **XP is monotonic and never resets.** The Backup Core preserves tiers and wipes
-  XP (Q100); nothing else takes XP away. Ranking by investment rather than raw XP
-  is what keeps that honest (Q105-R3).
+- **Tools carry the power; levels license** (Q121) — canonical in
+  [xp-and-specialization.md](02-agents/xp-and-specialization.md).
+  **There are no tiers** — Q111
+  removed `Capability`, the tier catalog, the scale factor and the level cap
+  outright. Ten structurally identical tracks, centi-points, one uncapped
+  quadratic curve. A tool is bought, then licensed by *either* its specific
+  track's level *or* the floored mean across all ten; quirks can grant a licence
+  outright.
+- **XP is strictly monotonic** — canonical in
+  [xp-and-specialization.md](02-agents/xp-and-specialization.md). Buying never
+  costs XP and nothing resets it (Q111). The one item that would have wiped it — the Backup Core — is **cut**
+  (Q115); the stat sheet's `XP preserved` row is 0% on destruction with no item
+  softening it. `investment()` is earned XP plus installed tool value (Q115),
+  which is what keeps the scrap valve ranking by investment rather than raw XP
+  (Q105-R3). *Note: [PROBLEMS.md](PROBLEMS.md) P8 records that several docs still
+  specify the pre-Q115 formula.*
 - **Every stat row is keyable.** Any row of the stat sheet and any ledger number
   can serve as a selection key, which is why
   [stat-sheet.md](02-agents/stat-sheet.md) is a contract and not just a table —
   adding a row adds a key.
-- **Upkeep re-bases on installed tools** (Q122/Q123), so a change to the tool
+- **Upkeep re-bases on installed tools** (Q122/Q123) — canonical in
+  [xp-and-specialization.md](02-agents/xp-and-specialization.md). A change to the tool
   model in [06-progression.md](06-progression.md) moves upkeep here.
 - **All numbers here are tuning constants** bound for data files (`xp.ron`,
-  `upkeep.ron`, …), never code.
+  `upkeep.ron`, …), never code — canonical in CLAUDE.md's doc conventions.
 
 ## Open Questions
 

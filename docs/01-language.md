@@ -24,23 +24,30 @@ Pyrite is a **custom Python-like DSL** with an interpreter written in Rust. We c
 
 ## What holds across all of them
 
-These are the invariants a change to any part above has to keep. They live here
-because no single part owns them.
+Invariants a change to any part above has to keep. **None of them is canonical
+here.** Each names the file that owns it; if a bullet and its owner disagree, the
+owner wins and the bullet is the bug. This list exists so a change to one part
+cannot silently break another — not to save anyone reading the parts.
 
 - **The cycle economy rests on actions blocking.** Thinking and acting never
-  overlap (Q100). Every cost in [cycle-costs.md](01-language/cycle-costs.md) and
-  every signature in [builtins.md](01-language/builtins.md) is priced on that
-  assumption; making any action non-blocking invalidates both.
-- **Engine-initiated charges are debt; window code pays normally** (Q75). The
-  trap cost, boot's forced `upload_log()`, and abort's forced sequence drive the
-  budget negative rather than waiting to be affordable — logs always go home.
-  Anything a player writes in a window is ordinary costed code.
-- **Budgets are stored in centicycles** (×100); `costs.ron` entries are whole
-  cycles, converted at charge time. Prose throughout these files reads in whole
-  cycles — only storage is fine-grained.
+  overlap (Q100) — canonical in
+  [execution-model.md](01-language/execution-model.md). Every cost in
+  [cycle-costs.md](01-language/cycle-costs.md) and every signature in
+  [builtins.md](01-language/builtins.md) is priced on that assumption; making any
+  action non-blocking invalidates both.
+- **Engine-initiated charges are debt; window code pays normally** (Q75) —
+  canonical in [execution-model.md](01-language/execution-model.md). The trap
+  cost, boot's forced `upload_log()`, and abort's forced sequence drive the
+  budget negative rather than waiting to be affordable; anything a player writes
+  in a window is ordinary costed code.
+- **Budgets are stored in centicycles** (×100) — canonical in
+  [execution-model.md](01-language/execution-model.md). Prose throughout these
+  files reads in whole cycles; only storage is fine-grained.
 - **No key's worst-case effective cost may exceed `bank_cap`**, checked at load
-  (Q75/Q82/Q101). This is what makes freeze-forever unrepresentable, and it
-  couples [cycle-costs.md](01-language/cycle-costs.md) to the overlay pipeline in
+  (Q75/Q82/Q101) — canonical in
+  [execution-model.md](01-language/execution-model.md). This is what makes
+  freeze-forever unrepresentable, and it couples
+  [cycle-costs.md](01-language/cycle-costs.md) to the overlay pipeline in
   [05-terrain.md](05-terrain.md) and to per-bot deltas from
   [09-quirks.md](09-quirks.md).
 - **Construct gating is enforced at parse time**, so a tier the player lacks is a
@@ -48,7 +55,7 @@ because no single part owns them.
   [syntax-tiers.md](01-language/syntax-tiers.md) owns the ladder;
   [06-progression.md](06-progression.md) owns when it unlocks.
 - **Every number in these files is a tuning constant** bound for `costs.ron`,
-  never a commitment in code.
+  never a commitment in code — canonical in CLAUDE.md's doc conventions.
 - **Determinism** (CLAUDE.md): no floats reach a program, queries return in
   stable sorted order with ties broken by entity ID, and programs are stored as
   byte-exact source hashed for versioning.

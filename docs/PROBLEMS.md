@@ -14,6 +14,12 @@ Line references are as of the sweep that found them (2026-07-28, `git diff
 @{upstream}...HEAD -- docs/` at commit `1f4ffb6`) and will drift as the docs
 are edited — the quoted text is the reliable anchor.
 
+**Re-anchored 2026-07-31** for the doc split: `01-language`, `02-agents`,
+`03-resources` and `05-terrain` became doorway + directory, so every citation
+into those four now names the *part file* that holds the quoted text. Line
+numbers were dropped wherever the split invalidated them and kept only where
+re-verified against the new file. No finding changed — this is a pointer fix.
+
 **Status 2026-07-28: 14 problems opened (P1–P14), 0 fixed.** All come from one
 max-effort doc-coherence review of the Q111–Q123 sweep (76 agents, 84 candidates
 verified, 8 refuted) — fifteen verified findings, two of which are the two
@@ -41,8 +47,10 @@ These cannot be swept mechanically — the docs do not contain the answer.
 
 **P1 — the Upgrade Station is priced in a material only the Upgrade Station can
 unlock. OPEN.**
-[03-resources.md:202](03-resources.md) (also `:176`, `:227`,
-[06-progression.md:137](06-progression.md))
+[03-resources/structures-and-start.md:32](03-resources/structures-and-start.md) (the Station's price),
+[03-resources/decided.md:16](03-resources/decided.md) ("The bootstrap works"),
+[03-resources/harvest-tiers.md](03-resources/harvest-tiers.md) (the drill ladder),
+[06-progression.md:137](06-progression.md)
 
 The Station costs **10 Steel, 5 Chips, 3 Wire**. Chips are 1 Silver + 2 Crystal
 + 1 Wire, and Crystal is resource tier 4. A fresh print carries the free grade-1
@@ -67,12 +75,13 @@ instance.**
 
 **P2 — Mining's `curve_base` is derived from a rate 8× the docs' own mine yield.
 OPEN.**
-[02-agents.md:203](02-agents.md) (also `:60`,
-[QUESTIONS.md:416](QUESTIONS.md), `:832`, `:834`)
+[02-agents/xp-and-specialization.md:74](02-agents/xp-and-specialization.md) (the pacing table),
+[03-resources/the-tree.md](03-resources/the-tree.md) (mine yield),
+[history/questions-answered.md](history/questions-answered.md) (Q122/Q123)
 
 The Q123 pacing table reads `| Mining | ~80 /tick | 32,000 |`. But
 [03-resources.md](03-resources.md)'s tuning manifest fixes mine yield at **2
-units/swing**, [02-agents.md:54](02-agents.md) fixes one `mine()` swing at **~20
+units/swing**, [02-agents/xp-and-specialization.md](02-agents/xp-and-specialization.md) fixes one `mine()` swing at **~20
 ticks**, and Mining income is 1 XP (100 centi) per unit. A bot swinging nonstop
 earns **200 centi / 20 ticks = 10 centi/tick**, not ~80. (QUESTIONS.md:834
 repeats the same unchecked assumption in prose.)
@@ -92,8 +101,9 @@ of a rate that was never checked against `costs.ron`'s action times** — the
 whole table needs recomputing, not just Mining's row.
 
 **P3 — Q120 both mandates and forbids the same silent hold. OPEN. ⚠HASH**
-[03-resources.md:219](03-resources.md) and `:221` (also
-[QUESTIONS.md:722](QUESTIONS.md))
+[03-resources/decided.md:8](03-resources/decided.md) ("HOLDS — silently") and
+[03-resources/decided.md:10](03-resources/decided.md) ("never hold"); also
+[history/questions-answered.md](history/questions-answered.md) (Q120)
 
 Within one *Decided* entry: line 219 says that when the displacement BFS
 exhausts, the completing build **"HOLDS — silently"** (re-parks and retries next
@@ -108,7 +118,7 @@ spec desync in lockstep multiplayer.**
 QUESTIONS.md:722 carries only the unconditional "never hold" version and argues
 the case cannot arise ("a colony's fleet cap sits far below the map's tile
 count, so a legal state always has a free tile somewhere"), while
-03-resources.md:219 explicitly rejects that argument ("no tile count argument
+03-resources/decided.md explicitly rejects that argument ("no tile count argument
 covers it"). They also disagree on the **BFS domain** — whole map versus the
 build site's passable connected component — which is what decides whether a bot
 sealed in a pocket by Mountain/Water/barricades is reachable at all. Both the
@@ -116,21 +126,22 @@ exception's existence and the search domain need one answer.
 
 **P4 — `try_*` verbs type-faulting on `Result` re-creates the double-handle the
 amendment was written to remove. OPEN.**
-[01-language.md:436](01-language.md) (also `:474`)
+[01-language/builtins.md](01-language/builtins.md) (the `try_*` rows and signal-safe flags),
+[01-language/types-and-env.md](01-language/types-and-env.md) (`Result`)
 
 QUESTIONS.md:131–141 deleted the old unwrap rule because it left
 `try_move_to(try_receive("orders"))` undefined, and "one reading makes that line
 a fault inside a running handler, i.e. a double-handle that wrecks the wounded
 bot it was meant to save." The replacement makes that line an **always**-fault
 instead of a sometimes-fault. Both operands are signal-safe
-([01-language.md:474](01-language.md), `:506`), so the idiom is legal inside
+([01-language/builtins.md](01-language/builtins.md)), so the idiom is legal inside
 `on hurt:` and the fault lands in the handler.
 
-Worse, `closest` and `closest_minable` return `Result` (`:472`, `:494`), so the
+Worse, `closest` and `closest_minable` return `Result` (see [01-language/builtins.md](01-language/builtins.md)), so the
 natural spelling of "the fault-free walk" — `try_move_to(closest(depot))`,
 **verbatim the code QUESTIONS.md:180 shipped one amendment earlier** — is a
 runtime fault. Nothing specifies a deploy-time type check; deploy validates only
-program memory and variable slots ([02-agents.md:261](02-agents.md)). A
+program memory and variable slots ([02-agents/decided.md](02-agents/decided.md)). A
 hurt-handler retreat written the obvious way turns every hurt signal into an
 abort, i.e. the rescue-denial path.
 
@@ -140,10 +151,11 @@ widened), or `try_*` loses its signal-safe status (which costs more than it
 saves).
 
 **P5 — the bounded perk truncates to zero on integer stats. OPEN.**
-[02-agents.md:161](02-agents.md)
+[02-agents/xp-and-specialization.md:32](02-agents/xp-and-specialization.md) (the formula),
+[02-agents/stat-sheet.md](02-agents/stat-sheet.md) ("flat-only stats stay whole")
 
 Q121's `bonus = max_bonus × level / (level + K)` is applied to sensor range and
-max HP, which [02-agents.md:82](02-agents.md) keeps as whole integers
+max HP, which [02-agents/stat-sheet.md](02-agents/stat-sheet.md) keeps as whole integers
 ("Flat-only stats (HP, slots, sensor tiles) stay whole" — sensor range has no
 `unit_scale`). With a plausible `max_bonus` of 3 tiles and K of 10, integer
 division gives 3×1/11 = 0, 3×2/12 = 0, 3×3/13 = 0, 3×4/14 = 0 — **a bot that has
@@ -160,12 +172,12 @@ ambiguous.
 
 **P6 — the Flinch perk saturates to zero, deleting the forced prologue
 outright. OPEN.**
-[QUESTIONS.md:756](QUESTIONS.md) (also [02-agents.md:144](02-agents.md),
-[09-quirks.md:99](09-quirks.md))
+[02-agents/xp-and-specialization.md:54](02-agents/xp-and-specialization.md) (the Flinch row),
+[09-quirks.md:99](09-quirks.md); Q121 in [history/questions-answered.md](history/questions-answered.md)
 
 Q121 ratified Flinch's −10%/level as "self-saturating," but it saturates **at
 zero**: "floors at L10" means a bot that has endured enough hostile flinches has
-flinch duration 0. [02-agents.md:59](02-agents.md)'s "forced prologue on most
+flinch duration 0. [02-agents/damage-faults-death.md](02-agents/damage-faults-death.md)'s "forced prologue on most
 signals — time spent locked and vulnerable" then stops existing for veterans,
 removing the vulnerability window the entire double-handle and rescue economy is
 priced against. This is the one surviving linear perk Q121 declined to convert
@@ -174,7 +186,8 @@ are the two fixes.
 
 **P7 — the shipped Tier-0 starter faults to death on unreachable ore, and does
 nothing at all when no ore is minable. OPEN.**
-[01-language.md:203](01-language.md)–`:204`
+[01-language/syntax-tiers.md](01-language/syntax-tiers.md) (the shipped starter),
+[01-language/builtins.md](01-language/builtins.md) (`move_to`'s no-path fault)
 
 Two defects in one program, both introduced by Q117's rewrite:
 
@@ -182,7 +195,7 @@ Two defects in one program, both introduced by Q117's rewrite:
     then unwraps into the **faulting** `move_to`. An Iron seam on the far bank
     of a river (water is impassable; sight is not blocked by it) makes
     `exists_minable(ore)` True, `closest_minable(ore)` return it, `.expect()`
-    unwrap Ok, and `move_to` hit "the normal no-path fault" (`:471`). Nothing in
+    unwrap Ok, and `move_to` hit "the normal no-path fault" (see [01-language/builtins.md](01-language/builtins.md)). Nothing in
     the loop ever observes the node as unreachable, so the guard stays True and
     the program faults **every iteration** — 2 HP a fault, a 40 HP chassis dead
     in ~20, and every bot on the shipped program does it at the same seam
@@ -211,11 +224,11 @@ These need no ruling; the decision exists and the text was not propagated.
 
 **P8 — `investment()` still sums deleted capability tiers. OPEN.**
 [07-architecture.md:77](07-architecture.md),
-[01-language.md:393](01-language.md),
-[02-agents.md:267](02-agents.md), [TASKS.md:1152](TASKS.md)
+[01-language/program-colors.md:47](01-language/program-colors.md) (the ghost-exemption bullet),
+[02-agents/decided.md](02-agents/decided.md), [TASKS.md](TASKS.md)
 
 Q115 cut the Backup Core and Q111 deleted `Capability` and the tier catalog.
-[01-language.md:381](01-language.md) and [02-agents.md:130](02-agents.md) were
+[01-language/program-colors.md](01-language/program-colors.md) and [02-agents/xp-and-specialization.md](02-agents/xp-and-specialization.md) were
 updated to "lifetime XP plus the value of installed tools" — but the scrap
 valve's spec in **07-architecture.md** (the doc an implementer builds phase 8
 from), the ghost-exemption bullet in **01-language.md** *three lines below the
@@ -234,7 +247,8 @@ was written to close. docs/01 additionally now gives two different formulas for
 the same selection twelve lines apart.
 
 **P9 — docs/02's *Decided* section was never swept. OPEN.**
-[02-agents.md:259](02-agents.md), `:262`, `:265`, `:266`
+[02-agents/decided.md:14](02-agents/decided.md) (the `100×n` curve), `:12` (Q68 upkeep),
+plus the module-slot and Optics entries in the same file
 
 The owning doc's authority under this repo's conventions still ratifies the
 whole pre-sweep model: the flat **`100×n` XP curve** (`:266`), **module slots
@@ -252,7 +266,7 @@ term Q122 replaced, so an old fleet browns out its colony purely by being old.
 
 **P10 — the Feral Harvester's verbatim source is still the Q117 crash-loop.
 OPEN.**
-[04-enemies.md:58](04-enemies.md)–`:64` (also [TASKS.md:1083](TASKS.md),
+[04-enemies.md:58](04-enemies.md)–`:64` (also [TASKS.md](TASKS.md),
 [06-progression.md:97](06-progression.md), `:102`, `:171`)
 
 [04-enemies.md:35](04-enemies.md) states these code blocks are the archetypes'
@@ -278,11 +292,14 @@ teaches exactly the bug** 04-enemies.md:41 and Q108 say a shipped source must
 never teach.
 
 **P11 — module slots were deleted but four places still specify them. OPEN.**
-[02-agents.md:24](02-agents.md), `:32`, `:62`, `:262`;
-[03-resources.md:94](03-resources.md); [07-architecture.md:90](07-architecture.md)
+[02-agents/anatomy.md:22](02-agents/anatomy.md) (`| Module slots | 1 |`),
+[02-agents/stat-sheet.md](02-agents/stat-sheet.md) (the modifier pipeline),
+[02-agents/damage-faults-death.md](02-agents/damage-faults-death.md) (the salvage receipt),
+[02-agents/decided.md](02-agents/decided.md);
+[03-resources/the-tree.md:94](03-resources/the-tree.md) (Lens); [07-architecture.md:90](07-architecture.md)
 
 docs/06 deleted the entire slotted-module catalog (Optics and Backup Core
-entries plus the swap-economics paragraph) and 02-agents.md:257's Decided entry
+entries plus the swap-economics paragraph) and 02-agents/decided.md's entry
 dropped "slots 1" from the print floor. Left behind: the universal base statline
 still prints `| Module slots | 1 |` (`:24`); the modifier pipeline still runs
 through "Upgrade Station purchases **+ slotted modules**" (`:32`); the salvage
@@ -297,20 +314,20 @@ of the ten tools since Q111 … so no rookie ever trades its working ability for
 eyes." A reader cannot tell whether a bot has a slot, whether Optics consumes
 it, or how salvage values a part that no longer exists.
 
-Separately, [03-resources.md:94](03-resources.md) still routes the whole Lens
+Separately, [03-resources/the-tree.md:94](03-resources/the-tree.md) still routes the whole Lens
 supply chain into "The **Optics module** (2 Lens + 1 Bronze)" — a deleted
 catalog entry — leaving **Lens with no priced consumer anywhere in the design**.
 
 **P12 — two identical "Cycles per tick" rows with contradictory growth sources.
 OPEN.**
-[02-agents.md:40](02-agents.md) vs `:45` (also `:36`, `:46`, `:55`, `:64`,
-`:66`; [03-resources.md:92](03-resources.md);
+[02-agents/stat-sheet.md:15](02-agents/stat-sheet.md) vs `:20` (also
+`:66`; [03-resources/the-tree.md](03-resources/the-tree.md);
 [06-progression.md:18](06-progression.md))
 
 Line 40 says cycles per tick is grown by "**Upgrade Station** (walk there, pay
 Chips)" — a flat buy — while line 45 says it is grown by the "**CPU tool**
 (Upgrade Station), licensed by the **Processing track**." Q111 moved cycles off
-flat buys onto the tool/licence model ([02-agents.md:12](02-agents.md): "Cycles
+flat buys onto the tool/licence model ([02-agents/anatomy.md](02-agents/anatomy.md): "Cycles
 per tick is the CPU tool"), so line 40 states the superseded model.
 
 Before this sweep the second row carried the suffix "— see the Processor
@@ -324,7 +341,7 @@ working").
 
 **P13 — `repair()` gates the rescue verb on both the new grade and the deleted
 Building tier. OPEN.**
-[01-language.md:486](01-language.md) (also `:35`, `:430`)
+[01-language/builtins.md:24](01-language/builtins.md) (the `repair()` row)
 
 The builtin row was edited in place without deleting the old clause, so one cell
 now reads: "field repair of a wreck needs **a build tool of grade ≥ 2** (Q105-R2,
@@ -339,19 +356,20 @@ cell the mechanical propagation missed.
 
 **P14 — the `XP gain` stat row was deleted, but two quirks still modify it.
 OPEN.**
-[02-agents.md:59](02-agents.md), `:61`, `:187`;
+[02-agents/stat-sheet.md](02-agents/stat-sheet.md) (the deleted row and the canonicity rule),
+[02-agents/xp-and-specialization.md](02-agents/xp-and-specialization.md);
 [09-quirks.md:30](09-quirks.md), `:50`;
 [07-architecture.md:60](07-architecture.md);
-[04-enemies.md:134](04-enemies.md); [TASKS.md:1155](TASKS.md)
+[04-enemies.md:134](04-enemies.md); [TASKS.md](TASKS.md)
 
-[02-agents.md:30](02-agents.md) declares the sheet canonical: "Anything anywhere
+[02-agents/stat-sheet.md](02-agents/stat-sheet.md) declares the sheet canonical: "Anything anywhere
 in the design that makes one bot better or worse than another — hardware, XP
 perks, quirks … modifies a row on this sheet; **if an effect can't name its row,
 it isn't a stat effect.**" The sweep deleted `| Survival | XP gain | 100% |
 Learning track |` along with the Learning track — but 10x Developer (+15% XP
 earned, all tracks), Tech Debt (−15% XP earned), QUESTIONS.md:766 ("quirk
 `XpPct` effects … stay"), docs/07's "any per-bot XP-gain multiplier (quirks
-only) applies at its start-of-tick value" and 02-agents.md:187 itself all still
+only) applies at its start-of-tick value" and 02-agents/xp-and-specialization.md itself all still
 specify it.
 
 An implementer building `stats.ron` from the canonical sheet ships no XP-gain
