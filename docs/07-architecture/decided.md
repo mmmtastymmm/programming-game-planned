@@ -1,0 +1,7 @@
+*Part of [07-architecture](../07-architecture.md).*
+
+# Decided
+
+- **Plain-Rust sim with a `BTreeMap` world** (supersedes the original "`bevy_ecs` inside sim, with careful queries" decision — the implementation went the other way and is locked in). Deterministic iteration comes free from the storage choice; no sort-before-mutate discipline is needed inside sim. `bevy_ecs` is confined to the `game` crate (rendering/UI), where iteration order can never touch sim state — the boundary is the `Command` stream in and read-only world views out. If ECS-side code ever grows sim-state-affecting logic, that's the smell to fix, not a sorting problem to manage. The rule lives in `CLAUDE.md`.
+- **Pathfinding: A\* per `move_to`.** Deterministic, simple, per-bot. **Note for later:** if profiling shows pathing dominating (hundreds of bots re-pathing every tick), flow fields per destination-tile are the escape hatch — one field shared by all bots heading to the same place; still deterministic. Don't build it until it's needed.
+- **Programs are stored as plain text, byte-exact.** Source is the canonical artifact everywhere: saves, replays, the Codex, network deploys. The AST is a derived cache (parser is deterministic). Color **versions are identified by hashing the source bytes** — hence byte-exact storage, no whitespace normalization, fixed UTF-8. Everything downstream composes: text diffs power the Codex, `(color, version-hash)` keys the decryption masks, and programs are shareable as ordinary files.

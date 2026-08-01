@@ -51,8 +51,3 @@ cannot silently break another — not to save anyone reading the parts.
 | Resources ([03](03-resources.md)) | All raw resources are terrain-placed; Vents gate free energy |
 | Enemies ([04](04-enemies.md)) | Nests anchor in Corruption; Feral patrol routes follow terrain graph |
 | Multiplayer ([08](08-multiplayer.md)) | Tile grid + integer move costs keep pathing deterministic |
-
-## Open Questions
-
-- Corruption spread/re-corruption rates, source radii, and cleanse speed — pure tuning, needs the prototype.
-- *(The paint-routing series Q95–Q97 is fully answered as of 2026-07-26 — per-call `only=`/`avoid=` args, `unpainted` a named color, forbidden = impassable-like-water, args free with the verbs, paint global and applied by blueprint-flow labor; see [tile-composition.md](05-terrain/tile-composition.md) and [01-language.md](01-language.md).)*

@@ -14,6 +14,7 @@ what is left to build.
 |---|---|---|
 | [questions-answered.md](questions-answered.md) | The per-question ruling log, Q1–Q123. Newest first — **append new rulings at the top.** | 2026-07-29 |
 | [questions-status-log.md](questions-status-log.md) | Dated board-state entries: what was open on each date and what the day's rulings changed. Newest first. | 2026-07-29 |
+| [questions-worksheets.md](questions-worksheets.md) | The full worksheet bodies of answered questions (Q111–Q123 so far), moved out of `QUESTIONS.md` so it holds only open questions. | 2026-08-01 |
 | [tasks-completed.md](tasks-completed.md) | Milestones M0–M3 — fully complete, no open items. | 2026-07-29 |
 | [reviews.md](reviews.md) | Six review rounds, 2026-07-16 → 2026-07-20. Every finding fixed. Oldest first. | 2026-07-29 |
 
@@ -23,9 +24,10 @@ what is left to build.
   its normal pass, by design — that is the point of the split. Both still *grep*
   it, and a hit for a retired term is usually correct history to leave alone.
 - **Answering a question writes here.** The ruling goes to the top of
-  `questions-answered.md`; the status block it displaces from `QUESTIONS.md`
-  goes to the top of `questions-status-log.md`. Letting status blocks stack in
-  `QUESTIONS.md` is what grew it to 166 KB.
+  `questions-answered.md`; the question's worksheet body moves to
+  `questions-worksheets.md`; the status block it displaces from `QUESTIONS.md`
+  goes to the top of `questions-status-log.md`. Letting answered material stack
+  in `QUESTIONS.md` is what grew it to 166 KB.
 - **Archive a milestone only when it is inert** — every item checked, and no
   note inside it binding on unbuilt work. M4–M15 stayed in `TASKS.md` for
   exactly that reason. When a note *is* still live but the milestone is

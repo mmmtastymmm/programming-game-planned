@@ -11,6 +11,20 @@ rulings are in [questions-answered.md](questions-answered.md).
 
 ---
 
+**Status 2026-07-27 (M16 rethink, latest): Q122 and Q123 ANSWERED — the XP
+model is fully specified.** Each track carries **its own `curve_base`**
+(`curve_base = dedicated_rate × target_ticks_to_L5 / 15`), with a deliberate
+two-tier pacing: a dedicated specialist reaches L5 in ~10 minutes on a JOB
+track, ~50 minutes on an AMBIENT one. That gap is what lets the skill route
+to a tool licence beat the seniority clock. **Age drops to 0.2 deci/tick.**
+Upkeep takes the same bounded hyperbolic as the perks, and its module term
+re-bases on installed tools. Two corrections went in with this: the original
+Q123 claim that the skill route was "dead on arrival" was true in deci/tick
+but **false in levels** (the mean over ten tracks, several at zero, very
+nearly cancels the passive lead — a pure miner comes out tied); and
+**specialisation dissolves the duty-cycle problem by itself**, which is why
+"pay the loop, not the verb" was rejected as unnecessary. **THE BOARD IS CLEAR** — every numbered question through Q123 is decided.
+
 **Status 2026-07-27 (M16 rethink, earlier): Q121 ANSWERED — tools carry the
 power, levels license.** Perks take three shapes: tools hold the step
 changes (which is what makes an uncapped ladder harmless by construction),

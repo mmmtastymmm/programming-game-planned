@@ -50,7 +50,3 @@ cannot silently break another — not to save anyone reading the parts.
   model in [06-progression.md](06-progression.md) moves upkeep here.
 - **All numbers here are tuning constants** bound for data files (`xp.ron`,
   `upkeep.ron`, …), never code — canonical in CLAUDE.md's doc conventions.
-
-## Open Questions
-
-- Upkeep mix tuning: does Steel maintenance earn its complexity alongside Energy, or should the v1 config lean harder on Energy? (System is data-driven — answer via playtest, not redesign.)

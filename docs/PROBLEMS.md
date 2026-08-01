@@ -20,6 +20,18 @@ into those four now names the *part file* that holds the quoted text. Line
 numbers were dropped wherever the split invalidated them and kept only where
 re-verified against the new file. No finding changed — this is a pointer fix.
 
+**Re-anchored 2026-08-01** for the second doc split: `04-enemies`,
+`06-progression`, `07-architecture`, `08-multiplayer` and `09-quirks` became
+doorway + directory, so every citation into those five now names the part file
+holding the quoted text, with line numbers re-verified against the new files.
+No finding changed — pointer fix only. The same day's open-questions sweep
+moved the answered worksheet bodies (Q111–Q123) out of `QUESTIONS.md` into
+[history/questions-worksheets.md](history/questions-worksheets.md); citations
+into those bodies now point there.
+
+**Status 2026-08-01: 18 problems opened (P1–P18), 0 fixed.** P15–P18 were
+found by the reviews of the 04–09 doc split and appended below.
+
 **Status 2026-07-28: 14 problems opened (P1–P14), 0 fixed.** All come from one
 max-effort doc-coherence review of the Q111–Q123 sweep (76 agents, 84 candidates
 verified, 8 refuted) — fifteen verified findings, two of which are the two
@@ -50,7 +62,7 @@ unlock. OPEN.**
 [03-resources/structures-and-start.md:32](03-resources/structures-and-start.md) (the Station's price),
 [03-resources/decided.md:16](03-resources/decided.md) ("The bootstrap works"),
 [03-resources/harvest-tiers.md](03-resources/harvest-tiers.md) (the drill ladder),
-[06-progression.md:137](06-progression.md)
+[06-progression/upgrade-station.md:34](06-progression/upgrade-station.md)
 
 The Station costs **10 Steel, 5 Chips, 3 Wire**. Chips are 1 Silver + 2 Crystal
 + 1 Wire, and Crystal is resource tier 4. A fresh print carries the free grade-1
@@ -83,7 +95,8 @@ The Q123 pacing table reads `| Mining | ~80 /tick | 32,000 |`. But
 [03-resources.md](03-resources.md)'s tuning manifest fixes mine yield at **2
 units/swing**, [02-agents/xp-and-specialization.md](02-agents/xp-and-specialization.md) fixes one `mine()` swing at **~20
 ticks**, and Mining income is 1 XP (100 centi) per unit. A bot swinging nonstop
-earns **200 centi / 20 ticks = 10 centi/tick**, not ~80. (QUESTIONS.md:834
+earns **200 centi / 20 ticks = 10 centi/tick**, not ~80.
+([history/questions-worksheets.md:510](history/questions-worksheets.md)
 repeats the same unchecked assumption in prose.)
 
 With `curve_base` 32,000, Mining L5 costs 15 × 32,000 = 480,000 centi = **48,000
@@ -93,7 +106,8 @@ Processing L5 **before** a dedicated miner reaches Mining L5: seniority beats
 specialisation, which is precisely the failure Q123 exists to fix. Knock-on:
 drill grade 2 (Mining L2 ≈ 16 minutes of *uninterrupted* swinging, far longer
 once hauling is counted) gates Copper/Tin well past
-[06-progression.md](06-progression.md)'s 15–30 minute midgame beat.
+[06-progression/pacing.md:11](06-progression/pacing.md)'s 15–30 minute
+midgame beat.
 
 `curve_base = dedicated_rate × target_ticks_to_L5 / 15` is sound; the
 substituted rate is not. **Every job-track row in the table is one substitution
@@ -115,7 +129,7 @@ versus whatever the never-hold branch does (fault, delete, or force-complete) �
 and every alternative is hash-affecting, so **two implementations of the same
 spec desync in lockstep multiplayer.**
 
-QUESTIONS.md:722 carries only the unconditional "never hold" version and argues
+[history/questions-worksheets.md:417](history/questions-worksheets.md)–`:427` carries only the unconditional "never hold" version and argues
 the case cannot arise ("a colony's fleet cap sits far below the map's tile
 count, so a legal state always has a free tile somewhere"), while
 03-resources/decided.md explicitly rejects that argument ("no tile count argument
@@ -129,7 +143,7 @@ amendment was written to remove. OPEN.**
 [01-language/builtins.md](01-language/builtins.md) (the `try_*` rows and signal-safe flags),
 [01-language/types-and-env.md](01-language/types-and-env.md) (`Result`)
 
-QUESTIONS.md:131–141 deleted the old unwrap rule because it left
+[history/questions-worksheets.md:220](history/questions-worksheets.md)–`:230` deleted the old unwrap rule because it left
 `try_move_to(try_receive("orders"))` undefined, and "one reading makes that line
 a fault inside a running handler, i.e. a double-handle that wrecks the wounded
 bot it was meant to save." The replacement makes that line an **always**-fault
@@ -139,7 +153,7 @@ instead of a sometimes-fault. Both operands are signal-safe
 
 Worse, `closest` and `closest_minable` return `Result` (see [01-language/builtins.md](01-language/builtins.md)), so the
 natural spelling of "the fault-free walk" — `try_move_to(closest(depot))`,
-**verbatim the code QUESTIONS.md:180 shipped one amendment earlier** — is a
+**verbatim the code [history/questions-worksheets.md:264](history/questions-worksheets.md) shipped one amendment earlier** — is a
 runtime fault. Nothing specifies a deploy-time type check; deploy validates only
 program memory and variable slots ([02-agents/decided.md](02-agents/decided.md)). A
 hurt-handler retreat written the obvious way turns every hurt signal into an
@@ -173,7 +187,7 @@ ambiguous.
 **P6 — the Flinch perk saturates to zero, deleting the forced prologue
 outright. OPEN.**
 [02-agents/xp-and-specialization.md:54](02-agents/xp-and-specialization.md) (the Flinch row),
-[09-quirks.md:99](09-quirks.md); Q121 in [history/questions-answered.md](history/questions-answered.md)
+[09-quirks/acquired-quirks.md:8](09-quirks/acquired-quirks.md); Q121 in [history/questions-answered.md](history/questions-answered.md)
 
 Q121 ratified Flinch's −10%/level as "self-saturating," but it saturates **at
 zero**: "floors at L10" means a bot that has endured enough hostile flinches has
@@ -223,7 +237,7 @@ Two defects in one program, both introduced by Q117's rewrite:
 These need no ruling; the decision exists and the text was not propagated.
 
 **P8 — `investment()` still sums deleted capability tiers. OPEN.**
-[07-architecture.md:77](07-architecture.md),
+[07-architecture/vm.md:13](07-architecture/vm.md),
 [01-language/program-colors.md:47](01-language/program-colors.md) (the ghost-exemption bullet),
 [02-agents/decided.md](02-agents/decided.md), [TASKS.md](TASKS.md)
 
@@ -266,21 +280,22 @@ term Q122 replaced, so an old fleet browns out its colony purely by being old.
 
 **P10 — the Feral Harvester's verbatim source is still the Q117 crash-loop.
 OPEN.**
-[04-enemies.md:58](04-enemies.md)–`:64` (also [TASKS.md](TASKS.md),
-[06-progression.md:97](06-progression.md), `:102`, `:171`)
+[04-enemies/archetypes.md:40](04-enemies/archetypes.md)–`:46` (also [TASKS.md](TASKS.md),
+[06-progression/unlock-tree.md:71](06-progression/unlock-tree.md), `:76`,
+[06-progression/pacing.md:10](06-progression/pacing.md))
 
-[04-enemies.md:35](04-enemies.md) states these code blocks are the archetypes'
+[04-enemies/archetypes.md:5](04-enemies/archetypes.md) states these code blocks are the archetypes'
 ***actual* shipped source**, and Q117's answer
-([QUESTIONS.md:571](QUESTIONS.md)–573) explicitly records that
+([history/questions-worksheets.md:273](history/questions-worksheets.md)–`:275`) explicitly records that
 `crates/sim/src/feral.rs` takes the new guarded form and that "docs/04's
 verbatim sources need re-syncing." The sweep updated only docs/04's nest-claim
-gate at `:90` and left the programs untouched.
+gate (now [04-enemies/nests-and-claims.md:9](04-enemies/nests-and-claims.md)) and left the programs untouched.
 
 The Harvester still guards with tier-blind `exists(ore)` — which per
 03-resources.md Design Rule 4 answers from **permanent map knowledge**, so it
 stays True on a seam the map emptied an hour ago — binds `closest(ore).expect()`
 with no minable filter, and calls the **faulting** `mine()` rather than
-`try_mine()`. That is the loop Q117 measured at QUESTIONS.md:466–471: closest →
+`try_mine()`. That is the loop Q117 measured at [history/questions-worksheets.md:168](history/questions-worksheets.md)–`:174`: closest →
 `move_to` (0 ticks at chebyshev ≤ 1) → `mine` → fault → restart, ~3–4 ticks per
 iteration, 2 HP per fault, a 40 HP chassis dead in about eight seconds.
 
@@ -288,7 +303,7 @@ So every Harvester a nest prints grinds itself into a wreck within seconds of
 reaching a worked-out or over-grade vein: the PvE *economic* enemy deletes
 itself, docs/04's "starve the nest (kill Harvesters) and it prints less"
 counterplay becomes unreachable, and **the first Feral program a player decrypts
-teaches exactly the bug** 04-enemies.md:41 and Q108 say a shipped source must
+teaches exactly the bug** [04-enemies/archetypes.md:22](04-enemies/archetypes.md) and Q108 say a shipped source must
 never teach.
 
 **P11 — module slots were deleted but four places still specify them. OPEN.**
@@ -296,7 +311,7 @@ never teach.
 [02-agents/stat-sheet.md](02-agents/stat-sheet.md) (the modifier pipeline),
 [02-agents/damage-faults-death.md](02-agents/damage-faults-death.md) (the salvage receipt),
 [02-agents/decided.md](02-agents/decided.md);
-[03-resources/the-tree.md:94](03-resources/the-tree.md) (Lens); [07-architecture.md:90](07-architecture.md)
+[03-resources/the-tree.md:94](03-resources/the-tree.md) (Lens); [07-architecture/world-state.md:6](07-architecture/world-state.md)
 
 docs/06 deleted the entire slotted-module catalog (Optics and Backup Core
 entries plus the swap-economics paragraph) and 02-agents/decided.md's entry
@@ -322,7 +337,7 @@ catalog entry — leaving **Lens with no priced consumer anywhere in the design*
 OPEN.**
 [02-agents/stat-sheet.md:15](02-agents/stat-sheet.md) vs `:20` (also
 `:66`; [03-resources/the-tree.md](03-resources/the-tree.md);
-[06-progression.md:18](06-progression.md))
+[06-progression/scopes.md:20](06-progression/scopes.md))
 
 Line 40 says cycles per tick is grown by "**Upgrade Station** (walk there, pay
 Chips)" — a flat buy — while line 45 says it is grown by the "**CPU tool**
@@ -347,8 +362,9 @@ The builtin row was edited in place without deleting the old clause, so one cell
 now reads: "field repair of a wreck needs **a build tool of grade ≥ 2** (Q105-R2,
 restated for Q111); on a wreck = field repair (the rescue verb), which needs
 **Building tier ≥ 2** (Q105-R2 — the replacement for the deleted build-tool
-gate)." Q111 deleted capability tiers entirely (QUESTIONS.md:432: "TIERS ARE
-REMOVED"), so the trailing clause gates the rescue verb on a stat no bot has,
+gate)." Q111 deleted capability tiers entirely
+([history/questions-worksheets.md:22](history/questions-worksheets.md): "TIERS
+ARE REMOVED"), so the trailing clause gates the rescue verb on a stat no bot has,
 and its parenthetical asserts the opposite of the sentence in front of it.
 
 This is the **sole surviving "Building tier" reference in docs/01–09** — the one
@@ -358,16 +374,16 @@ cell the mechanical propagation missed.
 OPEN.**
 [02-agents/stat-sheet.md](02-agents/stat-sheet.md) (the deleted row and the canonicity rule),
 [02-agents/xp-and-specialization.md](02-agents/xp-and-specialization.md);
-[09-quirks.md:30](09-quirks.md), `:50`;
-[07-architecture.md:60](07-architecture.md);
-[04-enemies.md:134](04-enemies.md); [TASKS.md](TASKS.md)
+[09-quirks/catalog.md:19](09-quirks/catalog.md), `:39`;
+[07-architecture/tick-model.md:29](07-architecture/tick-model.md);
+[04-enemies/capturing-wrecks.md:5](04-enemies/capturing-wrecks.md); [TASKS.md](TASKS.md)
 
 [02-agents/stat-sheet.md](02-agents/stat-sheet.md) declares the sheet canonical: "Anything anywhere
 in the design that makes one bot better or worse than another — hardware, XP
 perks, quirks … modifies a row on this sheet; **if an effect can't name its row,
 it isn't a stat effect.**" The sweep deleted `| Survival | XP gain | 100% |
 Learning track |` along with the Learning track — but 10x Developer (+15% XP
-earned, all tracks), Tech Debt (−15% XP earned), QUESTIONS.md:766 ("quirk
+earned, all tracks), Tech Debt (−15% XP earned), [history/questions-worksheets.md:468](history/questions-worksheets.md) ("quirk
 `XpPct` effects … stay"), docs/07's "any per-bot XP-gain multiplier (quirks
 only) applies at its start-of-tick value" and 02-agents/xp-and-specialization.md itself all still
 specify it.
@@ -375,6 +391,80 @@ specify it.
 An implementer building `stats.ron` from the canonical sheet ships no XP-gain
 stat and the two quirks have nothing to apply to; the modifier-pipeline position
 and the pessimistic-rounding rule for that multiplier are gone with the row.
+
+**P15 — the disconnect ruling's footnote points PvP disconnects at "open
+questions", but they are decided two bullets down. OPEN.**
+[08-multiplayer/decided.md:11](08-multiplayer/decided.md)
+
+The colony-keeps-running ruling closes with "(Decided for co-op / non-harm
+play; PvP disconnects need more thought — see open questions.)" — stale since
+"PvP disconnects: free farm until reconnect" was ratified in the same Decided
+section; there is no open question to see. The fix is a one-clause pointer
+("see below"). Registered rather than silently reworded so the 04–09 doc
+split stays a byte-exact move of decided text.
+
+**P16 — the Drone's and Stinger's verbatim sources still check-then-act
+across a blocking `move_to`, the pattern Q110 ruled out. OPEN.**
+[04-enemies/archetypes.md:18](04-enemies/archetypes.md)–`:19` (Drone),
+`:31`–`:32` (Stinger); the ruling inside Q117's answer
+([history/questions-answered.md](history/questions-answered.md))
+
+Q110's ruling — "bind once, never check-then-act", recorded inside Q117's
+answer and cited by [01-language/syntax-tiers.md:29](01-language/syntax-tiers.md)
+("the bug Q110 ruled against") — rules out re-querying a target around a
+blocking verb, whose tens-of-ticks window "is what made Q110's Feral race a
+systematic bug"
+([history/questions-worksheets.md:247](history/questions-worksheets.md)–`:248`).
+The ratified Drone and the ratified Stinger both do exactly that — the
+byte-identical pair `move_to(closest(enemy).expect())` then
+`attack(closest(enemy).expect())`. Same left-behind class as P10's Harvester.
+Until the sources are re-synced, the first combat programs a player decrypts
+teach the racing form Q108 says shipped source must never teach. (The doorway's Q110
+open-question entry was retired with the split — the question is answered;
+this register entry replaces it.)
+
+**P17 — the "hardware is Chips-priced" shorthand survives in four places,
+contradicting the ratified tool pricing it summarizes. OPEN.**
+[06-progression/scopes.md:10](06-progression/scopes.md) (the per-match row)
+and `:20` (the three-scopes list),
+[06-progression/unlock-tree.md:67](06-progression/unlock-tree.md) (the axis
+sentence), [02-agents/decided.md:11](02-agents/decided.md) (the compute-stats
+ruling's "(Chips — …)" gloss); the pricing in
+[06-progression/upgrade-station.md:30](06-progression/upgrade-station.md)–`:59`
+
+All four lines gloss hardware buys as Chips-priced, but the owning part
+prices tool grades by resource role — *Bronze arms, Chips think* — across
+Steel, Bronze, Sand/Glass/Lens, Wire and Silver, with Chips entering only at
+CPU grade 4, and deliberately starts every flat capacity buy on **Wire**
+rather than Chips (upgrade-station.md: "These start on **Wire** rather than
+Chips deliberately"). A reader taking the shorthand at face value concludes
+Chips are the hardware currency and mis-plans the material gating of nine of
+ten tools; the same shorthand in the 06 doorway intro was corrected in the
+2026-08-01 sweep. The fix is a wording pass on the four lines (e.g.
+"hardware (Upgrade Station)" or "hardware (materials by role)"), not a
+pricing change — closing this entry requires re-grepping for the shorthand,
+not just fixing the lines listed here.
+
+**P18 — the hijack ruling still credits the deleted Boot XP track. OPEN.**
+[04-enemies/capturing-wrecks.md:5](04-enemies/capturing-wrecks.md) ("counts
+as a rescue boot for its Boot track");
+[02-agents/decided.md:11](02-agents/decided.md) ("Boot and Learning were
+later cut"),
+[02-agents/xp-and-specialization.md:56](02-agents/xp-and-specialization.md)
+(Boot "never once awarded"),
+[07-architecture/tick-model.md:29](07-architecture/tick-model.md) (the
+ten-track settle order)
+
+Q111's sweep cut the Boot track from the XP model — the tick's XP settlement
+runs exactly ten tracks and 02-agents records the cut — but the hijack
+ruling moved into capturing-wrecks.md still awards the stolen bot's hijack
+boot as "a rescue boot for its Boot track." An implementer building the
+hijack path from docs/04 credits XP to a track that does not exist: either
+the code grows an eleventh track (a hash-affecting divergence between
+implementations — the desync class) or the clause is silently dropped with
+no record. Same left-behind class as P14's Learning-track modifiers; the
+clause needs a ruling-side sweep (drop the award, or re-home it on a
+surviving track), not a silent reword.
 
 ---
 

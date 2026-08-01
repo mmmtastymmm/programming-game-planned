@@ -2,145 +2,57 @@
 
 Constraint that shapes everything: the simulation must be **deterministic and fixed-tick** for lockstep multiplayer ([08-multiplayer.md](08-multiplayer.md)). Rendering is decoupled and free-running.
 
-## Layering
+## The parts
 
-```mermaid
-flowchart TD
-    subgraph SimCrate["sim (pure Rust crate — NO Bevy at all; depends only on pyrite)"]
-        VM[Pyrite VM<br/>parser + interpreter]
-        WORLD[World state<br/>tiles, bots, structures, Ferals]
-        SYS[Tick systems<br/>cycles → actions → perception →<br/>damage → XP → economy]
-    end
+| File | Owns |
+|---|---|
+| [layering.md](07-architecture/layering.md) | The sim/game split, the two layering rules, and the crate layout. |
+| [tick-model.md](07-architecture/tick-model.md) | The 9-phase tick, sub-pass assignment, RNG stream inventory, and phase notes. |
+| [vm.md](07-architecture/vm.md) | The Pyrite VM: run states, fault path, signal dispatch, templates, recall, cost resolution, the function registry. |
+| [world-state.md](07-architecture/world-state.md) | The world-state struct sketch and the complete `Command` inventory. |
+| [ui-notes.md](07-architecture/ui-notes.md) | Editor, inspector, and Codex implementation notes. |
+| [testing.md](07-architecture/testing.md) | Golden replays, CI determinism checks, the headless balance harness. |
+| [decided.md](07-architecture/decided.md) | Settled rulings owned by this doc. |
 
-    subgraph GameCrate["game (Bevy app)"]
-        NET[Lockstep networking]
-        REND[Rendering, camera, VFX]
-        UI[Code editor, inspector,<br/>Codex, build menus]
-        INPUT[Player input → Commands]
-    end
+## What holds across all of them
 
-    INPUT -->|Commands| NET
-    NET -->|agreed command stream| SYS
-    SYS --> WORLD
-    VM <--> SYS
-    WORLD -->|read-only snapshot| REND
-    WORLD -->|read-only| UI
-```
+Invariants a change to any part above has to keep. **None of them is canonical
+here.** Each names the file that owns it; if a bullet and its owner disagree, the
+owner wins and the bullet is the bug. This list exists so a change to one part
+cannot silently break another — not to save anyone reading the parts.
 
-**Rule 1: the `sim` crate is plain Rust and deterministic.** Its only dependency is `pyrite` — no Bevy of any kind. World state lives in ordinary structs and `BTreeMap`s, so iteration order is deterministic *by construction* (this is now locked in — the sim is built on it). Given `(seed, command stream)` it must replay identically on every machine and in tests. This rule is why multiplayer, replays, and headless balance-testing all come cheap.
-
-**Rule 2: players emit Commands, never mutations.** Deploying a program, queueing a print, placing a structure — all are serializable `Command` values fed through the lockstep layer, even in single-player (single-player = lockstep with one peer).
-
-## Tick Model
-
-- Fixed sim tick, target **10 ticks/sec** (bots feel deliberate, cycle budgets stay legible, network headroom is generous).
-- Bevy `FixedUpdate` drives the sim; `Update` renders with interpolation between the last two sim states.
-- Per-tick system order (deterministic, explicit ordering):
-
-```mermaid
-flowchart LR
-    A[1. Apply agreed<br/>Commands] --> B[2. Grant cycles,<br/>step every VM]
-    B --> C[3. Collect issued<br/>Actions]
-    C --> D[4. Resolve Actions<br/>move → combat → mine/build]
-    D --> P[5. Perception<br/>seen/heard, episodes,<br/>map knowledge, surveys]
-    P --> E[6. Damage, faults, death,<br/>countdowns, blasts]
-    E --> X[7. XP settlement<br/>awards → thresholds →<br/>stat recompute]
-    X --> F[8. Economy tick<br/>energy, upkeep, refineries,<br/>allocation, prints, pads,<br/>Corruption spread]
-    F --> G[9. Snapshot hash<br/>for desync detection]
-```
-
-Within each phase, iterate entities in **stable ID order** — never hash-map order. Commands within a tick apply in **(player ID, per-player sequence)** order — the relay's total order. Phase notes (Q81):
-
-- **Match start runs a phase-0 perception seed** (round 4) — tick 1's queries have a "previous tick" to read, so the pre-deployed starter program works from its first operation. Self-repair ticks and rust decay live in the economy phase, alongside upkeep.
-- **Resolve Actions (phase 4) runs three sub-passes: move → combat → mine/build** (2026-07-26, answers Q102's first half — the code resolved one bot end-to-end at a time until then). The split exists so **combat sees a settled world**: every mover finishes stepping before the first swing range-checks, which turns "did I get out of range in time?" into a rule instead of a function of entity id (under the old order a lower-id attacker checked range *before* its victim's traverse completed and a higher-id attacker checked *after* — the same escape succeeded or failed on print order). It also makes retreat, the canonical hurt-handler response, reliable. The **engine-driven walks** (boot countdowns, recall) ride the move pass for the same reason. Each pass still iterates in stable ID order and a bot's pass is decided from what it holds at phase entry — finishing an action resumes the VM inline, so the classification is snapshotted before any pass runs and no bot can act twice in one tick. Note what this does *not* buy: movers still resolve against each other in ID order within the move pass; true simultaneity would need an intent-collection model and is deliberately out of scope.
-
-  **Pass assignment is part of the spec, not an implementation detail** (it is hash-affecting, so it must not be invented per implementation): **Move** — `move_to`, `wander`, `explore`, an in-flight `Move`, and a bump-freeze tick-down with its replan, plus the engine walks (boot countdowns, recall). **Combat** — `attack`, `guard`/`escort`. **Work (the doc's "mine/build" pass)** — everything else: `mine`, `build`, `deposit`/`withdraw`, `repair`, the wreck-race verbs `salvage`/`analyze`/`hijack`, `recover_black_box`, `study`, `search`, `wait`, and the channel ops. Note the consequence for the wreck race: `repair` and `salvage` are **both Work**, so a rescue and a salvage landing on one wreck in one tick still resolve against each other in entity-ID order inside that pass — Q102 removed the cross-category artifact, not the intra-pass one.
-- **Damage is a phase for EVERY attackable mass** (2026-07-26, answers Q102's second half). Bots always queued; structures, Feral nests, Blight Cores, and wreck hulls used to lose hp inline, wherever the blow was struck, because the pending-damage queue was typed to bot ids. It now carries a **target** (bot / structure / nest / blight / wreck), so one settle owns every hp change, every Combat-XP credit (paid on hp *actually* removed), and every destruction — which runs once, after the whole queue drains, so all of a tick's events resolve against the same world. The rule this restores: **two blows landing on one mass in a single tick resolve by rule, not by entity ID.** Previously the lower-ID attacker felled a structure and removed it mid-phase, so the higher-ID attacker's swing found nothing and took a *fault* — a crash dump, an error template, and a chassis chip — for a swing that was legal when it committed; two bots ganking a *bot* never suffered that. Blast damage queues the same way, and an untagged (culprit-less) hit is exactly what tells the settle to file a destroyed wreck's black box under "caught in a blast" rather than "destroyed by attack".
-- **Perception (phase 5)** recomputes seeing/hearing from post-move positions: episode open/close per (bot, enemy faction), per-faction map-knowledge writes (a seen tile is fully known), `search()`/`explore()` ring steps. **Phase-2 queries read the *previous* tick's perception** — one tick stale, deterministic, cheap. A bot is *moving* on any tick it advanced its traverse (mid-tile progress, slides, and sidesteps count); zero progress = stationary = silent. **Scale note** (the flow-fields-style escape hatch): perception must not be naive O(perceivers × bots) with per-pair raycasts — spatial hashing, event-driven episode transitions, and chunk-cached LoS are the intended shape; the check is sim-critical (it feeds Hiding XP), so whatever the optimization, results must be bit-identical to the naive check.
-- **XP settlement (phase 7)**: every XP event earned anywhere in the tick is *queued*, then settles here in **one pass** over the ten tracks in fixed order — the five task tracks (Mining, Hauling, Combat, Building, Scouting), then Processing, Age, Mileage, Hiding, Flinch. Awards are in **centi-points** and each track's level reads its own `curve_base` ([02-agents.md](02-agents.md)); XP is monotonic and uncapped, so there is no clamp step. Any per-bot XP-gain multiplier (quirks only, since Q121 retired the Learning track) applies at its **start-of-tick** value — no intra-tick self-compounding. There is **no second pass**: the Learning feed was deleted with the track. Then thresholds check (quirk manifestation, which reads the **Age level**), then the stat sheet recomputes once (state-layer flags like Damaged also recompute immediately when they flip).
-- **Deploys re-allocate in the economy phase** of their own tick ("immediate" = this tick's phase 8, not phase 1). Corruption spread is an economy-phase counter system — no RNG. Wrecks have **HP** (~25% of the bot's max, tuning) so the damage phase can resolve hits on them; countdown decrements live in phase 6.
-- **RNG streams, enumerated** (the CLAUDE.md rule's inventory): `rng.combat`, `rng.wander`, `rng.explore`, `rng.sidestep`, `rng.quirk_roll`, `rng.feral_mutation`, and `rng.program` — the `rng(n)` builtin draws from a **per-bot stream seeded by (match seed, entity ID)**, so identical programs desync deterministically, which is the builtin's whole job.
-- **Quirk scratch state** (Branch Predictor's last-branch memory, the deterministic counters of GC Pause / Heisenbug / Off-by-One / Cold Start / Crypto Miner, Eventual Consistency's one-*additional*-tick perception snapshot) is declared **sim state**: serialized, hashed, cleared on restart like variables, persistent across recolor and rescue.
-- **UnlockSets** ship in the match-start data (every peer validates every player's deploys identically); `Research` Commands mutate them in lockstep order. **Runtime alliances** (`SetAlliance`) share vision, ears, channels, and **decryption progress from the alliance forward** (Q107, 2026-07-26 — this line previously read "never decryption", contradicting docs/08's "shared color-decryption intel"; docs/08 is the ruling one). **Never retroactively**: pre-alliance levels are not merged, because decryption is permanent and monotonic, so a merge-on-formation would let a faction ally for one tick, absorb everything a partner ever learned, and divorce — decryption laundering. Forward-only pooling has no such hole: allies must actually stay allied and salvage together, and a divorce leaves nothing to unwind. Granted vision **feeds allied bots' queries** — the grant is a sim-level perception union, not a UI overlay.
-
-
-## Pyrite VM
-
-- **Tree-walking interpreter** over a parsed AST, one op per `step()`. Simple, debuggable, fast enough (thousands of bots × a few ops/tick is trivial). Bytecode VM is a later optimization if profiling demands it.
-- VM state per bot (one plain struct): program AST handle, program counter (as an AST cursor), variable table (fixed-size, from hardware), call stack (capped: base 4 frames + hardware), cycle debt, run state (`Running | Faulted { error } | Blocked(action | channel) | Template(signal, phase) | Boot | PadSit` — the `handler_active` flag is a view over the Template/Boot/PadSit arms), budget in centicycles (negative = debt).
-- **Unified fault path**: every runtime failure (stack overflow, type error, unsupported op, failed action) routes through one `fault(error)` transition into the **error handler template**: pay trap cost, run the forced prologue (`handler_init()`), then the player's `on error:` window — or its factory contents, `upload_crash_dump()` (same registry entry players call — one code path). Either way, afterwards reset (clear variables + stack) and restart at line 1 ([01-language.md](01-language.md)).
-- **Signal dispatch**: signals (`error` sync; `hurt`/`bump`/`bumped`/`abort` async from damage/collision systems → raised into the VM, checked at op boundaries; co-arrivals resolve by the severity order in [01-language.md](01-language.md)). Dispatch lives in the VM, not scattered across game systems. Every signal resolves to its **reserved handler template** — forced prologue + editable window + forced epilogue, assembled at deploy time: the engine's forced lines are engine-owned AST fragments spliced around the player's window (which stays the only thing in source, preserving byte-exact hashing).
-- **Window checks are static**: per-signal **instruction caps** and the **`signal_safe` function flag** (a single per-function registry property) are parse/deploy-time checks — the same machinery as construct gating (the parser takes a handler-context bit alongside the `UnlockSet`). User `def`s get **derived safety** at deploy: build the call graph, reject cycles and loop nodes, propagate the flag bottom-up, and compute each def's **worst-case instruction count**; window cap checking charges call sites at the callee's worst case. All static, all deterministic — one pass over the AST per deploy.
-- **Abort and the double-handle**: `abort` is fully engine-reserved (like recall) — no player window, just the forced `upload_log()` + `become_disabled()` (wreck + countdown; field-repair within it restores the bot). Any signal or fault arriving while any template phase is active (prologue, window, or forced epilogue; boot, the recall walk, and the pad-sit via the engine-interrupt flag) raises `abort` instead. Abort itself is un-interruptible — signals during it are absorbed, the forced sequence always completes. No instant-destroy path exists — `Exploded` is only the wreck countdown's expiry. (The Upgrade-Station **pad pull skips mid-template bots** — it pulls the next adjacent queued bot that isn't in a template, so the pull itself never creates a double-handle.)
-- **Handler state drives presentation**: each signal's fixed **cloud color/icon** keys off the VM's run state — the `game` crate's thought-cloud renderer switches on exactly this.
-- **Engine-forced behaviors reuse the builtin registry entries** (boot-time `upload_log`, and `become_disabled` — registry-shared but engine-only; the player scuttle verb is `abort()`, Q76; the error window's dump is *factory contents*, not a force) — no parallel internal implementations to drift out of sync.
-- **Recall** is dispatched like any signal but its handler is an **engine-owned Pyrite program** (immutable, runs on the same VM — the forced-call principle extended to a whole program): suspend user program, `move_to(home_printer)`, transfer, re-color → Boot. Recall sets `handler_active` (double-handle applies). Target selection runs in the economy phase: the **target-share allocation** ([01-language.md](01-language.md)) — claims resolve down the player-set printer priority list, per-printer sort keys (any stat), remainder to the first printer, recomputed on rule edits and on the player-set check interval (default 1000 ticks); over-capacity scrap picks the least-invested (lifetime XP **plus bought capability-tier value** — Q105-R3, so a Backup-Core reprint's tier-4 hardware is never mistaken for a rookie) bot **of the fleet** (ghost machines exempt — Q73) — deterministic tie-breaks by entity ID throughout.
-- **Every `Destroy` spawns a Black Box entity** on the bot's tile (one system, one spawn point — impossible to miss a path): snapshot of the log ring buffer + id, tick, cause + the bot's env snapshot (Q58 — env leaks on death, never live).
-- **Decryption state** ([08-multiplayer.md](08-multiplayer.md)) is sim state, not UI state: per `(color slot, faction)` a monotonic decryption level; the character reveal set is derived deterministically per version, keyed on `(color, version, faction, level)`. Both the level *and* the mask must be identical across lockstep peers (they're inspectable state); noise glyphs are seeded the same way so re-viewing never re-rolls. Program storage is per-faction **color slots** (uncapped count) → versioned entries in `ProgramLibrary`; a bot's `DeployedProgram` is `(color, version)`.
-- **The Boot state** (from print, rescue, or recall re-coloring): force `upload_log()` if the buffer is non-empty → reset VM → Active. Boot sets the engine-interrupt flag — it's an interrupt context, so a signal mid-boot triggers the same double-handle abort path (one flag, one rule, no special cases).
-- All error/signal constants (`crash_dump_cost`, `trap_cost`, per-signal window caps, `handler_init_ticks`) are `costs.ron` entries like everything else — tunable and overlay-able per biome.
-- **Construct gating at parse time**: parser takes an `UnlockSet`; locked syntax yields a structured error the editor renders ([06-progression.md](06-progression.md)).
-- **Cycle costs are layered data**: base `costs.ron` asset (op → cost, including `trap_cost`) + per-map/biome **overlay** assets ([05-terrain.md](05-terrain.md)). Effective cost = overlay(base) for the tile the bot occupies, resolved at step time, **floored at 1** (Q75 — no zero-cost ops, no infinite intra-tick loops). Overlays are moddable content — validate at load (every key must exist in base; costs ≥ 1) so a bad mod fails loudly. `bank_cap` is a **flat constant** with a load-time check that no key's worst-case effective cost — overlays applied to base *plus* the largest per-bot delta a quirk or perk can add — exceeds it (Q75/Q82, reshaped by Q101), so freeze-forever is impossible for every bot including quirked ones ([01-language.md](01-language.md)). Effective cost resolves as `floor₁(region(tile(base + Σ per-bot deltas)))` — per-bot first, so terrain amplifies quirks (Q101).
-- **Function blocks are a registry**: `name → (signature, cost, signal_safe, effect)`. The `signal_safe` flag gates what handler windows may call ([01-language.md](01-language.md)); flags are data alongside costs. Effects don't mutate the world directly — they emit `Action`s resolved in phase 4. Ferals use the same registry ([04-enemies.md](04-enemies.md)). Log entries carry a **level** (`trace…error`, a small enum on the entry) end-to-end: ring buffer → cloud archive → Black Box; the UI colors by it.
-- Determinism inside the VM: integers only (i64 + fixed-point), seeded per-match RNG streams for anything random (`wander()`), no host time/IO.
-
-## Key World-State Shapes (sketch — plain structs + `BTreeMap`s, not ECS)
-
-```text
-Bot entity:      BotId, Hp, Cargo(typed manifest), Modules, XpTracks,
-                 Env, QuirkList+QuirkScratch, VmState, DeployedProgram,
-                 TilePos, Faction
-World extras:    per-tile counters (scree, dune sink, Corruption spread),
-                 Hiding-episode state, allocation table (assignments +
-                 check timer + pending polite recalls), comm keys per
-                 faction, colony stock, structure buffers/pads + recipe
-                 selections, wreck countdowns, per-faction node map
-Structure:       StructureKind, Hp, Buffers, TilePos, Faction
-Tile map:        dense Grid<TileKind> world field + spatial index (bots per tile)
-Programs:        ProgramLibrary table — source + AST, shared/refcounted
-                 (100 bots on one program share one AST)
-Commands:        DeployProgram, QueuePrint(faction), PlaceBlueprint
-                 (structures, terraform, repairs), EditPrinterRules
-                 (targets, keys, directions, priority, check interval),
-                 QueueUpgrade(bot, catalog item — the program must bring
-                 the bot to a pad; the pad applies queued orders),
-                 SetRecipe(structure, recipe),
-                 PlaceOverlay(arrow — instant signage),
-                 PlacePaint(pos, color|unpainted — Q97: places a paint
-                 DESIGNATION a bot services, the blueprint flow),
-                 ExchangeData, PostRequest,
-                 Grant(faction, channel | vision | module), SetAlliance,
-                 Vote(sim-speed | decommission), Research(UnlockId)
-                 — the ONLY external inputs to sim (Q77: list completed;
-                 it grows only when a decided system adds a player input)
-```
-
-## UI Notes (editor & inspector)
-
-- Code editor: egui (`bevy_egui`) to start — fastest path to a functional editor with gutter annotations (per-line cycle costs, live program counter). Custom polish later.
-- Inspector = same widget pointed at any bot's `VmState` in read-only mode, **filtered through the viewer's decryption level** for foreign bots (player or Feral): revealed characters render, the rest is stable noise, and the live program counter only steps over revealed lines. One widget, one masking pass — the transparency rules fall out of architecture.
-- Codex ([04-enemies.md](04-enemies.md)) is a `ProgramLibrary` view with diffing.
-
-## Testing Strategy (day one, not later)
-
-- **Golden replays**: `(seed, command stream) → final state hash` tests; any PR changing a hash must explain why.
-- **Cross-run determinism test in CI**: run the same replay twice in one process + once in another, compare hashes every 100 ticks.
-- VM unit tests: each construct/function, cycle-cost accounting, gating errors.
-- Headless balance harness: run scripted colonies for N ticks, assert economy curves — the `sim` crate split makes this a plain `cargo test`.
-
-## Crate Layout
-
-```text
-programming_game/
-├── crates/
-│   ├── pyrite/        # language: lexer, parser, AST, VM (zero game deps)
-│   ├── sim/           # world, ticks, actions, economy (depends: pyrite)
-│   └── game/          # Bevy app: net, render, ui (depends: sim)
-└── docs/              # these documents
-```
-
-## Decided
-
-- **Plain-Rust sim with a `BTreeMap` world** (supersedes the original "`bevy_ecs` inside sim, with careful queries" decision — the implementation went the other way and is locked in). Deterministic iteration comes free from the storage choice; no sort-before-mutate discipline is needed inside sim. `bevy_ecs` is confined to the `game` crate (rendering/UI), where iteration order can never touch sim state — the boundary is the `Command` stream in and read-only world views out. If ECS-side code ever grows sim-state-affecting logic, that's the smell to fix, not a sorting problem to manage. The rule lives in `CLAUDE.md`.
-- **Pathfinding: A\* per `move_to`.** Deterministic, simple, per-bot. **Note for later:** if profiling shows pathing dominating (hundreds of bots re-pathing every tick), flow fields per destination-tile are the escape hatch — one field shared by all bots heading to the same place; still deterministic. Don't build it until it's needed.
-- **Programs are stored as plain text, byte-exact.** Source is the canonical artifact everywhere: saves, replays, the Codex, network deploys. The AST is a derived cache (parser is deterministic). Color **versions are identified by hashing the source bytes** — hence byte-exact storage, no whitespace normalization, fixed UTF-8. Everything downstream composes: text diffs power the Codex, `(color, version-hash)` keys the decryption masks, and programs are shareable as ordinary files.
+- **The `sim` crate is plain Rust — no Bevy, `BTreeMap` world** — canonical in
+  [layering.md](07-architecture/layering.md) (Rule 1) and
+  [decided.md](07-architecture/decided.md); the enforcement rule lives in
+  CLAUDE.md. Deterministic iteration is by construction, not discipline; ECS
+  feeding sim state is the #1 violation to flag.
+- **All external input is ordered `Command`s** — canonical in
+  [layering.md](07-architecture/layering.md) (Rule 2);
+  [world-state.md](07-architecture/world-state.md) owns the complete inventory
+  (Q77 — it grows only when a decided system adds a player input). Even
+  single-player is lockstep with one peer.
+- **Phase order, sub-pass assignment, and RNG streams are spec, because they
+  are hash-affecting** — canonical in
+  [tick-model.md](07-architecture/tick-model.md). No part (and no
+  implementation) may treat them as internals; a change here is a replay-hash
+  change and must say so.
+- **One registry, one code path** — canonical in [vm.md](07-architecture/vm.md).
+  Engine-forced behaviors reuse builtin registry entries (`become_disabled`
+  is registry-shared but engine-only — the player's scuttle verb is
+  `abort()`), Ferals
+  ([04-enemies.md](04-enemies.md)) call the same function registry, and cost
+  resolution runs through the one layered pipeline
+  (`floor₁(region(tile(base + Σ per-bot deltas)))`, bounded by `bank_cap` at
+  load — the player-facing side is owned by
+  [01-language/execution-model.md](01-language/execution-model.md)).
+- **Inspectable secrets are sim state** — canonical in
+  [vm.md](07-architecture/vm.md): decryption levels *and* reveal masks are
+  hashed lockstep state, ruled by [08-multiplayer.md](08-multiplayer.md).
+  Anything a player can inspect that differs per faction must live sim-side,
+  never as a UI overlay.
+- **Programs are byte-exact plain text, versioned by source hash** — canonical
+  in [decided.md](07-architecture/decided.md); also a CLAUDE.md determinism
+  rule. The AST is always a derived cache.
+- **Golden replays guard all of it** — canonical in
+  [testing.md](07-architecture/testing.md); a PR that changes a replay hash
+  must explain why (CLAUDE.md).

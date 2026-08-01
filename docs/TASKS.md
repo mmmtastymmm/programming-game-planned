@@ -689,6 +689,12 @@ fixed. Archived in full at [history/reviews.md](history/reviews.md).
 
 ## Decided-but-unbuilt (design ruled, implementation pending)
 
+- [ ] **Function-granularity tree-shaking** (Q61) — deploy assembles the artifact from only
+      the module functions transitively called by the program and its handlers
+      ([01-language/modules-and-library.md](01-language/modules-and-library.md)); the sandbox
+      currently ships whole imported modules. Memory charge, version hash, and decryption
+      leakage all key off the tree-shaken artifact, so the whole-module stopgap overcharges
+      program memory and over-leaks library code. [sim] ⚠HASH (version hashes change)
 - [ ] **The Pump** (Q98, 2026-07-26) — the water source the Upgrade Station's coolant needs.
       Two tiles: intake in any Water tile + pump house on orthogonally adjacent walkable
       ground. `Structure` gains an optional second tile (`intake: Option<TilePos>`), NOT a

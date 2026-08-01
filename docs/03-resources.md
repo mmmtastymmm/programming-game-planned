@@ -36,11 +36,11 @@ cannot silently break another — not to save anyone reading the parts.
   [the-tree.md](03-resources/the-tree.md). Neither is a pile in a depot, so
   neither obeys hauling, cargo, or the Request Box.
 - **Only the compute family draws coolant** (Q119) — canonical in
-  [06-progression.md](06-progression.md), *not* in this doc. Declared per catalog entry
+  [06-progression/upgrade-station.md](06-progression/upgrade-station.md), *not* in this doc. Declared per catalog entry
   rather than per code branch — the failure that made every mechanical tool cost
   Water.
 - **Compute does not sit behind maxed mining** (Q118) — canonical in
-  [06-progression.md](06-progression.md). The compute ladder starts
+  [06-progression/upgrade-station.md](06-progression/upgrade-station.md). The compute ladder starts
   on Wire and escalates to Chips; program capacity grows with it.
 - **All numbers here are tuning constants** bound for data files, never code —
   canonical in CLAUDE.md's doc conventions.

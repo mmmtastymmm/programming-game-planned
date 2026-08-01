@@ -1,107 +1,48 @@
 # Multiplayer
 
-Multiplayer is a **day-one constraint**, not a feature (per project decision: retrofitting it later was judged too costly). There are no hard modes: every player owns a colony, and co-op vs. PvP is how players choose to interact on a given server (see Modes).
+Multiplayer is a **day-one constraint**, not a feature (per project decision: retrofitting it later was judged too costly). There are no hard modes: every player owns a colony, and co-op vs. PvP is how players choose to interact on a given server.
 
-## Model: Deterministic Lockstep
+## The parts
 
-This game is unusually well-suited to lockstep:
-
-- Player inputs are **rare and small** — deploy a program, queue a print, place a structure, research. No per-unit micro spam. Bandwidth is trivial.
-- The sim (including every Pyrite VM step) is deterministic by construction ([07-architecture.md](07-architecture.md)).
-- Bot counts can grow large; lockstep cost is independent of entity count (unlike state sync).
-
-```mermaid
-sequenceDiagram
-    participant P1 as Player 1
-    participant R as Relay / Host
-    participant P2 as Player 2
-
-    Note over P1,P2: both sims at tick T, identical state
-    P1->>R: Commands for tick T+D (deploy program X)
-    P2->>R: Commands for tick T+D (none)
-    R->>P1: agreed command set for T+D
-    R->>P2: agreed command set for T+D
-    Note over P1,P2: each sim applies same commands at T+D<br/>→ states remain identical
-    P1->>R: state hash @ T+D
-    P2->>R: state hash @ T+D
-    R-->>R: hashes match? else DESYNC event
-```
-
-- **Input delay D**: ~3 ticks (300ms at 10 tps). Invisible here — commands are "deploy code," not "dodge left." This is why lockstep's classic weakness doesn't hurt us.
-- **Topology**: client-hosted relay for v1 (one player hosts; relay only orders commands, doesn't simulate ahead of others). Dedicated relay later if needed.
-- **Desync handling**: per-tick state hash exchange ([07-architecture.md](07-architecture.md) phase 9, the snapshot hash). On mismatch: pause, dump divergent-state diff to log (dev), attempt host-state resync (prod).
-- **Late join / reconnect**: host serializes full sim state + tick; joiner loads and enters lockstep. Same path as save/load — build once.
-
-## Determinism Contract
-
-The rules every system must obey (enforced by CI replay tests):
-
-1. Fixed tick rate; sim never reads wall clock or frame time.
-2. Integer/fixed-point math only in sim. No `f32`/`f64` in any state-affecting path.
-3. All randomness from named, seeded RNG streams (`rng.combat`, `rng.wander`, …) advanced only by sim systems.
-4. Stable iteration order everywhere (sort by entity ID before mutation).
-5. All external influence enters as ordered `Command`s — including in single-player.
-6. Pyrite VM: no nondeterministic builtins; `scan_enemies()` returns results in stable sorted order, etc.
-
-## Modes (DECIDED: one model — allied colonies, interaction is up to the server)
-
-**Every player owns their own colony.** There is no shared-colony mode: co-op vs. PvP isn't a hard mode split but *how players choose to interact on a given server*. Allies share research intel, program libraries, and leak intel; rivals fight. The same match can contain both.
-
-| Server setting | Effect |
+| File | Owns |
 |---|---|
-| **Open** (default) | Players may ally, trade, raid, or war freely. Ferals escalate against everyone. |
-| **Non-PvP** | Players **cannot directly harm each other** (no damage to other players' bots/structures; no salvaging, `analyze()`-ing, or hijacking their wrecks/units — Q76). One physics exception: **wreck blasts hit friend and foe on every server type** (Q55) — standing near anyone's countdown is on you, and an "ally" who walks ticking wrecks into your base is answered socially. Competition is indirect: territory, nests, resources. Ferals remain the common enemy. |
-| **Duel** (stretch) | 2 players, tiny mirror map, fixed identical loadouts, pure program-vs-program. Esports-minimal; also the perfect balance-testing arena. |
+| [lockstep.md](08-multiplayer/lockstep.md) | The lockstep model: input delay, relay topology, desync handling, late join. |
+| [determinism-contract.md](08-multiplayer/determinism-contract.md) | The six rules every system must obey (the CI-enforced contract). |
+| [modes.md](08-multiplayer/modes.md) | Server harm settings, the PvP gate, and allied-colony scaffolding. |
+| [code-visibility.md](08-multiplayer/code-visibility.md) | Shared libraries, per-color decryption by salvage attrition, the reveal-mask rules, spectating. |
+| [match-settings.md](08-multiplayer/match-settings.md) | The owning inventory of every match dial (Q77). |
+| [decided.md](08-multiplayer/decided.md) | Settled rulings owned by this doc. |
 
-- **PvP entry gate**: joining any server where players can be harmed requires **all language constructs permanently unlocked** ([06-progression.md](06-progression.md)) — every combatant has the full language; matches are decided by usage, not vocabulary. Non-PvP servers have no gate.
-- Allied-colony scaffolding: shared **program library** (call a friend's published functions), shared color-decryption intel **from the alliance forward only** (Q107: pre-alliance levels never merge — decryption is permanent and monotonic, so a merge-on-formation would let a faction ally for one tick, absorb everything a partner ever learned, and divorce; forward-only pooling leaves nothing to unwind), grantable channels and vision — but **not shared progression**: each colony recovers its own Function Caches and earns its own unlocks ([06-progression.md](06-progression.md)). Allies share *work products*, not capability.
+## What holds across all of them
 
-## Multiplayer × Code — the interesting design space
+Invariants a change to any part above has to keep. **None of them is canonical
+here.** Each names the file that owns it; if a bullet and its owner disagree, the
+owner wins and the bullet is the bug. This list exists so a change to one part
+cannot silently break another — not to save anyone reading the parts.
 
-- **Shared program libraries (co-op)**: allies can publish functions to a shared library; your colony can call your friend's `defend_choke()`. Co-op becomes pair programming.
-- **Code visibility (DECIDED): programs are read on murder, by per-color attrition.** Every player runs **colored program slots** (start Green; repair the ruined Red printer with Data; more by controlling Feral nests — quadratic, uncapped, [01-language.md](01-language.md)). Each `salvage()` of a bot grants the salvaging faction **+N% decryption of that color** (match-rules constant, default **5%** → ~20 kills for full read). The percentage is **permanent and only ever increases** — it survives redeploys: rewriting Red doesn't reset an enemy's 60% on Red; the new version simply appears 60% readable. Viewing a partially decrypted color shows the current version with that fraction of characters revealed, the rest stable noise. Live opponent bots show behavior and color, never more.
-  - **Some kills = some leaks.** Every loss bleeds a little of that color, forever. There's no reset button — only the choice of *which* color bleeds.
-  - **Risk is assigned per color.** Red on 30 disposable miners will be fully readable by mid-game: write it knowing that. Blue on one escorted veteran might end the match at 5%. Where you put your cleverness is a strategic decision — and visible tinting means the enemy always knows which secret a kill would buy.
-  - **Counter-intel is possible**: a sacrificial color running plausible-but-misleading code is a legal and delicious play.
-  - Tiers: **own + allies** — full source, live; **opponents** — per-color decryption via salvage attrition; **Ferals** — the *same* attrition rule, at per-arcanum rates ([04-enemies.md](04-enemies.md)): the Fool leaks in a couple of kills (the curriculum is earned), high arcana stay cryptic.
-- **Spectating** is nearly free (a spectator is a lockstep peer with no command rights) and unusually fun here: watching two codebases fight. Code-secrecy rule: **full disclosure only after the match completes** — replays (which contain every deploy) unlock post-match as the learning artifact; live spectators, when built, see per-faction views, never omniscient source.
-
-### Color-decryption rules
-
-- Decryption level is **per (color, salvaging faction)**, monotonic, permanent — sim state, identical across lockstep peers ([07-architecture.md](07-architecture.md)). Allies on a team share it (one teammate's salvage advances the team's level) — matches shared research.
-- **The reveal mask must be stable, seeded, and monotonic** (anti-inference — a correctness requirement): which characters are revealed at level *k* is a deterministic function of `(color, version, faction, k)`; noise glyphs are equally stable. If noise re-rolled between viewings, real characters would be identifiable as the ones that never change.
-- The mask is **re-drawn per version** (at the same level). Deliberate consequence: *lazy edits don't protect you*. If v5 is 95% identical to v4, the enemy's 50% mask on each reveals different characters of nearly the same text — cross-version reading recovers more than 50%. Only a genuine rewrite re-obscures. The Codex keeps every version snapshot at its viewed level, diffable, to support exactly this play.
-- **What's decrypted is the color's deployed artifact** ([01-language.md](01-language.md), Modules — answers Q62): the program, its handler windows, and every module function its deploy pulled in (tree-shaken). What deploys is what leaks; never-deployed code is a secret forever. A module function shared by several colors appears under *each* color's mask — deliberate consequence, same mechanic as cross-version reading: shared code cross-reads across closures and effectively leaks at the sum of its exposures. Fork privately for opsec; no extra sim state needed (the per-(color, faction) levels remain the only decryption state).
-- Open questions: can opponents see a color's *version counter* tick ("they redeployed Blue 30s after our salvage" — juicy intel)? Lean yes, it rewards attention. Should structural whitespace (line breaks, indentation) be always-visible rather than maskable? Lean yes — silhouettes read as "shape of the program," which is good partial-intel texture.
-
-## Match Settings (the owning inventory — Q77)
-
-Every dial a match is configured with, in one place. Each is a lockstep-shared constant fixed at match start; the owning doc holds the mechanics.
-
-| Setting | Default | Owner |
-|---|---|---|
-| **Server harm setting** (Open / Non-PvP / Duel) | Open | this doc (Modes) |
-| **Ferals** (on / off in "pure" PvP) | on | [04-enemies.md](04-enemies.md) |
-| **Print cost** | FREE | [02-agents.md](02-agents.md) (build receipt is literal — refunds scale with what was actually spent) |
-| **Max nest arcanum** | per map | [04-enemies.md](04-enemies.md) |
-| **Quirk probability** (expected quirks per bot) | tuning | [09-quirks.md](09-quirks.md) |
-| **Salvage decryption %** | 5% | this doc (Color-decryption rules) |
-| **Sim-speed vote cooldown** | tuning | this doc |
-| *(floated)* cargo-scaled wreck blasts | off | [02-agents.md](02-agents.md) (Q55 note) |
-
-## Decided
-
-- **Allied colonies, never shared** — every player owns a colony; cooperation happens through shared research, the shared program library, messaging, and leak intel (see Modes).
-- **Co-op vs. PvP is a server setting, not a mode** — Open / Non-PvP / Duel.
-- **PvP gate**: full permanent construct knowledge required to join harm-enabled servers ([06-progression.md](06-progression.md)).
-- **Replays ship v1** — free with lockstep (seed + command log); also our bug-report format and the input to golden-replay CI tests ([07-architecture.md](07-architecture.md)).
-- **Host migration on host quit** — serialize-state handoff to another peer, the same machinery as late join and save/load. Build it once, get all three.
-- **Sim-speed changes require unanimous consent, with a cooldown.** Any pause/speed proposal needs every player's agreement; each attempt (pass or fail) starts a **configurable cooldown** before the next proposal — no vote spam. One rule for all server types: in PvP, unanimity is its own gate (opponents *can* agree to a mutual pause; they usually won't).
-- **A disconnected player's colony keeps running.** The colony is code — it doesn't need its player. Programs execute, printers print to their target shares, recalls fire, handlers handle. It's merely frozen *at the helm*: no new deploys, research, claims, or dial changes. Reconnecting resumes control seamlessly (lockstep late-join path). Remaining players may **vote to decommission** the absent colony — a graceful wind-down: bots scuttle to scrap, structures power down, nests unclaim. (Decided for co-op / non-harm play; PvP disconnects need more thought — see open questions.)
-
-- **Indirect aggression is always legal, on every server type.** Non-PvP removes *harm*, not competition: racing an ally to a nest claim, out-mining a contested vein, studying the Cache they're camped next to — all fair play. That's the point of the setting.
-- **PvP disconnects: free farm until reconnect.** No armistice, no auto-forfeit, no helm transfer. The colony keeps running autonomously and can be attacked like anything else — its defense is exactly whatever its owner programmed: hurt-handler retreats, escort patrols, walls, alarm channels. Going offline is the ultimate exam of pillar 1; write code you'd trust alone at night.
-- **Channel espionage is legal** ([01-language.md](01-language.md)): stolen channel names can be eavesdropped, message-sniped, and spoofed on harm-enabled servers. Counter-protocol design is endgame craft.
-- **Commands are authorized by sender, not trusted by operand** (2026-07-17, answers Q86). One player owns one colony, so the relay **binds each peer to its owned faction** and rejects any command whose acting-faction operand doesn't match the sender — the check is a lookup at the lockstep choke point (`try_step`), before `apply`. Cross-faction commands (`ExchangeData`, `SetAlliance`, `Grant`, `Vote`, `ClaimNest`, `RazeNest`) can no longer be forged to debit a rival's Data, dissolve another pair's alliance, vote as someone else, or bank another player's nest bounty. Authorization lives in the relay (the trusted golden-replay command log runs through `apply` directly); no `Command` gains an issuing-faction field — a `Command::actor_faction()` helper names the operand each variant acts on.
-- **Each colony has its own cloud** (2026-07-17, answers Q89's archive half, [03-resources.md](03-resources.md)). The colony archive is **per-faction**, not one shared list: `analyze()` files a murdered victim's logs into the **analyzer's** cloud, `upload_log`/`upload_crash_dump`/black-box recovery/scrap file into the owning bot's faction cloud — so analyzed intel stays with the colony that earned it and never leaks to every faction reading a global list.
-- **Alliance stops accidents, not betrayal** (2026-07-17, answers Q91). `guard()`/`escort()` auto-fire spares declared allies — its purpose is preventing *accidental* friendly fire from automatic defense — but **explicit** harm is never alliance-gated: `attack()` and the wreck-race verbs (`salvage`/`analyze`/`hijack`) gate only on the server harm setting. On a harm-enabled server an ally can be deliberately struck or have its wreck stolen; betrayal is a legal play, consistent with espionage-is-legal and no-armistice. Trust is a social contract, not an engine invariant.
+- **Every player owns their own colony; interaction is a server setting** —
+  canonical in [modes.md](08-multiplayer/modes.md) and
+  [decided.md](08-multiplayer/decided.md). No part may introduce a
+  shared-colony mechanic or a hard co-op/PvP mode split.
+- **The determinism contract binds every system in every part** — canonical in
+  [determinism-contract.md](08-multiplayer/determinism-contract.md), with the
+  same rules restated as law in CLAUDE.md and implemented per
+  [07-architecture.md](07-architecture.md). Anything added here (a new dial, a
+  new sharing rule) must be expressible as lockstep-shared state plus ordered
+  `Command`s.
+- **Programs are read on murder — permanent, monotonic, per-color attrition** —
+  canonical in [code-visibility.md](08-multiplayer/code-visibility.md). One
+  rule for players and Ferals alike ([04-enemies.md](04-enemies.md) applies it
+  at per-arcanum rates); decryption state is hashed sim state
+  ([07-architecture.md](07-architecture.md)); alliance pooling is forward-only
+  (Q107 — no retroactive merge, ever — canonical in
+  [modes.md](08-multiplayer/modes.md)).
+- **Allies share work products, never capability** — canonical in
+  [modes.md](08-multiplayer/modes.md); the progression side is owned by
+  [06-progression.md](06-progression.md). Libraries, intel, vision, and
+  channels are shareable; unlocks are not.
+- **Every match dial lives in the match-settings inventory** — canonical in
+  [match-settings.md](08-multiplayer/match-settings.md) (Q77). A part (or any
+  other doc) adding a configurable constant must register it there.
+- **All numbers here are tuning constants** bound for data files, never code —
+  canonical in CLAUDE.md's doc conventions.
