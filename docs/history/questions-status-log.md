@@ -11,6 +11,19 @@ rulings are in [questions-answered.md](questions-answered.md).
 
 ---
 
+**Status 2026-08-01: Q124–Q125 OPENED — the open-questions
+consolidation sweep.** Unnumbered open questions found living outside this
+file were swept in: the two code-visibility texture calls (version-counter
+visibility, always-visible whitespace) are now **Q124–Q125**, and doorway
+"Open Questions" sections were removed — per the ratified convention
+(CLAUDE.md), open questions live **only** here; other docs cite numbers
+without restating substance. The doorway tuning notes (upkeep mix, Corruption
+rates) were folded into the playtest-tuning bucket at the bottom of this
+file, which now carries their full substance. In the same sweep the answered worksheet bodies (Q111–Q123) moved
+to [history/questions-worksheets.md](history/questions-worksheets.md), so
+this file now holds only what is open. Everything through Q123 remains
+decided.
+
 **Status 2026-07-27 (M16 rethink, latest): Q122 and Q123 ANSWERED — the XP
 model is fully specified.** Each track carries **its own `curve_base`**
 (`curve_base = dedicated_rate × target_ticks_to_L5 / 15`), with a deliberate

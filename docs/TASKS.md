@@ -703,14 +703,16 @@ fixed. Archived in full at [history/reviews.md](history/reviews.md).
       unit by its track's L5; perk progress is additionally computed in
       centi-units for UI display (granted stat stays whole). [sim][game]
       ⚠HASH once perks land (grouping decides granted values)
-- [ ] **Known-structures query domain** (P22 ruling, 2026-08-01) — `closest`/`exists`
-      on structure kinds resolve from faction knowledge: own structures always
-      (colony state), foreign structures as last observed via a per-faction
-      known-structures memory written in perception (phase 5), hashed like known
-      tiles/nodes. Both queries take **`faction=own` as default** for structure
-      kinds (the ownership filter — foreign memory is explicit opt-in). Canonical hurt window gains the `exists` guard
+- [ ] **Structure-pool query domain** (P22 ruling, 2026-08-02 form) — `closest`/`exists`
+      on structure and designation kinds resolve from the **faction's knowledge
+      pool**: own colony state (always current) plus, while an ally vision grant
+      stands, the granting ally's own structures/designations as the ally knows
+      them; revoke removes them. Foreign structures are not query-reachable
+      (Q126 tracks a possible future surface). **No new sim state** — the pool
+      reads colony state and grants, both already hashed. Canonical hurt window
+      gains the `exists` guard
       ([01-language/signals-and-logging.md](01-language/signals-and-logging.md)).
-      [sim] ⚠HASH (new hashed per-faction state + query-domain change)
+      [sim] ⚠HASH (query-domain change only)
 - [ ] **Function-granularity tree-shaking** (Q61) — deploy assembles the artifact from only
       the module functions transitively called by the program and its handlers
       ([01-language/modules-and-library.md](01-language/modules-and-library.md)); the sandbox
