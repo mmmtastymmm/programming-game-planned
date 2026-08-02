@@ -182,8 +182,8 @@ other four job rows verified against their inputs (Hauling and Building
 derive; Scouting and Combat annotated as duty-cycle placeholders) and a
 derivation paragraph added so the table is recomputed, never re-guessed.)*
 
-*(Amended: Hauling's curve_base failed its own derivation (600 vs ~1.4 × 400);
-corrected to 560 in `c87ee66`.)*
+*(Amended twice: 600 → 560 (`c87ee66`) still baked display rounding; the exact
+derivation (10/7 centi/tick × 400) gives **571**, landed in `6686866`.)*
 
 **P3 — Q120 both mandates and forbids the same silent hold. FIXED (`c1b26a7`). ⚠HASH**
 [03-resources/decided.md:8](03-resources/decided.md) ("HOLDS — silently") and
@@ -676,7 +676,10 @@ structures) count as map knowledge for query builtins?
 foreign as last observed via a phase-5 known-structures memory. The canonical
 hurt window gained its `exists` guard; ruling in 05-terrain/decided.md.)*
 
-*(Amended: the ruling lacked an ownership filter (queries default `faction=own`,
+*(Amended twice: the second audit scoped `faction=` to structure/designation
+kinds only, bound the selector constants, brought blueprints into the ruled
+class, and pooled the memory under the ally vision grant (`6686866`).
+First: the ruling lacked an ownership filter (queries default `faction=own`,
 foreign memory is opt-in — `c87ee66`) and had not propagated to fog-of-war.md,
 the stat-sheet sensor row, or 01-language/decided.md; both fixed in `c87ee66`.)*
 
