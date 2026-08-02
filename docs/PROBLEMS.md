@@ -29,6 +29,21 @@ moved the answered worksheet bodies (Q111–Q123) out of `QUESTIONS.md` into
 [history/questions-worksheets.md](history/questions-worksheets.md); citations
 into those bodies now point there.
 
+**Status 2026-08-02: still 28 opened, 28 fixed — a third audit corrected the
+record, not the rulings.** The block below cites P22's close as `09c3e62`
+(structure queries answer from faction knowledge); that close was twice
+amended the next day — `6686866`, then `95c73c8` — to its final
+**knowledge-pool** form (own colony state + granted allies', foreign
+structures not query-reachable; see P22's amendment notes). No new problems
+opened: the audit's ten findings were residual drift from already-recorded
+closes, swept the same day — two stale carriers of P22's unguarded retreat
+idiom (`05-terrain/tiles.md`, `05-terrain/map-generation.md`), the
+code-visibility DECIDED paragraph never amended for Q124/Q125, a duplicated
+clause in `01-language/types-and-env.md`, the Q109/Q110 rulings absent from
+`history/questions-answered.md`, the stale `history/README.md` index
+(Q123 → Q126), and two relative links broken by the verbatim moves into
+`docs/history/`.
+
 **Status 2026-08-01 (final): 28 opened, 28 fixed — the register is clear.**
 A post-close xhigh audit (`c87ee66`) corrected ten closes: two spec gaps
 (try_ pass assignment, the P22 ownership filter), two arithmetic errors
@@ -687,6 +702,11 @@ class, and pooled the memory under the ally vision grant (`6686866`).
 First: the ruling lacked an ownership filter (queries default `faction=own`,
 foreign memory is opt-in — `c87ee66`) and had not propagated to fog-of-war.md,
 the stat-sheet sensor row, or 01-language/decided.md; both fixed in `c87ee66`.)*
+
+*(Third-audit addendum, 2026-08-02: two stale carriers of the unguarded
+retreat idiom survived every sweep — `05-terrain/tiles.md`'s Crystal Field
+cell and `05-terrain/map-generation.md`'s chokepoint idiom; both now carry
+the `exists` guard.)*
 
 **P23 — the execution model still grows compute through the deleted
 "Processor capability (tier × level)". FIXED (`93d6b25`).**

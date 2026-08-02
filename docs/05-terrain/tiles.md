@@ -12,7 +12,7 @@
 | **Grove** | 1× | harvestable Wood; **regenerates** | renewable-but-thin logging loops |
 | **Outcrop** | 1× | harvestable Stone node — plentiful, near everywhere ([03-resources.md](../03-resources.md)) | fortification supply lines: walls are hauled |
 | **Sand Flat** | 1× | harvestable Sand — shoreline flats and dune fringes ([03-resources.md](../03-resources.md)); deep **Dunes** (below) make *interior* sand risky to work: a harvesting bot is standing still, and the sinking clock ticks | glassworks supply; another reason coasts are contested |
-| **Crystal Field** | 1× | minable Crystal; usually spawns near Corruption | risk-managed harvesting (`if exists(enemy): move_to(closest(repair_bay).expect())`) |
+| **Crystal Field** | 1× | minable Crystal; usually spawns near Corruption | risk-managed harvesting (`if exists(enemy) and exists(repair_bay): move_to(closest(repair_bay).expect())` — the bay guard, per P22, is for the colony that has none) |
 | **Geothermal Vent** | 1× | only tile allowing Geothermal Tap | expansion targets worth fighting over |
 | **Mud** | 3×, and loaded bots 4× | — | haulers should route *around*; naive `move_to(depot)` straight-lines through it |
 | **Water** | impassable (ground) | blocks ground bots; shoreline tiles accept a **Pump** (the Water resource, [03-resources.md](../03-resources.md)) | natural walls; chokepoint defense — and now a resource worth holding |

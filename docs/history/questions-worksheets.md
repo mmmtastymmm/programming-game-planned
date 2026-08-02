@@ -567,7 +567,7 @@ QUESTIONS.md the same day:)*
 
 **Q124 — can opponents see a color's *version counter* tick? OPEN (opened
 2026-08-01, docs/08).** Swept in from an unnumbered note in
-[08-multiplayer/code-visibility.md](08-multiplayer/code-visibility.md). A
+[08-multiplayer/code-visibility.md](../08-multiplayer/code-visibility.md). A
 visible counter is decryption-free intel ("they redeployed Blue 30 seconds
 after our salvage"). Lean **yes** — it rewards attention.
 

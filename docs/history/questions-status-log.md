@@ -28,7 +28,7 @@ visibility, always-visible whitespace) are now **Q124–Q125**, and doorway
 without restating substance. The doorway tuning notes (upkeep mix, Corruption
 rates) were folded into the playtest-tuning bucket at the bottom of this
 file, which now carries their full substance. In the same sweep the answered worksheet bodies (Q111–Q123) moved
-to [history/questions-worksheets.md](history/questions-worksheets.md), so
+to [history/questions-worksheets.md](questions-worksheets.md), so
 this file now holds only what is open. Everything through Q123 remains
 decided.
 

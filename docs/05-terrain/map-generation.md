@@ -20,7 +20,7 @@ flowchart TD
 - **Start zones are safe and legible** — a Tier-0 program works there. Difficulty is geographic.
 - **Template Caches ring each start zone** ([06-progression.md](../06-progression.md)): basic ones close, advanced ones toward the midfield. They're non-consumable study sites — everyone can learn from them, so the deep ones are worth *holding*, not racing. The opening toolkit sweep is the first thing eyes-only fog makes interesting.
 - **Every expansion is a tradeoff**: more veins = longer haul routes; the tier ladder (Copper/Tin → Silver/Gold → Crystal, [03-resources.md](../03-resources.md)) is laid out center-out, so richer material is farther material; Crystal = Corruption exposure; Vents and shorelines = contested.
-- **Chokepoints from Water/High Ground** give defensive programs something to anchor on — `guard()` takes an **entity**, never a tile (Q79), so the idiom is a Sentry Post or Lantern at the choke: `guard(closest(sentry).expect())`.
+- **Chokepoints from Water/High Ground** give defensive programs something to anchor on — `guard()` takes an **entity**, never a tile (Q79), so the idiom is a Sentry Post or Lantern at the choke: `if exists(sentry): guard(closest(sentry).expect())` (the `exists` guard, per P22, is for the colony that hasn't built one yet).
 - PvP maps are **mirror-symmetric**; co-op maps are asymmetric with a shared frontier.
 
 ## Map Generation
