@@ -15,13 +15,26 @@ eight seconds. No state, no loops.
 
 ```python
 if exists_minable(ore):
-    move_to(closest_minable(ore).expect())
+    try_move_to(closest_minable(ore).expect())
     try_mine()
 if exists(depot):
-    move_to(closest(depot).expect())
+    try_move_to(closest(depot).expect())
     try_deposit()
+wander()
 # program loops back to line 1
 ```
+
+**The walks are `try_`, and the tail wanders** (P7 ruling, 2026-08-01).
+`try_move_to` instead of `move_to` means an *unreachable* node — an Iron seam
+on the far bank of a river — is a `False` and a shrug instead of the no-path
+fault every loop that Q109's chip turns into a dead fleet; the `.expect()`
+feeding it is legal because it unwraps to a concrete entity *before* the verb
+([builtins.md](builtins.md), the P4 contract). The unconditional `wander()` is
+diagnostic and cure in one line: a bot with nothing minable — start zones are
+finite by design — visibly searches instead of standing silent at the depot
+forever, and a bot parked against an unreachable seam drifts until the
+picture changes. It is the same tail the Feral Harvester carries — one
+shipped idiom, taught twice ([04-enemies.md](../04-enemies.md)).
 
 **The guard-then-query race is accepted, deliberately.** `exists_minable`
 and `closest_minable` are two queries, so a node can be taken or emptied
