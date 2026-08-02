@@ -697,6 +697,12 @@ fixed. Archived in full at [history/reviews.md](history/reviews.md).
       seller-side ladder corollary ([03-resources/harvest-tiers.md](03-resources/harvest-tiers.md))
       is a load-time assert candidate alongside Q118's three. [sim][game]
       ⚠HASH (start state changes)
+- [ ] **Perk-formula spec** (P5 ruling, 2026-08-01) — the bounded hyperbolic
+      evaluates as `(max_bonus × level) / (level + K)`, floor division, one
+      integer expression; `xp.ron` load asserts every perk grants ≥ 1 whole
+      unit by its track's L5; perk progress is additionally computed in
+      centi-units for UI display (granted stat stays whole). [sim][game]
+      ⚠HASH once perks land (grouping decides granted values)
 - [ ] **Known-structures query domain** (P22 ruling, 2026-08-01) — `closest`/`exists`
       on structure kinds resolve from faction knowledge: own structures always
       (colony state), foreign structures as last observed via a per-faction

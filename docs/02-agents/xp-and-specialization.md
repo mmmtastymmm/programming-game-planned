@@ -26,16 +26,28 @@ prevent. Instead:
    Most levels grant no automatic perk at all.
 3. **Bounded continuous** perks, where growth genuinely reads as continuous
    (a hull toughening with age, bearings wearing in, optics sharpening), use an
-   integer **hyperbolic**:
+   integer **hyperbolic** (P5 ruling, 2026-08-01 — grouping and rounding are
+   spec, not implementation choice):
 
    ```
-   bonus = max_bonus × level / (level + K)
+   bonus = (max_bonus × level) / (level + K)    # one expression, floor division
    ```
 
-   No floats, deterministic, asymptotic: half of `max_bonus` at level `K`, 80%
-   at `4K`, and never more than `max_bonus` however far the ladder runs. Both
-   constants live per-perk in `xp.ron` alongside the track's `curve_base`;
-   magnitudes are tuning and deliberately not fixed here.
+   The multiplication happens **first**: the other grouping,
+   `max_bonus × (level / (level + K))`, is zero at every level forever and is
+   a bug by definition. No floats, deterministic, asymptotic:
+   ⌊`max_bonus`/2⌋ at level `K`, ~80% at `4K`, and **strictly below
+   `max_bonus` forever** — the floor never attains the asymptote, so tune
+   `max_bonus` one above the intended practical ceiling. On whole-unit stats
+   the early levels floor to zero; two rules keep them honest (P5): **perk
+   progress is computed in centi-units for display** — the granted stat stays
+   whole per the sheet's granularity rule, but the UI shows fractional
+   progress toward the next unit, so a level is visible before the first tile
+   lands — and a **load-time liveness assert**: every perk must grant ≥ 1
+   whole unit by its track's L5, the licensing horizon, so a dead-zone tuning
+   fails at load (the Q118 idiom). Both constants live per-perk in `xp.ron`
+   alongside the track's `curve_base`; magnitudes are tuning and deliberately
+   not fixed here.
 
 This is why every level still matters without any level being large: **a level
 is a licence** (Q118 — the catalog is dense to grade 5, so no reachable level is
