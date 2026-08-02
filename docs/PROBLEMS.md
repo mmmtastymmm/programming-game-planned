@@ -35,7 +35,10 @@ drifted (five into `02-agents/xp-and-specialization.md`, two each into
 `01-language/builtins.md` and `01-language/syntax-tiers.md`, one into
 `07-architecture/world-state.md`, and `08-multiplayer/decided.md`'s Q86 line,
 pushed down by the Q124/Q125 closes). Each number re-verified against the
-current file. The quoted text remains the reliable anchor.
+current file. The quoted text remains the reliable anchor. *(A twelfth was
+caught later the same day: P22's own citation into
+`01-language/signals-and-logging.md`, shifted one line by the guard the P22
+fix itself inserted — now :18.)*
 
 **Status 2026-08-02: still 28 opened, 28 fixed — a third audit corrected the
 record, not the rulings.** The block below cites P22's close as `09c3e62`
@@ -682,7 +685,7 @@ reading note, archetypes' Stinger header; swept in `c87ee66`.)*
 
 **P22 — the canonical hurt window faults whenever no Repair Bay is in range;
 whether a faction's own structures are map knowledge is undecided. FIXED (`09c3e62`).**
-[01-language/signals-and-logging.md:17](01-language/signals-and-logging.md)
+[01-language/signals-and-logging.md:18](01-language/signals-and-logging.md)
 (`move_to(closest(repair_bay).expect())`)
 
 Resource nodes have a decided knowledge model (a seen tile is fully known;

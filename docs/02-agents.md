@@ -30,7 +30,7 @@ cannot silently break another — not to save anyone reading the parts.
   **There are no tiers** — Q111
   removed `Capability`, the tier catalog, the scale factor and the level cap
   outright. Ten structurally identical tracks, centi-points, one uncapped
-  quadratic curve. A tool is bought, then licensed by *either* its specific
+  quadratic *shape* — each track carrying its own `curve_base` (Q123). A tool is bought, then licensed by *either* its specific
   track's level *or* the floored mean across all ten; quirks can grant a licence
   outright.
 - **XP is strictly monotonic** — canonical in
