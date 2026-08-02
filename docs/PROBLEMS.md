@@ -676,7 +676,12 @@ structures) count as map knowledge for query builtins?
 foreign as last observed via a phase-5 known-structures memory. The canonical
 hurt window gained its `exists` guard; ruling in 05-terrain/decided.md.)*
 
-*(Amended twice: the second audit scoped `faction=` to structure/designation
+*(Amended thrice — final form: the third audit showed the `faction=` selector
+design generating contradictions faster than patches closed them; the ruling
+simplified to the **knowledge pool** (own colony state + granted allies',
+current by construction, foreign structures not query-reachable — Q126 opened
+for a future surface; no per-faction memory, no new hashed state) in
+`95c73c8`. Earlier: the second audit scoped `faction=` to structure/designation
 kinds only, bound the selector constants, brought blueprints into the ruled
 class, and pooled the memory under the ally vision grant (`6686866`).
 First: the ruling lacked an ownership filter (queries default `faction=own`,
