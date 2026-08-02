@@ -91,6 +91,28 @@ claimed midpoint; and the **evaluation order is unstated** —
 the spec rules that grouping out. A deterministic sim cannot leave that
 ambiguous.
 
+**P27 — solid structures have no slot in the ratified tile-composition
+model. OPEN.**
+[05-terrain/tile-composition.md:9](05-terrain/tile-composition.md) ("An
+unwalkable building (exclusive)... the Barricade today — owns its tile
+outright: it shares with *nothing*"); Q98's Pump in [TASKS.md](TASKS.md)
+(both tiles solid, the intake *in* a Water tile)
+
+The physical model is a strict either/or: exclusive unwalkable building, or
+walkable ground stack. The Pump intake is a solid structure standing in
+Water it must keep (it pumps it) — a share the shares-with-nothing class
+forbids — and solid structures generally (Depot, printers, nests: the tiles
+Q120's displacement BFS excludes) are assigned to neither class. Needs one
+ruling on where structure solidity lives (tile-kind replacement like the
+Barricade, or a contents slot the model currently omits); the answer decides
+whether paint and overlays survive under a structure and what demolition
+leaves behind.
+
+*(Resolution: both walking legs became `try_move_to` (P4-legal composition)
+and the starter gained the unconditional `wander()` tail — the Feral
+Harvester's idiom. Unreachable ore is a False, not a fault-loop; an
+out-of-ore fleet searches visibly instead of stalling silently.)*
+
 ---
 
 ## Mechanical — decided text left behind
@@ -430,28 +452,6 @@ Two defects in one program, both introduced by Q117's rewrite:
     condition without specifying a replacement signal. `wander` and `explore`
     are both already in the start kit — docs/04's Feral Harvester uses the
     identical guard followed by `wander()`.
-
-**P27 — solid structures have no slot in the ratified tile-composition
-model. OPEN.**
-[05-terrain/tile-composition.md:9](05-terrain/tile-composition.md) ("An
-unwalkable building (exclusive)... the Barricade today — owns its tile
-outright: it shares with *nothing*"); Q98's Pump in [TASKS.md](TASKS.md)
-(both tiles solid, the intake *in* a Water tile)
-
-The physical model is a strict either/or: exclusive unwalkable building, or
-walkable ground stack. The Pump intake is a solid structure standing in
-Water it must keep (it pumps it) — a share the shares-with-nothing class
-forbids — and solid structures generally (Depot, printers, nests: the tiles
-Q120's displacement BFS excludes) are assigned to neither class. Needs one
-ruling on where structure solidity lives (tile-kind replacement like the
-Barricade, or a contents slot the model currently omits); the answer decides
-whether paint and overlays survive under a structure and what demolition
-leaves behind.
-
-*(Resolution: both walking legs became `try_move_to` (P4-legal composition)
-and the starter gained the unconditional `wander()` tail — the Feral
-Harvester's idiom. Unreachable ore is a False, not a fault-loop; an
-out-of-ore fleet searches visibly instead of stalling silently.)*
 
 **P8 — `investment()` still sums deleted capability tiers. FIXED (`93d6b25`).**
 [07-architecture/vm.md:13](07-architecture/vm.md),
