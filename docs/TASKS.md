@@ -6,15 +6,16 @@ hashes (per CLAUDE.md, the PR must say why); **(S/M/L)** = small/medium/large.
 
 ## Where the code stands
 
-The crates are a clean, well-tested implementation of the *round-1/2* design. The determinism
+The crates are a clean, well-tested implementation of the design **through M15**
+(2026-07-20; the round-1/2 staleness this paragraph used to list — generic ore, `desired_max`
+dials, omniscient sensing, inline XP tracks — landed across M4–M9). The determinism
 discipline is intact everywhere (BTreeMap world, command-only mutation, no floats, seeded RNG,
 stable tie-breaks), and the game crate has zero architecture violations — all mutation already
-flows through `Command`s. What's stale is the *design generation*: generic ore instead of 11
-raws → 7 refined, `desired_max` dials instead of target shares, one unified `on signal(s):`
-handler instead of seven per-signal templates, instant-explode double-handle instead of abort,
-omniscient sensing instead of the seeing/hearing model, 4 inline XP tracks instead of 5+6
-settled tracks. Each of those lands as a replay-hash change — and since M0 landed, stored golden fixtures
-make every one of them pay the explain-your-hash-change toll the docs prescribe
+flows through `Command`s. What's stale now is the **Q111 generation**: the tree carries the
+reverted M16 capability-tier code awaiting the M16b rebuild (per-track `curve_base` XP, ten
+tools), the M17 overlay pipeline is unbuilt, and the [game]-side gaps (structure rendering,
+the Codex/decryption UI) are open below. Each lands as a replay-hash change — stored golden
+fixtures make every one pay the explain-your-hash-change toll the docs prescribe
 (`UPDATE_GOLDEN=1` regenerates; the PR explains why).
 
 Milestones are dependency-ordered. Within a milestone, tasks are roughly sequenced. Milestones
@@ -51,9 +52,9 @@ context for each is in [history/tasks-completed.md](history/tasks-completed.md).
       `move_to(home_printer)` program on the VM. Observable semantics match the
       doc; flagged for discussion. [pyrite][sim] (M)
 
-*M7 also carries two live deferrals — Ford quieting waits for M8's Ford tile,
-and the fog-of-war rendering pass (per-tile ambient freezing, signature tells in
-the world view) — both recorded in place under M7 below.*
+*M7 still carries one live deferral — the fog-of-war rendering pass (per-tile
+ambient freezing, signature tells in the world view), recorded in place under
+M7 below. (Ford quieting, once deferred here, shipped with M8's Ford tile.)*
 
 ---
 
@@ -223,7 +224,7 @@ hash: statline, XP map, quirk rolls, upkeep settlements).*
       heard-at distance, Snow mutes movement. *RESOLVED 2026-07-26 (Q103): creeping is a
       `creep=True` ARGUMENT on the pathing builtins (slower steps + a signature cut), not a
       verb and not emergent — the emergent claim was inexpressible (blocking `move_to`, no
-      position literals) and wouldn't have beaten a static listener anyway. Ford quieting waits for M8's Ford tile.*
+      position literals) and wouldn't have beaten a static listener anyway. Ford quieting has since shipped with M8's Ford tile.*
       [sim] (L) ⚠HASH
 - [x] **Queries perception-scoped**: seen ∪ heard ∪ map knowledge; heard-only contacts are
       position-only handles (property reads fault `err_unknown_contact`); stale handles
@@ -244,7 +245,7 @@ hash: statline, XP map, quirk rolls, upkeep settlements).*
       needs per-tile material instances); signature tells ride the inspector, not the
       world view. Both flagged for the rendering pass.* [game] (L)
 
-## M8 — Terrain v2 & terraforming
+## M8 — Terrain v2 & terraforming ✅ CORE COMPLETE (2026-07-16) — discussion items below
 
 - [x] **×2 move-cost scale** + full tile table: `tuning.tile_costs` (×2 scale — Plains 2 so
       Road ½× = 1); eight new TileKinds (Mountain, Ramp, Dunes, Ice, Ford, Road, Scree,
@@ -322,7 +323,7 @@ hash: statline, XP map, quirk rolls, upkeep settlements).*
       faction, so any faction's builder can finish them (Clear pays the finisher).*
       [sim][game] (M)
 
-## M9 — Printers v2: target shares (replaces the superseded `desired_max` dial)
+## M9 — Printers v2: target shares (replaces the superseded `desired_max` dial) ✅ CORE COMPLETE (2026-07-16) — discussion items below
 
 *Review round (2026-07-16, 10 confirmed findings fixed):* signal-mode allocation now DEFERS
 booting/pad-sitting bots to the polite queue (engine states aren't the player's clock — only
@@ -903,17 +904,22 @@ written-up quirks are unbuildable. ⚠HASH.
 
 ## Verb-layer index (every spec'd builtin → its milestone)
 
+✅ = host implementation landed. Every spec'd verb below has (as of M15); the
+milestone column records which one shipped it. Still-unbuilt verbs
+(`try_move_to`, `try_attack`, `closest_minable`/`exists_minable`/`try_mine`)
+live in the quick-wins backlog and M16b above, not here.
+
 | Verb | Milestone | | Verb | Milestone |
 |---|---|---|---|---|
-| `abort` ✅ | M3 | | `is_seen` | M7 |
-| `setenv`/`getenv` ✅ | M3 | | `search`/`wander`/`explore` | M7 |
-| `log(level=)` ✅ | M3 | | `path_blocked` | M7 |
-| `withdraw`/`try_withdraw` | M4 | | `creep=` arg ✅ | Q103 |
-| `deposit`/`try_deposit` | M4 | | `repair`/`salvage`/`analyze` | M10 |
-| `cargo_count` | M4 | | `hijack`/`recover_black_box` | M10 |
-| `study` | M15 | | `guard`/`escort` | M10 |
-| `scan_resources` | M4 | | `send`/`receive`/`broadcast` + `try_*` | M11 |
-| `my_quirks`/`has_quirk` ✅ | M6 | | `scan_enemies` | M7 |
+| `abort` ✅ | M3 | | `is_seen` ✅ | M7 |
+| `setenv`/`getenv` ✅ | M3 | | `search`/`wander`/`explore` ✅ | M7 |
+| `log(level=)` ✅ | M3 | | `path_blocked` ✅ | M7 |
+| `withdraw`/`try_withdraw` ✅ | M4 | | `creep=` arg ✅ | Q103 |
+| `deposit`/`try_deposit` ✅ | M4 | | `repair`/`salvage`/`analyze` ✅ | M10 |
+| `cargo_count` ✅ | M4 | | `hijack`/`recover_black_box` ✅ | M10 |
+| `study` ✅ | M15 | | `guard`/`escort` ✅ | M10 |
+| `scan_resources` ✅ | M4 | | `send`/`receive`/`broadcast` + `try_*` ✅ | M11 |
+| `my_quirks`/`has_quirk` ✅ | M6 | | `scan_enemies` ✅ | M7 |
 
 Existing and staying: `closest`, `exists`, `move_to`, `mine`, `build`, `attack`, `wait`,
 `rng`, `log`, `upload_log`, `upload_crash_dump`, `cargo_full`, `health_low`, `last_error`,

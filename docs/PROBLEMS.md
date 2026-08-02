@@ -450,7 +450,8 @@ pending rather than asserting byte-exactness the lagging feral.rs breaks;
 `c87ee66`.)*
 
 **P11 — module slots were deleted but four places still specify them. FIXED (`d5b561f`).**
-[02-agents/anatomy.md:22](02-agents/anatomy.md) (`| Module slots | 1 |`),
+[02-agents/anatomy.md](02-agents/anatomy.md) (`| Module slots | 1 |` — the
+row itself, deleted by the fix, so the line number is dropped),
 [02-agents/stat-sheet.md](02-agents/stat-sheet.md) (the modifier pipeline),
 [02-agents/damage-faults-death.md](02-agents/damage-faults-death.md) (the salvage receipt),
 [02-agents/decided.md](02-agents/decided.md);

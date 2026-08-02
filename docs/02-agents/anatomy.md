@@ -2,7 +2,7 @@
 
 # Anatomy
 
-Every bot is a **chassis + modules + program** — and every chassis is **identical**:
+Every bot is a **chassis + tools + program** — and every chassis is **identical**:
 
 | Part | What it determines |
 |---|---|
