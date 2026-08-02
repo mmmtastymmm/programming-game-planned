@@ -29,17 +29,18 @@ moved the answered worksheet bodies (Q111–Q123) out of `QUESTIONS.md` into
 [history/questions-worksheets.md](history/questions-worksheets.md); citations
 into those bodies now point there.
 
-**Status 2026-08-01 (latest): 28 opened, 21 fixed.** P1 — the bootstrap
+**Status 2026-08-01 (latest): 28 opened, 22 fixed.** P1 — the bootstrap
 deadlock — ruled and closed in `2c56fdf` (ruined Upgrade Station in the
 start base). Earlier the same day the mechanical propagation batch — P8,
 P12, P13, P15–P17, P19, P21, P23, P24, P26, P28 — closed in `93d6b25`.
-7 remain open (P9–P11, P14, P18, P25, P27); P2
+6 remain open (P9–P11, P14, P18, P25) — all sweep-class; every
+needs-a-ruling entry is closed. P2
 closed in `d90a428` (pacing table recomputed), P3 in `c1b26a7` (component
 BFS + non-minting visible hold), P4 in `e913c27` (try_ covers the action,
 never the argument), P22 in `09c3e62` (structure queries answer from
 faction knowledge), P6+P20 in `3e21e89` (both linear perks converted to
 the bounded hyperbolic), P7 in `84e1e68` (starter walks try_, tail
-wanders), P5 in `9921848` (hyperbolic grouping/rounding/liveness are spec).
+wanders), P5 in `9921848` (hyperbolic grouping/rounding/liveness are spec), P27 in `a2a81ff` (occupancy layer).
 
 **Status 2026-08-01: 28 problems opened (P1–P28), 0 fixed.** P15–P18 were
 found by the reviews of the 04–09 doc split; P19–P28 by the same day's
@@ -71,27 +72,7 @@ The three that change actual game behavior rather than doc clarity are **P1**
 
 These cannot be swept mechanically — the docs do not contain the answer.
 
-**P27 — solid structures have no slot in the ratified tile-composition
-model. OPEN.**
-[05-terrain/tile-composition.md:9](05-terrain/tile-composition.md) ("An
-unwalkable building (exclusive)... the Barricade today — owns its tile
-outright: it shares with *nothing*"); Q98's Pump in [TASKS.md](TASKS.md)
-(both tiles solid, the intake *in* a Water tile)
-
-The physical model is a strict either/or: exclusive unwalkable building, or
-walkable ground stack. The Pump intake is a solid structure standing in
-Water it must keep (it pumps it) — a share the shares-with-nothing class
-forbids — and solid structures generally (Depot, printers, nests: the tiles
-Q120's displacement BFS excludes) are assigned to neither class. Needs one
-ruling on where structure solidity lives (tile-kind replacement like the
-Barricade, or a contents slot the model currently omits); the answer decides
-whether paint and overlays survive under a structure and what demolition
-leaves behind.
-
-*(Resolution: both walking legs became `try_move_to` (P4-legal composition)
-and the starter gained the unconditional `wander()` tail — the Feral
-Harvester's idiom. Unreachable ore is a False, not a fault-loop; an
-out-of-ore fleet searches visibly instead of stalling silently.)*
+*(Empty as of 2026-08-01 — every entry ruled and moved to the Fixed log.)*
 
 ---
 
@@ -692,6 +673,33 @@ Scouting XP and Data awards are a replay-hash desync.
 *(Amended: a second carrier — the Data-income clause "seen-set-free, like
 Scouting" in [03-resources/decided.md:18](03-resources/decided.md) — was
 missed by the first close and shut in `0060a47`.)*
+
+**P27 — solid structures have no slot in the ratified tile-composition
+model. FIXED (`a2a81ff`).**
+[05-terrain/tile-composition.md:9](05-terrain/tile-composition.md) ("An
+unwalkable building (exclusive)... the Barricade today — owns its tile
+outright: it shares with *nothing*"); Q98's Pump in [TASKS.md](TASKS.md)
+(both tiles solid, the intake *in* a Water tile)
+
+The physical model is a strict either/or: exclusive unwalkable building, or
+walkable ground stack. The Pump intake is a solid structure standing in
+Water it must keep (it pumps it) — a share the shares-with-nothing class
+forbids — and solid structures generally (Depot, printers, nests: the tiles
+Q120's displacement BFS excludes) are assigned to neither class. Needs one
+ruling on where structure solidity lives (tile-kind replacement like the
+Barricade, or a contents slot the model currently omits); the answer decides
+whether paint and overlays survive under a structure and what demolition
+leaves behind.
+
+*(Resolution: both walking legs became `try_move_to` (P4-legal composition)
+and the starter gained the unconditional `wander()` tail — the Feral
+Harvester's idiom. Unreachable ore is a False, not a fault-loop; an
+out-of-ore fleet searches visibly instead of stalling silently.)*
+
+*(Resolution: occupancy layer — solid structures are entities standing on
+the ground stack, solidity from the structure registry, stack inert not
+erased beneath; Barricade keeps its Q99 tile-kind exclusivity. Ratifies the
+code's existing structure_at shape.)*
 
 **P28 — the function-block scope row still gates some functions on a "tool
 module". FIXED (`93d6b25`).**
