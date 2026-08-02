@@ -29,8 +29,10 @@ moved the answered worksheet bodies (Q111–Q123) out of `QUESTIONS.md` into
 [history/questions-worksheets.md](history/questions-worksheets.md); citations
 into those bodies now point there.
 
-**Status 2026-08-01: 18 problems opened (P1–P18), 0 fixed.** P15–P18 were
-found by the reviews of the 04–09 doc split and appended below.
+**Status 2026-08-01: 28 problems opened (P1–P28), 0 fixed.** P15–P18 were
+found by the reviews of the 04–09 doc split; P19–P28 by the same day's
+full-corpus consistency audit (post-split, commit `406c837`). Appended below —
+P20/P22/P27 under *Needs a ruling*, the rest under *Mechanical*.
 
 **Status 2026-07-28: 14 problems opened (P1–P14), 0 fixed.** All come from one
 max-effort doc-coherence review of the Q111–Q123 sweep (76 agents, 84 candidates
@@ -229,6 +231,57 @@ Two defects in one program, both introduced by Q117's rewrite:
     condition without specifying a replacement signal. `wander` and `explore`
     are both already in the start kit — docs/04's Feral Harvester uses the
     identical guard followed by `wander()`.
+
+**P20 — the Hiding perk is a second linear-uncapped perk, contradicting
+Q121's own rule. OPEN.**
+[02-agents/xp-and-specialization.md:53](02-agents/xp-and-specialization.md) and
+[02-agents/stat-sheet.md:27](02-agents/stat-sheet.md) ("−1 signature/level,
+tuning") vs
+[02-agents/xp-and-specialization.md:15](02-agents/xp-and-specialization.md)
+("none of them is linear-per-level")
+
+Q121 converted perks to bounded shapes because the ladder is uncapped; P6
+records Flinch as "the one surviving linear perk." Hiding is a second
+survivor, registered nowhere: signature falls 1 per level, and heard-at
+distance (their hearing radius + this signature) floors at 1 — so a Hiding
+bot around level 6–7 against base hearing 7 is heard only at adjacency,
+everywhere, permanently. That deletes the movement-noise detection layer
+(Sentry early warning, creeping's trade, signature quirks) for veteran
+infiltrators — the "switch fog of war off at a reachable level" failure Q121
+names as the reason the rule exists. Same two fixes as P6: convert to the
+bounded hyperbolic, or floor it at a nonzero signature.
+
+**P22 — the canonical hurt window faults whenever no Repair Bay is in range;
+whether a faction's own structures are map knowledge is undecided. OPEN.**
+[01-language/signals-and-logging.md:17](01-language/signals-and-logging.md)
+(`move_to(closest(repair_bay).expect())`)
+
+Resource nodes have a decided knowledge model (a seen tile is fully known;
+queries answer from `known_nodes`); structures have none. If
+`closest(repair_bay)` answers from perception, the canonical hurt handler
+faults the moment a bot is hurt beyond sensor range of a bay — `.expect()`
+on Err inside a running handler is the double-handle wreck path (P4's
+class), shipped as the recommended idiom. If it answers from permanent
+knowledge, no doc says so, and the two readings diverge — hash-affecting.
+Needs one ruling: do a faction's own structures (or all discovered
+structures) count as map knowledge for query builtins?
+
+**P27 — solid structures have no slot in the ratified tile-composition
+model. OPEN.**
+[05-terrain/tile-composition.md:9](05-terrain/tile-composition.md) ("An
+unwalkable building (exclusive)... the Barricade today — owns its tile
+outright: it shares with *nothing*"); Q98's Pump in [TASKS.md](TASKS.md)
+(both tiles solid, the intake *in* a Water tile)
+
+The physical model is a strict either/or: exclusive unwalkable building, or
+walkable ground stack. The Pump intake is a solid structure standing in
+Water it must keep (it pumps it) — a share the shares-with-nothing class
+forbids — and solid structures generally (Depot, printers, nests: the tiles
+Q120's displacement BFS excludes) are assigned to neither class. Needs one
+ruling on where structure solidity lives (tile-kind replacement like the
+Barricade, or a contents slot the model currently omits); the answer decides
+whether paint and overlays survive under a structure and what demolition
+leaves behind.
 
 ---
 
@@ -465,6 +518,106 @@ implementations — the desync class) or the clause is silently dropped with
 no record. Same left-behind class as P14's Learning-track modifiers; the
 clause needs a ruling-side sweep (drop the award, or re-home it on a
 surviving track), not a silent reword.
+
+**P19 — the Q77 Command inventory omits `ClaimNest` and `RazeNest`. OPEN.**
+[07-architecture/world-state.md:30](07-architecture/world-state.md) ("the
+ONLY external inputs to sim (Q77: list completed"),
+[08-multiplayer/decided.md:15](08-multiplayer/decided.md) (Q86 names both);
+[TASKS.md](TASKS.md)
+
+The inventory declares itself complete, but Q86's authorization ruling
+explicitly lists `ClaimNest` and `RazeNest` among the cross-faction commands
+the relay binds to the sender's faction, and TASKS.md specifies their
+effects ("RazeNest banks the Data bounty, ClaimNest converts it").
+`ClaimNest` appears nowhere in docs/07. An implementer building the command
+layer from the canonical inventory ships a sim in which nest conversion —
+the gate on every printer/color past the second — has no input path; and
+because Commands are the lockstep input stream, implementations that
+disagree here also disagree on Q86's forgery-protection set.
+
+**P21 — Q117's branching-at-start never propagated to three "`if` is an
+unlock" passages. OPEN.**
+[06-progression/unlock-tree.md:76](06-progression/unlock-tree.md) (Design
+Rule 2: "The player wants `if` because they *felt* its absence") vs the same
+file's START node (`:7` grants **if / elif / else** at game start);
+[01-language.md:6](01-language.md) ("Construct gating — `if`, loops,
+variables, `def` are *unlockable features*");
+[00-overview.md:66](00-overview.md) (glossary Construct entry)
+
+Q117 granted branching at game start (the guarded starter needs it). The
+tree's START node was updated; the prose was not: the 01 doorway invariant
+and the overview glossary still name `if` as the flagship unlockable, and
+Design Rule 2 still sells the tree with the example the ruling deleted. A
+data author pricing constructs from the doorway adds a research cost to
+branching — no tree node exists for it — and a fresh account then cannot
+load the shipped Tier-0 starter, which opens with `if exists_minable(ore):`.
+
+**P23 — the execution model still grows compute through the deleted
+"Processor capability (tier × level)". OPEN.**
+[01-language/execution-model.md:29](01-language/execution-model.md)
+("Compute grows instead through the **Processor capability** (tier ×
+level — [02-agents.md](01-language/../02-agents.md))")
+
+Q111 removed tiers and the capability model; cycles per tick is the CPU tool
+(grades 1–5, licensed by the Processing track —
+[02-agents/anatomy.md](02-agents/anatomy.md),
+[06-progression/upgrade-station.md](06-progression/upgrade-station.md)). The
+Q100 ruling's closing sentence — in the execution-model part an implementer
+of the cycle economy reads first — still cites the deleted formula. Not
+covered by P8 (the investment formula) or P12 (the stat-sheet rows).
+
+**P24 — the 01-language doorway's parts table says "Tiers 0–6"; the part
+defines Tiers 0–7. OPEN.**
+[01-language.md:17](01-language.md) vs
+[01-language/syntax-tiers.md:131](01-language/syntax-tiers.md) ("## Tier 7 —
+Channels") and [01-language/builtins.md:39](01-language/builtins.md)
+(`send` "Requires Tier 7")
+
+The ownership table's tier count predates the channels tier. A gating or
+renumbering change made against the doorway's 0–6 ladder drops or misplaces
+the parse-time gate on `send`/`receive` — a deploy-validation divergence
+between peers, and the doorway-drift failure the split convention exists to
+catch.
+
+**P25 — two quirks modify a "boot ritual" duration that names no stat-sheet
+row. OPEN.**
+[09-quirks/catalog.md:22](09-quirks/catalog.md) (**Hot Reload**: "boot
+ritual half as long — [02-agents.md] stat sheet") and `:52` (**Windows
+Update**: "boot ritual twice as long");
+[02-agents/stat-sheet.md](02-agents/stat-sheet.md) (the canonicity rule)
+
+The sheet's own rule is "if an effect can't name its row, it isn't a stat
+effect." No boot-duration row exists (Print time and the hurt/Damaged lines
+are different rows), and Hot Reload even cites the stat sheet as its home.
+Same left-behind class as P14's XP-gain quirks, different stat: either the
+sheet gains a boot-ritual-duration row (with modifier-pipeline position and
+rounding rule) or the two quirks need re-speccing.
+
+**P26 — the Scouting income row still asserts "no seen-tile set", which Q94
+overturned. OPEN.**
+[02-agents/xp-and-specialization.md:13](02-agents/xp-and-specialization.md)
+("Q83 — sim events; no seen-tile set, so eyes-only fog stays stateless") vs
+[05-terrain/decided.md:12](05-terrain/decided.md) ("Seen tiles are sim
+state", answers Q94) and
+[07-architecture/tick-model.md:28](07-architecture/tick-model.md) (the
+phase-5 per-faction map writes)
+
+Q94 made the per-faction known-tiles set hashed sim state; the Scouting
+row's parenthetical still asserts the pre-Q94 stateless model. An
+implementer deriving discovery events from an ad-hoc structure instead of
+the phase-5 writes diverges on when "node discovered" fires — divergent
+Scouting XP and Data awards are a replay-hash desync.
+
+**P28 — the function-block scope row still gates some functions on a "tool
+module". OPEN.**
+[06-progression/scopes.md:19](06-progression/scopes.md) ("some also need a
+tool module on the bot")
+
+Q111 deleted the slotted-module catalog (P11 records the other survivors);
+the per-bot gate on function blocks is tool *grade* (e.g. `hijack()` needs a
+build tool of grade ≥ 2). The row sends readers hunting a module catalog
+that no longer exists anywhere in the design. A one-clause fix, registered
+rather than silently reworded because the text is ratified.
 
 ---
 
