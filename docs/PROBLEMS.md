@@ -29,10 +29,11 @@ moved the answered worksheet bodies (Q111–Q123) out of `QUESTIONS.md` into
 [history/questions-worksheets.md](history/questions-worksheets.md); citations
 into those bodies now point there.
 
-**Status 2026-08-01 (later): 28 opened, 12 fixed.** The mechanical
-propagation batch — P8, P12, P13, P15–P17, P19, P21, P23, P24, P26,
-P28 — closed in `93d6b25`; 16 remain open (P1–P7, P9–P11, P14, P18,
-P20, P22, P25, P27).
+**Status 2026-08-01 (latest): 28 opened, 13 fixed.** P1 — the bootstrap
+deadlock — ruled and closed in `2c56fdf` (ruined Upgrade Station in the
+start base). Earlier the same day the mechanical propagation batch — P8,
+P12, P13, P15–P17, P19, P21, P23, P24, P26, P28 — closed in `93d6b25`.
+15 remain open (P2–P7, P9–P11, P14, P18, P20, P22, P25, P27).
 
 **Status 2026-08-01: 28 problems opened (P1–P28), 0 fixed.** P15–P18 were
 found by the reviews of the 04–09 doc split; P19–P28 by the same day's
@@ -63,34 +64,6 @@ The three that change actual game behavior rather than doc clarity are **P1**
 ## Needs a ruling
 
 These cannot be swept mechanically — the docs do not contain the answer.
-
-**P1 — the Upgrade Station is priced in a material only the Upgrade Station can
-unlock. OPEN.**
-[03-resources/structures-and-start.md:32](03-resources/structures-and-start.md) (the Station's price),
-[03-resources/decided.md:16](03-resources/decided.md) ("The bootstrap works"),
-[03-resources/harvest-tiers.md](03-resources/harvest-tiers.md) (the drill ladder),
-[06-progression/upgrade-station.md:34](06-progression/upgrade-station.md)
-
-The Station costs **10 Steel, 5 Chips, 3 Wire**. Chips are 1 Silver + 2 Crystal
-+ 1 Wire, and Crystal is resource tier 4. A fresh print carries the free grade-1
-drill, which reaches tiers 0–1 (Wood/Stone/Sand/Iron/Coal) only. Grade 2 — the
-sole route to Copper/Tin, hence Bronze, hence the Foundry (25 Steel + 10 Bronze)
-that makes Chips in the first place — is purchasable **only at an Upgrade
-Station**, and no doc grants a pre-built one. The colony cannot build the
-structure that sells the upgrade it needs to build the structure. It is hard
-capped at Iron/Coal forever and no tool of any grade is ever buyable, while
-"The bootstrap works (Q72)" at `:227` asserts the opposite **on the same page**.
-
-The old formulation survived this because tools also had a Fabricator path;
-Q105 folded tool-making into the one pad flow and Q118 narrowed the ladder rule
-to bind **on the drill alone**, so the rule as written no longer catches the
-case where the *seller itself* is priced above the ladder it sells.
-
-A fix must do one of: grant a pre-built Station in the starting kit, reprice the
-Station below tier 2, unlock drill grade 2 off-Station, or re-widen the ladder
-rule to bind on structures that sell tools. **Whichever is chosen, the ladder
-rule at `:227` needs restating so it catches this class, not just this
-instance.**
 
 **P2 — Mining's `curve_base` is derived from a rate 8× the docs' own mine yield.
 OPEN.**
@@ -451,6 +424,38 @@ are not re-raised:
 ## Fixed
 
 *(entries move here with the fixing commit's hash when they close)*
+
+**P1 — the Upgrade Station is priced in a material only the Upgrade Station can
+unlock. FIXED (`2c56fdf`).**
+[03-resources/structures-and-start.md:32](03-resources/structures-and-start.md) (the Station's price),
+[03-resources/decided.md:16](03-resources/decided.md) ("The bootstrap works"),
+[03-resources/harvest-tiers.md](03-resources/harvest-tiers.md) (the drill ladder),
+[06-progression/upgrade-station.md:34](06-progression/upgrade-station.md)
+
+The Station costs **10 Steel, 5 Chips, 3 Wire**. Chips are 1 Silver + 2 Crystal
++ 1 Wire, and Crystal is resource tier 4. A fresh print carries the free grade-1
+drill, which reaches tiers 0–1 (Wood/Stone/Sand/Iron/Coal) only. Grade 2 — the
+sole route to Copper/Tin, hence Bronze, hence the Foundry (25 Steel + 10 Bronze)
+that makes Chips in the first place — is purchasable **only at an Upgrade
+Station**, and no doc grants a pre-built one. The colony cannot build the
+structure that sells the upgrade it needs to build the structure. It is hard
+capped at Iron/Coal forever and no tool of any grade is ever buyable, while
+"The bootstrap works (Q72)" at `:227` asserts the opposite **on the same page**.
+
+The old formulation survived this because tools also had a Fabricator path;
+Q105 folded tool-making into the one pad flow and Q118 narrowed the ladder rule
+to bind **on the drill alone**, so the rule as written no longer catches the
+case where the *seller itself* is priced above the ladder it sells.
+
+A fix must do one of: grant a pre-built Station in the starting kit, reprice the
+Station below tier 2, unlock drill grade 2 off-Station, or re-widen the ladder
+rule to bind on structures that sell tools. **Whichever is chosen, the ladder
+rule at `:227` needs restating so it catches this class, not just this
+instance.**
+
+*(Resolution: a **ruined Upgrade Station** in the start base, repairable for
+tier-0/1 materials — the Red-Fabricator pattern — plus the seller-side ladder
+corollary in [harvest-tiers.md](03-resources/harvest-tiers.md).)*
 
 **P8 — `investment()` still sums deleted capability tiers. FIXED (`93d6b25`).**
 [07-architecture/vm.md:13](07-architecture/vm.md),
