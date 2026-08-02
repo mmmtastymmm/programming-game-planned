@@ -29,14 +29,15 @@ moved the answered worksheet bodies (Q111–Q123) out of `QUESTIONS.md` into
 [history/questions-worksheets.md](history/questions-worksheets.md); citations
 into those bodies now point there.
 
-**Status 2026-08-01 (latest): 28 opened, 16 fixed.** P1 — the bootstrap
+**Status 2026-08-01 (latest): 28 opened, 17 fixed.** P1 — the bootstrap
 deadlock — ruled and closed in `2c56fdf` (ruined Upgrade Station in the
 start base). Earlier the same day the mechanical propagation batch — P8,
 P12, P13, P15–P17, P19, P21, P23, P24, P26, P28 — closed in `93d6b25`.
-12 remain open (P5–P7, P9–P11, P14, P18, P20, P22, P25, P27); P2
+11 remain open (P5–P7, P9–P11, P14, P18, P20, P25, P27); P2
 closed in `d90a428` (pacing table recomputed), P3 in `c1b26a7` (component
 BFS + non-minting visible hold), P4 in `e913c27` (try_ covers the action,
-never the argument).
+never the argument), P22 in `09c3e62` (structure queries answer from
+faction knowledge).
 
 **Status 2026-08-01: 28 problems opened (P1–P28), 0 fixed.** P15–P18 were
 found by the reviews of the 04–09 doc split; P19–P28 by the same day's
@@ -152,21 +153,6 @@ everywhere, permanently. That deletes the movement-noise detection layer
 infiltrators — the "switch fog of war off at a reachable level" failure Q121
 names as the reason the rule exists. Same two fixes as P6: convert to the
 bounded hyperbolic, or floor it at a nonzero signature.
-
-**P22 — the canonical hurt window faults whenever no Repair Bay is in range;
-whether a faction's own structures are map knowledge is undecided. OPEN.**
-[01-language/signals-and-logging.md:17](01-language/signals-and-logging.md)
-(`move_to(closest(repair_bay).expect())`)
-
-Resource nodes have a decided knowledge model (a seen tile is fully known;
-queries answer from `known_nodes`); structures have none. If
-`closest(repair_bay)` answers from perception, the canonical hurt handler
-faults the moment a bot is hurt beyond sensor range of a bay — `.expect()`
-on Err inside a running handler is the double-handle wreck path (P4's
-class), shipped as the recommended idiom. If it answers from permanent
-knowledge, no doc says so, and the two readings diverge — hash-affecting.
-Needs one ruling: do a faction's own structures (or all discovered
-structures) count as map knowledge for query builtins?
 
 **P27 — solid structures have no slot in the ratified tile-composition
 model. OPEN.**
@@ -622,6 +608,25 @@ Design Rule 2 still sells the tree with the example the ruling deleted. A
 data author pricing constructs from the doorway adds a research cost to
 branching — no tree node exists for it — and a fresh account then cannot
 load the shipped Tier-0 starter, which opens with `if exists_minable(ore):`.
+
+**P22 — the canonical hurt window faults whenever no Repair Bay is in range;
+whether a faction's own structures are map knowledge is undecided. FIXED (`09c3e62`).**
+[01-language/signals-and-logging.md:17](01-language/signals-and-logging.md)
+(`move_to(closest(repair_bay).expect())`)
+
+Resource nodes have a decided knowledge model (a seen tile is fully known;
+queries answer from `known_nodes`); structures have none. If
+`closest(repair_bay)` answers from perception, the canonical hurt handler
+faults the moment a bot is hurt beyond sensor range of a bay — `.expect()`
+on Err inside a running handler is the double-handle wreck path (P4's
+class), shipped as the recommended idiom. If it answers from permanent
+knowledge, no doc says so, and the two readings diverge — hash-affecting.
+Needs one ruling: do a faction's own structures (or all discovered
+structures) count as map knowledge for query builtins?
+
+*(Resolution: queries answer from faction knowledge — own structures always,
+foreign as last observed via a phase-5 known-structures memory. The canonical
+hurt window gained its `exists` guard; ruling in 05-terrain/decided.md.)*
 
 **P23 — the execution model still grows compute through the deleted
 "Processor capability (tier × level)". FIXED (`93d6b25`).**
