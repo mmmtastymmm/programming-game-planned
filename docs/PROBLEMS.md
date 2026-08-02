@@ -29,13 +29,14 @@ moved the answered worksheet bodies (Q111–Q123) out of `QUESTIONS.md` into
 [history/questions-worksheets.md](history/questions-worksheets.md); citations
 into those bodies now point there.
 
-**Status 2026-08-01 (latest): 28 opened, 15 fixed.** P1 — the bootstrap
+**Status 2026-08-01 (latest): 28 opened, 16 fixed.** P1 — the bootstrap
 deadlock — ruled and closed in `2c56fdf` (ruined Upgrade Station in the
 start base). Earlier the same day the mechanical propagation batch — P8,
 P12, P13, P15–P17, P19, P21, P23, P24, P26, P28 — closed in `93d6b25`.
-13 remain open (P4–P7, P9–P11, P14, P18, P20, P22, P25, P27); P2
+12 remain open (P5–P7, P9–P11, P14, P18, P20, P22, P25, P27); P2
 closed in `d90a428` (pacing table recomputed), P3 in `c1b26a7` (component
-BFS + non-minting visible hold).
+BFS + non-minting visible hold), P4 in `e913c27` (try_ covers the action,
+never the argument).
 
 **Status 2026-08-01: 28 problems opened (P1–P28), 0 fixed.** P15–P18 were
 found by the reviews of the 04–09 doc split; P19–P28 by the same day's
@@ -66,32 +67,6 @@ The three that change actual game behavior rather than doc clarity are **P1**
 ## Needs a ruling
 
 These cannot be swept mechanically — the docs do not contain the answer.
-
-**P4 — `try_*` verbs type-faulting on `Result` re-creates the double-handle the
-amendment was written to remove. OPEN.**
-[01-language/builtins.md](01-language/builtins.md) (the `try_*` rows and signal-safe flags),
-[01-language/types-and-env.md](01-language/types-and-env.md) (`Result`)
-
-[history/questions-worksheets.md:220](history/questions-worksheets.md)–`:230` deleted the old unwrap rule because it left
-`try_move_to(try_receive("orders"))` undefined, and "one reading makes that line
-a fault inside a running handler, i.e. a double-handle that wrecks the wounded
-bot it was meant to save." The replacement makes that line an **always**-fault
-instead of a sometimes-fault. Both operands are signal-safe
-([01-language/builtins.md](01-language/builtins.md)), so the idiom is legal inside
-`on hurt:` and the fault lands in the handler.
-
-Worse, `closest` and `closest_minable` return `Result` (see [01-language/builtins.md](01-language/builtins.md)), so the
-natural spelling of "the fault-free walk" — `try_move_to(closest(depot))`,
-**verbatim the code [history/questions-worksheets.md:264](history/questions-worksheets.md) shipped one amendment earlier** — is a
-runtime fault. Nothing specifies a deploy-time type check; deploy validates only
-program memory and variable slots ([02-agents/decided.md](02-agents/decided.md)). A
-hurt-handler retreat written the obvious way turns every hurt signal into an
-abort, i.e. the rescue-denial path.
-
-A fix must pick one: `try_*` accepts and propagates `Result`/`Option`, or the
-type error is caught at deploy (which needs the deploy validator's scope
-widened), or `try_*` loses its signal-safe status (which costs more than it
-saves).
 
 **P5 — the bounded perk truncates to zero on integer stats. OPEN.**
 [02-agents/xp-and-specialization.md:32](02-agents/xp-and-specialization.md) (the formula),
@@ -468,6 +443,38 @@ exception's existence and the search domain need one answer.
 and UI-visible — the one legal stall. The "never hold" bullet now forbids
 minting/faulting stalls specifically. The history log keeps the superseded
 whole-map wording as a closed record.)*
+
+**P4 — `try_*` verbs type-faulting on `Result` re-creates the double-handle the
+amendment was written to remove. FIXED (`e913c27`).**
+[01-language/builtins.md](01-language/builtins.md) (the `try_*` rows and signal-safe flags),
+[01-language/types-and-env.md](01-language/types-and-env.md) (`Result`)
+
+[history/questions-worksheets.md:220](history/questions-worksheets.md)–`:230` deleted the old unwrap rule because it left
+`try_move_to(try_receive("orders"))` undefined, and "one reading makes that line
+a fault inside a running handler, i.e. a double-handle that wrecks the wounded
+bot it was meant to save." The replacement makes that line an **always**-fault
+instead of a sometimes-fault. Both operands are signal-safe
+([01-language/builtins.md](01-language/builtins.md)), so the idiom is legal inside
+`on hurt:` and the fault lands in the handler.
+
+Worse, `closest` and `closest_minable` return `Result` (see [01-language/builtins.md](01-language/builtins.md)), so the
+natural spelling of "the fault-free walk" — `try_move_to(closest(depot))`,
+**verbatim the code [history/questions-worksheets.md:264](history/questions-worksheets.md) shipped one amendment earlier** — is a
+runtime fault. Nothing specifies a deploy-time type check; deploy validates only
+program memory and variable slots ([02-agents/decided.md](02-agents/decided.md)). A
+hurt-handler retreat written the obvious way turns every hurt signal into an
+abort, i.e. the rescue-denial path.
+
+A fix must pick one: `try_*` accepts and propagates `Result`/`Option`, or the
+type error is caught at deploy (which needs the deploy validator's scope
+widened), or `try_*` loses its signal-safe status (which costs more than it
+saves).
+
+*(Resolution — ruled the other way: `try_` covers the action, never the
+argument. try_* verbs take concrete arguments; Result/Option arguments are
+ordinary type faults, resolved before the verb by guard-then-act or match.
+The contract is now stated in builtins.md and types-and-env.md; the
+composition idiom is defined by exclusion rather than absorbed.)*
 
 **P8 — `investment()` still sums deleted capability tiers. FIXED (`93d6b25`).**
 [07-architecture/vm.md:13](07-architecture/vm.md),
