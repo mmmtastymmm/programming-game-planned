@@ -29,12 +29,13 @@ moved the answered worksheet bodies (Q111–Q123) out of `QUESTIONS.md` into
 [history/questions-worksheets.md](history/questions-worksheets.md); citations
 into those bodies now point there.
 
-**Status 2026-08-01 (latest): 28 opened, 14 fixed.** P1 — the bootstrap
+**Status 2026-08-01 (latest): 28 opened, 15 fixed.** P1 — the bootstrap
 deadlock — ruled and closed in `2c56fdf` (ruined Upgrade Station in the
 start base). Earlier the same day the mechanical propagation batch — P8,
 P12, P13, P15–P17, P19, P21, P23, P24, P26, P28 — closed in `93d6b25`.
-14 remain open (P3–P7, P9–P11, P14, P18, P20, P22, P25, P27); P2
-closed in `d90a428` (pacing table recomputed).
+13 remain open (P4–P7, P9–P11, P14, P18, P20, P22, P25, P27); P2
+closed in `d90a428` (pacing table recomputed), P3 in `c1b26a7` (component
+BFS + non-minting visible hold).
 
 **Status 2026-08-01: 28 problems opened (P1–P28), 0 fixed.** P15–P18 were
 found by the reviews of the 04–09 doc split; P19–P28 by the same day's
@@ -65,30 +66,6 @@ The three that change actual game behavior rather than doc clarity are **P1**
 ## Needs a ruling
 
 These cannot be swept mechanically — the docs do not contain the answer.
-
-**P3 — Q120 both mandates and forbids the same silent hold. OPEN. ⚠HASH**
-[03-resources/decided.md:8](03-resources/decided.md) ("HOLDS — silently") and
-[03-resources/decided.md:10](03-resources/decided.md) ("never hold"); also
-[history/questions-answered.md](history/questions-answered.md) (Q120)
-
-Within one *Decided* entry: line 219 says that when the displacement BFS
-exhausts, the completing build **"HOLDS — silently"** (re-parks and retries next
-tick, no progress, no XP, no fault); line 221 says the build must **"never
-hold"**, and that holding "was tried during M16 and was wrong."
-
-The two readings produce different sim behavior — an infinite silent stall
-versus whatever the never-hold branch does (fault, delete, or force-complete) —
-and every alternative is hash-affecting, so **two implementations of the same
-spec desync in lockstep multiplayer.**
-
-[history/questions-worksheets.md:417](history/questions-worksheets.md)–`:427` carries only the unconditional "never hold" version and argues
-the case cannot arise ("a colony's fleet cap sits far below the map's tile
-count, so a legal state always has a free tile somewhere"), while
-03-resources/decided.md explicitly rejects that argument ("no tile count argument
-covers it"). They also disagree on the **BFS domain** — whole map versus the
-build site's passable connected component — which is what decides whether a bot
-sealed in a pocket by Mountain/Water/barricades is reachable at all. Both the
-exception's existence and the search domain need one answer.
 
 **P4 — `try_*` verbs type-faulting on `Result` re-creates the double-handle the
 amendment was written to remove. OPEN.**
@@ -462,6 +439,35 @@ whole table needs recomputing, not just Mining's row.
 other four job rows verified against their inputs (Hauling and Building
 derive; Scouting and Combat annotated as duty-cycle placeholders) and a
 derivation paragraph added so the table is recomputed, never re-guessed.)*
+
+**P3 — Q120 both mandates and forbids the same silent hold. FIXED (`c1b26a7`). ⚠HASH**
+[03-resources/decided.md:8](03-resources/decided.md) ("HOLDS — silently") and
+[03-resources/decided.md:10](03-resources/decided.md) ("never hold"); also
+[history/questions-answered.md](history/questions-answered.md) (Q120)
+
+Within one *Decided* entry: line 219 says that when the displacement BFS
+exhausts, the completing build **"HOLDS — silently"** (re-parks and retries next
+tick, no progress, no XP, no fault); line 221 says the build must **"never
+hold"**, and that holding "was tried during M16 and was wrong."
+
+The two readings produce different sim behavior — an infinite silent stall
+versus whatever the never-hold branch does (fault, delete, or force-complete) —
+and every alternative is hash-affecting, so **two implementations of the same
+spec desync in lockstep multiplayer.**
+
+[history/questions-worksheets.md:417](history/questions-worksheets.md)–`:427` carries only the unconditional "never hold" version and argues
+the case cannot arise ("a colony's fleet cap sits far below the map's tile
+count, so a legal state always has a free tile somewhere"), while
+03-resources/decided.md explicitly rejects that argument ("no tile count argument
+covers it"). They also disagree on the **BFS domain** — whole map versus the
+build site's passable connected component — which is what decides whether a bot
+sealed in a pocket by Mountain/Water/barricades is reachable at all. Both the
+exception's existence and the search domain need one answer.
+
+*(Resolution: component-scoped BFS ratified; exhaustion holds, non-minting
+and UI-visible — the one legal stall. The "never hold" bullet now forbids
+minting/faulting stalls specifically. The history log keeps the superseded
+whole-map wording as a closed record.)*
 
 **P8 — `investment()` still sums deleted capability tiers. FIXED (`93d6b25`).**
 [07-architecture/vm.md:13](07-architecture/vm.md),
