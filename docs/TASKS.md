@@ -38,9 +38,12 @@ records — QUESTIONS.md is the live registry.
 Notes left inside finished milestones that still bind on unbuilt work. Full
 context for each is in [history/tasks-completed.md](history/tasks-completed.md).
 
-- [ ] **`rng.combat` isn't in docs/07's inventory** (M0) — the death cargo-spill
+- [x] **`rng.combat` isn't in docs/07's inventory** (M0) — the death cargo-spill
       scatter draws from it; flagged in a code comment, never ratified. Either
-      add the stream to docs/07 or move the draw. [sim] (S)
+      add the stream to docs/07 or move the draw. [sim] (S) *(Resolved
+      2026-08-02: the first arm was already done — the ratified stream
+      inventory in [07-architecture/tick-model.md](07-architecture/tick-model.md)
+      enumerates `rng.combat`. No draw moves.)*
 - [ ] **Shallow VM hashing** (M2) — per-bot movement intent (path/ticks/goals)
       and the recall path aren't hashed, so a peer divergence there stays
       invisible until a position changes. Known TODO. [sim] (M) ⚠HASH
@@ -266,8 +269,8 @@ hash: statline, XP map, quirk rolls, upkeep settlements).* ✅ CORE COMPLETE (20
       pops into existence on High Ground); ground hardening under an in-flight plan (new
       barricade, demolished bridge) re-plans instead of panicking, for program walks and
       recall walks both.
-      *NEEDS DISCUSSION: (1) Snow stays 1× and mute-only (Q67 open — no cost/tracks effects
-      invented); (2) HighGround's +2 bonus and the Chebyshev spread metric are still
+      *NEEDS DISCUSSION: (1) Snow stays 1× and mute-only (Q67 — since answered, 2026-07-14
+      terrain backlog, snow's hook re-ruled by Q78; no cost/tracks effects invented); (2) HighGround's +2 bonus and the Chebyshev spread metric are still
       hardcoded first-pass; (3) slide steps cost normal step ticks (no momentum speed-up);
       (4) a Barricade completing under a standing bot leaves it free to step off (entry-only
       blocking).* [sim][game] (L) ⚠HASH *(golden regenerated: hash format only — dune_idle,
@@ -819,9 +822,12 @@ free-structure laundering, and a handful of genuinely repaired tests.
       GREEN/RED sandbox programs, and the Harvester's P10 form into
       `crates/sim/src/feral.rs` (minable-scoped queries, try_ verbs, bound
       target, wander tail). docs/04 carries the sources verbatim again. [game][sim]
-- [ ] **Doc sync** — docs/03's ladder paragraph still says buying a tier
+- [x] **Doc sync** — docs/03's ladder paragraph still says buying a tier
       "resets that capability's earned level" (Q111 deleted that); docs/02 and
-      docs/06 carry the tier/level model throughout. [docs]
+      docs/06 carry the tier/level model throughout. [docs] *(Resolved
+      2026-08-02: already done by the P9/P11 fixes and the Q111 propagation
+      sweeps — grep finds neither the quoted docs/03 paragraph nor a live
+      tier/level carrier in docs/02 or docs/06.)*
 
 **Method, learned the hard way.** Build in verified slices, and **write the
 failing test before deciding the fix** — the one discipline that worked when it

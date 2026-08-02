@@ -25,7 +25,7 @@ Bots are solid and bump-freezes are expensive ([02-agents.md](../02-agents.md)),
 | 0 | `wait(n)` + `rng(n)` | `wait(rng(20))` desynchronizes identical programs — stagger departures, time-slice the corridor |
 | 2 | sensors + `if` | Check before committing (`path_blocked()` — real as of Q79 — plus occupancy peeks) |
 | 6–7 | enums + **channels** | The real answer: a one-receiver channel token is a **mutex with a lease** (round 4) — hold the token to enter, `send` it back on exit, and the gatekeeper's `receive` timeout is the lease: a holder that crashes (handler restarts clear its token variable) or wrecks simply times out, and the gatekeeper's own fault-restart mints a fresh token. Lost locks recover; a wrecked holder still *physically* plugs a one-tile corridor — that's the drama, not a bug. (Give the gatekeeper an `on error:` window, or each lease expiry chips it — timeouts are ordinary faults) |
-| terraform | bridges + **arrow overlays** / the Clear blueprint | Widen the corridor — or arrow two crossings in opposite directions: a deadlock-free roundabout, no mutex required ([Terraforming](#terraforming-build--deconstruct)) |
+| terraform | bridges + **arrow overlays** / the Clear blueprint | Widen the corridor — or arrow two crossings in opposite directions: a deadlock-free roundabout, no mutex required ([Terraforming](terraforming.md)) |
 
 Design intent: corridor congestion is the first *systems* problem a colony hits — visible (frozen bots stare at each other), diagnosable (crash-free, just slow), and solvable at every tier with the tools of that tier. A deadlocked corridor is not a bug; it's the tutorial for channels.
 

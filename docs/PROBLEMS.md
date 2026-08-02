@@ -29,6 +29,14 @@ moved the answered worksheet bodies (Q111–Q123) out of `QUESTIONS.md` into
 [history/questions-worksheets.md](history/questions-worksheets.md); citations
 into those bodies now point there.
 
+**Re-anchored 2026-08-02:** the fix rounds recorded above shifted their own
+carriers after the 2026-08-01 pass — eleven Fixed-log line numbers had
+drifted (five into `02-agents/xp-and-specialization.md`, two each into
+`01-language/builtins.md` and `01-language/syntax-tiers.md`, one into
+`07-architecture/world-state.md`, and `08-multiplayer/decided.md`'s Q86 line,
+pushed down by the Q124/Q125 closes). Each number re-verified against the
+current file. The quoted text remains the reliable anchor.
+
 **Status 2026-08-02: still 28 opened, 28 fixed — a third audit corrected the
 record, not the rulings.** The block below cites P22's close as `09c3e62`
 (structure queries answer from faction knowledge); that close was twice
@@ -165,7 +173,7 @@ reachable (it is tier 4 — grade 4); corrected in all three carriers, `c87ee66`
 
 **P2 — Mining's `curve_base` is derived from a rate 8× the docs' own mine yield.
 FIXED (`d90a428`).**
-[02-agents/xp-and-specialization.md:74](02-agents/xp-and-specialization.md) (the pacing table),
+[02-agents/xp-and-specialization.md:84](02-agents/xp-and-specialization.md) (the pacing table),
 [03-resources/the-tree.md](03-resources/the-tree.md) (mine yield),
 [history/questions-answered.md](history/questions-answered.md) (Q122/Q123)
 
@@ -262,7 +270,7 @@ The contract is now stated in builtins.md and types-and-env.md; the
 composition idiom is defined by exclusion rather than absorbed.)*
 
 **P5 — the bounded perk truncates to zero on integer stats. FIXED (`9921848`).**
-[02-agents/xp-and-specialization.md:32](02-agents/xp-and-specialization.md) (the formula),
+[02-agents/xp-and-specialization.md:33](02-agents/xp-and-specialization.md) (the formula),
 [02-agents/stat-sheet.md](02-agents/stat-sheet.md) ("flat-only stats stay whole")
 
 Q121's `bonus = max_bonus × level / (level + K)` is applied to sensor range and
@@ -291,7 +299,7 @@ grouping; swept in `c87ee66`.)*
 
 **P6 — the Flinch perk saturates to zero, deleting the forced prologue
 outright. FIXED (`3e21e89`).**
-[02-agents/xp-and-specialization.md:54](02-agents/xp-and-specialization.md) (the Flinch row),
+[02-agents/xp-and-specialization.md:66](02-agents/xp-and-specialization.md) (the Flinch row),
 [09-quirks/acquired-quirks.md:8](09-quirks/acquired-quirks.md); Q121 in [history/questions-answered.md](history/questions-answered.md)
 
 Q121 ratified Flinch's −10%/level as "self-saturating," but it saturates **at
@@ -498,7 +506,7 @@ working").
 
 **P13 — `repair()` gates the rescue verb on both the new grade and the deleted
 Building tier. FIXED (`93d6b25`).**
-[01-language/builtins.md:24](01-language/builtins.md) (the `repair()` row)
+[01-language/builtins.md:26](01-language/builtins.md) (the `repair()` row)
 
 The builtin row was edited in place without deleting the old clause, so one cell
 now reads: "field repair of a wreck needs **a build tool of grade ≥ 2** (Q105-R2,
@@ -555,7 +563,7 @@ across a blocking `move_to`, the pattern Q110 ruled out. FIXED (`93d6b25`).**
 ([history/questions-answered.md](history/questions-answered.md))
 
 Q110's ruling — "bind once, never check-then-act", recorded inside Q117's
-answer and cited by [01-language/syntax-tiers.md:29](01-language/syntax-tiers.md)
+answer and cited by [01-language/syntax-tiers.md:42](01-language/syntax-tiers.md)
 ("the bug Q110 ruled against") — rules out re-querying a target around a
 blocking verb, whose tens-of-ticks window "is what made Q110's Feral race a
 systematic bug"
@@ -595,7 +603,7 @@ not just fixing the lines listed here.
 as a rescue boot for its Boot track");
 [02-agents/decided.md:11](02-agents/decided.md) ("Boot and Learning were
 later cut"),
-[02-agents/xp-and-specialization.md:56](02-agents/xp-and-specialization.md)
+[02-agents/xp-and-specialization.md:68](02-agents/xp-and-specialization.md)
 (Boot "never once awarded"),
 [07-architecture/tick-model.md:29](07-architecture/tick-model.md) (the
 ten-track settle order)
@@ -614,9 +622,9 @@ surviving track), not a silent reword.
 *(Resolution: the rescue-boot award clause is dropped with its track.)*
 
 **P19 — the Q77 Command inventory omits `ClaimNest` and `RazeNest`. FIXED (`93d6b25`).**
-[07-architecture/world-state.md:30](07-architecture/world-state.md) ("the
+[07-architecture/world-state.md:32](07-architecture/world-state.md) ("the
 ONLY external inputs to sim (Q77: list completed"),
-[08-multiplayer/decided.md:15](08-multiplayer/decided.md) (Q86 names both);
+[08-multiplayer/decided.md:17](08-multiplayer/decided.md) (Q86 names both);
 [TASKS.md](TASKS.md)
 
 The inventory declares itself complete, but Q86's authorization ruling
@@ -631,7 +639,7 @@ disagree here also disagree on Q86's forgery-protection set.
 
 **P20 — the Hiding perk is a second linear-uncapped perk, contradicting
 Q121's own rule. FIXED (`3e21e89`).**
-[02-agents/xp-and-specialization.md:53](02-agents/xp-and-specialization.md) and
+[02-agents/xp-and-specialization.md:65](02-agents/xp-and-specialization.md) and
 [02-agents/stat-sheet.md:26](02-agents/stat-sheet.md) ("−1 signature/level,
 tuning") vs
 [02-agents/xp-and-specialization.md:15](02-agents/xp-and-specialization.md)
@@ -725,8 +733,8 @@ covered by P8 (the investment formula) or P12 (the stat-sheet rows).
 **P24 — the 01-language doorway's parts table says "Tiers 0–6"; the part
 defines Tiers 0–7. FIXED (`93d6b25`).**
 [01-language.md:17](01-language.md) vs
-[01-language/syntax-tiers.md:131](01-language/syntax-tiers.md) ("## Tier 7 —
-Channels") and [01-language/builtins.md:39](01-language/builtins.md)
+[01-language/syntax-tiers.md:144](01-language/syntax-tiers.md) ("## Tier 7 —
+Channels") and [01-language/builtins.md:41](01-language/builtins.md)
 (`send` "Requires Tier 7")
 
 The ownership table's tier count predates the channels tier. A gating or
