@@ -29,12 +29,11 @@ moved the answered worksheet bodies (Q111–Q123) out of `QUESTIONS.md` into
 [history/questions-worksheets.md](history/questions-worksheets.md); citations
 into those bodies now point there.
 
-**Status 2026-08-01 (latest): 28 opened, 22 fixed.** P1 — the bootstrap
+**Status 2026-08-01 (final): 28 opened, 28 fixed — the register is clear.** P1 — the bootstrap
 deadlock — ruled and closed in `2c56fdf` (ruined Upgrade Station in the
 start base). Earlier the same day the mechanical propagation batch — P8,
 P12, P13, P15–P17, P19, P21, P23, P24, P26, P28 — closed in `93d6b25`.
-6 remain open (P9–P11, P14, P18, P25) — all sweep-class; every
-needs-a-ruling entry is closed. P2
+The last six (P9–P11, P14, P18, P25) closed in `d5b561f`. P2
 closed in `d90a428` (pacing table recomputed), P3 in `c1b26a7` (component
 BFS + non-minting visible hold), P4 in `e913c27` (try_ covers the action,
 never the argument), P22 in `09c3e62` (structure queries answer from
@@ -80,135 +79,7 @@ These cannot be swept mechanically — the docs do not contain the answer.
 
 These need no ruling; the decision exists and the text was not propagated.
 
-**P9 — docs/02's *Decided* section was never swept. OPEN.**
-[02-agents/decided.md:14](02-agents/decided.md) (the `100×n` curve), `:12` (Q68 upkeep),
-plus the module-slot and Optics entries in the same file
-
-The owning doc's authority under this repo's conventions still ratifies the
-whole pre-sweep model: the flat **`100×n` XP curve** (`:266`), **module slots
-unlocking at total-XP milestones, cap 3** (`:262`), **Optics as a slotted tool
-module** (`:259`), and Q68's upkeep as "per station upgrade, module, and track
-level" with a Mk2→Mk3 catalog curve (`:265`).
-
-A tuner writing `xp.ron` from this section ships one global `100×n` curve
-instead of Q123's per-track `curve_base`. Every track then climbs at one pace,
-the job/ambient two-tier gap disappears, a dedicated miner takes the same ~50
-minutes to L5 as the Age clock does by merely existing, and specialisation stops
-beating seniority for tool licensing — the entire outcome Q123 was decided to
-produce. The same section also re-introduces the unbounded `Σ levels` upkeep
-term Q122 replaced, so an old fleet browns out its colony purely by being old.
-
-**P10 — the Feral Harvester's verbatim source is still the Q117 crash-loop.
-OPEN.**
-[04-enemies/archetypes.md:42](04-enemies/archetypes.md)–`:48` (also [TASKS.md](TASKS.md),
-[06-progression/unlock-tree.md:71](06-progression/unlock-tree.md), `:76`,
-[06-progression/pacing.md:10](06-progression/pacing.md))
-
-[04-enemies/archetypes.md:5](04-enemies/archetypes.md) states these code blocks are the archetypes'
-***actual* shipped source**, and Q117's answer
-([history/questions-worksheets.md:273](history/questions-worksheets.md)–`:275`) explicitly records that
-`crates/sim/src/feral.rs` takes the new guarded form and that "docs/04's
-verbatim sources need re-syncing." The sweep updated only docs/04's nest-claim
-gate (now [04-enemies/nests-and-claims.md:9](04-enemies/nests-and-claims.md)) and left the programs untouched.
-
-The Harvester still guards with tier-blind `exists(ore)` — which per
-03-resources.md Design Rule 4 answers from **permanent map knowledge**, so it
-stays True on a seam the map emptied an hour ago — binds `closest(ore).expect()`
-with no minable filter, and calls the **faulting** `mine()` rather than
-`try_mine()`. That is the loop Q117 measured at [history/questions-worksheets.md:168](history/questions-worksheets.md)–`:174`: closest →
-`move_to` (0 ticks at chebyshev ≤ 1) → `mine` → fault → restart, ~3–4 ticks per
-iteration, 2 HP per fault, a 40 HP chassis dead in about eight seconds.
-
-So every Harvester a nest prints grinds itself into a wreck within seconds of
-reaching a worked-out or over-grade vein: the PvE *economic* enemy deletes
-itself, docs/04's "starve the nest (kill Harvesters) and it prints less"
-counterplay becomes unreachable, and **the first Feral program a player decrypts
-teaches exactly the bug** [04-enemies/archetypes.md:23](04-enemies/archetypes.md) and Q108 say a shipped source must
-never teach.
-
-**P11 — module slots were deleted but four places still specify them. OPEN.**
-[02-agents/anatomy.md:22](02-agents/anatomy.md) (`| Module slots | 1 |`),
-[02-agents/stat-sheet.md](02-agents/stat-sheet.md) (the modifier pipeline),
-[02-agents/damage-faults-death.md](02-agents/damage-faults-death.md) (the salvage receipt),
-[02-agents/decided.md](02-agents/decided.md);
-[03-resources/the-tree.md:94](03-resources/the-tree.md) (Lens); [07-architecture/world-state.md:6](07-architecture/world-state.md)
-
-docs/06 deleted the entire slotted-module catalog (Optics and Backup Core
-entries plus the swap-economics paragraph) and 02-agents/decided.md's entry
-dropped "slots 1" from the print floor. Left behind: the universal base statline
-still prints `| Module slots | 1 |` (`:24`); the modifier pipeline still runs
-through "Upgrade Station purchases **+ slotted modules**" (`:32`); the salvage
-receipt still derives from "slotted modules … swapped-out modules drop off — Q72
-swap rules" (`:62`), citing a rules paragraph this sweep deleted; and `:262`
-still rules slots unlock at total-XP milestones, cap 3.
-
-Worst of the set is `:259` — "On a one-slot rookie, Optics is the whole build —
-a dedicated prospector that gave up its ability to work" — which flatly
-contradicts the sensor-range row the same sweep wrote at `:51`: "optics is one
-of the ten tools since Q111 … so no rookie ever trades its working ability for
-eyes." A reader cannot tell whether a bot has a slot, whether Optics consumes
-it, or how salvage values a part that no longer exists.
-
-Separately, [03-resources/the-tree.md:94](03-resources/the-tree.md) still routes the whole Lens
-supply chain into "The **Optics module** (2 Lens + 1 Bronze)" — a deleted
-catalog entry — leaving **Lens with no priced consumer anywhere in the design**.
-
-**P14 — the `XP gain` stat row was deleted, but two quirks still modify it.
-OPEN.**
-[02-agents/stat-sheet.md](02-agents/stat-sheet.md) (the deleted row and the canonicity rule),
-[02-agents/xp-and-specialization.md](02-agents/xp-and-specialization.md);
-[09-quirks/catalog.md:19](09-quirks/catalog.md), `:39`;
-[07-architecture/tick-model.md:29](07-architecture/tick-model.md);
-[04-enemies/capturing-wrecks.md:5](04-enemies/capturing-wrecks.md); [TASKS.md](TASKS.md)
-
-[02-agents/stat-sheet.md](02-agents/stat-sheet.md) declares the sheet canonical: "Anything anywhere
-in the design that makes one bot better or worse than another — hardware, XP
-perks, quirks … modifies a row on this sheet; **if an effect can't name its row,
-it isn't a stat effect.**" The sweep deleted `| Survival | XP gain | 100% |
-Learning track |` along with the Learning track — but 10x Developer (+15% XP
-earned, all tracks), Tech Debt (−15% XP earned), [history/questions-worksheets.md:468](history/questions-worksheets.md) ("quirk
-`XpPct` effects … stay"), docs/07's "any per-bot XP-gain multiplier (quirks
-only) applies at its start-of-tick value" and 02-agents/xp-and-specialization.md itself all still
-specify it.
-
-An implementer building `stats.ron` from the canonical sheet ships no XP-gain
-stat and the two quirks have nothing to apply to; the modifier-pipeline position
-and the pessimistic-rounding rule for that multiplier are gone with the row.
-
-**P18 — the hijack ruling still credits the deleted Boot XP track. OPEN.**
-[04-enemies/capturing-wrecks.md:5](04-enemies/capturing-wrecks.md) ("counts
-as a rescue boot for its Boot track");
-[02-agents/decided.md:11](02-agents/decided.md) ("Boot and Learning were
-later cut"),
-[02-agents/xp-and-specialization.md:56](02-agents/xp-and-specialization.md)
-(Boot "never once awarded"),
-[07-architecture/tick-model.md:29](07-architecture/tick-model.md) (the
-ten-track settle order)
-
-Q111's sweep cut the Boot track from the XP model — the tick's XP settlement
-runs exactly ten tracks and 02-agents records the cut — but the hijack
-ruling moved into capturing-wrecks.md still awards the stolen bot's hijack
-boot as "a rescue boot for its Boot track." An implementer building the
-hijack path from docs/04 credits XP to a track that does not exist: either
-the code grows an eleventh track (a hash-affecting divergence between
-implementations — the desync class) or the clause is silently dropped with
-no record. Same left-behind class as P14's Learning-track modifiers; the
-clause needs a ruling-side sweep (drop the award, or re-home it on a
-surviving track), not a silent reword.
-
-**P25 — two quirks modify a "boot ritual" duration that names no stat-sheet
-row. OPEN.**
-[09-quirks/catalog.md:22](09-quirks/catalog.md) (**Hot Reload**: "boot
-ritual half as long — [02-agents.md] stat sheet") and `:52` (**Windows
-Update**: "boot ritual twice as long");
-[02-agents/stat-sheet.md](02-agents/stat-sheet.md) (the canonicity rule)
-
-The sheet's own rule is "if an effect can't name its row, it isn't a stat
-effect." No boot-duration row exists (Print time and the hurt/Damaged lines
-are different rows), and Hot Reload even cites the stat sheet as its home.
-Same left-behind class as P14's XP-gain quirks, different stat: either the
-sheet gains a boot-ritual-duration row (with modifier-pipeline position and
-rounding rule) or the two quirks need re-speccing.
+*(Empty as of 2026-08-01 — every entry fixed and moved to the Fixed log.)*
 
 ---
 
@@ -463,6 +334,92 @@ hardware investment for a partial refund. That is exactly the failure Q105-R3
 was written to close. docs/01 additionally now gives two different formulas for
 the same selection twelve lines apart.
 
+**P9 — docs/02's *Decided* section was never swept. FIXED (`d5b561f`).**
+[02-agents/decided.md:14](02-agents/decided.md) (the `100×n` curve), `:12` (Q68 upkeep),
+plus the module-slot and Optics entries in the same file
+
+The owning doc's authority under this repo's conventions still ratifies the
+whole pre-sweep model: the flat **`100×n` XP curve** (`:266`), **module slots
+unlocking at total-XP milestones, cap 3** (`:262`), **Optics as a slotted tool
+module** (`:259`), and Q68's upkeep as "per station upgrade, module, and track
+level" with a Mk2→Mk3 catalog curve (`:265`).
+
+A tuner writing `xp.ron` from this section ships one global `100×n` curve
+instead of Q123's per-track `curve_base`. Every track then climbs at one pace,
+the job/ambient two-tier gap disappears, a dedicated miner takes the same ~50
+minutes to L5 as the Age clock does by merely existing, and specialisation stops
+beating seniority for tool licensing — the entire outcome Q123 was decided to
+produce. The same section also re-introduces the unbounded `Σ levels` upkeep
+term Q122 replaced, so an old fleet browns out its colony purely by being old.
+
+*(Resolution: the XP-curve entry restated per-track (Q123) and Q68's upkeep
+clause converted to Q122's bounded hyperbolic with the tool-rebased term;
+the module-slot and Optics monolith entries were already gone.)*
+
+**P10 — the Feral Harvester's verbatim source is still the Q117 crash-loop.
+FIXED (`d5b561f`).**
+[04-enemies/archetypes.md:42](04-enemies/archetypes.md)–`:48` (also [TASKS.md](TASKS.md),
+[06-progression/unlock-tree.md:71](06-progression/unlock-tree.md), `:76`,
+[06-progression/pacing.md:10](06-progression/pacing.md))
+
+[04-enemies/archetypes.md:5](04-enemies/archetypes.md) states these code blocks are the archetypes'
+***actual* shipped source**, and Q117's answer
+([history/questions-worksheets.md:273](history/questions-worksheets.md)–`:275`) explicitly records that
+`crates/sim/src/feral.rs` takes the new guarded form and that "docs/04's
+verbatim sources need re-syncing." The sweep updated only docs/04's nest-claim
+gate (now [04-enemies/nests-and-claims.md:9](04-enemies/nests-and-claims.md)) and left the programs untouched.
+
+The Harvester still guards with tier-blind `exists(ore)` — which per
+03-resources.md Design Rule 4 answers from **permanent map knowledge**, so it
+stays True on a seam the map emptied an hour ago — binds `closest(ore).expect()`
+with no minable filter, and calls the **faulting** `mine()` rather than
+`try_mine()`. That is the loop Q117 measured at [history/questions-worksheets.md:168](history/questions-worksheets.md)–`:174`: closest →
+`move_to` (0 ticks at chebyshev ≤ 1) → `mine` → fault → restart, ~3–4 ticks per
+iteration, 2 HP per fault, a 40 HP chassis dead in about eight seconds.
+
+So every Harvester a nest prints grinds itself into a wreck within seconds of
+reaching a worked-out or over-grade vein: the PvE *economic* enemy deletes
+itself, docs/04's "starve the nest (kill Harvesters) and it prints less"
+counterplay becomes unreachable, and **the first Feral program a player decrypts
+teaches exactly the bug** [04-enemies/archetypes.md:23](04-enemies/archetypes.md) and Q108 say a shipped source must
+never teach.
+
+*(Resolution: the Harvester carries the ratified form — minable-scoped
+queries, try_ verbs, bound target, wander tail; code re-sync tracked in the
+Shipped-programs task.)*
+
+**P11 — module slots were deleted but four places still specify them. FIXED (`d5b561f`).**
+[02-agents/anatomy.md:22](02-agents/anatomy.md) (`| Module slots | 1 |`),
+[02-agents/stat-sheet.md](02-agents/stat-sheet.md) (the modifier pipeline),
+[02-agents/damage-faults-death.md](02-agents/damage-faults-death.md) (the salvage receipt),
+[02-agents/decided.md](02-agents/decided.md);
+[03-resources/the-tree.md:94](03-resources/the-tree.md) (Lens); [07-architecture/world-state.md:6](07-architecture/world-state.md)
+
+docs/06 deleted the entire slotted-module catalog (Optics and Backup Core
+entries plus the swap-economics paragraph) and 02-agents/decided.md's entry
+dropped "slots 1" from the print floor. Left behind: the universal base statline
+still prints `| Module slots | 1 |` (`:24`); the modifier pipeline still runs
+through "Upgrade Station purchases **+ slotted modules**" (`:32`); the salvage
+receipt still derives from "slotted modules … swapped-out modules drop off — Q72
+swap rules" (`:62`), citing a rules paragraph this sweep deleted; and `:262`
+still rules slots unlock at total-XP milestones, cap 3.
+
+Worst of the set is `:259` — "On a one-slot rookie, Optics is the whole build —
+a dedicated prospector that gave up its ability to work" — which flatly
+contradicts the sensor-range row the same sweep wrote at `:51`: "optics is one
+of the ten tools since Q111 … so no rookie ever trades its working ability for
+eyes." A reader cannot tell whether a bot has a slot, whether Optics consumes
+it, or how salvage values a part that no longer exists.
+
+Separately, [03-resources/the-tree.md:94](03-resources/the-tree.md) still routes the whole Lens
+supply chain into "The **Optics module** (2 Lens + 1 Bronze)" — a deleted
+catalog entry — leaving **Lens with no priced consumer anywhere in the design**.
+
+*(Resolution: statline row, pipeline clause, and the salvage receipt's
+slot/swap clause deleted (the receipt carrier was in stat-sheet.md, not
+damage-faults-death.md as cited); Lens retargeted to the optics tool's upper
+grades — a priced consumer via the ratified sensing chain, no ruling needed.)*
+
 **P12 — two identical "Cycles per tick" rows with contradictory growth sources.
 FIXED (`93d6b25`).**
 [02-agents/stat-sheet.md:15](02-agents/stat-sheet.md) vs `:20` (also
@@ -499,6 +456,31 @@ and its parenthetical asserts the opposite of the sentence in front of it.
 
 This is the **sole surviving "Building tier" reference in docs/01–09** — the one
 cell the mechanical propagation missed.
+
+**P14 — the `XP gain` stat row was deleted, but two quirks still modify it.
+FIXED (`d5b561f`).**
+[02-agents/stat-sheet.md](02-agents/stat-sheet.md) (the deleted row and the canonicity rule),
+[02-agents/xp-and-specialization.md](02-agents/xp-and-specialization.md);
+[09-quirks/catalog.md:19](09-quirks/catalog.md), `:39`;
+[07-architecture/tick-model.md:29](07-architecture/tick-model.md);
+[04-enemies/capturing-wrecks.md:5](04-enemies/capturing-wrecks.md); [TASKS.md](TASKS.md)
+
+[02-agents/stat-sheet.md](02-agents/stat-sheet.md) declares the sheet canonical: "Anything anywhere
+in the design that makes one bot better or worse than another — hardware, XP
+perks, quirks … modifies a row on this sheet; **if an effect can't name its row,
+it isn't a stat effect.**" The sweep deleted `| Survival | XP gain | 100% |
+Learning track |` along with the Learning track — but 10x Developer (+15% XP
+earned, all tracks), Tech Debt (−15% XP earned), [history/questions-worksheets.md:468](history/questions-worksheets.md) ("quirk
+`XpPct` effects … stay"), docs/07's "any per-bot XP-gain multiplier (quirks
+only) applies at its start-of-tick value" and 02-agents/xp-and-specialization.md itself all still
+specify it.
+
+An implementer building `stats.ron` from the canonical sheet ships no XP-gain
+stat and the two quirks have nothing to apply to; the modifier-pipeline position
+and the pessimistic-rounding rule for that multiplier are gone with the row.
+
+*(Resolution: the row is restored as quirks-only — start-of-tick value,
+pessimistic rounding — per the recorded 'XpPct effects stay' intent.)*
 
 **P15 — the disconnect ruling's footnote points PvP disconnects at "open
 questions", but they are decided two bullets down. FIXED (`93d6b25`).**
@@ -552,6 +534,29 @@ ten tools; the same shorthand in the 06 doorway intro was corrected in the
 "hardware (Upgrade Station)" or "hardware (materials by role)"), not a
 pricing change — closing this entry requires re-grepping for the shorthand,
 not just fixing the lines listed here.
+
+**P18 — the hijack ruling still credits the deleted Boot XP track. FIXED (`d5b561f`).**
+[04-enemies/capturing-wrecks.md:5](04-enemies/capturing-wrecks.md) ("counts
+as a rescue boot for its Boot track");
+[02-agents/decided.md:11](02-agents/decided.md) ("Boot and Learning were
+later cut"),
+[02-agents/xp-and-specialization.md:56](02-agents/xp-and-specialization.md)
+(Boot "never once awarded"),
+[07-architecture/tick-model.md:29](07-architecture/tick-model.md) (the
+ten-track settle order)
+
+Q111's sweep cut the Boot track from the XP model — the tick's XP settlement
+runs exactly ten tracks and 02-agents records the cut — but the hijack
+ruling moved into capturing-wrecks.md still awards the stolen bot's hijack
+boot as "a rescue boot for its Boot track." An implementer building the
+hijack path from docs/04 credits XP to a track that does not exist: either
+the code grows an eleventh track (a hash-affecting divergence between
+implementations — the desync class) or the clause is silently dropped with
+no record. Same left-behind class as P14's Learning-track modifiers; the
+clause needs a ruling-side sweep (drop the award, or re-home it on a
+surviving track), not a silent reword.
+
+*(Resolution: the rescue-boot award clause is dropped with its track.)*
 
 **P19 — the Q77 Command inventory omits `ClaimNest` and `RazeNest`. FIXED (`93d6b25`).**
 [07-architecture/world-state.md:30](07-architecture/world-state.md) ("the
@@ -654,6 +659,23 @@ renumbering change made against the doorway's 0–6 ladder drops or misplaces
 the parse-time gate on `send`/`receive` — a deploy-validation divergence
 between peers, and the doorway-drift failure the split convention exists to
 catch.
+
+**P25 — two quirks modify a "boot ritual" duration that names no stat-sheet
+row. FIXED (`d5b561f`).**
+[09-quirks/catalog.md:22](09-quirks/catalog.md) (**Hot Reload**: "boot
+ritual half as long — [02-agents.md] stat sheet") and `:52` (**Windows
+Update**: "boot ritual twice as long");
+[02-agents/stat-sheet.md](02-agents/stat-sheet.md) (the canonicity rule)
+
+The sheet's own rule is "if an effect can't name its row, it isn't a stat
+effect." No boot-duration row exists (Print time and the hurt/Damaged lines
+are different rows), and Hot Reload even cites the stat sheet as its home.
+Same left-behind class as P14's XP-gain quirks, different stat: either the
+sheet gains a boot-ritual-duration row (with modifier-pipeline position and
+rounding rule) or the two quirks need re-speccing.
+
+*(Resolution: a Boot-ritual row joins the sheet, quirks-only, so both
+quirks name a row per the canonicity rule.)*
 
 **P26 — the Scouting income row still asserts "no seen-tile set", which Q94
 overturned. FIXED (`93d6b25`).**
