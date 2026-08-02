@@ -641,6 +641,10 @@ implementer deriving discovery events from an ad-hoc structure instead of
 the phase-5 writes diverges on when "node discovered" fires — divergent
 Scouting XP and Data awards are a replay-hash desync.
 
+*(Amended: a second carrier — the Data-income clause "seen-set-free, like
+Scouting" in [03-resources/decided.md:17](03-resources/decided.md) — was
+missed by the first close and shut in `0060a47`.)*
+
 **P28 — the function-block scope row still gates some functions on a "tool
 module". FIXED (`93d6b25`).**
 [06-progression/scopes.md:19](06-progression/scopes.md) ("some also need a
