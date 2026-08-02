@@ -788,8 +788,9 @@ free-structure laundering, and a handful of genuinely repaired tests.
       **displaces** the occupant: BFS outward from the site over passable
       tiles, first free tile, ties on lowest `(x, y)`. **Nothing dies** — the
       entombment death was cut. If the BFS exhausts the component (a bot
-      sealed in a pocket) the build **holds silently**: re-park, no progress,
-      no XP, no fault. The displaced bot's action is **re-planned, not
+      sealed in a pocket) the build **holds, non-minting and UI-visible**
+      (P3 ruling): re-park, no progress, no XP, no fault; the held state
+      shows as a "build held: no room" badge derived from sim state. The displaced bot's action is **re-planned, not
       failed**, so being pushed never costs HP. Never delete the designation.
       Blueprints stay passable. [sim]
 - [ ] **Queries (Q117)** — add `closest_minable(kind)` and
