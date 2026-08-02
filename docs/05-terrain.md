@@ -25,7 +25,9 @@ cannot silently break another — not to save anyone reading the parts.
   opening rule, above. It is the filter every addition in these parts must pass.
 - **A tile is layers, not a kind** (2026-07-26) — canonical in
   [tile-composition.md](05-terrain/tile-composition.md). Base terrain, paint, and
-  contents compose; paint is the *routing* layer and carries no material cost.
+  contents compose; paint is the *routing* layer and carries no material cost;
+  solid structures are **occupants on the stack**, never tile kinds — the
+  Barricade is the sole exception (P27).
   Forbidden paint is impassable-like-water, which routes into the standard
   no-path fault rather than a special case (Q95–Q97).
 - **Overlays attach to regions, not tile kinds — with Corruption the exception**
