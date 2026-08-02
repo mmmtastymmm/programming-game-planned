@@ -29,17 +29,17 @@ moved the answered worksheet bodies (Q111–Q123) out of `QUESTIONS.md` into
 [history/questions-worksheets.md](history/questions-worksheets.md); citations
 into those bodies now point there.
 
-**Status 2026-08-01 (latest): 28 opened, 20 fixed.** P1 — the bootstrap
+**Status 2026-08-01 (latest): 28 opened, 21 fixed.** P1 — the bootstrap
 deadlock — ruled and closed in `2c56fdf` (ruined Upgrade Station in the
 start base). Earlier the same day the mechanical propagation batch — P8,
 P12, P13, P15–P17, P19, P21, P23, P24, P26, P28 — closed in `93d6b25`.
-8 remain open (P5, P9–P11, P14, P18, P25, P27); P2
+7 remain open (P9–P11, P14, P18, P25, P27); P2
 closed in `d90a428` (pacing table recomputed), P3 in `c1b26a7` (component
 BFS + non-minting visible hold), P4 in `e913c27` (try_ covers the action,
 never the argument), P22 in `09c3e62` (structure queries answer from
 faction knowledge), P6+P20 in `3e21e89` (both linear perks converted to
 the bounded hyperbolic), P7 in `84e1e68` (starter walks try_, tail
-wanders).
+wanders), P5 in `9921848` (hyperbolic grouping/rounding/liveness are spec).
 
 **Status 2026-08-01: 28 problems opened (P1–P28), 0 fixed.** P15–P18 were
 found by the reviews of the 04–09 doc split; P19–P28 by the same day's
@@ -70,26 +70,6 @@ The three that change actual game behavior rather than doc clarity are **P1**
 ## Needs a ruling
 
 These cannot be swept mechanically — the docs do not contain the answer.
-
-**P5 — the bounded perk truncates to zero on integer stats. OPEN.**
-[02-agents/xp-and-specialization.md:32](02-agents/xp-and-specialization.md) (the formula),
-[02-agents/stat-sheet.md](02-agents/stat-sheet.md) ("flat-only stats stay whole")
-
-Q121's `bonus = max_bonus × level / (level + K)` is applied to sensor range and
-max HP, which [02-agents/stat-sheet.md](02-agents/stat-sheet.md) keeps as whole integers
-("Flat-only stats (HP, slots, sensor tiles) stay whole" — sensor range has no
-`unit_scale`). With a plausible `max_bonus` of 3 tiles and K of 10, integer
-division gives 3×1/11 = 0, 3×2/12 = 0, 3×3/13 = 0, 3×4/14 = 0 — **a bot that has
-ground Scouting to level 4 sees exactly as far as a fresh print**, with no UI
-signal that the perk exists. This contradicts the perk table's "sensor range
-(bounded)" entry and `:167`'s "This is why every level still matters."
-
-Two further gaps in the same formula: the doc promises "half of `max_bonus` at
-level K" and 3×10/20 = 1, not 1.5, so odd `max_bonus` values silently lose their
-claimed midpoint; and the **evaluation order is unstated** —
-`max_bonus * (level / (level + K))` is 0 at every level forever, and nothing in
-the spec rules that grouping out. A deterministic sim cannot leave that
-ambiguous.
 
 **P27 — solid structures have no slot in the ratified tile-composition
 model. OPEN.**
@@ -403,6 +383,31 @@ argument. try_* verbs take concrete arguments; Result/Option arguments are
 ordinary type faults, resolved before the verb by guard-then-act or match.
 The contract is now stated in builtins.md and types-and-env.md; the
 composition idiom is defined by exclusion rather than absorbed.)*
+
+**P5 — the bounded perk truncates to zero on integer stats. FIXED (`9921848`).**
+[02-agents/xp-and-specialization.md:32](02-agents/xp-and-specialization.md) (the formula),
+[02-agents/stat-sheet.md](02-agents/stat-sheet.md) ("flat-only stats stay whole")
+
+Q121's `bonus = max_bonus × level / (level + K)` is applied to sensor range and
+max HP, which [02-agents/stat-sheet.md](02-agents/stat-sheet.md) keeps as whole integers
+("Flat-only stats (HP, slots, sensor tiles) stay whole" — sensor range has no
+`unit_scale`). With a plausible `max_bonus` of 3 tiles and K of 10, integer
+division gives 3×1/11 = 0, 3×2/12 = 0, 3×3/13 = 0, 3×4/14 = 0 — **a bot that has
+ground Scouting to level 4 sees exactly as far as a fresh print**, with no UI
+signal that the perk exists. This contradicts the perk table's "sensor range
+(bounded)" entry and `:167`'s "This is why every level still matters."
+
+Two further gaps in the same formula: the doc promises "half of `max_bonus` at
+level K" and 3×10/20 = 1, not 1.5, so odd `max_bonus` values silently lose their
+claimed midpoint; and the **evaluation order is unstated** —
+`max_bonus * (level / (level + K))` is 0 at every level forever, and nothing in
+the spec rules that grouping out. A deterministic sim cannot leave that
+ambiguous.
+
+*(Resolution: grouping mandated — `(max_bonus × level) / (level + K)`, floor
+division; bounds restated honestly (⌊max_bonus/2⌋ at K, strictly below
+max_bonus forever); centi-unit progress display plus an xp.ron load assert
+that every perk grants ≥ 1 unit by its track's L5.)*
 
 **P6 — the Flinch perk saturates to zero, deleting the forced prologue
 outright. FIXED (`3e21e89`).**
