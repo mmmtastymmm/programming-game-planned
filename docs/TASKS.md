@@ -811,10 +811,11 @@ free-structure laundering, and a handful of genuinely repaired tests.
       (docs/01 needs no amendment). Add `try_mine()` with the backlogged
       `try_*` family. Both new queries scope to `known_nodes` and sort
       `(distance, id)`. [sim][pyrite]
-- [ ] **Shipped programs (Q117, Q108, Q110)** — GREEN/RED starters and the
-      Feral Harvester `match` on `closest_minable(ore)` and handle the miss;
-      bind once, never check-then-act. Re-sync docs/04's verbatim sources,
-      already found stale against Q110. [game][sim][docs]
+- [ ] **Shipped programs (Q117, Q108, Q110)** — re-sync code to the now-ratified
+      doc sources: the Tier-0 starter (docs/01 syntax-tiers, P7 form) into the
+      GREEN/RED sandbox programs, and the Harvester's P10 form into
+      `crates/sim/src/feral.rs` (minable-scoped queries, try_ verbs, bound
+      target, wander tail). docs/04 carries the sources verbatim again. [game][sim]
 - [ ] **Doc sync** — docs/03's ladder paragraph still says buying a tier
       "resets that capability's earned level" (Q111 deleted that); docs/02 and
       docs/06 carry the tier/level model throughout. [docs]

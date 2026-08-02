@@ -19,7 +19,6 @@ The universal base statline (the floor — roughly the worst of every option fro
 | Move rate | 14 ticks/tile (slow) |
 | Cargo | 4 |
 | Sensors | 5 tiles |
-| Module slots | 1 |
 
 **Identity is earned, not printed.** A fresh print is slow, fragile, dim-eyed, and nearly empty-handed — the same sorry machine every time. What it becomes is written by what it does — and by simply lasting: XP tracks grow the body (HP by Age, speed by Mileage), total XP builds out the frame (slots), modules extend it, quirks bend it. The old sensing/carrying/surviving triangle didn't disappear — it moved from a print-time class picker to a lifetime of behavior. Identical rookies are the point: divergence starts at the first tick, and the print-time identity choice relocated to the first module + the color.
 

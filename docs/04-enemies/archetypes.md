@@ -6,7 +6,7 @@ Each archetype = chassis + program. Programs shown are their *actual* shipped so
 
 (The **Nest** itself — the printing structure and the territory game around it — is owned by [nests-and-claims.md](nests-and-claims.md).)
 
-**Bind once, never check-then-act** (Q110, ruled inside Q117's answer — [history/questions-answered.md](../history/questions-answered.md)): a shipped source binds its target once rather than re-querying it around a blocking verb, whose tens-of-ticks window makes the race systematic ([01-language/syntax-tiers.md](../01-language/syntax-tiers.md) accepts only the *adjacent-ops* guard race). The Drone and Stinger below carry the bound form; the Harvester's staleness against Q117 is registered as [PROBLEMS.md](../PROBLEMS.md) P10.
+**Bind once, never check-then-act** (Q110, ruled inside Q117's answer — [history/questions-answered.md](../history/questions-answered.md)): a shipped source binds its target once rather than re-querying it around a blocking verb, whose tens-of-ticks window makes the race systematic ([01-language/syntax-tiers.md](../01-language/syntax-tiers.md) accepts only the *adjacent-ops* guard race). All three sources below carry the ratified forms: bound targets (Q110), minable-scoped queries and fault-free verbs (Q117), and the wander tail the Tier-0 starter shares ([01-language.md](../01-language.md)).
 
 ## Drone (threat 1) — teaches Tier 1
 
@@ -40,12 +40,12 @@ Counterplay written in the code: hurt it and it *will* run — ambush the retrea
 ## Harvester (threat 2) — economic enemy
 
 ```python
-if exists(ore):
-    vein = closest(ore).expect()
-    move_to(vein)
-    mine()
-    move_to(home)
-    deposit()
+if exists_minable(ore):
+    vein = closest_minable(ore).expect()
+    try_move_to(vein)
+    try_mine()
+    try_move_to(home)
+    try_deposit()
 wander()
 wait(4)
 ```
