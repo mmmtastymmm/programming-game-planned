@@ -33,6 +33,14 @@ amendment. Refined goods resolve through their recipes, so the effective
 mining tier of a price is the deepest raw input it needs: Glass and Lens 0,
 Steel 1, Bronze and Wire 2, Chips and Gold Chip 4.
 
+**The seller-side corollary (P1 ruling, 2026-08-01): the rule binds on
+sellers too.** A structure priced above the ladder it *exclusively* sells is
+the same deadlock one step removed — the Upgrade Station prices in Chips
+(effective tier 4), which need drill grade 2, which only a Station sells.
+Such a seller must have a **granted instance in the starting state**: hence
+the ruined Upgrade Station in every start base, repairable for tier-0/1
+materials ([structures-and-start.md](structures-and-start.md)).
+
 Tools are bought at the **Upgrade Station** (Q105 folded the Fabricator's
 tool-making role into the one pad flow) and are **licensed by level** — a bot
 may buy a grade-N tool once *either* that track's level *or* its total level

@@ -689,6 +689,14 @@ fixed. Archived in full at [history/reviews.md](history/reviews.md).
 
 ## Decided-but-unbuilt (design ruled, implementation pending)
 
+- [ ] **Ruined Upgrade Station in the start base** (P1 ruling, 2026-08-01) — the
+      Red-Fabricator pattern: start-state generation places a ruined Upgrade Station
+      in every player base; repairable for tier-0/1 materials (`tuning.ron`) through
+      the existing repair flow; sells nothing until repaired. Closes the bootstrap
+      deadlock (Station prices in Chips → Crystal → drill grade 2 → Station). The
+      seller-side ladder corollary ([03-resources/harvest-tiers.md](03-resources/harvest-tiers.md))
+      is a load-time assert candidate alongside Q118's three. [sim][game]
+      ⚠HASH (start state changes)
 - [ ] **Function-granularity tree-shaking** (Q61) — deploy assembles the artifact from only
       the module functions transitively called by the program and its handlers
       ([01-language/modules-and-library.md](01-language/modules-and-library.md)); the sandbox

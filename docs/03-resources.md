@@ -27,11 +27,11 @@ cannot silently break another — not to save anyone reading the parts.
   [decided.md](03-resources/decided.md). No tool may be priced in a material
   its own ladder unlocks at or above the grade being bought. Three load-time
   assertions enforce it: anti-circularity, no orphan materials, no gaps.
-  **This rule is known to be too narrow.** Q118 scoped it to bind on the drill
-  alone, so it does not catch a *structure* priced above the ladder it sells —
-  which is exactly how [PROBLEMS.md](PROBLEMS.md) P1 (the colony cannot bootstrap
-  at all) got through. Treat the rule as necessary but not sufficient until P1 is
-  ruled on; the fix is expected to restate it to cover the class.
+  **The rule is now two-sided** (P1 ruling, 2026-08-01): it binds on sellers
+  too — a structure priced above the ladder it *exclusively* sells must have
+  a granted instance in the starting state, which is why a **ruined Upgrade
+  Station** stands in every start base
+  ([structures-and-start.md](03-resources/structures-and-start.md)).
 - **Energy is a rate and Data is a currency** — canonical in
   [the-tree.md](03-resources/the-tree.md). Neither is a pile in a depot, so
   neither obeys hauling, cargo, or the Request Box.

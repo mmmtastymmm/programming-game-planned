@@ -36,7 +36,10 @@ kit price in Bronze, sensing in the Sand → Glass → Lens chain, and compute
 starts cheap and escalates: **CPU 2 in Wire, 3 in Silver + Wire, 4 in Chips, 5
 in Gold Chips**. Three invariants are checked at load: anti-circularity, no
 orphan materials, and **no gaps** — every grade from 2 to a tool's ceiling has
-an entry, so no reachable level is dead.
+an entry, so no reachable level is dead. (The Station itself prices above the
+drill ladder it sells — Chips are effective tier 4 — so the first Station is
+a **ruin in the start base**, repairable for tier-0/1 materials: the P1
+ruling, [03-resources.md](../03-resources.md), Starting State.)
 
 **Only the compute family draws coolant** (Q119) — the CPU tool and the
 capacity buys below. Mechanical tools are not thermal and pay none; the
