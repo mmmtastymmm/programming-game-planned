@@ -29,16 +29,17 @@ moved the answered worksheet bodies (Q111–Q123) out of `QUESTIONS.md` into
 [history/questions-worksheets.md](history/questions-worksheets.md); citations
 into those bodies now point there.
 
-**Status 2026-08-01 (latest): 28 opened, 19 fixed.** P1 — the bootstrap
+**Status 2026-08-01 (latest): 28 opened, 20 fixed.** P1 — the bootstrap
 deadlock — ruled and closed in `2c56fdf` (ruined Upgrade Station in the
 start base). Earlier the same day the mechanical propagation batch — P8,
 P12, P13, P15–P17, P19, P21, P23, P24, P26, P28 — closed in `93d6b25`.
-9 remain open (P5, P7, P9–P11, P14, P18, P25, P27); P2
+8 remain open (P5, P9–P11, P14, P18, P25, P27); P2
 closed in `d90a428` (pacing table recomputed), P3 in `c1b26a7` (component
 BFS + non-minting visible hold), P4 in `e913c27` (try_ covers the action,
 never the argument), P22 in `09c3e62` (structure queries answer from
 faction knowledge), P6+P20 in `3e21e89` (both linear perks converted to
-the bounded hyperbolic).
+the bounded hyperbolic), P7 in `84e1e68` (starter walks try_, tail
+wanders).
 
 **Status 2026-08-01: 28 problems opened (P1–P28), 0 fixed.** P15–P18 were
 found by the reviews of the 04–09 doc split; P19–P28 by the same day's
@@ -89,55 +90,6 @@ claimed midpoint; and the **evaluation order is unstated** —
 `max_bonus * (level / (level + K))` is 0 at every level forever, and nothing in
 the spec rules that grouping out. A deterministic sim cannot leave that
 ambiguous.
-
-**P7 — the shipped Tier-0 starter faults to death on unreachable ore, and does
-nothing at all when no ore is minable. OPEN.**
-[01-language/syntax-tiers.md](01-language/syntax-tiers.md) (the shipped starter),
-[01-language/builtins.md](01-language/builtins.md) (`move_to`'s no-path fault)
-
-Two defects in one program, both introduced by Q117's rewrite:
-
-  - **No reachability guard.** The starter guards drill grade and ore remaining,
-    then unwraps into the **faulting** `move_to`. An Iron seam on the far bank
-    of a river (water is impassable; sight is not blocked by it) makes
-    `exists_minable(ore)` True, `closest_minable(ore)` return it, `.expect()`
-    unwrap Ok, and `move_to` hit "the normal no-path fault" (see [01-language/builtins.md](01-language/builtins.md)). Nothing in
-    the loop ever observes the node as unreachable, so the guard stays True and
-    the program faults **every iteration** — 2 HP a fault, a 40 HP chassis dead
-    in ~20, and every bot on the shipped program does it at the same seam
-    simultaneously. That is Q117's own fleet-killer re-entered through
-    unreachability instead of tier or depletion. `try_move_to` was added to the
-    start kit in the same change as "the fault-free walk" and goes unused. (Note
-    the interaction with **P4**: the obvious rewrite,
-    `try_move_to(closest_minable(ore))`, is itself a fault until P4 is settled.)
-
-  - **No fallback branch.** When `exists_minable(ore)` is False, both guards
-    fail closed and the program does nothing — no fault, no error template, no
-    thought cloud. Start-zone nodes are finite by design, so once a colony works
-    out the ore its grade-1 drill can reach, every bot walks to the depot, gets
-    False from `try_deposit()`, and loops **silently, forever**: a full fleet
-    pacing between depot and nothing, paying upkeep against the fleet cap, with
-    zero diagnostics. Q117 removed the fault that used to announce this
-    condition without specifying a replacement signal. `wander` and `explore`
-    are both already in the start kit — docs/04's Feral Harvester uses the
-    identical guard followed by `wander()`.
-
-**P27 — solid structures have no slot in the ratified tile-composition
-model. OPEN.**
-[05-terrain/tile-composition.md:9](05-terrain/tile-composition.md) ("An
-unwalkable building (exclusive)... the Barricade today — owns its tile
-outright: it shares with *nothing*"); Q98's Pump in [TASKS.md](TASKS.md)
-(both tiles solid, the intake *in* a Water tile)
-
-The physical model is a strict either/or: exclusive unwalkable building, or
-walkable ground stack. The Pump intake is a solid structure standing in
-Water it must keep (it pumps it) — a share the shares-with-nothing class
-forbids — and solid structures generally (Depot, printers, nests: the tiles
-Q120's displacement BFS excludes) are assigned to neither class. Needs one
-ruling on where structure solidity lives (tile-kind replacement like the
-Barricade, or a contents slot the model currently omits); the answer decides
-whether paint and overlays survive under a structure and what demolition
-leaves behind.
 
 ---
 
@@ -446,6 +398,60 @@ are the two fixes.
 
 *(Resolution: converted to Q121's bounded hyperbolic with `max_cut` below
 100% — the prologue shortens, never vanishes. Ruled together with P20.)*
+
+**P7 — the shipped Tier-0 starter faults to death on unreachable ore, and does
+nothing at all when no ore is minable. FIXED (`84e1e68`).**
+[01-language/syntax-tiers.md](01-language/syntax-tiers.md) (the shipped starter),
+[01-language/builtins.md](01-language/builtins.md) (`move_to`'s no-path fault)
+
+Two defects in one program, both introduced by Q117's rewrite:
+
+  - **No reachability guard.** The starter guards drill grade and ore remaining,
+    then unwraps into the **faulting** `move_to`. An Iron seam on the far bank
+    of a river (water is impassable; sight is not blocked by it) makes
+    `exists_minable(ore)` True, `closest_minable(ore)` return it, `.expect()`
+    unwrap Ok, and `move_to` hit "the normal no-path fault" (see [01-language/builtins.md](01-language/builtins.md)). Nothing in
+    the loop ever observes the node as unreachable, so the guard stays True and
+    the program faults **every iteration** — 2 HP a fault, a 40 HP chassis dead
+    in ~20, and every bot on the shipped program does it at the same seam
+    simultaneously. That is Q117's own fleet-killer re-entered through
+    unreachability instead of tier or depletion. `try_move_to` was added to the
+    start kit in the same change as "the fault-free walk" and goes unused. (Note
+    the interaction with **P4**: the obvious rewrite,
+    `try_move_to(closest_minable(ore))`, is itself a fault until P4 is settled.)
+
+  - **No fallback branch.** When `exists_minable(ore)` is False, both guards
+    fail closed and the program does nothing — no fault, no error template, no
+    thought cloud. Start-zone nodes are finite by design, so once a colony works
+    out the ore its grade-1 drill can reach, every bot walks to the depot, gets
+    False from `try_deposit()`, and loops **silently, forever**: a full fleet
+    pacing between depot and nothing, paying upkeep against the fleet cap, with
+    zero diagnostics. Q117 removed the fault that used to announce this
+    condition without specifying a replacement signal. `wander` and `explore`
+    are both already in the start kit — docs/04's Feral Harvester uses the
+    identical guard followed by `wander()`.
+
+**P27 — solid structures have no slot in the ratified tile-composition
+model. OPEN.**
+[05-terrain/tile-composition.md:9](05-terrain/tile-composition.md) ("An
+unwalkable building (exclusive)... the Barricade today — owns its tile
+outright: it shares with *nothing*"); Q98's Pump in [TASKS.md](TASKS.md)
+(both tiles solid, the intake *in* a Water tile)
+
+The physical model is a strict either/or: exclusive unwalkable building, or
+walkable ground stack. The Pump intake is a solid structure standing in
+Water it must keep (it pumps it) — a share the shares-with-nothing class
+forbids — and solid structures generally (Depot, printers, nests: the tiles
+Q120's displacement BFS excludes) are assigned to neither class. Needs one
+ruling on where structure solidity lives (tile-kind replacement like the
+Barricade, or a contents slot the model currently omits); the answer decides
+whether paint and overlays survive under a structure and what demolition
+leaves behind.
+
+*(Resolution: both walking legs became `try_move_to` (P4-legal composition)
+and the starter gained the unconditional `wander()` tail — the Feral
+Harvester's idiom. Unreachable ore is a False, not a fault-loop; an
+out-of-ore fleet searches visibly instead of stalling silently.)*
 
 **P8 — `investment()` still sums deleted capability tiers. FIXED (`93d6b25`).**
 [07-architecture/vm.md:13](07-architecture/vm.md),
