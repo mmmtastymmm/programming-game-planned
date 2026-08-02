@@ -29,6 +29,11 @@ moved the answered worksheet bodies (Q111–Q123) out of `QUESTIONS.md` into
 [history/questions-worksheets.md](history/questions-worksheets.md); citations
 into those bodies now point there.
 
+**Status 2026-08-01 (later): 28 opened, 12 fixed.** The mechanical
+propagation batch — P8, P12, P13, P15–P17, P19, P21, P23, P24, P26,
+P28 — closed in `93d6b25`; 16 remain open (P1–P7, P9–P11, P14, P18,
+P20, P22, P25, P27).
+
 **Status 2026-08-01: 28 problems opened (P1–P28), 0 fixed.** P15–P18 were
 found by the reviews of the 04–09 doc split; P19–P28 by the same day's
 full-corpus consistency audit (post-split, commit `406c837`). Appended below —
@@ -289,30 +294,6 @@ leaves behind.
 
 These need no ruling; the decision exists and the text was not propagated.
 
-**P8 — `investment()` still sums deleted capability tiers. OPEN.**
-[07-architecture/vm.md:13](07-architecture/vm.md),
-[01-language/program-colors.md:47](01-language/program-colors.md) (the ghost-exemption bullet),
-[02-agents/decided.md](02-agents/decided.md), [TASKS.md](TASKS.md)
-
-Q115 cut the Backup Core and Q111 deleted `Capability` and the tier catalog.
-[01-language/program-colors.md](01-language/program-colors.md) and [02-agents/xp-and-specialization.md](02-agents/xp-and-specialization.md) were
-updated to "lifetime XP plus the value of installed tools" — but the scrap
-valve's spec in **07-architecture.md** (the doc an implementer builds phase 8
-from), the ghost-exemption bullet in **01-language.md** *three lines below the
-corrected one*, and the **Decided entry that owns the ruling** in 02-agents.md
-all still read "lifetime XP plus bought capability-tier value … so a Backup-Core
-reprint's tier-4 hardware is never mistaken for a rookie."
-
-An implementer following docs/07 has no `capability_tier` field to sum, so the
-hardware term evaluates to nothing and `investment()` degenerates to raw
-lifetime XP. On the first sustained Steel shortfall with `rust_scraps` on, the
-valve ranks a bot carrying grade-5 drill, optics and CPU **below** a rookie
-hauler with slightly more Mileage — it spent the match on a pad and in transit,
-so its XP is lower — recalls it, and dismantles the colony's single largest
-hardware investment for a partial refund. That is exactly the failure Q105-R3
-was written to close. docs/01 additionally now gives two different formulas for
-the same selection twelve lines apart.
-
 **P9 — docs/02's *Decided* section was never swept. OPEN.**
 [02-agents/decided.md:14](02-agents/decided.md) (the `100×n` curve), `:12` (Q68 upkeep),
 plus the module-slot and Optics entries in the same file
@@ -386,43 +367,6 @@ Separately, [03-resources/the-tree.md:94](03-resources/the-tree.md) still routes
 supply chain into "The **Optics module** (2 Lens + 1 Bronze)" — a deleted
 catalog entry — leaving **Lens with no priced consumer anywhere in the design**.
 
-**P12 — two identical "Cycles per tick" rows with contradictory growth sources.
-OPEN.**
-[02-agents/stat-sheet.md:15](02-agents/stat-sheet.md) vs `:20` (also
-`:66`; [03-resources/the-tree.md](03-resources/the-tree.md);
-[06-progression/scopes.md:20](06-progression/scopes.md))
-
-Line 40 says cycles per tick is grown by "**Upgrade Station** (walk there, pay
-Chips)" — a flat buy — while line 45 says it is grown by the "**CPU tool**
-(Upgrade Station), licensed by the **Processing track**." Q111 moved cycles off
-flat buys onto the tool/licence model ([02-agents/anatomy.md](02-agents/anatomy.md): "Cycles
-per tick is the CPU tool"), so line 40 states the superseded model.
-
-Before this sweep the second row carried the suffix "— see the Processor
-capability" in its Stat column, which marked it as the cross-reference rather
-than a second canonical row; the edit deleted the marker, leaving **two
-indistinguishable canonical rows for the single most contested stat in the
-game**. An implementer building `stats.ron` from the sheet gets two conflicting
-growth sources for one stat, and line 45 still closes in the deleted model's
-language ("joins Q105's capability model — buy the tier, then sharpen it by
-working").
-
-**P13 — `repair()` gates the rescue verb on both the new grade and the deleted
-Building tier. OPEN.**
-[01-language/builtins.md:24](01-language/builtins.md) (the `repair()` row)
-
-The builtin row was edited in place without deleting the old clause, so one cell
-now reads: "field repair of a wreck needs **a build tool of grade ≥ 2** (Q105-R2,
-restated for Q111); on a wreck = field repair (the rescue verb), which needs
-**Building tier ≥ 2** (Q105-R2 — the replacement for the deleted build-tool
-gate)." Q111 deleted capability tiers entirely
-([history/questions-worksheets.md:22](history/questions-worksheets.md): "TIERS
-ARE REMOVED"), so the trailing clause gates the rescue verb on a stat no bot has,
-and its parenthetical asserts the opposite of the sentence in front of it.
-
-This is the **sole surviving "Building tier" reference in docs/01–09** — the one
-cell the mechanical propagation missed.
-
 **P14 — the `XP gain` stat row was deleted, but two quirks still modify it.
 OPEN.**
 [02-agents/stat-sheet.md](02-agents/stat-sheet.md) (the deleted row and the canonicity rule),
@@ -445,59 +389,6 @@ An implementer building `stats.ron` from the canonical sheet ships no XP-gain
 stat and the two quirks have nothing to apply to; the modifier-pipeline position
 and the pessimistic-rounding rule for that multiplier are gone with the row.
 
-**P15 — the disconnect ruling's footnote points PvP disconnects at "open
-questions", but they are decided two bullets down. OPEN.**
-[08-multiplayer/decided.md:11](08-multiplayer/decided.md)
-
-The colony-keeps-running ruling closes with "(Decided for co-op / non-harm
-play; PvP disconnects need more thought — see open questions.)" — stale since
-"PvP disconnects: free farm until reconnect" was ratified in the same Decided
-section; there is no open question to see. The fix is a one-clause pointer
-("see below"). Registered rather than silently reworded so the 04–09 doc
-split stays a byte-exact move of decided text.
-
-**P16 — the Drone's and Stinger's verbatim sources still check-then-act
-across a blocking `move_to`, the pattern Q110 ruled out. OPEN.**
-[04-enemies/archetypes.md:18](04-enemies/archetypes.md)–`:19` (Drone),
-`:31`–`:32` (Stinger); the ruling inside Q117's answer
-([history/questions-answered.md](history/questions-answered.md))
-
-Q110's ruling — "bind once, never check-then-act", recorded inside Q117's
-answer and cited by [01-language/syntax-tiers.md:29](01-language/syntax-tiers.md)
-("the bug Q110 ruled against") — rules out re-querying a target around a
-blocking verb, whose tens-of-ticks window "is what made Q110's Feral race a
-systematic bug"
-([history/questions-worksheets.md:247](history/questions-worksheets.md)–`:248`).
-The ratified Drone and the ratified Stinger both do exactly that — the
-byte-identical pair `move_to(closest(enemy).expect())` then
-`attack(closest(enemy).expect())`. Same left-behind class as P10's Harvester.
-Until the sources are re-synced, the first combat programs a player decrypts
-teach the racing form Q108 says shipped source must never teach. (The doorway's Q110
-open-question entry was retired with the split — the question is answered;
-this register entry replaces it.)
-
-**P17 — the "hardware is Chips-priced" shorthand survives in four places,
-contradicting the ratified tool pricing it summarizes. OPEN.**
-[06-progression/scopes.md:10](06-progression/scopes.md) (the per-match row)
-and `:20` (the three-scopes list),
-[06-progression/unlock-tree.md:67](06-progression/unlock-tree.md) (the axis
-sentence), [02-agents/decided.md:11](02-agents/decided.md) (the compute-stats
-ruling's "(Chips — …)" gloss); the pricing in
-[06-progression/upgrade-station.md:30](06-progression/upgrade-station.md)–`:59`
-
-All four lines gloss hardware buys as Chips-priced, but the owning part
-prices tool grades by resource role — *Bronze arms, Chips think* — across
-Steel, Bronze, Sand/Glass/Lens, Wire and Silver, with Chips entering only at
-CPU grade 4, and deliberately starts every flat capacity buy on **Wire**
-rather than Chips (upgrade-station.md: "These start on **Wire** rather than
-Chips deliberately"). A reader taking the shorthand at face value concludes
-Chips are the hardware currency and mis-plans the material gating of nine of
-ten tools; the same shorthand in the 06 doorway intro was corrected in the
-2026-08-01 sweep. The fix is a wording pass on the four lines (e.g.
-"hardware (Upgrade Station)" or "hardware (materials by role)"), not a
-pricing change — closing this entry requires re-grepping for the shorthand,
-not just fixing the lines listed here.
-
 **P18 — the hijack ruling still credits the deleted Boot XP track. OPEN.**
 [04-enemies/capturing-wrecks.md:5](04-enemies/capturing-wrecks.md) ("counts
 as a rescue boot for its Boot track");
@@ -519,66 +410,6 @@ no record. Same left-behind class as P14's Learning-track modifiers; the
 clause needs a ruling-side sweep (drop the award, or re-home it on a
 surviving track), not a silent reword.
 
-**P19 — the Q77 Command inventory omits `ClaimNest` and `RazeNest`. OPEN.**
-[07-architecture/world-state.md:30](07-architecture/world-state.md) ("the
-ONLY external inputs to sim (Q77: list completed"),
-[08-multiplayer/decided.md:15](08-multiplayer/decided.md) (Q86 names both);
-[TASKS.md](TASKS.md)
-
-The inventory declares itself complete, but Q86's authorization ruling
-explicitly lists `ClaimNest` and `RazeNest` among the cross-faction commands
-the relay binds to the sender's faction, and TASKS.md specifies their
-effects ("RazeNest banks the Data bounty, ClaimNest converts it").
-`ClaimNest` appears nowhere in docs/07. An implementer building the command
-layer from the canonical inventory ships a sim in which nest conversion —
-the gate on every printer/color past the second — has no input path; and
-because Commands are the lockstep input stream, implementations that
-disagree here also disagree on Q86's forgery-protection set.
-
-**P21 — Q117's branching-at-start never propagated to three "`if` is an
-unlock" passages. OPEN.**
-[06-progression/unlock-tree.md:76](06-progression/unlock-tree.md) (Design
-Rule 2: "The player wants `if` because they *felt* its absence") vs the same
-file's START node (`:7` grants **if / elif / else** at game start);
-[01-language.md:6](01-language.md) ("Construct gating — `if`, loops,
-variables, `def` are *unlockable features*");
-[00-overview.md:66](00-overview.md) (glossary Construct entry)
-
-Q117 granted branching at game start (the guarded starter needs it). The
-tree's START node was updated; the prose was not: the 01 doorway invariant
-and the overview glossary still name `if` as the flagship unlockable, and
-Design Rule 2 still sells the tree with the example the ruling deleted. A
-data author pricing constructs from the doorway adds a research cost to
-branching — no tree node exists for it — and a fresh account then cannot
-load the shipped Tier-0 starter, which opens with `if exists_minable(ore):`.
-
-**P23 — the execution model still grows compute through the deleted
-"Processor capability (tier × level)". OPEN.**
-[01-language/execution-model.md:29](01-language/execution-model.md)
-("Compute grows instead through the **Processor capability** (tier ×
-level — [02-agents.md](01-language/../02-agents.md))")
-
-Q111 removed tiers and the capability model; cycles per tick is the CPU tool
-(grades 1–5, licensed by the Processing track —
-[02-agents/anatomy.md](02-agents/anatomy.md),
-[06-progression/upgrade-station.md](06-progression/upgrade-station.md)). The
-Q100 ruling's closing sentence — in the execution-model part an implementer
-of the cycle economy reads first — still cites the deleted formula. Not
-covered by P8 (the investment formula) or P12 (the stat-sheet rows).
-
-**P24 — the 01-language doorway's parts table says "Tiers 0–6"; the part
-defines Tiers 0–7. OPEN.**
-[01-language.md:17](01-language.md) vs
-[01-language/syntax-tiers.md:131](01-language/syntax-tiers.md) ("## Tier 7 —
-Channels") and [01-language/builtins.md:39](01-language/builtins.md)
-(`send` "Requires Tier 7")
-
-The ownership table's tier count predates the channels tier. A gating or
-renumbering change made against the doorway's 0–6 ladder drops or misplaces
-the parse-time gate on `send`/`receive` — a deploy-validation divergence
-between peers, and the doorway-drift failure the split convention exists to
-catch.
-
 **P25 — two quirks modify a "boot ritual" duration that names no stat-sheet
 row. OPEN.**
 [09-quirks/catalog.md:22](09-quirks/catalog.md) (**Hot Reload**: "boot
@@ -592,32 +423,6 @@ are different rows), and Hot Reload even cites the stat sheet as its home.
 Same left-behind class as P14's XP-gain quirks, different stat: either the
 sheet gains a boot-ritual-duration row (with modifier-pipeline position and
 rounding rule) or the two quirks need re-speccing.
-
-**P26 — the Scouting income row still asserts "no seen-tile set", which Q94
-overturned. OPEN.**
-[02-agents/xp-and-specialization.md:13](02-agents/xp-and-specialization.md)
-("Q83 — sim events; no seen-tile set, so eyes-only fog stays stateless") vs
-[05-terrain/decided.md:12](05-terrain/decided.md) ("Seen tiles are sim
-state", answers Q94) and
-[07-architecture/tick-model.md:28](07-architecture/tick-model.md) (the
-phase-5 per-faction map writes)
-
-Q94 made the per-faction known-tiles set hashed sim state; the Scouting
-row's parenthetical still asserts the pre-Q94 stateless model. An
-implementer deriving discovery events from an ad-hoc structure instead of
-the phase-5 writes diverges on when "node discovered" fires — divergent
-Scouting XP and Data awards are a replay-hash desync.
-
-**P28 — the function-block scope row still gates some functions on a "tool
-module". OPEN.**
-[06-progression/scopes.md:19](06-progression/scopes.md) ("some also need a
-tool module on the bot")
-
-Q111 deleted the slotted-module catalog (P11 records the other survivors);
-the per-bot gate on function blocks is tool *grade* (e.g. `hijack()` needs a
-build tool of grade ≥ 2). The row sends readers hunting a module catalog
-that no longer exists anywhere in the design. A one-clause fix, registered
-rather than silently reworded because the text is ratified.
 
 ---
 
@@ -645,4 +450,204 @@ are not re-raised:
 
 ## Fixed
 
-*(none yet — move entries here with the fixing commit's hash when they close)*
+*(entries move here with the fixing commit's hash when they close)*
+
+**P8 — `investment()` still sums deleted capability tiers. FIXED (`93d6b25`).**
+[07-architecture/vm.md:13](07-architecture/vm.md),
+[01-language/program-colors.md:47](01-language/program-colors.md) (the ghost-exemption bullet),
+[02-agents/decided.md](02-agents/decided.md), [TASKS.md](TASKS.md)
+
+Q115 cut the Backup Core and Q111 deleted `Capability` and the tier catalog.
+[01-language/program-colors.md](01-language/program-colors.md) and [02-agents/xp-and-specialization.md](02-agents/xp-and-specialization.md) were
+updated to "lifetime XP plus the value of installed tools" — but the scrap
+valve's spec in **07-architecture.md** (the doc an implementer builds phase 8
+from), the ghost-exemption bullet in **01-language.md** *three lines below the
+corrected one*, and the **Decided entry that owns the ruling** in 02-agents.md
+all still read "lifetime XP plus bought capability-tier value … so a Backup-Core
+reprint's tier-4 hardware is never mistaken for a rookie."
+
+An implementer following docs/07 has no `capability_tier` field to sum, so the
+hardware term evaluates to nothing and `investment()` degenerates to raw
+lifetime XP. On the first sustained Steel shortfall with `rust_scraps` on, the
+valve ranks a bot carrying grade-5 drill, optics and CPU **below** a rookie
+hauler with slightly more Mileage — it spent the match on a pad and in transit,
+so its XP is lower — recalls it, and dismantles the colony's single largest
+hardware investment for a partial refund. That is exactly the failure Q105-R3
+was written to close. docs/01 additionally now gives two different formulas for
+the same selection twelve lines apart.
+
+**P12 — two identical "Cycles per tick" rows with contradictory growth sources.
+FIXED (`93d6b25`).**
+[02-agents/stat-sheet.md:15](02-agents/stat-sheet.md) vs `:20` (also
+`:66`; [03-resources/the-tree.md](03-resources/the-tree.md);
+[06-progression/scopes.md:20](06-progression/scopes.md))
+
+Line 40 says cycles per tick is grown by "**Upgrade Station** (walk there, pay
+Chips)" — a flat buy — while line 45 says it is grown by the "**CPU tool**
+(Upgrade Station), licensed by the **Processing track**." Q111 moved cycles off
+flat buys onto the tool/licence model ([02-agents/anatomy.md](02-agents/anatomy.md): "Cycles
+per tick is the CPU tool"), so line 40 states the superseded model.
+
+Before this sweep the second row carried the suffix "— see the Processor
+capability" in its Stat column, which marked it as the cross-reference rather
+than a second canonical row; the edit deleted the marker, leaving **two
+indistinguishable canonical rows for the single most contested stat in the
+game**. An implementer building `stats.ron` from the sheet gets two conflicting
+growth sources for one stat, and line 45 still closes in the deleted model's
+language ("joins Q105's capability model — buy the tier, then sharpen it by
+working").
+
+**P13 — `repair()` gates the rescue verb on both the new grade and the deleted
+Building tier. FIXED (`93d6b25`).**
+[01-language/builtins.md:24](01-language/builtins.md) (the `repair()` row)
+
+The builtin row was edited in place without deleting the old clause, so one cell
+now reads: "field repair of a wreck needs **a build tool of grade ≥ 2** (Q105-R2,
+restated for Q111); on a wreck = field repair (the rescue verb), which needs
+**Building tier ≥ 2** (Q105-R2 — the replacement for the deleted build-tool
+gate)." Q111 deleted capability tiers entirely
+([history/questions-worksheets.md:22](history/questions-worksheets.md): "TIERS
+ARE REMOVED"), so the trailing clause gates the rescue verb on a stat no bot has,
+and its parenthetical asserts the opposite of the sentence in front of it.
+
+This is the **sole surviving "Building tier" reference in docs/01–09** — the one
+cell the mechanical propagation missed.
+
+**P15 — the disconnect ruling's footnote points PvP disconnects at "open
+questions", but they are decided two bullets down. FIXED (`93d6b25`).**
+[08-multiplayer/decided.md:11](08-multiplayer/decided.md)
+
+The colony-keeps-running ruling closes with "(Decided for co-op / non-harm
+play; PvP disconnects need more thought — see open questions.)" — stale since
+"PvP disconnects: free farm until reconnect" was ratified in the same Decided
+section; there is no open question to see. The fix is a one-clause pointer
+("see below"). Registered rather than silently reworded so the 04–09 doc
+split stays a byte-exact move of decided text.
+
+**P16 — the Drone's and Stinger's verbatim sources still check-then-act
+across a blocking `move_to`, the pattern Q110 ruled out. FIXED (`93d6b25`).**
+[04-enemies/archetypes.md:18](04-enemies/archetypes.md)–`:19` (Drone),
+`:31`–`:32` (Stinger); the ruling inside Q117's answer
+([history/questions-answered.md](history/questions-answered.md))
+
+Q110's ruling — "bind once, never check-then-act", recorded inside Q117's
+answer and cited by [01-language/syntax-tiers.md:29](01-language/syntax-tiers.md)
+("the bug Q110 ruled against") — rules out re-querying a target around a
+blocking verb, whose tens-of-ticks window "is what made Q110's Feral race a
+systematic bug"
+([history/questions-worksheets.md:247](history/questions-worksheets.md)–`:248`).
+The ratified Drone and the ratified Stinger both do exactly that — the
+byte-identical pair `move_to(closest(enemy).expect())` then
+`attack(closest(enemy).expect())`. Same left-behind class as P10's Harvester.
+Until the sources are re-synced, the first combat programs a player decrypts
+teach the racing form Q108 says shipped source must never teach. (The doorway's Q110
+open-question entry was retired with the split — the question is answered;
+this register entry replaces it.)
+
+**P17 — the "hardware is Chips-priced" shorthand survives in four places,
+contradicting the ratified tool pricing it summarizes. FIXED (`93d6b25`).**
+[06-progression/scopes.md:10](06-progression/scopes.md) (the per-match row)
+and `:20` (the three-scopes list),
+[06-progression/unlock-tree.md:67](06-progression/unlock-tree.md) (the axis
+sentence), [02-agents/decided.md:11](02-agents/decided.md) (the compute-stats
+ruling's "(Chips — …)" gloss); the pricing in
+[06-progression/upgrade-station.md:30](06-progression/upgrade-station.md)–`:59`
+
+All four lines gloss hardware buys as Chips-priced, but the owning part
+prices tool grades by resource role — *Bronze arms, Chips think* — across
+Steel, Bronze, Sand/Glass/Lens, Wire and Silver, with Chips entering only at
+CPU grade 4, and deliberately starts every flat capacity buy on **Wire**
+rather than Chips (upgrade-station.md: "These start on **Wire** rather than
+Chips deliberately"). A reader taking the shorthand at face value concludes
+Chips are the hardware currency and mis-plans the material gating of nine of
+ten tools; the same shorthand in the 06 doorway intro was corrected in the
+2026-08-01 sweep. The fix is a wording pass on the four lines (e.g.
+"hardware (Upgrade Station)" or "hardware (materials by role)"), not a
+pricing change — closing this entry requires re-grepping for the shorthand,
+not just fixing the lines listed here.
+
+**P19 — the Q77 Command inventory omits `ClaimNest` and `RazeNest`. FIXED (`93d6b25`).**
+[07-architecture/world-state.md:30](07-architecture/world-state.md) ("the
+ONLY external inputs to sim (Q77: list completed"),
+[08-multiplayer/decided.md:15](08-multiplayer/decided.md) (Q86 names both);
+[TASKS.md](TASKS.md)
+
+The inventory declares itself complete, but Q86's authorization ruling
+explicitly lists `ClaimNest` and `RazeNest` among the cross-faction commands
+the relay binds to the sender's faction, and TASKS.md specifies their
+effects ("RazeNest banks the Data bounty, ClaimNest converts it").
+`ClaimNest` appears nowhere in docs/07. An implementer building the command
+layer from the canonical inventory ships a sim in which nest conversion —
+the gate on every printer/color past the second — has no input path; and
+because Commands are the lockstep input stream, implementations that
+disagree here also disagree on Q86's forgery-protection set.
+
+**P21 — Q117's branching-at-start never propagated to three "`if` is an
+unlock" passages. FIXED (`93d6b25`).**
+[06-progression/unlock-tree.md:76](06-progression/unlock-tree.md) (Design
+Rule 2: "The player wants `if` because they *felt* its absence") vs the same
+file's START node (`:7` grants **if / elif / else** at game start);
+[01-language.md:6](01-language.md) ("Construct gating — `if`, loops,
+variables, `def` are *unlockable features*");
+[00-overview.md:66](00-overview.md) (glossary Construct entry)
+
+Q117 granted branching at game start (the guarded starter needs it). The
+tree's START node was updated; the prose was not: the 01 doorway invariant
+and the overview glossary still name `if` as the flagship unlockable, and
+Design Rule 2 still sells the tree with the example the ruling deleted. A
+data author pricing constructs from the doorway adds a research cost to
+branching — no tree node exists for it — and a fresh account then cannot
+load the shipped Tier-0 starter, which opens with `if exists_minable(ore):`.
+
+**P23 — the execution model still grows compute through the deleted
+"Processor capability (tier × level)". FIXED (`93d6b25`).**
+[01-language/execution-model.md:29](01-language/execution-model.md)
+("Compute grows instead through the **Processor capability** (tier ×
+level — [02-agents.md](01-language/../02-agents.md))")
+
+Q111 removed tiers and the capability model; cycles per tick is the CPU tool
+(grades 1–5, licensed by the Processing track —
+[02-agents/anatomy.md](02-agents/anatomy.md),
+[06-progression/upgrade-station.md](06-progression/upgrade-station.md)). The
+Q100 ruling's closing sentence — in the execution-model part an implementer
+of the cycle economy reads first — still cites the deleted formula. Not
+covered by P8 (the investment formula) or P12 (the stat-sheet rows).
+
+**P24 — the 01-language doorway's parts table says "Tiers 0–6"; the part
+defines Tiers 0–7. FIXED (`93d6b25`).**
+[01-language.md:17](01-language.md) vs
+[01-language/syntax-tiers.md:131](01-language/syntax-tiers.md) ("## Tier 7 —
+Channels") and [01-language/builtins.md:39](01-language/builtins.md)
+(`send` "Requires Tier 7")
+
+The ownership table's tier count predates the channels tier. A gating or
+renumbering change made against the doorway's 0–6 ladder drops or misplaces
+the parse-time gate on `send`/`receive` — a deploy-validation divergence
+between peers, and the doorway-drift failure the split convention exists to
+catch.
+
+**P26 — the Scouting income row still asserts "no seen-tile set", which Q94
+overturned. FIXED (`93d6b25`).**
+[02-agents/xp-and-specialization.md:13](02-agents/xp-and-specialization.md)
+("Q83 — sim events; no seen-tile set, so eyes-only fog stays stateless") vs
+[05-terrain/decided.md:12](05-terrain/decided.md) ("Seen tiles are sim
+state", answers Q94) and
+[07-architecture/tick-model.md:28](07-architecture/tick-model.md) (the
+phase-5 per-faction map writes)
+
+Q94 made the per-faction known-tiles set hashed sim state; the Scouting
+row's parenthetical still asserts the pre-Q94 stateless model. An
+implementer deriving discovery events from an ad-hoc structure instead of
+the phase-5 writes diverges on when "node discovered" fires — divergent
+Scouting XP and Data awards are a replay-hash desync.
+
+**P28 — the function-block scope row still gates some functions on a "tool
+module". FIXED (`93d6b25`).**
+[06-progression/scopes.md:19](06-progression/scopes.md) ("some also need a
+tool module on the bot")
+
+Q111 deleted the slotted-module catalog (P11 records the other survivors);
+the per-bot gate on function blocks is tool *grade* (e.g. `hijack()` needs a
+build tool of grade ≥ 2). The row sends readers hunting a module catalog
+that no longer exists anywhere in the design. A one-clause fix, registered
+rather than silently reworded because the text is ratified.
