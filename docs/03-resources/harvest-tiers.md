@@ -36,8 +36,9 @@ Steel 1, Bronze and Wire 2, Chips and Gold Chip 4.
 **The seller-side corollary (P1 ruling, 2026-08-01): the rule binds on
 sellers too.** A structure priced above the ladder it *exclusively* sells is
 the same deadlock one step removed — the Upgrade Station prices in Chips
-(effective tier 4 — Crystal needs a **grade-4** drill, and even the Foundry's
-Bronze needs grade 2), grades only a Station sells.
+(effective tier 4): Crystal needs a **grade-4** drill and even the Foundry's
+Bronze needs grade 2 — and every drill grade above the free first is sold
+only at a Station.
 Such a seller must have a **granted instance in the starting state**: hence
 the ruined Upgrade Station in every start base, repairable for tier-0/1
 materials ([structures-and-start.md](structures-and-start.md)).

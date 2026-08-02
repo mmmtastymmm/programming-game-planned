@@ -87,9 +87,9 @@ with a deliberate **two-tier target**: a bot doing nothing else reaches **L5 in 
 | Building | 10 /tick | 4,000 | | Mileage | ~7 /tick | 14,000 |
 | Scouting | ~20 /tick | 8,000 | | Hiding | ~5 /tick | 10,000 |
 | Combat | ~10 /tick effective | 4,000 | | Age | 2 /tick | 4,000 |
-| Hauling | ~1.4 /tick | 560 | | Flinch | ~1 /tick | 2,000 |
+| Hauling | ~1.43 /tick | 571 | | Flinch | ~1 /tick | 2,000 |
 
-**The job rates are derived, not chosen** (the P2 correction — the original Mining row substituted ~80/tick, 8× the docs' own yield): Mining = 2 units/swing × 100 centi over a ~20-tick swing = **10 centi/tick**; Hauling = cargo 4 × 100 centi per 10 tiles at 14 ticks/tile, empty on the return = **~1.4 centi/tick**; Building assumes **~1 progress/tick** on the pad (per-entry build times are tuning); Scouting (frontier density) and Combat (fight duty) are duty-cycle placeholders. A rate here is the arithmetic of the income constants above against [03-resources.md](../03-resources.md)'s action times — change either input and this table must be recomputed, never re-guessed.
+**The job rates are derived, not chosen** (the P2 correction — the original Mining row substituted ~80/tick, 8× the docs' own yield): Mining = 2 units/swing × 100 centi over a ~20-tick swing = **10 centi/tick**; Hauling = cargo 4 × 100 centi per 10 tiles at 14 ticks/tile, empty on the return = 400/280 = **10/7 ≈ 1.43 centi/tick** (the base is the exact `(400 × 400)/280 = 571`, floored — never the display-rounded rate); Building assumes **~1 progress/tick** on the pad (per-entry build times are tuning); Scouting (frontier density) and Combat (fight duty) are duty-cycle placeholders. A rate here is the arithmetic of the income constants above against [03-resources.md](../03-resources.md)'s action times — change either input and this table must be recomputed, never re-guessed.
 
 Three to watch in playtest: **Combat**'s effective rate is a placeholder (its in-fight rate is ~100 centi/tick and its duty cycle is whatever the match gives it) and its 2,500-centi kill bonus is 60% of a first level; **Hauling**'s base is the lowest by far, so hauling levels are cheap for everyone and a dedicated hauler out-levels a part-timer by only ~1.8× where mining's margin is far wider; **Processing**'s rate scales with cycles, which its own tool buys.
 

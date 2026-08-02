@@ -147,6 +147,7 @@ corollary in [harvest-tiers.md](03-resources/harvest-tiers.md).)*
 
 *(Amended: the ruling text's bootstrap chain misstated Crystal as drill-grade-2
 reachable (it is tier 4 — grade 4); corrected in all three carriers, `c87ee66`.)*
+
 **P2 — Mining's `curve_base` is derived from a rate 8× the docs' own mine yield.
 FIXED (`d90a428`).**
 [02-agents/xp-and-specialization.md:74](02-agents/xp-and-specialization.md) (the pacing table),
@@ -183,6 +184,7 @@ derivation paragraph added so the table is recomputed, never re-guessed.)*
 
 *(Amended: Hauling's curve_base failed its own derivation (600 vs ~1.4 × 400);
 corrected to 560 in `c87ee66`.)*
+
 **P3 — Q120 both mandates and forbids the same silent hold. FIXED (`c1b26a7`). ⚠HASH**
 [03-resources/decided.md:8](03-resources/decided.md) ("HOLDS — silently") and
 [03-resources/decided.md:10](03-resources/decided.md) ("never hold"); also
@@ -271,6 +273,7 @@ that every perk grants ≥ 1 unit by its track's L5.)*
 
 *(Amended: the Hiding/Flinch stat-sheet rows still wrote the unparenthesized
 grouping; swept in `c87ee66`.)*
+
 **P6 — the Flinch perk saturates to zero, deleting the forced prologue
 outright. FIXED (`3e21e89`).**
 [02-agents/xp-and-specialization.md:54](02-agents/xp-and-specialization.md) (the Flinch row),
@@ -325,8 +328,12 @@ and the starter gained the unconditional `wander()` tail — the Feral
 Harvester's idiom. Unreachable ore is a False, not a fault-loop; an
 out-of-ore fleet searches visibly instead of stalling silently.)*
 
-*(Amended: this resolution note was misfiled under P27's entry by the e125abc
+*(Amended: the same audit ratified the try_ pass-assignment rule this fix
+created the need for — a `try_` verb resolves in its sibling's pass, spec in
+[07-architecture/tick-model.md](07-architecture/tick-model.md) (`c87ee66`).
+Also: this resolution note was misfiled under P27's entry by the e125abc
 over-match; returned here in `c87ee66`.)*
+
 **P8 — `investment()` still sums deleted capability tiers. FIXED (`93d6b25`).**
 [07-architecture/vm.md:13](07-architecture/vm.md),
 [01-language/program-colors.md:47](01-language/program-colors.md) (the ghost-exemption bullet),
@@ -353,6 +360,7 @@ the same selection twelve lines apart.
 
 *(Amended: the TASKS.md carrier (Q105-R3 entry) was never touched by the close;
 restated [~] in `c87ee66`.)*
+
 **P9 — docs/02's *Decided* section was never swept. FIXED (`d5b561f`).**
 [02-agents/decided.md:14](02-agents/decided.md) (the `100×n` curve), `:12` (Q68 upkeep),
 plus the module-slot and Optics entries in the same file
@@ -378,6 +386,7 @@ the module-slot and Optics monolith entries were already gone.)*
 *(Amended: the resolution's 'already gone' claim was FALSE — the Optics-module
 and slot-milestone clauses survived in decided.md's line tails (truncated-grep
 verification, again); actually swept in `c87ee66`.)*
+
 **P10 — the Feral Harvester's verbatim source is still the Q117 crash-loop.
 FIXED (`d5b561f`).**
 [04-enemies/archetypes.md:42](04-enemies/archetypes.md)–`:48` (also [TASKS.md](TASKS.md),
@@ -413,6 +422,7 @@ Shipped-programs task.)*
 *(Amended: archetypes' verbatim-source claim now marks the code re-sync as
 pending rather than asserting byte-exactness the lagging feral.rs breaks;
 `c87ee66`.)*
+
 **P11 — module slots were deleted but four places still specify them. FIXED (`d5b561f`).**
 [02-agents/anatomy.md:22](02-agents/anatomy.md) (`| Module slots | 1 |`),
 [02-agents/stat-sheet.md](02-agents/stat-sheet.md) (the modifier pipeline),
@@ -449,6 +459,7 @@ grades — a priced consumer via the ratified sensing chain, no ruling needed.)*
 tie-break, anatomy's identity and floor-statline clauses, the 02 doorway row,
 and the Q72 receipt clause in 03-resources/decided and reprinting; swept in
 `c87ee66`.)*
+
 **P12 — two identical "Cycles per tick" rows with contradictory growth sources.
 FIXED (`93d6b25`).**
 [02-agents/stat-sheet.md:15](02-agents/stat-sheet.md) vs `:20` (also
@@ -645,6 +656,7 @@ load the shipped Tier-0 starter, which opens with `if exists_minable(ore):`.
 
 *(Amended: three more carriers survived — scopes' construct row, unlock-tree's
 reading note, archetypes' Stinger header; swept in `c87ee66`.)*
+
 **P22 — the canonical hurt window faults whenever no Repair Bay is in range;
 whether a faction's own structures are map knowledge is undecided. FIXED (`09c3e62`).**
 [01-language/signals-and-logging.md:17](01-language/signals-and-logging.md)
@@ -667,6 +679,7 @@ hurt window gained its `exists` guard; ruling in 05-terrain/decided.md.)*
 *(Amended: the ruling lacked an ownership filter (queries default `faction=own`,
 foreign memory is opt-in — `c87ee66`) and had not propagated to fog-of-war.md,
 the stat-sheet sensor row, or 01-language/decided.md; both fixed in `c87ee66`.)*
+
 **P23 — the execution model still grows compute through the deleted
 "Processor capability (tier × level)". FIXED (`93d6b25`).**
 [01-language/execution-model.md:29](01-language/execution-model.md)

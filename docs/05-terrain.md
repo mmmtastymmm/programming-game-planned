@@ -39,8 +39,11 @@ cannot silently break another — not to save anyone reading the parts.
   load against the worst case rather than per tick. Any new overlay here must keep that check passing —
   see [01-language.md](01-language.md).
 - **Seen tiles are sim state** (Q94) — canonical in
-  [decided.md](05-terrain/decided.md). Not a rendering artifact, so fog belongs to
-  the deterministic world and not the `game` crate.
+  [decided.md](05-terrain/decided.md) — and so is the **known-structures
+  memory** (P22): own structures and designations always known, foreign as
+  last observed, `faction=own` query default, pooled by the ally vision
+  grant. Neither is a rendering artifact, so fog belongs to the
+  deterministic world and not the `game` crate.
 - **All numbers here are tuning constants** bound for data files, never code —
   canonical in CLAUDE.md's doc conventions.
 

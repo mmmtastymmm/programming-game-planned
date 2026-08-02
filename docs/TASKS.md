@@ -466,10 +466,9 @@ sustained-rust `rust_scraps` is the surviving valve).*
       then 1/3/6/10 nests). Undefended claims are RETAKEN by adjacent Feral activity
       (guard radius, tuning). Nests see for their side (perception eyes) and see-first
       acquisition falls out of M7's scoped queries. Sighting-only Feral perception, 9
-      tests in `tests/ferals.rs`. *NEEDS DISCUSSION: (1) archetype sources deviate from
-      docs/04's listings — a `move_to` before each `attack`, an `exists(ore)` guard on the
-      Harvester, and `wait(n)` beats added as mutation targets; ratify or restore the
-      crash-loop-y originals; (2) claim/raze are instant Commands — docs want a build-tool
+      tests in `tests/ferals.rs`. *NEEDS DISCUSSION: (1) RESOLVED — Q108 ratified the `move_to`-before-`attack`
+      guard and the `wait(n)` beats; Q117/P10 superseded the `exists(ore)` guard with
+      minable scoping (code re-sync tracked in *Shipped programs*); (2) claim/raze are instant Commands — docs want a build-tool
       bot converting the site; (3) of the v1 arcana subset only the MUTATION flag (1, 18)
       is mechanically distinct — Hierophant hijack, Death salvage-denial, Tower siege, and
       Moon counter-intel personalities are still just difficulty scaling; (4) ~~losing a

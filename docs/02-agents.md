@@ -39,8 +39,8 @@ cannot silently break another — not to save anyone reading the parts.
   (Q115); the stat sheet's `XP preserved` row is 0% on destruction with no item
   softening it. `investment()` is earned XP plus installed tool value (Q115),
   which is what keeps the scrap valve ranking by investment rather than raw XP
-  (Q105-R3). *Note: [PROBLEMS.md](PROBLEMS.md) P8 records that several docs still
-  specify the pre-Q115 formula.*
+  (Q105-R3). *(P8's stale-formula carriers are all swept — closed and amended
+  in [PROBLEMS.md](PROBLEMS.md).)*
 - **Every stat row is keyable.** Any row of the stat sheet and any ledger number
   can serve as a selection key, which is why
   [stat-sheet.md](02-agents/stat-sheet.md) is a contract and not just a table —

@@ -50,7 +50,7 @@ wander()
 wait(4)
 ```
 
-The `exists(ore)` guard is load-bearing (Q108): without it a worked-out map turns every Harvester into a crash-loop rather than an enemy. Steals *your* map's ore and feeds its nest. Ignores bots entirely — a pure race pressure on the economy.
+The `exists_minable(ore)` guard is load-bearing (Q108/Q117): without it a worked-out or under-tiered map turns every Harvester into a crash-loop rather than an enemy. Steals *your* map's ore and feeds its nest. Ignores bots entirely — a pure race pressure on the economy.
 
 ## Warden (threat 3) — teaches loops + messaging
 

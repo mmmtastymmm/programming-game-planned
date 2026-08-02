@@ -37,7 +37,7 @@ No free-form resource gifting. A colony builds a **Request Box** and posts a req
 ## Starting State (per player)
 
 - 1 working Fabricator (the **Green** printer), 1 **ruined Red Fabricator** (repairable for Data — the first colony milestone, [01-language.md](../01-language.md)), 1 **ruined Upgrade Station** (repairable for **tier-0/1 materials** — tuning; the P1 ruling, same pattern as the Red Fabricator — without it the buildable Station's Chips price sits above the drill ladder it sells), 1 Depot, 1 Generator
-- 2 bots (Green, **tier-1 mining tools** installed — the start-zone veins are Iron and Coal, tier 1) with a working starter mining program pre-deployed (the tutorial *is* reading this program)
+- 2 bots (Green, the universal free **grade-1 toolkit** every print carries — the start-zone veins are Iron and Coal, tier 1, within the grade-1 drill's reach) with a working starter mining program pre-deployed (the tutorial *is* reading this program)
 - 30 Steel, 10 Iron + 5 Coal in colony stock, 0 everything else (map generation guarantees Iron + Coal + Wood + Stone in the start zone; Copper/Tin within first-expansion reach — Q69)
 - **The Generator starts stoked** (Q84 — a tuning buffer of fuel), and the start guarantee includes *starting upkeep < starting generation*: the opening never brownouts before the player acts. The starter economy's first real job is keeping it fed.
 
