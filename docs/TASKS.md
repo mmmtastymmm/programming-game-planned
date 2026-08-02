@@ -107,7 +107,7 @@ the world view) — both recorded in place under M7 below.*
 - [ ] **Game**: render Smelter/Foundry/Archive/etc., typed stock in the world bar, structure
       HP bars. [game] (M)
 
-## M5 — Universal chassis: stats, energy, upgrades ✅ COMPLETE (2026-07-16) — notes below ✅ CORE COMPLETE (2026-07-15) — discussion items below
+## M5 — Universal chassis: stats, energy, upgrades ✅ COMPLETE (2026-07-16) — notes below
 
 - [x] **Floor statline + stat pipeline**: `stats.ron` (HP 40, move 140 deci-ticks/tile — a real
       move-rate stat, terrain multiplies it; cargo 40 deci, sensors 5, slots 1, cpu 100 centi,
@@ -142,7 +142,8 @@ the world view) — both recorded in place under M7 below.*
       sitter); step-off restarts at line 1. *NEEDS DISCUSSION: (1) Coprocessor and Backup Core
       are PURCHASABLE BUT INERT — think-while-blocked needs a VM concurrency design, XP
       preservation needs M6/M10 death rework; (2) no Water SOURCE exists — the Pump structure
-      (docs/03) is in no milestone, so coolant only flows from starting_stock/dev feeds; (3)
+      (docs/03) was in no milestone, so coolant only flows from starting_stock/dev feeds —
+      since ruled by Q98 (the two-tile waterworks) and tracked under *Decided-but-unbuilt*; (3)
       catalog time_ticks are invented first-pass numbers.* [sim][game] (L)
 - [x] **`bank_cap`** derived at load from the base cost table (max effective op cost = 25:
       crash dump / upload_log cap; payload ops at payload_cap) as `CostTable.bank_cap`;
@@ -172,7 +173,7 @@ notes: the phase-0 perception seed now also runs after `SpawnBot` (tick-1 blindn
 one crash per spawned starter program); legacy pacing/vision test maps carry explicit
 `sim.stats` overrides where fog/pacing wasn't what they test; the golden scenario gained
 a within-sight node and a 1500-tick window (fixture regenerated — M5/M6 change every
-hash: statline, XP map, quirk rolls, upkeep settlements).* ✅ CORE COMPLETE (2026-07-16) — discussion items below
+hash: statline, XP map, quirk rolls, upkeep settlements).*
 
 - [x] **Five task tracks + deci-XP** (`data/xp.ron`, `sim::xp`): `BotData.xp` is a
       `BTreeMap<XpTrack, u64>` in deci-XP (all 11 tracks exist — storage never migrates
@@ -527,8 +528,9 @@ sustained-rust `rust_scraps` is the surviving valve).*
       layer.* [sim] (L→M as scoped)
 - [x] **Q71 map generation** — **DESIGN DECIDED 2026-07-17** ([05-terrain.md](05-terrain.md)
       *Map Generation*, [history/questions-answered.md](history/questions-answered.md)); **SIM CORE IMPLEMENTED 2026-07-18** (M14 below — the
-      `sim::mapgen` producer, validator, config, and tests all land). The game still hand-authors
-      its scene; wiring `generate` into match setup is the one open M14 item.
+      `sim::mapgen` producer, validator, config, and tests all land). The game wiring landed
+      with it (`MAPGEN_SEED` opt-in; the hand-authored showcase stays the default) — the one
+      open M14 item is PvP rotational symmetry.
 
 ---
 
@@ -909,7 +911,7 @@ written-up quirks are unbuildable. ⚠HASH.
 | `withdraw`/`try_withdraw` | M4 | | `creep=` arg ✅ | Q103 |
 | `deposit`/`try_deposit` | M4 | | `repair`/`salvage`/`analyze` | M10 |
 | `cargo_count` | M4 | | `hijack`/`recover_black_box` | M10 |
-| `study` | M4 | | `guard`/`escort` | M10 |
+| `study` | M15 | | `guard`/`escort` | M10 |
 | `scan_resources` | M4 | | `send`/`receive`/`broadcast` + `try_*` | M11 |
 | `my_quirks`/`has_quirk` ✅ | M6 | | `scan_enemies` | M7 |
 
