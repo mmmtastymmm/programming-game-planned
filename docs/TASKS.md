@@ -697,6 +697,13 @@ fixed. Archived in full at [history/reviews.md](history/reviews.md).
       seller-side ladder corollary ([03-resources/harvest-tiers.md](03-resources/harvest-tiers.md))
       is a load-time assert candidate alongside Q118's three. [sim][game]
       ⚠HASH (start state changes)
+- [ ] **Known-structures query domain** (P22 ruling, 2026-08-01) — `closest`/`exists`
+      on structure kinds resolve from faction knowledge: own structures always
+      (colony state), foreign structures as last observed via a per-faction
+      known-structures memory written in perception (phase 5), hashed like known
+      tiles/nodes. Canonical hurt window gains the `exists` guard
+      ([01-language/signals-and-logging.md](01-language/signals-and-logging.md)).
+      [sim] ⚠HASH (new hashed per-faction state + query-domain change)
 - [ ] **Function-granularity tree-shaking** (Q61) — deploy assembles the artifact from only
       the module functions transitively called by the program and its handlers
       ([01-language/modules-and-library.md](01-language/modules-and-library.md)); the sandbox

@@ -14,7 +14,8 @@ on error:               # window only — handler_init() runs before this, unski
 
 on hurt:
     drop_cargo()
-    move_to(closest(repair_bay).expect())
+    if exists(repair_bay):              # own bays are always known (P22);
+        move_to(closest(repair_bay).expect())   # the guard is for a colony with none
 
 # there is no "on abort:" — abort is fully engine-reserved:
 # forced upload_log() + become_disabled(). Your black box is
