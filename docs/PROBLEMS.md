@@ -29,11 +29,12 @@ moved the answered worksheet bodies (Q111–Q123) out of `QUESTIONS.md` into
 [history/questions-worksheets.md](history/questions-worksheets.md); citations
 into those bodies now point there.
 
-**Status 2026-08-01 (latest): 28 opened, 13 fixed.** P1 — the bootstrap
+**Status 2026-08-01 (latest): 28 opened, 14 fixed.** P1 — the bootstrap
 deadlock — ruled and closed in `2c56fdf` (ruined Upgrade Station in the
 start base). Earlier the same day the mechanical propagation batch — P8,
 P12, P13, P15–P17, P19, P21, P23, P24, P26, P28 — closed in `93d6b25`.
-15 remain open (P2–P7, P9–P11, P14, P18, P20, P22, P25, P27).
+14 remain open (P3–P7, P9–P11, P14, P18, P20, P22, P25, P27); P2
+closed in `d90a428` (pacing table recomputed).
 
 **Status 2026-08-01: 28 problems opened (P1–P28), 0 fixed.** P15–P18 were
 found by the reviews of the 04–09 doc split; P19–P28 by the same day's
@@ -64,35 +65,6 @@ The three that change actual game behavior rather than doc clarity are **P1**
 ## Needs a ruling
 
 These cannot be swept mechanically — the docs do not contain the answer.
-
-**P2 — Mining's `curve_base` is derived from a rate 8× the docs' own mine yield.
-OPEN.**
-[02-agents/xp-and-specialization.md:74](02-agents/xp-and-specialization.md) (the pacing table),
-[03-resources/the-tree.md](03-resources/the-tree.md) (mine yield),
-[history/questions-answered.md](history/questions-answered.md) (Q122/Q123)
-
-The Q123 pacing table reads `| Mining | ~80 /tick | 32,000 |`. But
-[03-resources.md](03-resources.md)'s tuning manifest fixes mine yield at **2
-units/swing**, [02-agents/xp-and-specialization.md](02-agents/xp-and-specialization.md) fixes one `mine()` swing at **~20
-ticks**, and Mining income is 1 XP (100 centi) per unit. A bot swinging nonstop
-earns **200 centi / 20 ticks = 10 centi/tick**, not ~80.
-([history/questions-worksheets.md:510](history/questions-worksheets.md)
-repeats the same unchecked assumption in prose.)
-
-With `curve_base` 32,000, Mining L5 costs 15 × 32,000 = 480,000 centi = **48,000
-ticks ≈ 80 minutes**, against the stated 10-minute job-track target and the
-50-minute ambient target. So an idle bot that never mines reaches Age or
-Processing L5 **before** a dedicated miner reaches Mining L5: seniority beats
-specialisation, which is precisely the failure Q123 exists to fix. Knock-on:
-drill grade 2 (Mining L2 ≈ 16 minutes of *uninterrupted* swinging, far longer
-once hauling is counted) gates Copper/Tin well past
-[06-progression/pacing.md:11](06-progression/pacing.md)'s 15–30 minute
-midgame beat.
-
-`curve_base = dedicated_rate × target_ticks_to_L5 / 15` is sound; the
-substituted rate is not. **Every job-track row in the table is one substitution
-of a rate that was never checked against `costs.ron`'s action times** — the
-whole table needs recomputing, not just Mining's row.
 
 **P3 — Q120 both mandates and forbids the same silent hold. OPEN. ⚠HASH**
 [03-resources/decided.md:8](03-resources/decided.md) ("HOLDS — silently") and
@@ -456,6 +428,40 @@ instance.**
 *(Resolution: a **ruined Upgrade Station** in the start base, repairable for
 tier-0/1 materials — the Red-Fabricator pattern — plus the seller-side ladder
 corollary in [harvest-tiers.md](03-resources/harvest-tiers.md).)*
+
+**P2 — Mining's `curve_base` is derived from a rate 8× the docs' own mine yield.
+FIXED (`d90a428`).**
+[02-agents/xp-and-specialization.md:74](02-agents/xp-and-specialization.md) (the pacing table),
+[03-resources/the-tree.md](03-resources/the-tree.md) (mine yield),
+[history/questions-answered.md](history/questions-answered.md) (Q122/Q123)
+
+The Q123 pacing table reads `| Mining | ~80 /tick | 32,000 |`. But
+[03-resources.md](03-resources.md)'s tuning manifest fixes mine yield at **2
+units/swing**, [02-agents/xp-and-specialization.md](02-agents/xp-and-specialization.md) fixes one `mine()` swing at **~20
+ticks**, and Mining income is 1 XP (100 centi) per unit. A bot swinging nonstop
+earns **200 centi / 20 ticks = 10 centi/tick**, not ~80.
+([history/questions-worksheets.md:510](history/questions-worksheets.md)
+repeats the same unchecked assumption in prose.)
+
+With `curve_base` 32,000, Mining L5 costs 15 × 32,000 = 480,000 centi = **48,000
+ticks ≈ 80 minutes**, against the stated 10-minute job-track target and the
+50-minute ambient target. So an idle bot that never mines reaches Age or
+Processing L5 **before** a dedicated miner reaches Mining L5: seniority beats
+specialisation, which is precisely the failure Q123 exists to fix. Knock-on:
+drill grade 2 (Mining L2 ≈ 16 minutes of *uninterrupted* swinging, far longer
+once hauling is counted) gates Copper/Tin well past
+[06-progression/pacing.md:11](06-progression/pacing.md)'s 15–30 minute
+midgame beat.
+
+`curve_base = dedicated_rate × target_ticks_to_L5 / 15` is sound; the
+substituted rate is not. **Every job-track row in the table is one substitution
+of a rate that was never checked against `costs.ron`'s action times** — the
+whole table needs recomputing, not just Mining's row.
+
+*(Resolution: Mining recomputed to 10 centi/tick → `curve_base` 4,000; the
+other four job rows verified against their inputs (Hauling and Building
+derive; Scouting and Combat annotated as duty-cycle placeholders) and a
+derivation paragraph added so the table is recomputed, never re-guessed.)*
 
 **P8 — `investment()` still sums deleted capability tiers. FIXED (`93d6b25`).**
 [07-architecture/vm.md:13](07-architecture/vm.md),
