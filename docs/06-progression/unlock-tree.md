@@ -68,7 +68,7 @@ flowchart TD
 
 Handler-window unlocks buy the right to **edit** that signal's window ([01-language.md](../01-language.md)) — pre-unlock, the reserved template still runs with its factory contents, so nothing is unhandled, just uncustomized.
 
-Reading the tree: **constructs gate expressiveness, functions gate verbs**, and they interleave — e.g. `scan_enemies()` returns a list, so it requires lists; `if` is pointless without something to branch on, so sensor functions come first.
+Reading the tree: **constructs gate expressiveness, functions gate verbs**, and they interleave — e.g. `scan_enemies()` returns a list, so it requires lists; branching (granted at start — Q117) is pointless without something to branch on, so sensor functions come first.
 
 ## Design Rules
 

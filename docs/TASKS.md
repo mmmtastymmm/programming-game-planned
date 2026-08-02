@@ -693,7 +693,8 @@ fixed. Archived in full at [history/reviews.md](history/reviews.md).
       Red-Fabricator pattern: start-state generation places a ruined Upgrade Station
       in every player base; repairable for tier-0/1 materials (`tuning.ron`) through
       the existing repair flow; sells nothing until repaired. Closes the bootstrap
-      deadlock (Station prices in Chips → Crystal → drill grade 2 → Station). The
+      deadlock (Station prices in Chips → Crystal → drill grade **4** → Station;
+      even the Foundry's Bronze needs grade 2). The
       seller-side ladder corollary ([03-resources/harvest-tiers.md](03-resources/harvest-tiers.md))
       is a load-time assert candidate alongside Q118's three. [sim][game]
       ⚠HASH (start state changes)
@@ -707,7 +708,8 @@ fixed. Archived in full at [history/reviews.md](history/reviews.md).
       on structure kinds resolve from faction knowledge: own structures always
       (colony state), foreign structures as last observed via a per-faction
       known-structures memory written in perception (phase 5), hashed like known
-      tiles/nodes. Canonical hurt window gains the `exists` guard
+      tiles/nodes. Both queries take **`faction=own` as default** for structure
+      kinds (the ownership filter — foreign memory is explicit opt-in). Canonical hurt window gains the `exists` guard
       ([01-language/signals-and-logging.md](01-language/signals-and-logging.md)).
       [sim] ⚠HASH (new hashed per-faction state + query-domain change)
 - [ ] **Function-granularity tree-shaking** (Q61) — deploy assembles the artifact from only
@@ -881,9 +883,10 @@ written-up quirks are unbuildable. ⚠HASH.
 - [~] **Q105-R2** — RESTATED for Q111: a **build tool of grade ≥ 2** gates field repair (wreck rescue), `hijack`, and nest
       claim/raze; base tier 1 covers `build()` and structure `repair()`. Base weapon damage
       comes from Combat tier 1. Replaces the deleted build-tool gate. [sim]
-- [x] **Q105-R3** — the scrap valve and `SelectKey::TotalXp` rank by INVESTMENT (lifetime XP +
-      bought tier value), not raw XP: a Backup-Core reprint has tier-4 hardware and 0 XP and
-      must never be selected as the fleet's cheapest machine. [sim]
+- [~] **Q105-R3** — RESTATED for Q111/Q115 (the P8 follow-up): the scrap valve and
+      `SelectKey::TotalXp` rank by INVESTMENT (lifetime XP + **the value of installed
+      tools** — tiers and the Backup Core are deleted), not raw XP: a tooled-up veteran
+      with low XP must never be selected as the fleet's cheapest machine. [sim]
 - [x] **Processing track** — the twelfth track needs its income (first pass: 1 per 10 ops
       executed), its perk magnitudes, and a slot in the phase-7 settlement order; Learning's
       10% must read the UNSCALED award. [sim]

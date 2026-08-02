@@ -310,6 +310,10 @@ Two defects in one program, both introduced by Q117's rewrite:
     are both already in the start kit — docs/04's Feral Harvester uses the
     identical guard followed by `wander()`.
 
+*(Resolution: both walking legs became `try_move_to` (P4-legal composition)
+and the starter gained the unconditional `wander()` tail — the Feral
+Harvester's idiom. Unreachable ore is a False, not a fault-loop; an
+out-of-ore fleet searches visibly instead of stalling silently.)*
 **P8 — `investment()` still sums deleted capability tiers. FIXED (`93d6b25`).**
 [07-architecture/vm.md:13](07-architecture/vm.md),
 [01-language/program-colors.md:47](01-language/program-colors.md) (the ghost-exemption bullet),
@@ -712,11 +716,6 @@ ruling on where structure solidity lives (tile-kind replacement like the
 Barricade, or a contents slot the model currently omits); the answer decides
 whether paint and overlays survive under a structure and what demolition
 leaves behind.
-
-*(Resolution: both walking legs became `try_move_to` (P4-legal composition)
-and the starter gained the unconditional `wander()` tail — the Feral
-Harvester's idiom. Unreachable ore is a False, not a fault-loop; an
-out-of-ore fleet searches visibly instead of stalling silently.)*
 
 *(Resolution: occupancy layer — solid structures are entities standing on
 the ground stack, solidity from the structure registry, stack inert not

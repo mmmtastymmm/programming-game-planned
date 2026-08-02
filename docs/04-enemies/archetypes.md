@@ -2,11 +2,11 @@
 
 # Feral Archetypes (initial set)
 
-Each archetype = chassis + program. Programs shown are their *actual* shipped source — legal Pyrite: Feral programs run with **nest-bound values** — `home` (their own nest) and `patrol_route` — pre-bound at print (the kind-constant mechanism, faction-scoped — Q79), and `deposit()` treats their nest as their depot.
+Each archetype = chassis + program. Programs shown are the **ratified** shipped source — legal Pyrite; the code re-sync is pending ([TASKS.md](../TASKS.md), *Shipped programs*), after which they are byte-exact again: Feral programs run with **nest-bound values** — `home` (their own nest) and `patrol_route` — pre-bound at print (the kind-constant mechanism, faction-scoped — Q79), and `deposit()` treats their nest as their depot.
 
 (The **Nest** itself — the printing structure and the territory game around it — is owned by [nests-and-claims.md](nests-and-claims.md).)
 
-**Bind once, never check-then-act** (Q110, ruled inside Q117's answer — [history/questions-answered.md](../history/questions-answered.md)): a shipped source binds its target once rather than re-querying it around a blocking verb, whose tens-of-ticks window makes the race systematic ([01-language/syntax-tiers.md](../01-language/syntax-tiers.md) accepts only the *adjacent-ops* guard race). All three sources below carry the ratified forms: bound targets (Q110), minable-scoped queries and fault-free verbs (Q117), and the wander tail the Tier-0 starter shares ([01-language.md](../01-language.md)).
+**Bind once, never check-then-act** (Q110, ruled inside Q117's answer — [history/questions-answered.md](../history/questions-answered.md)): a shipped source binds its target once rather than re-querying it around a blocking verb, whose tens-of-ticks window makes the race systematic ([01-language/syntax-tiers.md](../01-language/syntax-tiers.md) accepts only the *adjacent-ops* guard race). Every attacker below binds its target once (Q110); the Harvester additionally carries Q117's minable-scoped queries and fault-free verbs, plus the wander tail the Tier-0 starter shares ([01-language.md](../01-language.md)). The Drone and Stinger keep their faulting `move_to`/`attack` deliberately — the Q108 `move_to`-before-swing guard is their lesson; no ruling requires `try_` walks of them.
 
 ## Drone (threat 1) — teaches Tier 1
 
@@ -22,7 +22,7 @@ if exists(enemy):
 
 Harmless in ones. Exists so the first program a player ever reads is trivially comprehensible. The `move_to` before the swing is load-bearing (Q108): `attack()` on a non-adjacent target faults, so without it the Drone crash-loops the moment it *sees* an enemy — and the first program a player reads must not teach a bug they would copy. Binding `target` once is equally load-bearing (Q110): re-querying `closest()` after the blocking `move_to` is a check-then-act race — the second call can return a different, non-adjacent enemy and fault the swing — and the bound variable is the reader's first look at Tier 1. The `wait(3)` gives the Magician's mutation an integer literal to bite on.
 
-## Stinger (threat 2) — teaches conditionals
+## Stinger (threat 2) — teaches what branching is for
 
 ```python
 if health_low():

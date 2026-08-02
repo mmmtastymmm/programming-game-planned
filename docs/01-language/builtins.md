@@ -31,9 +31,9 @@ The full catalog and unlock order live in [06-progression.md](../06-progression.
 | `my_quirks()` | 2 | **yes** | List of this bot's **manifested** quirks (latent ones invisible); free of any unlock whenever quirks are on |
 | `has_quirk(q)` | 1 | **yes** | Quirk names are **pre-bound constants like kind constants** (no third builtin enum) |
 | `path_blocked()` | 2 | **yes** | Is the current move path obstructed by a bot? The Tier-2 corridor sensor |
-| `closest(kind)` → `Result` | 4 | **yes** | Generic nearest-of-kind query over what the bot perceives **and its faction knows** — everything within **seeing**, movers within **hearing**, discovered nodes from map knowledge, **own structures always, foreign structures as last observed** (P22 ruling — [05-terrain.md](../05-terrain.md)); `Result.Ok(entity)` / `Result.Err(msg)` |
+| `closest(kind, faction=own)` → `Result` | 4 | **yes** | Generic nearest-of-kind query over what the bot perceives **and its faction knows** — everything within **seeing**, movers within **hearing**, discovered nodes from map knowledge. **Structure kinds scope to `faction=own` by default** — your own structures are always known — and `faction=any\|ally\|enemy` opts into **foreign structures as last observed** (P22 ruling + ownership filter; the `send(…, faction=own)` parameter idiom — [05-terrain.md](../05-terrain.md)), so the canonical retreat and deposit idioms can never resolve to an enemy structure unasked; `Result.Ok(entity)` / `Result.Err(msg)` |
 | `is_seen(contact)` → bool | 1 | **yes** | Is this contact *seen* (full dossier) or heard-only (position, nothing else)? The chase-investigate predicate (Q80) |
-| `exists(kind)` → bool | 1 | **yes** | Any entity of `kind` perceived or known (seen / heard-moving / known node / known structure — same domain as `closest`)? |
+| `exists(kind, faction=own)` → bool | 1 | **yes** | Any entity of `kind` perceived or known (seen / heard-moving / known node / known structure — same domain and `faction` default as `closest`)? |
 | `.expect()` (method on `Result` / `Option`) | 1 | **yes** | Unwrap: `Ok`/`Some` → the value; `Err`/`None` → faults (with the carried message, for `Err`) |
 | `cargo_full()` → bool | 1 | **yes** | |
 | `attack(entity)` | 2 + action | no | Handlers are recovery, not combat — no fighting back mid-flinch |

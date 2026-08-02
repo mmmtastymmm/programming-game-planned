@@ -6,7 +6,7 @@ A **bot** is a printed machine that runs exactly one [Pyrite](01-language.md) pr
 
 | File | Owns |
 |---|---|
-| [anatomy.md](02-agents/anatomy.md) | What a bot is physically made of — chassis, slots, the printed object. |
+| [anatomy.md](02-agents/anatomy.md) | What a bot is physically made of — chassis, tools, the printed object. |
 | [stat-sheet.md](02-agents/stat-sheet.md) | Every stat row, its units, and what reads it. |
 | [damage-faults-death.md](02-agents/damage-faults-death.md) | HP, damage sources, fault consequences, death, wrecks. |
 | [xp-and-specialization.md](02-agents/xp-and-specialization.md) | The task tracks, XP curves, levels, perks and upkeep. |
