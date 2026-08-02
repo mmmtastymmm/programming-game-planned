@@ -166,7 +166,8 @@ suites (`chassis.rs`, `station.rs`, `energy.rs`, `growth.rs`). NEEDS DISCUSSION,
 from the data files: xp.ron body-perk magnitudes are first-pass inventions; upkeep.ron
 figures likewise (and `rust_scraps` ships off); Coprocessor is purchasable but its
 think-while-acting VM support is pending; program_lines/variable_slots enforcement is
-M9's deploy bar; the Station coolant source (Pump) is still open from M4. Integration
+M9's deploy bar; the Station coolant source (Pump), open from M4, has since been
+answered by Q98 (the two-tile waterworks — [03-resources.md](03-resources.md)). Integration
 notes: the phase-0 perception seed now also runs after `SpawnBot` (tick-1 blindness ate
 one crash per spawned starter program); legacy pacing/vision test maps carry explicit
 `sim.stats` overrides where fog/pacing wasn't what they test; the golden scenario gained
@@ -525,7 +526,7 @@ sustained-rust `rust_scraps` is the surviving valve).*
       new-crate work — the docs' pause/dump/resync policy on desync also lives above this
       layer.* [sim] (L→M as scoped)
 - [x] **Q71 map generation** — **DESIGN DECIDED 2026-07-17** ([05-terrain.md](05-terrain.md)
-      *Map Generation*, QUESTIONS.md); **SIM CORE IMPLEMENTED 2026-07-18** (M14 below — the
+      *Map Generation*, [history/questions-answered.md](history/questions-answered.md)); **SIM CORE IMPLEMENTED 2026-07-18** (M14 below — the
       `sim::mapgen` producer, validator, config, and tests all land). The game still hand-authors
       its scene; wiring `generate` into match setup is the one open M14 item.
 

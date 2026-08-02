@@ -9,7 +9,7 @@ A **bot** is a printed machine that runs exactly one [Pyrite](01-language.md) pr
 | [anatomy.md](02-agents/anatomy.md) | What a bot is physically made of — chassis, tools, the printed object. |
 | [stat-sheet.md](02-agents/stat-sheet.md) | Every stat row, its units, and what reads it. |
 | [damage-faults-death.md](02-agents/damage-faults-death.md) | HP, damage sources, fault consequences, death, wrecks. |
-| [xp-and-specialization.md](02-agents/xp-and-specialization.md) | The task tracks, XP curves, levels, perks and upkeep. |
+| [xp-and-specialization.md](02-agents/xp-and-specialization.md) | The task tracks, XP curves, levels and perks. |
 | [reprinting.md](02-agents/reprinting.md) | What a replacement bot costs. |
 | [decided.md](02-agents/decided.md) | Settled rulings owned by this doc. |
 
@@ -46,7 +46,8 @@ cannot silently break another — not to save anyone reading the parts.
   [stat-sheet.md](02-agents/stat-sheet.md) is a contract and not just a table —
   adding a row adds a key.
 - **Upkeep re-bases on installed tools** (Q122/Q123) — canonical in
-  [xp-and-specialization.md](02-agents/xp-and-specialization.md). A change to the tool
+  [stat-sheet.md](02-agents/stat-sheet.md) (the Upkeep-draw row; the ruling in
+  [decided.md](02-agents/decided.md)). A change to the tool
   model in [06-progression.md](06-progression.md) moves upkeep here.
 - **All numbers here are tuning constants** bound for data files (`xp.ron`,
   `upkeep.ron`, …), never code — canonical in CLAUDE.md's doc conventions.

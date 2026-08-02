@@ -46,8 +46,11 @@ cannot silently break another — not to save anyone reading the parts.
   load — the player-facing side is owned by
   [01-language/execution-model.md](01-language/execution-model.md)).
 - **Inspectable secrets are sim state** — canonical in
-  [vm.md](07-architecture/vm.md): decryption levels *and* reveal masks are
-  hashed lockstep state, ruled by [08-multiplayer.md](08-multiplayer.md).
+  [vm.md](07-architecture/vm.md): the per-`(color, faction)` decryption
+  levels are hashed lockstep state — the *only* decryption state — and the
+  reveal mask is *derived* deterministically from
+  `(color, version, faction, level)`, identical across peers without being
+  stored or hashed; ruled by [08-multiplayer.md](08-multiplayer.md).
   Anything a player can inspect that differs per faction must live sim-side,
   never as a UI overlay.
 - **Programs are byte-exact plain text, versioned by source hash** — canonical
