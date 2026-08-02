@@ -6,20 +6,21 @@ Each archetype = chassis + program. Programs shown are their *actual* shipped so
 
 (The **Nest** itself — the printing structure and the territory game around it — is owned by [nests-and-claims.md](nests-and-claims.md).)
 
-**Bind once, never check-then-act** (Q110, ruled inside Q117's answer — [history/questions-answered.md](../history/questions-answered.md)): a shipped source binds its target once rather than re-querying it around a blocking verb, whose tens-of-ticks window makes the race systematic ([01-language/syntax-tiers.md](../01-language/syntax-tiers.md) accepts only the *adjacent-ops* guard race). The Drone's and the Stinger's paired `closest(enemy)` calls below predate the ruling and still show the racing form — registered as [PROBLEMS.md](../PROBLEMS.md) P16; the Harvester's own staleness is P10.
+**Bind once, never check-then-act** (Q110, ruled inside Q117's answer — [history/questions-answered.md](../history/questions-answered.md)): a shipped source binds its target once rather than re-querying it around a blocking verb, whose tens-of-ticks window makes the race systematic ([01-language/syntax-tiers.md](../01-language/syntax-tiers.md) accepts only the *adjacent-ops* guard race). The Drone and Stinger below carry the bound form; the Harvester's staleness against Q117 is registered as [PROBLEMS.md](../PROBLEMS.md) P10.
 
-## Drone (threat 1) — teaches Tier 0
+## Drone (threat 1) — teaches Tier 1
 
 ```python
 wander()
 wander()
 wait(3)
 if exists(enemy):
-    move_to(closest(enemy).expect())
-    attack(closest(enemy).expect())
+    target = closest(enemy).expect()
+    move_to(target)
+    attack(target)
 ```
 
-Harmless in ones. Exists so the first program a player ever reads is trivially comprehensible. The `move_to` before the swing is load-bearing (Q108): `attack()` on a non-adjacent target faults, so without it the Drone crash-loops the moment it *sees* an enemy — and the first program a player reads must not teach a bug they would copy. The `wait(3)` gives the Magician's mutation an integer literal to bite on.
+Harmless in ones. Exists so the first program a player ever reads is trivially comprehensible. The `move_to` before the swing is load-bearing (Q108): `attack()` on a non-adjacent target faults, so without it the Drone crash-loops the moment it *sees* an enemy — and the first program a player reads must not teach a bug they would copy. Binding `target` once is equally load-bearing (Q110): re-querying `closest()` after the blocking `move_to` is a check-then-act race — the second call can return a different, non-adjacent enemy and fault the swing — and the bound variable is the reader's first look at Tier 1. The `wait(3)` gives the Magician's mutation an integer literal to bite on.
 
 ## Stinger (threat 2) — teaches conditionals
 
@@ -28,8 +29,9 @@ if health_low():
     move_to(home)
     wait(8)
 if exists(enemy):
-    move_to(closest(enemy).expect())
-    attack(closest(enemy).expect())
+    target = closest(enemy).expect()
+    move_to(target)
+    attack(target)
 wander()
 ```
 

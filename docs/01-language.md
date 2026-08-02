@@ -3,7 +3,7 @@
 Pyrite is a **custom Python-like DSL** with an interpreter written in Rust. We control the whole stack, which buys us three things real Python can't cheaply give us:
 
 1. **Line-at-a-time execution** metered in cycles (bots visibly "think").
-2. **Construct gating** — `if`, loops, variables, `def` are *unlockable features*, enforced at parse time.
+2. **Construct gating** — variables, loops, `def`, lists are *unlockable features*, enforced at parse time (branching ships at game start — Q117).
 3. **Determinism** — required for lockstep multiplayer ([08-multiplayer.md](08-multiplayer.md)). No floats exposed to programs, no wall clock, no hash-order iteration.
 
 ## The parts
@@ -14,7 +14,7 @@ Pyrite is a **custom Python-like DSL** with an interpreter written in Rust. We c
 | [faults-and-handlers.md](01-language/faults-and-handlers.md) | What a fault is, the seven reserved handlers, the double-handle rule (abort), Black Boxes & the boot sequence. |
 | [signals-and-logging.md](01-language/signals-and-logging.md) | Signal handlers, the logging verbs, and the consequences the design wants. |
 | [cycle-costs.md](01-language/cycle-costs.md) | The base cost table and how overlays modify it. |
-| [syntax-tiers.md](01-language/syntax-tiers.md) | Tiers 0–6: what each unlock adds, with a worked program per tier. |
+| [syntax-tiers.md](01-language/syntax-tiers.md) | Tiers 0–7: what each unlock adds, with a worked program per tier. |
 | [program-colors.md](01-language/program-colors.md) | Colors, target shares, the recall interrupt, dormant printers. |
 | [modules-and-library.md](01-language/modules-and-library.md) | Modules, the program library, sharing and versioning. |
 | [types-and-env.md](01-language/types-and-env.md) | The type set, and the per-bot `key → int` environment. |

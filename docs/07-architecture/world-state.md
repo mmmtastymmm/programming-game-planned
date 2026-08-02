@@ -24,6 +24,8 @@ Commands:        DeployProgram, QueuePrint(faction), PlaceBlueprint
                  PlaceOverlay(arrow — instant signage),
                  PlacePaint(pos, color|unpainted — Q97: places a paint
                  DESIGNATION a bot services, the blueprint flow),
+                 ClaimNest(nest), RazeNest(nest) — on a DEFEATED site:
+                 claiming converts it, razing banks its Data bounty (Q86),
                  ExchangeData, PostRequest,
                  Grant(faction, channel | vision | module), SetAlliance,
                  Vote(sim-speed | decommission), Research(UnlockId)

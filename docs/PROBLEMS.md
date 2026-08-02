@@ -235,7 +235,7 @@ Two defects in one program, both introduced by Q117's rewrite:
 **P20 — the Hiding perk is a second linear-uncapped perk, contradicting
 Q121's own rule. OPEN.**
 [02-agents/xp-and-specialization.md:53](02-agents/xp-and-specialization.md) and
-[02-agents/stat-sheet.md:27](02-agents/stat-sheet.md) ("−1 signature/level,
+[02-agents/stat-sheet.md:26](02-agents/stat-sheet.md) ("−1 signature/level,
 tuning") vs
 [02-agents/xp-and-specialization.md:15](02-agents/xp-and-specialization.md)
 ("none of them is linear-per-level")
@@ -333,7 +333,7 @@ term Q122 replaced, so an old fleet browns out its colony purely by being old.
 
 **P10 — the Feral Harvester's verbatim source is still the Q117 crash-loop.
 OPEN.**
-[04-enemies/archetypes.md:40](04-enemies/archetypes.md)–`:46` (also [TASKS.md](TASKS.md),
+[04-enemies/archetypes.md:42](04-enemies/archetypes.md)–`:48` (also [TASKS.md](TASKS.md),
 [06-progression/unlock-tree.md:71](06-progression/unlock-tree.md), `:76`,
 [06-progression/pacing.md:10](06-progression/pacing.md))
 
@@ -356,7 +356,7 @@ So every Harvester a nest prints grinds itself into a wreck within seconds of
 reaching a worked-out or over-grade vein: the PvE *economic* enemy deletes
 itself, docs/04's "starve the nest (kill Harvesters) and it prints less"
 counterplay becomes unreachable, and **the first Feral program a player decrypts
-teaches exactly the bug** [04-enemies/archetypes.md:22](04-enemies/archetypes.md) and Q108 say a shipped source must
+teaches exactly the bug** [04-enemies/archetypes.md:23](04-enemies/archetypes.md) and Q108 say a shipped source must
 never teach.
 
 **P11 — module slots were deleted but four places still specify them. OPEN.**

@@ -63,7 +63,7 @@ The loop players should feel: *observe → rewrite → redeploy → watch it pla
 | **Cycle** | The unit of bot computation. Each sim tick, a bot's CPU grants it N cycles; every operation costs cycles. |
 | **Tick** | One fixed step of the deterministic simulation (all bots, physics, combat). |
 | **Function block** | An unlockable built-in function bots can call (e.g. `scan()`, `broadcast()`). |
-| **Construct** | An unlockable language feature (variables, `if`, loops, `def`, lists). |
+| **Construct** | An unlockable language feature (variables, loops, `def`, lists — branching ships at game start). |
 | **Fabricator / Printer** | Structure that prints (and reprints) bots. One per program color; buildable count gated by controlled nests. Each adds a fixed amount to the colony's fleet cap; each printer after the first carries a target share + selection key choosing which bots wear its color (the first takes the remainder). |
 | **Template Cache** | Non-consumable ruin where any colony studies a function block. Basic ones ring start zones; advanced ones sit deeper. |
 | **Reprint** | Queuing a replacement after a destruction — a fresh stock bot whose color comes from the fleet allocation. Nothing per-bot survives: XP gone, quirks re-rolled. |

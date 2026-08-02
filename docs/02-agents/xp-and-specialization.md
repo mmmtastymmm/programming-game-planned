@@ -10,7 +10,7 @@ Bots earn XP **per task track**, by doing:
 | Hauling | cargo-distance delivered | **cargo rack** | cargo capacity (bounded), at L3: +10% move speed while loaded |
 | Combat | damage dealt / kills | **weapon** | damage (bounded), at L3: +1 **hearing range** vs enemies (Q74) |
 | Building | build/repair progress | **build tool** | build speed (bounded), at L3: repairs restore +25% more |
-| Scouting | nodes discovered + surveys completed (Q83 — sim events; no seen-tile set, so eyes-only fog stays stateless) | **optics** | sensor range (bounded), at L3: immune to Corruption's cycle tax ([05-terrain.md](../05-terrain.md)) |
+| Scouting | nodes discovered + surveys completed (Q83 — sim events, read off the phase-5 per-faction known-tiles writes — Q94) | **optics** | sensor range (bounded), at L3: immune to Corruption's cycle tax ([05-terrain.md](../05-terrain.md)) |
 
 **Perks take three shapes, and none of them is linear-per-level** (Q121). The
 ladder is uncapped, so a `+10% per level` perk would run away — a `+1 sensor
