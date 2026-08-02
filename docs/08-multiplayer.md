@@ -7,7 +7,7 @@ Multiplayer is a **day-one constraint**, not a feature (per project decision: re
 | File | Owns |
 |---|---|
 | [lockstep.md](08-multiplayer/lockstep.md) | The lockstep model: input delay, relay topology, desync handling, late join. |
-| [determinism-contract.md](08-multiplayer/determinism-contract.md) | The six rules every system must obey (the CI-enforced contract). |
+| [determinism-contract.md](08-multiplayer/determinism-contract.md) | The eight rules every system must obey (the CI-enforced contract). |
 | [modes.md](08-multiplayer/modes.md) | Server harm settings, the PvP gate, and allied-colony scaffolding. |
 | [code-visibility.md](08-multiplayer/code-visibility.md) | Shared libraries, per-color decryption by salvage attrition, the reveal-mask rules, spectating. |
 | [match-settings.md](08-multiplayer/match-settings.md) | The owning inventory of every match dial (Q77). |

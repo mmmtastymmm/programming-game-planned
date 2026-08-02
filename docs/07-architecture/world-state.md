@@ -3,7 +3,7 @@
 # Key World-State Shapes (sketch — plain structs + `BTreeMap`s, not ECS)
 
 ```text
-Bot entity:      BotId, Hp, Cargo(typed manifest), Modules, XpTracks,
+Bot entity:      BotId, Hp, Cargo(typed manifest), ToolGrades, XpTracks,
                  Env, QuirkList+QuirkScratch, VmState, DeployedProgram,
                  TilePos, Faction
 World extras:    per-tile counters (scree, dune sink, Corruption spread),

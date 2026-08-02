@@ -245,7 +245,7 @@ hash: statline, XP map, quirk rolls, upkeep settlements).*
       needs per-tile material instances); signature tells ride the inspector, not the
       world view. Both flagged for the rendering pass.* [game] (L)
 
-## M8 — Terrain v2 & terraforming ✅ CORE COMPLETE (2026-07-16) — discussion items below
+## M8 — Terrain v2 & terraforming ✅ COMPLETE (2026-07-16) — notes below
 
 - [x] **×2 move-cost scale** + full tile table: `tuning.tile_costs` (×2 scale — Plains 2 so
       Road ½× = 1); eight new TileKinds (Mountain, Ramp, Dunes, Ice, Ford, Road, Scree,
@@ -323,7 +323,7 @@ hash: statline, XP map, quirk rolls, upkeep settlements).*
       faction, so any faction's builder can finish them (Clear pays the finisher).*
       [sim][game] (M)
 
-## M9 — Printers v2: target shares (replaces the superseded `desired_max` dial) ✅ CORE COMPLETE (2026-07-16) — discussion items below
+## M9 — Printers v2: target shares (replaces the superseded `desired_max` dial) ✅ COMPLETE (2026-07-16) — notes below
 
 *Review round (2026-07-16, 10 confirmed findings fixed):* signal-mode allocation now DEFERS
 booting/pad-sitting bots to the polite queue (engine states aren't the player's clock — only
@@ -429,7 +429,11 @@ sustained-rust `rust_scraps` is the surviving valve).*
       addressable factions (M11's `faction=` channels consume it; analyze steals one). Both
       hashed. Masked-source RENDERING deferred with the Codex UI below. [sim] (M)
 - [ ] **Game**: clickable Black Boxes, wreck countdown display, Codex/decryption viewer with
-      per-color enemy-decryption % in the file viewer. *(Deferred — the sim exposes
+      per-color enemy-decryption % in the file viewer. The masked view carries two ruled
+      requirements: **structural whitespace is exempt from the reveal mask at every level**
+      (Q125 — line breaks and indentation always render, so a level-0 silhouette is real
+      intel) and **a color's version counter is opponent-visible** (Q124 — shown wherever its
+      bots are, no decryption state). *(Deferred — the sim exposes
       everything: wrecks carry countdown/hp, boxes carry entity + cause, decryption is a
       readable map.)* [game] (M)
 
@@ -873,9 +877,11 @@ written-up quirks are unbuildable. ⚠HASH.
       built Research Archive: flat rate table in data (Chips-favored, Gold densest per unit),
       no scarcity scaling. Data's only other sinks are finite research + printer repair, so
       this is what keeps Data worth earning late. [sim][game]
-- [ ] **Feral sources: doc/code now agree** (Q108) — no code change; `feral.rs`'s
-      "NEEDS DISCUSSION / flagged in TASKS.md" comment can drop its flag, since docs/04 was
-      updated to the shipped sources. [sim]
+- [~] **Feral sources: doc/code agreed at Q108** — SUPERSEDED. The Q108-era parity is gone:
+      docs/04's archetype sources were since restated to the P7/P10/P16 forms, so the code
+      re-sync is genuinely pending and is tracked in **M16b → *Shipped programs*** above.
+      `feral.rs`'s "NEEDS DISCUSSION / flagged in TASKS.md" comment **stays** until that
+      lands — it is the only in-code marker of the divergence. [sim]
 - [x] **`QueuePrint(loadout)`** (Q104) — parameter deleted from docs/07; the shipped
       per-faction counter was always the whole feature. No code change.
 - [x] **Alliance decryption** (Q107) — shipped forward-only pooling ratified; docs/07's
@@ -898,14 +904,15 @@ written-up quirks are unbuildable. ⚠HASH.
       `SelectKey::TotalXp` rank by INVESTMENT (lifetime XP + **the value of installed
       tools** — tiers and the Backup Core are deleted), not raw XP: a tooled-up veteran
       with low XP must never be selected as the fleet's cheapest machine. [sim]
-- [x] **Processing track** — the twelfth track needs its income (first pass: 1 per 10 ops
-      executed), its perk magnitudes, and a slot in the phase-7 settlement order; Learning's
-      10% must read the UNSCALED award. [sim]
+- [~] **Processing track** — PARTLY SUPERSEDED by Q111/Q121: Processing is one of the **ten**
+      tracks (not a twelfth), and the Learning clause is void — Learning was retired entirely,
+      so phase 7 has no second pass. What stands: Processing's income (first pass: 1 per 10 ops
+      executed), its perk magnitudes, and its slot in the ten-track settlement order. [sim]
 
 ## Verb-layer index (every spec'd builtin → its milestone)
 
-✅ = host implementation landed. Every spec'd verb below has (as of M15); the
-milestone column records which one shipped it. Still-unbuilt verbs
+✅ = host implementation landed. As of M15 every verb below has landed; the
+milestone column records which milestone shipped it. Still-unbuilt verbs
 (`try_move_to`, `try_attack`, `closest_minable`/`exists_minable`/`try_mine`)
 live in the quick-wins backlog and M16b above, not here.
 

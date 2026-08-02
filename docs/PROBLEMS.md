@@ -40,7 +40,25 @@ caught later the same day: P22's own citation into
 `01-language/signals-and-logging.md`, shifted one line by the guard the P22
 fix itself inserted — now :18.)*
 
-**Status 2026-08-02: still 28 opened, 28 fixed — a third audit corrected the
+**Status 2026-08-02 (latest): 30 opened, 28 fixed — P29 and P30 are open and
+need rulings.** Four further high-effort audits followed the third, and their
+findings were fixed in the same commit that found them rather than sitting
+open as numbered entries: `8e17776` (6 — the last Q125 carrier in
+07-architecture/ui-notes.md, eleven drifted Fixed-log anchors, two
+false-premise tasks, the "(Q67 open)" marker, a dead intra-file link),
+`31b5bb9` (5 — two doorway drifts in 07-architecture.md and 02-agents.md, the
+Combat kill-bonus ratio, two stale TASKS.md markers), `2d4818c` (2 — the
+02-agents doorway's pre-Q123 single-curve claim, P22's own off-by-one anchor),
+`8aef987` (4 — TASKS.md state defects: a stale Q71 cross-reference, duplicated
+status markers, an un-annotated Pump note, a verb-index milestone), and
+`740539c` (10 — surviving Q111/Q115 carriers in 02-agents, two stale pointers
+in 03-resources, and TASKS.md freshness). **The classes recur** — drifted
+anchors appeared in three separate rounds — which is the argument for logging
+them here rather than only in commit messages. The two findings that could not
+be swept, because the docs do not contain the answer, are opened above as
+**P29** (barricade query domain) and **P30** (Feral walks vs. P7).
+
+**Status 2026-08-02 (earlier): still 28 opened, 28 fixed — a third audit corrected the
 record, not the rulings.** The block below cites P22's close as `09c3e62`
 (structure queries answer from faction knowledge); that close was twice
 amended the next day — `6686866`, then `95c73c8` — to its final
@@ -101,7 +119,41 @@ The three that change actual game behavior rather than doc clarity are **P1**
 
 These cannot be swept mechanically — the docs do not contain the answer.
 
-*(Empty as of 2026-08-01 — every entry ruled and moved to the Fixed log.)*
+**P29 — the barricade query domain is specified two incompatible ways in one
+Decided file.** [05-terrain/decided.md](05-terrain/decided.md) (the Q99
+barricade bullet vs. the P22 structure-pool bullet five lines below);
+[TASKS.md](TASKS.md) (*Decided-but-unbuilt*: "Barricade HP (Q99)" vs.
+"Structure-pool query domain (P22)").
+
+Q99 gives barricades a `barricade` kind constant expressly so an assault force
+can find and shoot through a rival's wall, and says finding one "takes eyes" —
+i.e. perception suffices. P22's final form removes foreign structures from the
+query domain **entirely** — no perception path, no selector. A rival's wall is
+therefore both findable (Q99) and unfindable (P22). Both readings are
+hash-affecting, so two implementers ship divergent `closest(barricade)` domains
+and desync; meanwhile the documented siege idiom faults every loop.
+Needs one ruling: are enemy barricades (and any other attackable foreign
+placement) a carve-out from P22's own-pool rule, or does breaching become a
+pure adjacency/terrain interaction with no query surface?
+
+**P30 — the shipped Feral walks keep the bare blocking `move_to` that P7 ruled
+lethal, on a waiver that cites a different fault.**
+[04-enemies/archetypes.md](04-enemies/archetypes.md) ("The Drone and Stinger
+keep their faulting `move_to`/`attack` deliberately — the Q108
+`move_to`-before-swing guard is their lesson").
+
+P7 made the Tier-0 starter's walks `try_` because a no-path fault every loop,
+at Q109's `fault_damage` 2 against 40 base HP, kills a bot in ~8 seconds. The
+Feral waiver rests on Q108's guard, which addresses a *non-adjacent swing* —
+a different fault entirely. `exists(enemy)` is true for any perceived enemy,
+including one across water or behind a demolished bridge, so a Drone or
+Stinger that sights an unreachable target self-destructs unattended and nests
+near water depopulate themselves. Q108's own principle ("shipped sources must
+not crash-loop") points the other way from the waiver built on it.
+Needs one ruling: do the attacker archetypes take `try_move_to` (⚠HASH — Feral
+program text is hashed into the program library), or is unreachable-target
+self-destruction intended Feral behavior that the waiver should state
+positively instead of deriving from Q108?
 
 ---
 
