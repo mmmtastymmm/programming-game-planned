@@ -29,15 +29,16 @@ moved the answered worksheet bodies (Q111–Q123) out of `QUESTIONS.md` into
 [history/questions-worksheets.md](history/questions-worksheets.md); citations
 into those bodies now point there.
 
-**Status 2026-08-01 (latest): 28 opened, 17 fixed.** P1 — the bootstrap
+**Status 2026-08-01 (latest): 28 opened, 19 fixed.** P1 — the bootstrap
 deadlock — ruled and closed in `2c56fdf` (ruined Upgrade Station in the
 start base). Earlier the same day the mechanical propagation batch — P8,
 P12, P13, P15–P17, P19, P21, P23, P24, P26, P28 — closed in `93d6b25`.
-11 remain open (P5–P7, P9–P11, P14, P18, P20, P25, P27); P2
+9 remain open (P5, P7, P9–P11, P14, P18, P25, P27); P2
 closed in `d90a428` (pacing table recomputed), P3 in `c1b26a7` (component
 BFS + non-minting visible hold), P4 in `e913c27` (try_ covers the action,
 never the argument), P22 in `09c3e62` (structure queries answer from
-faction knowledge).
+faction knowledge), P6+P20 in `3e21e89` (both linear perks converted to
+the bounded hyperbolic).
 
 **Status 2026-08-01: 28 problems opened (P1–P28), 0 fixed.** P15–P18 were
 found by the reviews of the 04–09 doc split; P19–P28 by the same day's
@@ -89,20 +90,6 @@ claimed midpoint; and the **evaluation order is unstated** —
 the spec rules that grouping out. A deterministic sim cannot leave that
 ambiguous.
 
-**P6 — the Flinch perk saturates to zero, deleting the forced prologue
-outright. OPEN.**
-[02-agents/xp-and-specialization.md:54](02-agents/xp-and-specialization.md) (the Flinch row),
-[09-quirks/acquired-quirks.md:8](09-quirks/acquired-quirks.md); Q121 in [history/questions-answered.md](history/questions-answered.md)
-
-Q121 ratified Flinch's −10%/level as "self-saturating," but it saturates **at
-zero**: "floors at L10" means a bot that has endured enough hostile flinches has
-flinch duration 0. [02-agents/damage-faults-death.md](02-agents/damage-faults-death.md)'s "forced prologue on most
-signals — time spent locked and vulnerable" then stops existing for veterans,
-removing the vulnerability window the entire double-handle and rescue economy is
-priced against. This is the one surviving linear perk Q121 declined to convert
-to the bounded hyperbolic; converting it, or flooring it at a nonzero fraction,
-are the two fixes.
-
 **P7 — the shipped Tier-0 starter faults to death on unreachable ore, and does
 nothing at all when no ore is minable. OPEN.**
 [01-language/syntax-tiers.md](01-language/syntax-tiers.md) (the shipped starter),
@@ -134,25 +121,6 @@ Two defects in one program, both introduced by Q117's rewrite:
     condition without specifying a replacement signal. `wander` and `explore`
     are both already in the start kit — docs/04's Feral Harvester uses the
     identical guard followed by `wander()`.
-
-**P20 — the Hiding perk is a second linear-uncapped perk, contradicting
-Q121's own rule. OPEN.**
-[02-agents/xp-and-specialization.md:53](02-agents/xp-and-specialization.md) and
-[02-agents/stat-sheet.md:26](02-agents/stat-sheet.md) ("−1 signature/level,
-tuning") vs
-[02-agents/xp-and-specialization.md:15](02-agents/xp-and-specialization.md)
-("none of them is linear-per-level")
-
-Q121 converted perks to bounded shapes because the ladder is uncapped; P6
-records Flinch as "the one surviving linear perk." Hiding is a second
-survivor, registered nowhere: signature falls 1 per level, and heard-at
-distance (their hearing radius + this signature) floors at 1 — so a Hiding
-bot around level 6–7 against base hearing 7 is heard only at adjacency,
-everywhere, permanently. That deletes the movement-noise detection layer
-(Sentry early warning, creeping's trade, signature quirks) for veteran
-infiltrators — the "switch fog of war off at a reachable level" failure Q121
-names as the reason the rule exists. Same two fixes as P6: convert to the
-bounded hyperbolic, or floor it at a nonzero signature.
 
 **P27 — solid structures have no slot in the ratified tile-composition
 model. OPEN.**
@@ -462,6 +430,23 @@ ordinary type faults, resolved before the verb by guard-then-act or match.
 The contract is now stated in builtins.md and types-and-env.md; the
 composition idiom is defined by exclusion rather than absorbed.)*
 
+**P6 — the Flinch perk saturates to zero, deleting the forced prologue
+outright. FIXED (`3e21e89`).**
+[02-agents/xp-and-specialization.md:54](02-agents/xp-and-specialization.md) (the Flinch row),
+[09-quirks/acquired-quirks.md:8](09-quirks/acquired-quirks.md); Q121 in [history/questions-answered.md](history/questions-answered.md)
+
+Q121 ratified Flinch's −10%/level as "self-saturating," but it saturates **at
+zero**: "floors at L10" means a bot that has endured enough hostile flinches has
+flinch duration 0. [02-agents/damage-faults-death.md](02-agents/damage-faults-death.md)'s "forced prologue on most
+signals — time spent locked and vulnerable" then stops existing for veterans,
+removing the vulnerability window the entire double-handle and rescue economy is
+priced against. This is the one surviving linear perk Q121 declined to convert
+to the bounded hyperbolic; converting it, or flooring it at a nonzero fraction,
+are the two fixes.
+
+*(Resolution: converted to Q121's bounded hyperbolic with `max_cut` below
+100% — the prologue shortens, never vanishes. Ruled together with P20.)*
+
 **P8 — `investment()` still sums deleted capability tiers. FIXED (`93d6b25`).**
 [07-architecture/vm.md:13](07-architecture/vm.md),
 [01-language/program-colors.md:47](01-language/program-colors.md) (the ghost-exemption bullet),
@@ -591,6 +576,29 @@ layer from the canonical inventory ships a sim in which nest conversion —
 the gate on every printer/color past the second — has no input path; and
 because Commands are the lockstep input stream, implementations that
 disagree here also disagree on Q86's forgery-protection set.
+
+**P20 — the Hiding perk is a second linear-uncapped perk, contradicting
+Q121's own rule. FIXED (`3e21e89`).**
+[02-agents/xp-and-specialization.md:53](02-agents/xp-and-specialization.md) and
+[02-agents/stat-sheet.md:26](02-agents/stat-sheet.md) ("−1 signature/level,
+tuning") vs
+[02-agents/xp-and-specialization.md:15](02-agents/xp-and-specialization.md)
+("none of them is linear-per-level")
+
+Q121 converted perks to bounded shapes because the ladder is uncapped; P6
+records Flinch as "the one surviving linear perk." Hiding is a second
+survivor, registered nowhere: signature falls 1 per level, and heard-at
+distance (their hearing radius + this signature) floors at 1 — so a Hiding
+bot around level 6–7 against base hearing 7 is heard only at adjacency,
+everywhere, permanently. That deletes the movement-noise detection layer
+(Sentry early warning, creeping's trade, signature quirks) for veteran
+infiltrators — the "switch fog of war off at a reachable level" failure Q121
+names as the reason the rule exists. Same two fixes as P6: convert to the
+bounded hyperbolic, or floor it at a nonzero signature.
+
+*(Resolution: converted to Q121's bounded hyperbolic with `max_quiet` tuned
+below base hearing — hearing detection never switches off. Ruled together
+with P6, leaving zero linear perks.)*
 
 **P21 — Q117's branching-at-start never propagated to three "`if` is an
 unlock" passages. FIXED (`93d6b25`).**
