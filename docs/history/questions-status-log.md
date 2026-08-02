@@ -11,6 +11,13 @@ rulings are in [questions-answered.md](questions-answered.md).
 
 ---
 
+**Status 2026-08-02: Q124–Q126 ANSWERED — THE BOARD IS CLEAR.**
+Version counters are opponent-visible (Q124), structural whitespace is
+always visible in masked views (Q125), and no program-side foreign-structure
+query surface ships in v1 (Q126). Every numbered question through Q126 is
+decided; only the playtest-tuning bucket remains open, and it never blocks
+design. Implementation proceeds from TASKS.md.
+
 **Status 2026-08-02 (earlier): Q126 OPENED — foreign-structure queryability.**
 P22's structure-query ruling simplified to its knowledge-pool form (own
 colony state plus granted allies', current by construction) after the

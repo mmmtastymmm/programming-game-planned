@@ -743,8 +743,10 @@ fixed. Archived in full at [history/reviews.md](history/reviews.md).
       `world.barricades: BTreeMap<EntityId, Barricade { pos, hp }>` (hashed), tile stays
       `TileKind::Barricade` for passability/LoS, 0 HP reverts the tile to Plains (the
       Demolish path, ground stack stays cleared); built by the existing Barricade blueprint;
-      a `barricade` kind constant joins `KINDS` + `find_kind` (perception-gated like
-      structures, unlike `blight`); `attack()`'s victim lookup and the damage settle learn
+      a `barricade` kind constant joins `KINDS` + `find_kind`. **Blocked on Q127** for the
+      registry's allegiance field and the query domain — the "perception-gated like
+      structures, unlike `blight`" line written here at Q99 time is the text P29 registers,
+      so build neither until the ruling lands; `attack()`'s victim lookup and the damage settle learn
       the new registry — add a `DamageTarget::Barricade` variant (Q102's second half landed
       the enum, so the path already exists). First-pass HP scaled to the 20-Stone price.
       [sim][game] ⚠HASH

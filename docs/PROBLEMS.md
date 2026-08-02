@@ -136,6 +136,11 @@ Needs one ruling: are enemy barricades (and any other attackable foreign
 placement) a carve-out from P22's own-pool rule, or does breaching become a
 pure adjacency/terrain interaction with no query surface?
 
+*(The ruling is being taken as **Q127**, opened 2026-08-02 — the question
+grew past this entry into building allegiance and the remembered-building
+query surface generally. P29 closes when Q127 is answered; the substance
+lives in QUESTIONS.md, not here.)*
+
 **P30 — the shipped Feral walks keep the bare blocking `move_to` that P7 ruled
 lethal, on a waiver that cites a different fault.**
 [04-enemies/archetypes.md](04-enemies/archetypes.md) ("The Drone and Stinger
