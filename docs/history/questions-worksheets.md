@@ -560,3 +560,29 @@ question was first written, because the original framing was half wrong:
   faster, which buys more cycles through its tool. Bounded by Q121's
   hyperbolic, but a loop worth watching.
 
+---
+
+*(Q124–Q126, answered 2026-08-02 — worksheet bodies moved from
+QUESTIONS.md the same day:)*
+
+**Q124 — can opponents see a color's *version counter* tick? OPEN (opened
+2026-08-01, docs/08).** Swept in from an unnumbered note in
+[08-multiplayer/code-visibility.md](08-multiplayer/code-visibility.md). A
+visible counter is decryption-free intel ("they redeployed Blue 30 seconds
+after our salvage"). Lean **yes** — it rewards attention.
+
+**Q125 — is structural whitespace always visible in masked views? OPEN (opened
+2026-08-01, docs/08).** Same origin. Should line breaks and indentation be
+exempt from the reveal mask at every decryption level? Lean **yes** —
+silhouettes read as "shape of the program," which is good partial-intel
+texture.
+
+**Q126 — should programs be able to query foreign structures at all? OPEN
+(opened 2026-08-02, docs/05 / docs/01).** P22's final form removed foreign
+structures from the query domain entirely: the fog display shows
+last-observed foreign structures to the *player*, but no builtin reaches
+them from Pyrite. Opened when the `faction=` selector design was retired
+(see PROBLEMS.md, P22's amendments). If a use case appears — raid targeting,
+espionage programs — the surface must solve what the retired design did not:
+a value domain that doesn't collide with kind constants, staleness semantics
+(as-last-observed is remembered intel, not current state), and a hash story.

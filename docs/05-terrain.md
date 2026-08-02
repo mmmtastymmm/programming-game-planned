@@ -42,7 +42,7 @@ cannot silently break another — not to save anyone reading the parts.
   [decided.md](05-terrain/decided.md) — and structure queries answer from
   the **faction's knowledge pool** (P22): own colony state plus granted
   allies' own, current by construction, foreign structures never
-  query-reachable (Q126). No new state — the pool reads colony state and
+  query-reachable (Q126 — none in v1). No new state — the pool reads colony state and
   grants, both already hashed. Fog belongs to the deterministic world and
   not the `game` crate.
 - **All numbers here are tuning constants** bound for data files, never code —

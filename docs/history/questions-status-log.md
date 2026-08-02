@@ -11,6 +11,14 @@ rulings are in [questions-answered.md](questions-answered.md).
 
 ---
 
+**Status 2026-08-02 (earlier): Q126 OPENED — foreign-structure queryability.**
+P22's structure-query ruling simplified to its knowledge-pool form (own
+colony state plus granted allies', current by construction) after the
+`faction=` selector design was retired for compounding contradictions
+(PROBLEMS.md, P22's amendments); whether programs should reach *foreign*
+structure intel at all is now the open question. Q124–Q125 remain open;
+everything through Q123 remains decided.
+
 **Status 2026-08-01: Q124–Q125 OPENED — the open-questions
 consolidation sweep.** Unnumbered open questions found living outside this
 file were swept in: the two code-visibility texture calls (version-counter

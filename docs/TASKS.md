@@ -708,7 +708,7 @@ fixed. Archived in full at [history/reviews.md](history/reviews.md).
       pool**: own colony state (always current) plus, while an ally vision grant
       stands, the granting ally's own structures/designations as the ally knows
       them; revoke removes them. Foreign structures are not query-reachable
-      (Q126 tracks a possible future surface). **No new sim state** — the pool
+      (Q126 ruled: no v1 surface). **No new sim state** — the pool
       reads colony state and grants, both already hashed. Canonical hurt window
       gains the `exists` guard
       ([01-language/signals-and-logging.md](01-language/signals-and-logging.md)).
