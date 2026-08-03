@@ -195,6 +195,39 @@ two are reconcilable — the signal is never sent, so the abort rule is vacuous
 rather than violated — but nothing says so, and a reader of the decided bullet
 would expect recall-during-boot to abort.
 
+*A fourth candidate considered and set aside as insufficient on its own
+(2026-08-03): **delete politeness entirely** — every signal, recall included,
+interrupts everything all the time.* Two real arguments for it. It restores a
+rule the design already states absolutely —
+[01-language/faults-and-handlers.md](01-language/faults-and-handlers.md): "There
+is no safe phase in the sandwich" — of which politeness is the only carve-out.
+And it makes the double-handle pricing *actually* load-bearing: the 2026-08-02
+window redesign made that rule the sole price of handler length, then left the
+most common interrupt source exempt from it, so handler length is currently
+priced by a mechanism that politely declines to fire. It also needs no tuning
+constant, unlike the deadline. **But it does not close this entry**, for the
+reason the deadline candidate also has to answer: politeness only matters where
+a recall is *dispatched*, and the allocation re-colors only bots whose
+assignment changed — a bot already at the right printer is never dispatched to
+at all (a same-color re-target "cancels in place"; an already-walking re-color
+just updates its destination). The P31 bot in a balanced colony has no polite
+recall being deferred; it has **no recall**. Removing politeness therefore fixes
+only the subset where fleet arithmetic independently wants to move the stuck
+bot, which makes recovery depend on unrelated bookkeeping. Its cost is also
+correlated in the wrong direction: rebalancing fires hardest after casualties,
+exactly when survivors are sitting in `hurt` and `bumped` windows, so a bad
+fight would be followed by an allocation pass killing a second wave for having
+flinched — the "triggers the player didn't time" line Q85 drew. That may still
+be the game you want (it is pressure toward short handlers, delivered by play
+rather than by a compiler), but it should be ruled as a deliberate lethality
+increase in its own right, not as this entry's fix.
+
+*Consequence for the candidate list:* only a **template-side** rule catches a
+bot that nothing is dispatching to, so the overtime rule closes this entry
+independent of fleet state. It also makes politeness harmless afterwards — once
+no template can run forever, a polite recall can only ever be deferred a bounded
+time — which leaves "keep or delete politeness" a free, separable choice.
+
 Needs one ruling. Three candidates, none of them swept in: accept it as the
 player's problem; **give politeness a deadline** — an engine-fired recall stays
 polite for N ticks, then lands anyway, so a normal two-line hurt handler is
