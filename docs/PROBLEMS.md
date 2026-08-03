@@ -209,8 +209,9 @@ constant, unlike the deadline. **But it does not close this entry**, for the
 reason the deadline candidate also has to answer: politeness only matters where
 a recall is *dispatched*, and the allocation re-colors only bots whose
 assignment changed — a bot already at the right printer is never dispatched to
-at all (a same-color re-target "cancels in place"; an already-walking re-color
-just updates its destination). The P31 bot in a balanced colony has no polite
+at all ([TASKS.md](TASKS.md) M9 *Dispatch rules*: "a same-color re-target
+cancels in place", and an already-walking re-color has its destination updated
+"no re-signal"). The P31 bot in a balanced colony has no polite
 recall being deferred; it has **no recall**. Removing politeness therefore fixes
 only the subset where fleet arithmetic independently wants to move the stuck
 bot, which makes recovery depend on unrelated bookkeeping. Its cost is also
