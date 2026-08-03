@@ -36,9 +36,9 @@ The full catalog and unlock order live in [06-progression.md](../06-progression.
 | `exists(kind)` → bool | 1 | Any entity of `kind` perceived or known (seen / heard-moving / known node / pool structure — same domain as `closest`)? |
 | `.expect()` (method on `Result` / `Option`) | 1 | Unwrap: `Ok`/`Some` → the value; `Err`/`None` → faults (with the carried message, for `Err`) |
 | `cargo_full()` → bool | 1 | True iff the manifest is at cargo capacity |
-| `attack(entity)` | 2 + action | Swing at an adjacent target — bot, structure, wreck, nest or Blight Core; a **non-adjacent swing faults**, which is why every shipped source `move_to`s first (Q108). Damage settles in phase 4; Non-PvP gates it (Q76) |
+| `attack(entity)` | 2 + action | Swing at an adjacent target — bot, structure, wreck, nest or Blight Core. A **non-adjacent swing at a seen target faults**, which is why every shipped source `move_to`s first (Q108); the exception is a **heard-only contact**, which `attack` closes to engage, resolving on sight (Q74 — see Decided). Damage settles in phase 4; Non-PvP gates it (Q76) |
 | `scan_enemies()` → list | 4 | Requires Tier 5 |
-| `send(ch, val, timeout=None, faction=own)` | 3 + size, blocks | Requires Tier 7; one receiver, rendezvous; `timeout=None` blocks forever, expiry faults. **Payload size caps at `payload_cap`** (~8, data — oversized faults `err_payload`, Q82), so sized costs are bounded. Legal in a handler window like anything else, but a `timeout=None` receive parks the bot inside the template until the next signal aborts it — the editor warns |
+| `send(ch, val, timeout=None, faction=own)` | 3 + size, blocks | Requires Tier 7; one receiver, rendezvous; `timeout=None` blocks forever, expiry faults. **Payload size caps at `payload_cap`** (~8, data — oversized faults `err_payload`, Q82), so sized costs are bounded. `timeout=None` blocks forever; inside a handler window that parks the bot in the template indefinitely, so the editor warns (see Signal handlers) |
 | `try_send(ch, val)` → bool | 3 + size | One receiver or lost — the fire-and-forget distress call |
 | `broadcast(ch, val, timeout=None)` | 5 + size, blocks | All blocked receivers; waits for ≥1; timeout faults |
 | `try_broadcast(ch, val)` → bool | 5 + size | All blocked receivers or lost |

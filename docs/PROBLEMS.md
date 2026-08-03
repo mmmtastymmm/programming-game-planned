@@ -40,7 +40,13 @@ caught later the same day: P22's own citation into
 `01-language/signals-and-logging.md`, shifted one line by the guard the P22
 fix itself inserted — now :18.)*
 
-**Status 2026-08-02 (latest): 30 opened, 28 fixed — P29 and P30 are open and
+**Status 2026-08-03 (latest): 31 opened, 28 fixed — P29, P30 and P31 are open
+and need rulings.** P31 was opened by the 2026-08-02 signal-safety deletion
+(`1def1cc`): removing the loop ban made an unbounded window legal, and every
+recovery path in the design is polite to mid-template bots, so the bot is
+unrecoverable and — uniquely — silent about it.
+
+**Status 2026-08-02: 30 opened, 28 fixed — P29 and P30 are open and
 need rulings.** Four further high-effort audits followed the third, and their
 findings were fixed in the same commit that found them rather than sitting
 open as numbered entries: `8e17776` (6 — the last Q125 carrier in
@@ -140,6 +146,35 @@ pure adjacency/terrain interaction with no query surface?
 grew past this entry into building allegiance and the remembered-building
 query surface generally. P29 closes when Q127 is answered; the substance
 lives in QUESTIONS.md, not here.)*
+
+**P31 — an unbounded handler window strands the bot in a state nothing can
+recover, and it is the one failure in the game with no wreck and no crash
+dump.** [01-language/faults-and-handlers.md](01-language/faults-and-handlers.md)
+(the 2026-08-02 window redesign) vs.
+[01-language/program-colors.md](01-language/program-colors.md) (polite recall,
+the loop-boundary hot-swap) and
+[07-architecture/vm.md](07-architecture/vm.md) (the pad pull skips mid-template
+bots).
+
+Deleting signal-safety made `on boot: while True: wait(1)` legal. A bot looping
+in a window is permanently mid-template, and every recovery path in the design
+is explicitly *polite* to mid-template bots: recall retries each tick and never
+lands, the over-capacity scrap valve re-selects past it, the Upgrade-Station
+pad pull skips it, and the hot-swap only lands at a loop boundary the bot never
+reaches — so not even a corrected redeploy can reach it. The double-handle rule
+does not save it either: a bot looping somewhere safe receives no second signal,
+so nothing forces the abort that would at least produce a wreck. Every other
+failure in this game is visible and diagnosable; this one is a bot that silently
+stops, forever, with an intact colony around it.
+Needs one ruling. Three candidates, none of them swept in: accept it as the
+player's problem; give **recall** an engine-level force-abort once a bot has
+been mid-template for N ticks (recovery without touching the language); or add a
+**runtime overtime rule** where a template running past N ticks aborts — noting
+that [01-language/cycle-costs.md](01-language/cycle-costs.md) records the
+deleted caps as having *replaced* an earlier "grace-window/overtime tax", so
+this third option is a deliberate revival. Reserving `on boot:` was considered
+and does not close it: `error`, `hurt`, `bump` and `bumped` windows have the
+same property.
 
 **P30 — the shipped Feral walks keep the bare blocking `move_to` that P7 ruled
 lethal, on a waiver that cites a different fault.**

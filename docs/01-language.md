@@ -42,8 +42,8 @@ cannot silently break another — not to save anyone reading the parts.
   any `def`, loops included. Window length is bounded by program memory and
   window danger by abort-on-second-signal. The deploy-time analysis survives as
   **information only** — a worst-case instruction count where computable,
-  `unbounded` otherwise, plus one warning for an unbounded blocking call in a
-  window. Anything reintroducing a window-only restriction — in
+  `unbounded` otherwise, plus one warning for an unbounded window (unbounded
+  loop, or a blocking call with no timeout). Anything reintroducing a window-only restriction — in
   [builtins.md](01-language/builtins.md)'s table, a
   [modules-and-library.md](01-language/modules-and-library.md) import rule, or
   an [editor-ux.md](01-language/editor-ux.md) greying rule — contradicts this.
