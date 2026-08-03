@@ -9,8 +9,8 @@ remembered-building query surface.** Q126 closed the foreign-structure
 surface for v1 and recorded what any future one must solve; a use case
 arrived immediately — P29's barricade contradiction — and with it a simpler
 shape than the design Q126 retired, so the question is reopened on its own
-terms as **Q127**. Everything through Q126 remains decided; **P29** and
-**P30** are open in [PROBLEMS.md](PROBLEMS.md), and P29 closes as a
+terms as **Q127**. Everything through Q126 remains decided; **P29**, **P30**
+and **P31** are open in [PROBLEMS.md](PROBLEMS.md), and P29 closes as a
 consequence of Q127.
 
 *Earlier status entries — the dated record of how the board got here — are in

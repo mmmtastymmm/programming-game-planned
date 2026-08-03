@@ -734,7 +734,8 @@ fixed. Archived in full at [history/reviews.md](history/reviews.md).
       becomes a readout, so it must now *return* `unbounded` for a cycle or loop node instead
       of erroring. `crates/game`: the editor stops greying anything in a window and shows the
       worst-case (or `unbounded`) badge; add the one deploy-time **warning** for an unbounded
-      window (unbounded loop, or a blocking call with no timeout). Tests in
+      window (unbounded loop, or a **channel** call with `timeout=None` — action-blocking
+      verbs like `move_to` always resolve and must not warn). Tests in
       `pyrite/tests/language.rs` that assert rejection invert to assert acceptance.
       **`crates/sim` is in scope**: `sim.rs` calls `check_windows` on the deploy path twice
       (`Command::SpawnBot`, `Command::DeployProgram`), and `game/src/editor/window.rs` twice
