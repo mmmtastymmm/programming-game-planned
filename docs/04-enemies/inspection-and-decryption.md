@@ -12,12 +12,12 @@ The core conceit (requirement 5): **Ferals run real Pyrite programs on the same 
 
 ## Inspection & Decryption
 
-Feral programs are **encrypted exactly like player code** ([08-multiplayer.md](../08-multiplayer.md)): each salvage/analysis of a nest's unit grants **permanent +N% decryption** of that nest's archetype program. One universal rule, no exceptions: **programs are read on murder** — yours, theirs, everyone's.
+Feral programs are **encrypted exactly like player code** ([08-multiplayer.md](../08-multiplayer.md)): each **salvage** of a nest's unit grants **permanent +N% decryption** of that nest's archetype program — the same verb that grants it against players, since it is the same attrition rule ([08-multiplayer.md](../08-multiplayer.md) owns it; `analyze` is the intel verb and grants none). One universal rule, no exceptions: **programs are read on murder** — yours, theirs, everyone's.
 
 | Method | What you get |
 |---|---|
 | Click any visible Feral | Archetype + nest tag, live behavior — and your current **decrypted view** of its source (stable noise where unrevealed), with **live program counter** stepping over the lines you've revealed |
-| `analyze()` any wreck (Q76: the intel verb, player wrecks included) | **Data** ([03-resources.md](../03-resources.md)) + the wreck's **logs + env snapshot** + its faction's **comm key**; Feral wrecks add **+N% decryption** of that nest's archetype program ([01-language.md](../01-language.md)). Destroys the wreck — materials (`salvage`) or intel (`analyze`), pick one |
+| `analyze()` any wreck (Q76: the intel verb, player wrecks included) | **Data** ([03-resources.md](../03-resources.md)) + the wreck's **logs + env snapshot** + its faction's **comm key**; **no decryption** — that rides `salvage` alone ([08-multiplayer.md](../08-multiplayer.md)). Destroys the wreck — materials (`salvage`) or intel (`analyze`), pick one |
 | Codex library | Every decrypted view, versioned and diffable (mutating nests create versions; your % persists across them) |
 
 - **Decrypt rate is per-arcanum tuning** — the difficulty knob: the Fool leaks its whole program in a couple of kills (the curriculum still works; it's just earned), while high arcana stay cryptic across a long campaign.

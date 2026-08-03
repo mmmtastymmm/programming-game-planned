@@ -40,7 +40,13 @@ caught later the same day: P22's own citation into
 `01-language/signals-and-logging.md`, shifted one line by the guard the P22
 fix itself inserted — now :18.)*
 
-**Status 2026-08-03 (latest): 31 opened, 28 fixed — P29, P30 and P31 are open
+**Status 2026-08-03 (latest): 33 opened, 28 fixed — P29–P33 are open and need
+rulings.** P32 and P33 were opened by the full-corpus consistency audit the
+same day: neither could be swept, because both ask which of two hash-affecting
+readings is the design (the Combat-pass movement question, and what the Merge
+Conflict quirk is actually allowed to modify).
+
+**Status 2026-08-03 (earlier): 31 opened, 28 fixed — P29, P30 and P31 are open
 and need rulings.** P31 was opened by the 2026-08-02 signal-safety deletion
 (`1def1cc`): removing the loop ban made an unbounded window legal, and every
 recovery path in the design is polite to mid-template bots, so the bot is
@@ -146,6 +152,49 @@ pure adjacency/terrain interaction with no query surface?
 grew past this entry into building allegiance and the remembered-building
 query surface generally. P29 closes when Q127 is answered; the substance
 lives in QUESTIONS.md, not here.)*
+
+**P32 — the three Combat-pass verbs all move the bot, which is the one thing
+the move→combat split exists to prevent.**
+[07-architecture/tick-model.md:25](07-architecture/tick-model.md) (the
+verb-by-verb pass assignment) vs. the same entry's rationale at :24.
+
+Pass assignment is declared hash-affecting spec — "it must not be invented per
+implementation" — and it puts `attack`, `guard` and `escort` in **Combat**,
+while **Move** lists only `move_to`, `wander`, `explore`, in-flight `Move`,
+bump-freeze replans and the engine walks. But all three Combat verbs move:
+`attack(contact)` on a heard-only contact "closes to engage, resolving on
+sight" ([01-language/decided.md](01-language/decided.md), Q74), and
+`guard`/`escort` hold near and follow their entity. The split's stated purpose
+is that "every mover finishes stepping before the first swing range-checks",
+which a Combat-pass step defeats — and the movement those verbs perform is
+assigned to no pass at all.
+Needs one ruling: does the closing/following **step** ride the Move pass while
+only the swing resolves in Combat (preserving the invariant, at the cost of one
+verb spanning two passes), or do Combat verbs move within Combat and the
+invariant get restated as "movers *whose action is a move verb* finish first"?
+Both are hash-affecting; picking by implementation is exactly what the entry
+forbids.
+
+**P33 — the Merge Conflict quirk modifies a literal inside replaceable factory
+Pyrite, naming no stat row.** [09-quirks/catalog.md](09-quirks/catalog.md) (the
+Merge Conflict row: "the bump factory window's built-in `wait` runs +50%
+longer") vs. [09-quirks/design-rules.md](09-quirks/design-rules.md) rule 6 and
+[02-agents/stat-sheet.md](02-agents/stat-sheet.md)'s canonicity rule.
+
+Rule 6 requires every quirk to modify a stat-sheet row or lay a per-bot cost
+overlay; this does neither. The bump stun is factory contents —
+`wait(35)` in replaceable Pyrite ([01-language/decided.md](01-language/decided.md))
+— not hardware and not a stat, so no row declares its unit scale, pipeline
+position or rounding, and +50% of 35 (52.5) can round either way on two peers.
+Implemented literally, by editing the window's argument, it is worse: two bots
+of the same color would run different program source, breaking the byte-exact
+per-color artifact hashing that version identity and the decryption reveal mask
+both rest on. Same defect class as the fixed P14 (XP gain) and P25 (Boot
+ritual), both of which were closed by *adding the missing stat row*.
+Needs one ruling: give the bump stun a stat-sheet row and re-express the quirk
+against it (the P25 precedent — but note the player can delete the factory
+`wait` entirely, so the row must define what the quirk scales when the window is
+empty); re-express it as a cost-table overlay; or cut the quirk.
 
 **P31 — an unbounded handler window strands the bot in a state nothing can
 recover, and it is the one failure in the game with no wreck and no crash
