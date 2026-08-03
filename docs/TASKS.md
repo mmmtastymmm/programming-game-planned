@@ -724,6 +724,18 @@ fixed. Archived in full at [history/reviews.md](history/reviews.md).
       gains the `exists` guard
       ([01-language/signals-and-logging.md](01-language/signals-and-logging.md)).
       [sim] ⚠HASH (query-domain change only)
+- [ ] **Delete signal-safety** (redesign 2026-08-02, supersedes Q49/Q51) — mostly deletion,
+      and **not hash-affecting**: these are deploy-time checks, so execution is unchanged and
+      every stored golden replay contains programs that already passed. `crates/pyrite`:
+      drop `analysis::check_windows`, `window_cap`, `window_usage` and `signal_safe`; drop the
+      `signal_safe` column from `data/builtins.ron` (57 entries) and the per-signal window-cap
+      entries from `data/costs.ron`; delete the handler-context bit from the parser and the
+      matching `PyriteError` variants. **Keep `def_worst_case`** — it stops being a gate and
+      becomes a readout, so it must now *return* `unbounded` for a cycle or loop node instead
+      of erroring. `crates/game`: the editor stops greying anything in a window and shows the
+      worst-case (or `unbounded`) badge; add the one deploy-time **warning** for an unbounded
+      blocking call reachable from a window. Tests in `pyrite/tests/language.rs` that assert
+      rejection invert to assert acceptance. [pyrite][game] (M)
 - [ ] **Function-granularity tree-shaking** (Q61) — deploy assembles the artifact from only
       the module functions transitively called by the program and its handlers
       ([01-language/modules-and-library.md](01-language/modules-and-library.md)); the sandbox

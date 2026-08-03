@@ -88,7 +88,7 @@ The big one: reusable subroutines, shareable across your colony as a **program l
 
 `def` parameters follow the builtin convention: **optional parameters last, with Python-style defaults** — `def haul_to(target, drop=1):` — passed positionally or by keyword at the call site.
 
-Every `def` also gets a **derived signal-safety** at deploy (see Signal handlers): safe iff it only calls safe things and contains no loops or recursion — safe defs are callable from handler windows at their computed worst-case instruction cost. Writing your colony's library so the recovery verbs stay signal-safe is real API design.
+Every `def` also gets a deploy-computed **worst-case instruction count** where one exists — longest branch, calls expanded — reported as **unbounded** when a loop or recursion makes it undecidable (see Signal handlers). It is a cost readout, not a gate: any `def` may be called from a handler window. Writing your colony's library so the recovery verbs stay short and predictable is still real API design — the double-handle rule prices every extra tick they spend.
 
 **Docstrings, Python-style (DECIDED)** — a leading `"""triple-quoted"""` string in a `def` body is the function's documentation: captured at parse, **stripped from the runtime body** (free — like import lines, it doesn't exist at runtime), and surfaced by the editor (hovering the function — in the file viewer or in any code window — shows it, exactly like builtin hover docs). Triple-quoted strings may span lines and take their content raw (no escapes, literal newlines); elsewhere they're ordinary string values. A docstring alone is a legal (documented, do-nothing) body. The starter `hauling` module ships with one, so the idiom is taught by example.
 

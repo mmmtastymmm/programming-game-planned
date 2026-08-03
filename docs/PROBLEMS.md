@@ -329,6 +329,12 @@ ordinary type faults, resolved before the verb by guard-then-act or match.
 The contract is now stated in builtins.md and types-and-env.md; the
 composition idiom is defined by exclusion rather than absorbed.)*
 
+*(Note 2026-08-02: this entry's reasoning leans on signal-safety — "both
+operands are signal-safe", the rejected "`try_*` loses its signal-safe status"
+option — and that concept was deleted the same day. The reasoning is a closed
+record; the ruling is unaffected, and the deleted flag only widens where the
+idiom is legal, never where it faults.)*
+
 **P5 — the bounded perk truncates to zero on integer stats. FIXED (`9921848`).**
 [02-agents/xp-and-specialization.md:33](02-agents/xp-and-specialization.md) (the formula),
 [02-agents/stat-sheet.md](02-agents/stat-sheet.md) ("flat-only stats stay whole")

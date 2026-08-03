@@ -35,6 +35,18 @@ cannot silently break another — not to save anyone reading the parts.
   [cycle-costs.md](01-language/cycle-costs.md) and every signature in
   [builtins.md](01-language/builtins.md) is priced on that assumption; making any
   action non-blocking invalidates both.
+- **Handler windows are unrestricted; the double-handle rule is the only
+  pricing** (2026-08-02, supersedes Q49/Q51) — canonical in
+  [faults-and-handlers.md](01-language/faults-and-handlers.md). No instruction
+  cap, no `signal_safe` flag, no deploy rejection: a window takes any builtin,
+  any `def`, loops included. Window length is bounded by program memory and
+  window danger by abort-on-second-signal. The deploy-time analysis survives as
+  **information only** — a worst-case instruction count where computable,
+  `unbounded` otherwise, plus one warning for an unbounded blocking call in a
+  window. Anything reintroducing a window-only restriction — in
+  [builtins.md](01-language/builtins.md)'s table, a
+  [modules-and-library.md](01-language/modules-and-library.md) import rule, or
+  an [editor-ux.md](01-language/editor-ux.md) greying rule — contradicts this.
 - **Engine-initiated charges are debt; window code pays normally** (Q75) —
   canonical in [execution-model.md](01-language/execution-model.md). The trap
   cost, boot's forced `upload_log()`, and abort's forced sequence drive the

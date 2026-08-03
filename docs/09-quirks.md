@@ -29,7 +29,7 @@ cannot silently break another — not to save anyone reading the parts.
 - **Runtime stats only, never deploy-time validation** (Q52) — canonical in
   [design-rules.md](09-quirks/design-rules.md) (rule 6). A color program that
   deploys must deploy to every bot of its color; any proposed quirk touching
-  program memory, variable slots, or window caps is invalid by construction.
+  program memory or variable slots is invalid by construction.
 - **Deterministic by construction** — canonical in
   [design-rules.md](09-quirks/design-rules.md) (rule 2): the seeded
   `quirk_roll` stream, counters never random checks. The companion clause —

@@ -27,7 +27,7 @@ Base values:
 | Enum construction | 1 | `Order.Mine(target)` |
 | **`upload_crash_dump()`** | 25 | Force-called on unhandled errors; also player-callable |
 | **Trap cost** | 5 | Paid to enter the `error` handler on a *fault* (signal-raised entries — hurt/bump/bumped — skip it) |
-| **Window caps** | per-signal | Max instructions in each handler's editable window (see the reserved-handler table). Caps replace the old grace-window/overtime tax: they bound code length at deploy time; handler *time* is priced by double-handle risk |
+| ~~**Window caps**~~ | — | **Deleted 2026-08-02** with signal-safety: windows have no instruction cap. Handler *time* is priced by double-handle risk and handler *length* by program memory, so no cost entry remains |
 | **`bank_cap`** | flat (~100 cycles) | Max banked cycle budget — a constant, with a **load-time** check that no key's worst-case effective cost (overlays applied to base *plus* the largest per-bot delta) exceeds it (Q75/Q82, reshaped by Q101). Clamped after each grant (see Execution Model) |
 
 Design intent: **cycle costs are the balance dial.** Complex behavior should be *possible* early but *slow*, so hardware upgrades and code golf both feel rewarding.
