@@ -166,15 +166,49 @@ does not save it either: a bot looping somewhere safe receives no second signal,
 so nothing forces the abort that would at least produce a wreck. Every other
 failure in this game is visible and diagnosable; this one is a bot that silently
 stops, forever, with an intact colony around it.
+
+*The root cause is the unbounded politeness, not the loop.* Recall **is** a
+signal and double-handle **does** apply to it (`decided.md`: "Recall is an
+interrupt context — double-handle applies all the way home"), so the obvious
+expectation — a recall landing on a stuck bot aborts it, producing a wreck —
+is the design's own rule. What blocks it is Q85's dispatch split: recalls the
+*player didn't time* (deploy-triggered drops/claims, over-capacity scrap)
+"never enter mid-template", while player-fired triggers (rule edits, the check
+interval) "dispatch like signals — your clock, your risk". Politeness has no
+deadline, so a bot that never leaves its template is never dispatched to.
+
+*The exposure is not uniform, and `on boot:` is the worst case.* The M9 review
+round further defers **booting and pad-sitting** bots to the polite queue even
+in signal mode ("engine states aren't the player's clock — only mid-TEMPLATE
+landings keep the double-handle gamble", [TASKS.md](TASKS.md) M9). So a
+boot-window loop is exempt from *both* dispatch modes and has **no escape at
+all**, while a loop in `error`/`hurt`/`bump`/`bumped` retains one narrow,
+accidental escape: a player-fired rule edit or the check interval can land and
+abort it — but only if the allocation happens to want to move that bot, so a
+correctly-allocated bot is never dispatched to and stays stuck regardless.
+
+*A related gap this exposed, worth a sentence either way.*
+[01-language/decided.md](01-language/decided.md) states "**Boot participates in
+double-handle** — any signal mid-boot aborts the bot back into a wreck", while
+the M9 rule means recall never *becomes* such a signal for a booting bot. The
+two are reconcilable — the signal is never sent, so the abort rule is vacuous
+rather than violated — but nothing says so, and a reader of the decided bullet
+would expect recall-during-boot to abort.
+
 Needs one ruling. Three candidates, none of them swept in: accept it as the
-player's problem; give **recall** an engine-level force-abort once a bot has
-been mid-template for N ticks (recovery without touching the language); or add a
-**runtime overtime rule** where a template running past N ticks aborts — noting
-that [01-language/cycle-costs.md](01-language/cycle-costs.md) records the
-deleted caps as having *replaced* an earlier "grace-window/overtime tax", so
-this third option is a deliberate revival. Reserving `on boot:` was considered
-and does not close it: `error`, `hurt`, `bump` and `bumped` windows have the
-same property.
+player's problem; **give politeness a deadline** — an engine-fired recall stays
+polite for N ticks, then lands anyway, so a normal two-line hurt handler is
+never touched while a looping bot aborts into a diagnosable wreck and frees its
+fleet slot (one engine rule, no language change, and it targets the mechanism
+rather than the symptom); or add a **runtime overtime rule** where a template
+running past N ticks aborts — noting that
+[01-language/cycle-costs.md](01-language/cycle-costs.md) records the deleted
+caps as having *replaced* an earlier "grace-window/overtime tax", so this third
+option is a deliberate revival. Reserving `on boot:` was considered and does not
+close it: `error`, `hurt`, `bump` and `bumped` windows have the same property,
+and boot's window is the documented home of the run-once dotfile idiom
+([01-language/types-and-env.md](01-language/types-and-env.md)), which the main
+program cannot replace without re-charging the config every loop-around.
 
 **P30 — the shipped Feral walks keep the bare blocking `move_to` that P7 ruled
 lethal, on a waiver that cites a different fault.**
