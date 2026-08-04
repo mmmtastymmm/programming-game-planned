@@ -14,7 +14,7 @@ sequenceDiagram
     Sim->>CPU: grant N cycles
     loop while cycles remain
         CPU->>VM: step one operation
-        VM-->>CPU: cost (unaffordable → pause & save up;<br/>forced charges → negative budget, debt)
+        VM-->>CPU: cost (unaffordable → pause and save up<br/>forced charges → negative budget = debt)
         alt operation is an action (move, mine, ...)
             VM->>World: enqueue action
             Note over VM: action ops BLOCK until<br/>the action resolves
