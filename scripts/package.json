@@ -1,0 +1,13 @@
+{
+  "name": "programming-game-doc-checks",
+  "private": true,
+  "type": "module",
+  "description": "Doc lint tooling. Not part of the game build — the game is pure Rust; this exists only because mermaid's parser is JS.",
+  "scripts": {
+    "check-mermaid": "node check-mermaid.mjs ../docs"
+  },
+  "devDependencies": {
+    "jsdom": "^26.0.0",
+    "mermaid": "^11.4.0"
+  }
+}

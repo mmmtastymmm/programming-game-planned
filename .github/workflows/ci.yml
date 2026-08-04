@@ -1,7 +1,7 @@
-# Determinism gate (CLAUDE.md): golden-replay fixtures are checked in, so
-# any sim behavior change fails here until the fixture is regenerated
-# (UPDATE_GOLDEN=1) — and the PR explains why. The game crate is excluded:
-# it needs Bevy's system deps and contains no sim logic by rule.
+# Both jobs shell out to scripts/ci.sh, which is also what you run locally
+# (`scripts/ci.sh` for everything, or `rust` / `docs` for one half). Keeping the
+# commands in the script rather than in this file is what stops local and CI
+# drifting apart.
 name: ci
 on:
   push:
@@ -9,6 +9,24 @@ on:
   pull_request:
 
 jobs:
+  # Seconds, and needs no Rust toolchain — so a docs-only PR gets fast feedback
+  # instead of waiting on a Bevy-adjacent build.
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: scripts/package-lock.json
+      - name: Doc checks (mermaid diagrams parse)
+        run: scripts/ci.sh docs
+
+  # Determinism gate (CLAUDE.md): golden-replay fixtures are checked in, so any
+  # sim behavior change fails here until the fixture is regenerated
+  # (UPDATE_GOLDEN=1) — and the PR explains why. The game crate is excluded: it
+  # needs Bevy's system deps and contains no sim logic by rule.
   test:
     runs-on: ubuntu-latest
     steps:
@@ -18,4 +36,4 @@ jobs:
       # No rustfmt gate yet: the tree has pre-existing fmt drift; adding the
       # gate means one dedicated whole-tree `cargo fmt` commit first.
       - name: Test (sim + pyrite, incl. golden replays)
-        run: cargo test -p sim -p pyrite
+        run: scripts/ci.sh rust
