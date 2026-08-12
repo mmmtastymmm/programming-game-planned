@@ -177,8 +177,9 @@ a within-sight node and a 1500-tick window (fixture regenerated — M5/M6 change
 hash: statline, XP map, quirk rolls, upkeep settlements).*
 
 - [x] **Five task tracks + deci-XP** (`data/xp.ron`, `sim::xp`): `BotData.xp` is a
-      `BTreeMap<XpTrack, u64>` in deci-XP (all 11 tracks exist — storage never migrates
-      again); quadratic curve (100×n, cap L5); incomes per Q83 — mining 1/unit, hauling 1 per
+      `BTreeMap<XpTrack, u64>` in deci-XP (all 11 tracks exist — "storage never migrates
+      again" **superseded by Q111**: the deci→centi migration is queued in *XP core* below,
+      ⚠HASH); quadratic curve (100×n, cap L5); incomes per Q83 — mining 1/unit, hauling 1 per
       unit-per-10-tiles ACCRUED per loaded tile and PAID AT DELIVERY (`haul_accum`; drops/
       spills forfeit it), combat 1 per 10 damage + 25/kill (`pending_damage` now carries the
       attacker BOT so the kill credits in settle), building 1 per 10 progress (blueprint
@@ -374,11 +375,14 @@ sustained-rust `rust_scraps` is the surviving valve).*
       `ColorProgram`; printers claim only fitting bots; the REMAINDER deploy is refused over
       stock (32 lines / 8 names — `RemainderOverBar`); above-stock-bar printers don't print.
       `QueuePrint { faction }` = a per-faction convenience counter consumed as jobs start.
-      *NEEDS DISCUSSION: (1) the docs' `QueuePrint(loadout)` parameter is UNDEFINED — all
-      prose says a reprint is a fresh stock print with allocation-chosen color, so the
-      counter is the whole feature until "loadout" means something; (2) docs/02 says "a
-      deploy IS a rule edit" while docs/01 says deploys are NOT rule edits in the dispatch
-      taxonomy — same end behavior, opposite wording, needs reconciling; (3) variable-name
+      *NEEDS DISCUSSION: (1) **RESOLVED (Q104)** — the `QueuePrint(loadout)` parameter was
+      deleted from docs/07; the per-faction counter was always the whole feature, no code
+      change (logged `[x]` under *Small decided-but-unbuilt items* below); (2) **RESOLVED** —
+      the "a deploy IS a rule edit" wording is gone from docs/02:
+      [02-agents/decided.md](02-agents/decided.md) (Q52) and
+      [01-language/program-colors.md](01-language/program-colors.md) now agree that a deploy
+      is **its own trigger, scoped to its color — not a rule edit in the dispatch taxonomy**,
+      which is the behavior this task already implements; (3) variable-name
       requirements count assignment targets, loop vars, params, and match binds — reads are
       free.* [sim] (L) ⚠HASH
 - [x] **9 named colors** (Green, Red, Blue, Yellow, Cyan, Magenta, Orange, Purple, White —
@@ -800,7 +804,8 @@ free-structure laundering, and a handful of genuinely repaired tests.
       stat, `tier_xp_scale_pct`, `track_scale`, `capability_level`,
       `track_cap_deci(_scaled)`, the settle-time clamp, `UpgradeOrder::Tier`,
       the Q105-R1/R3 validations, `learning_carry`, and `settle_xp`'s second
-      pass. Age income → **0.2 deci/tick**; per-track bases per Q123's table (also carried in [02-agents.md](../docs/02-agents.md), the owning doc).
+      pass. Age income → **2 centi/tick** (1 XP per 50 ticks — Q123's 5× cut;
+      stated in the storage unit, since deci cannot express it); per-track bases per Q123's table (also carried in [02-agents.md](../docs/02-agents.md), the owning doc).
       ⚠HASH + units migration. [sim]
 - [ ] **Tools (Q111, Q118)** — ten tools, one per track (drill, build tool,
       weapon, optics, CPU, hull plating, drivetrain, signature dampener, gyros,

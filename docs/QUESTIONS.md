@@ -4,14 +4,24 @@ All design questions across the design docs (00–09). As each is decided, its r
 
 This file is for things **not yet decided**. Text that is already wrong — a decision contradicted, or a number that fails arithmetic — is tracked in [PROBLEMS.md](PROBLEMS.md), numbered P1… on the same append-only rule.
 
-**Status 2026-08-02 (latest): Q127 OPENED — building allegiance and the
-remembered-building query surface.** Q126 closed the foreign-structure
-surface for v1 and recorded what any future one must solve; a use case
-arrived immediately — P29's barricade contradiction — and with it a simpler
-shape than the design Q126 retired, so the question is reopened on its own
-terms as **Q127**. Everything through Q126 remains decided; **P29–P33**
-are open in [PROBLEMS.md](PROBLEMS.md), and P29 closes as a consequence of
-Q127.
+**Status 2026-08-12 (latest): Q127 is still the only open question; the problem
+register carries five open entries.** Everything through Q126 remains decided.
+**P29–P33** are open in [PROBLEMS.md](PROBLEMS.md), and P29 closes as a
+consequence of Q127.
+
+Two corrections to the record, both about *when* things entered the board. **P32
+and P33 were opened on 2026-08-03**, by that day's full-corpus consistency audit;
+the 2026-08-02 block (now archived in the status log) had been edited in place to
+say "P29–P33" rather than being superseded, which left the 08-03 board state
+recorded nowhere and put the wrong date on it. Its original wording is restored
+in the archive — a dated block is a point-in-time record, so the fix is a new
+block, never a back-edit. Second, a **2026-08-12** corpus audit re-anchored
+PROBLEMS.md and widened P33 from one catalog row to the class of six that share
+its defect (see that file's re-anchor note). That audit's substantive findings are
+being ruled one at a time; the first opened and closed **P34** (XP stored in
+deci-units in the Q56 entry, a month after Q111 moved it to centi-points), so the
+register now reads **34 opened, 29 fixed**. None of this touches the question
+board: Q127 is still the only open question.
 
 *Earlier status entries — the dated record of how the board got here — are in
 [history/questions-status-log.md](history/questions-status-log.md). The

@@ -41,6 +41,13 @@ cannot silently break another — not to save anyone reading the parts.
   which is what keeps the scrap valve ranking by investment rather than raw XP
   (Q105-R3). *(P8's stale-formula carriers are all swept — closed and amended
   in [PROBLEMS.md](PROBLEMS.md).)*
+- **The stat sheet owns every row's unit.** `unit_scale` — centicycles for the
+  cycle budget, deci-units for cargo/progress/move, **centi-points for XP** — is
+  canonical in [stat-sheet.md](02-agents/stat-sheet.md). Any other part that
+  names a unit is a carrier, not an authority, and a carrier that disagrees is
+  the bug. Units are rounding inputs to the modifier pipeline and divisors on the
+  XP curve, so a drift here is hash-affecting and silent (P34: the owning
+  *Decided* entry stored XP in deci for a month after Q111 moved it to centi).
 - **Every stat row is keyable.** Any row of the stat sheet and any ledger number
   can serve as a selection key, which is why
   [stat-sheet.md](02-agents/stat-sheet.md) is a contract and not just a table —

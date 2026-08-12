@@ -40,6 +40,28 @@ caught later the same day: P22's own citation into
 `01-language/signals-and-logging.md`, shifted one line by the guard the P22
 fix itself inserted — now :18.)*
 
+**Re-anchored 2026-08-12:** a full-corpus audit re-resolved every `file.md:NN`
+citation in this register against the current tree. Two were wrong, and both
+belonged to *open* entries: P32's pass-assignment anchor landed on a blank line
+(`:25` → `:26`, with the quoted sentence added), and P30's quoted anchor — the
+recovery mechanism this file's header guarantees — no longer matched its
+carrier, which has since been rewritten to name the gap in its own voice. In
+the same pass **P33's scope was widened from one catalog row to the six that
+share its defect**, so the ruling is taken against the class rather than the
+instance. No finding changed and nothing opened or closed by the anchor pass
+itself; the same audit's substantive findings are being ruled one at a time, and
+the first of them opened and closed **P34** the same day (status block below).
+
+**Status 2026-08-12 (latest): 34 opened, 29 fixed — P29–P33 remain open and need
+rulings.** P34 was opened and fixed the same day: the Q56 granularity entry still
+stored XP in deci-units, a month after Q111 replaced deci with centi-points. It
+took a number rather than being swept silently because *decided text left behind*
+is the class this register exists to prove recurs — and because the entry's
+survival is instructive: it matched the shipped code (the centi migration is
+queued, not built), an adjacent *Checked and cleared* entry had created an
+exemption that read as covering it, and the contradiction sat six lines from its
+own refutation in the same file.
+
 **Status 2026-08-03 (latest): 33 opened, 28 fixed — P29–P33 are open and need
 rulings.** P32 and P33 were opened by the full-corpus consistency audit the
 same day: neither could be swept, because both ask which of two hash-affecting
@@ -155,8 +177,10 @@ lives in QUESTIONS.md, not here.)*
 
 **P32 — the three Combat-pass verbs all move the bot, which is the one thing
 the move→combat split exists to prevent.**
-[07-architecture/tick-model.md:25](07-architecture/tick-model.md) (the
-verb-by-verb pass assignment) vs. the same entry's rationale at :24.
+[07-architecture/tick-model.md:26](07-architecture/tick-model.md) (the
+verb-by-verb pass assignment — "**Pass assignment is part of the spec, not an
+implementation detail**") vs. the same entry's rationale at :24 ("every mover
+finishes stepping before the first swing range-checks").
 
 Pass assignment is declared hash-affecting spec — "it must not be invented per
 implementation" — and it puts `attack`, `guard` and `escort` in **Combat**,
@@ -175,10 +199,12 @@ invariant get restated as "movers *whose action is a move verb* finish first"?
 Both are hash-affecting; picking by implementation is exactly what the entry
 forbids.
 
-**P33 — the Merge Conflict quirk modifies a literal inside replaceable factory
-Pyrite, naming no stat row.** [09-quirks/catalog.md](09-quirks/catalog.md) (the
+**P33 — six catalog quirks modify something that is neither a stat-sheet row nor
+a cost-table overlay, against quirk design rule 6.** Flagship: the Merge Conflict
+quirk modifies a literal inside replaceable factory Pyrite.
+[09-quirks/catalog.md:54](09-quirks/catalog.md) (the
 Merge Conflict row: "the bump factory window's built-in `wait` runs +50%
-longer") vs. [09-quirks/design-rules.md](09-quirks/design-rules.md) rule 6 and
+longer") vs. [09-quirks/design-rules.md:10](09-quirks/design-rules.md) rule 6 and
 [02-agents/stat-sheet.md](02-agents/stat-sheet.md)'s canonicity rule.
 
 Rule 6 requires every quirk to modify a stat-sheet row or lay a per-bot cost
@@ -195,6 +221,41 @@ Needs one ruling: give the bump stun a stat-sheet row and re-express the quirk
 against it (the P25 precedent — but note the player can delete the factory
 `wait` entirely, so the row must define what the quirk scales when the window is
 empty); re-express it as a cost-table overlay; or cut the quirk.
+
+*(Scope widened 2026-08-12 — the entry was opened on one row, but a rule-6 sweep
+of the whole catalog finds six. The ruling has to be applied catalog-wide, or it
+fixes one row and leaves five; each is hash-affecting, and none names a row.)*
+
+  - **Merge Conflict** (`:54`) — the flagship above.
+  - **Lazy Evaluation** (`:13`) — "its budget **accumulates while blocked**
+    instead of burning (cap `bank_cap`)". Not a row and not an overlay: it edits
+    a VM rule. ⚠ **This one is bigger than rule 6 and is not closed by P33's
+    ruling** — three canonical passages state the opposite absolutely, with no
+    quirk carve-out: [01-language/execution-model.md:33](01-language/execution-model.md)
+    ("**No banking while blocked** … you can't idle for a minute and then execute
+    600 cycles in one tick"),
+    [01-language/syntax-tiers.md:170](01-language/syntax-tiers.md) ("**No banking
+    cycles, no free listening posts**") and
+    [01-language/decided.md:31](01-language/decided.md) ("**Blocking burns
+    cycles**"). Two implementers reading different owning docs give a blocked
+    listening post 0 vs. a full tank on wake. Whether the quirk or the rule
+    yields is a separate ruling from this entry's.
+  - **Simulated Annealing** (`:27`) — "may sidestep to neighbors that lose up to
+    1 tile of ground toward the goal" relaxes the ratified sidestep rule in
+    [02-agents/decided.md:18](02-agents/decided.md) ("among free neighbors that
+    **lose no ground** toward its goal"). A movement rule, not a row.
+  - **Off-by-One** (`:50`) — "every Kth `move_to()` stops one tile short of the
+    target". No row, and it brushes design rule 1 as well ("never … moves the bot
+    on its own" — here it *stops* the bot short of the instruction it was given).
+  - **Eventual Consistency** (`:71`) — the cycle half is a clean cost overlay,
+    but "returns data that is **one additional tick stale**" modifies perception
+    latency, which is spec in [07-architecture/tick-model.md:28](07-architecture/tick-model.md),
+    not a sheet row.
+  - **Thermal Runaway** (`:74`) — "+20% move speed" is a row; "its wreck's blast
+    damage is doubled" is not. Blast is *derived* from the wreck's max HP
+    ([02-agents/damage-faults-death.md:44](02-agents/damage-faults-death.md);
+    50% of max HP in [TASKS.md](TASKS.md) M10), so doubling the blast without
+    doubling max HP is an unrowed multiplier on a derived quantity.
 
 **P31 — an unbounded handler window strands the bot in a state nothing can
 recover, and it is the one failure in the game with no wreck and no crash
@@ -295,9 +356,11 @@ program cannot replace without re-charging the config every loop-around.
 
 **P30 — the shipped Feral walks keep the bare blocking `move_to` that P7 ruled
 lethal, on a waiver that cites a different fault.**
-[04-enemies/archetypes.md](04-enemies/archetypes.md) ("The Drone and Stinger
-keep their faulting `move_to`/`attack` deliberately — the Q108
-`move_to`-before-swing guard is their lesson").
+[04-enemies/archetypes.md:9](04-enemies/archetypes.md) ("The Drone and Stinger
+keep their faulting `move_to`/`attack` as shipped, and the Q108
+`move_to`-before-swing guard is their lesson — but that guard covers the
+*non-adjacent swing*, not the *no-path* fault P7 ruled lethal for the Tier-0
+starter, so whether these walks should be `try_` is open (P30)").
 
 P7 made the Tier-0 starter's walks `try_` because a no-path fault every loop,
 at Q109's `fault_damage` 2 against 40 base HP, kills a bot in ~8 seconds. The
@@ -312,13 +375,20 @@ program text is hashed into the program library), or is unreachable-target
 self-destruction intended Feral behavior that the waiver should state
 positively instead of deriving from Q108?
 
+*(Re-anchored 2026-08-12: the quoted sentence had been rewritten and no longer
+grepped. The carrier now states the gap in its own voice and cites P30 rather
+than asserting the waiver, so what remains open here is the ruling alone, not an
+unmarked contradiction.)*
+
 ---
 
 ## Mechanical — decided text left behind
 
 These need no ruling; the decision exists and the text was not propagated.
 
-*(Empty as of 2026-08-01 — every entry fixed and moved to the Fixed log.)*
+*(Empty. Cleared 2026-08-01; **P34** joined this class on 2026-08-12 and closed
+the same day — see the Fixed log. The class is not extinct, so this heading
+stays.)*
 
 ---
 
@@ -337,8 +407,12 @@ are not re-raised:
   Markers are present where the convention requires them.
 - **"Dense to grade 5" contradicts levels past 5 being pure score.** Both are
   true of different things.
-- **The XP-core task mixes centi and deci units.** The deci figure is a stated
-  conversion, not a storage claim.
+- **The XP-core task mixes centi and deci units.** The deci figure was a stated
+  conversion, not a storage claim — correct as far as it went. *(Retired
+  2026-08-12 by **P34**: the exemption this entry created was read as covering
+  the question, and the real storage claim sat one file over in
+  `02-agents/decided.md`. The conversion has since been restated in centi, so no
+  deci figure survives in the XP path and nothing here needs an exemption.)*
 - **The tool licence's "or its total level" branch is inert all session.** The
   floored mean does reach useful values within a match.
 
@@ -1030,3 +1104,56 @@ the per-bot gate on function blocks is tool *grade* (e.g. `hijack()` needs a
 build tool of grade ≥ 2). The row sends readers hunting a module catalog
 that no longer exists anywhere in the design. A one-clause fix, registered
 rather than silently reworded because the text is ratified.
+
+**P34 — the Q56 granularity ruling still stores XP in deci-units, which Q111
+superseded and which cannot express the shipped Age income. FIXED
+(`<hash pending>`). ⚠HASH**
+[02-agents/decided.md:8](02-agents/decided.md) (the Q56 entry: "cargo/progress/move
+— and, since round 4, XP — in deci-units") vs. **the same file's `:14`**
+("level *n* costs `curve_base × n` additional **centi-XP**"),
+[02-agents/xp-and-specialization.md:70](02-agents/xp-and-specialization.md)
+("**XP stores CENTI-points** in an `i64`"),
+[02-agents/stat-sheet.md:58](02-agents/stat-sheet.md) ("**XP stores centi-points**
+— one place finer than the rest"), [02-agents.md:32](02-agents.md) (the doorway),
+[07-architecture/tick-model.md:29](07-architecture/tick-model.md) ("Awards are in
+**centi-points**"), [TASKS.md](TASKS.md) (*XP core*: "`i64` **centi-points**")
+
+Q56's round 4 filed XP into the deci group on 2026-07-14. **Q111 moved it out**
+— "Centi-points (`i64`), **replacing deci**" — because the `gain_carry` /
+`learning_carry` fields existed precisely to compensate for deci being too coarse
+for a sub-100% cut of a small drip, and Q111 deleted them. The sweep updated five
+carriers and missed the entry that *owns* the ruling, so under this repo's
+convention the stalest text sits in the most authoritative place — the P7/P9
+failure mode exactly.
+
+The consequence is not cosmetic. `curve_base` values are published in the storage
+unit: Mining's 4,000 (P2's corrected figure) against 10 centi/tick gives L5 =
+15 × 4,000 = 60,000 centi = **6,000 ticks ≈ 10 minutes**, the job-track target
+Q123 exists to produce. A tuner building `xp.ron` from the Decided section stores
+deci with the same published numbers and gets **60,000 ticks ≈ 100 minutes** —
+10× the target, and *behind* the 50-minute ambient Age clock, which re-enters the
+seniority-beats-specialisation failure P2 was opened to close. Worse, Q123's Age
+income (1 XP per 50 ticks = **2 centi/tick = 0.2 deci/tick**) is not a deci
+integer at all: in deci storage it truncates to zero and Age never levels, or it
+needs the carry field Q111 deleted. `unit_scale` is also a rounding input to the
+modifier pipeline, so the two XP-gain quirks round differently on two peers.
+
+*Why three audits walked past it.* (1) The stale text matches the **shipped
+code** — `crates/sim/src/xp.rs` still stores deci (`age_deci_per_tick`,
+`mileage_deci_per_tile`, `processing_per_op_deci`, one global `curve_base`, a
+`level_cap`), because the centi migration is real but unbuilt; anyone checking
+the entry against the code called it correct. (2) The *Checked and cleared* entry
+above ("The XP-core task mixes centi and deci units") verified the adjacent
+question in TASKS.md and created an exemption that read as covering the whole
+topic. (3) The contradiction is **intra-file, six lines apart**, which no
+single-term grep surfaces.
+
+*(Resolution: the Q56 entry restated — XP in centi-points, with Q111 recorded as
+superseding round 4 and the reason kept (deci cannot express the Age income), and
+`unit_scale` ownership pointed at the stat sheet. The last two deci figures in
+the XP path — TASKS.md's "Age income → 0.2 deci/tick" and
+xp-and-specialization.md's "0.2 deci = 2 centi per tick" — restated in centi, so
+the *Checked and cleared* exemption is retired with them. A doorway invariant now
+names the stat sheet as the sole authority on any row's unit. **No replay hash
+moves**: XP core is unbuilt and already carries ⚠HASH + units migration, so the
+fix was free to land now and would not have been after that task ships.)*

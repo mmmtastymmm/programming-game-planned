@@ -11,6 +11,21 @@ rulings are in [questions-answered.md](questions-answered.md).
 
 ---
 
+**Status 2026-08-02 (later): Q127 OPENED — building allegiance and the
+remembered-building query surface.** Q126 closed the foreign-structure
+surface for v1 and recorded what any future one must solve; a use case
+arrived immediately — P29's barricade contradiction — and with it a simpler
+shape than the design Q126 retired, so the question is reopened on its own
+terms as **Q127**. Everything through Q126 remains decided; **P29**, **P30**
+and **P31** are open in [PROBLEMS.md](../PROBLEMS.md), and P29 closes as a
+consequence of Q127.
+
+*(Archived 2026-08-12 with its original wording restored. While current, this
+block was edited in place to read "P29–P33" — P32 and P33 were opened the
+following day, 2026-08-03 — so it carried a state that never existed on its own
+date. The back-edit is reverted here and the correction recorded in the
+2026-08-12 block in QUESTIONS.md.)*
+
 **Status 2026-08-02: Q124–Q126 ANSWERED — THE BOARD IS CLEAR.**
 Version counters are opponent-visible (Q124), structural whitespace is
 always visible in masked views (Q125), and no program-side foreign-structure

@@ -71,7 +71,7 @@ Same quadratic *shape* for every track, but **each track carries its own `curve_
 
 **Total level is the MEAN across all ten tracks** (Q111), which makes it a seniority-and-breadth measure rather than a clock: a bot that has done many things scores on the mean, a specialist scores on its own track, and **a tool is licensed by whichever of the two is higher**. (Quirk manifestation reads the Age **level**, not raw Age XP — [09-quirks.md](../09-quirks.md) — so it re-derives itself from whatever pace Age currently carries instead of drifting every time the income is retuned.)
 
-**Income constants (Q83/Q123 — first-pass, all tuning):** Mining 1/unit · Hauling 1 per unit-per-10-tiles · Combat 1 per 10 damage + 25/kill · Building 1 per 10 progress · Scouting 5/node + 10/survey · **Age 1 per 50 ticks** (0.2 deci = 2 centi per tick — cut 5× by Q123 so that simply existing no longer out-earns working) · Mileage 1/tile · Hiding 25/episode · Flinch 10/hostile flinch · **Processing 1 per 10 operations executed** (Q100 — the track behind cycles-per-tick).
+**Income constants (Q83/Q123 — first-pass, all tuning):** Mining 1/unit · Hauling 1 per unit-per-10-tiles · Combat 1 per 10 damage + 25/kill · Building 1 per 10 progress · Scouting 5/node + 10/survey · **Age 1 per 50 ticks** (2 centi/tick — cut 5× by Q123 so that simply existing no longer out-earns working) · Mileage 1/tile · Hiding 25/episode · Flinch 10/hostile flinch · **Processing 1 per 10 operations executed** (Q100 — the track behind cycles-per-tick).
 
 **Pace is set per track, not by the income alone** (Q123). Because each track has its own `curve_base`, an event's payout keeps its fiction while the ladder normalises how fast the track climbs:
 
