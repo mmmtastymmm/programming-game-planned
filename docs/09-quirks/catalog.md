@@ -10,7 +10,6 @@
 | **Tail-Call Optimized** | loop-iteration overhead costs 1 cycle less (min 1) — a no-op at base costs; earns its keep under cost-raising overlays (Corruption, Loop Desert) |
 | **Branch Predictor** | an `if` that takes the same branch it took last time costs 1 cycle less |
 | **Memoized** | calling the same builtin as the immediately previous action costs 1 cycle less |
-| **Lazy Evaluation** | its budget **accumulates while blocked** instead of burning (cap `bank_cap`) — the listening-post quirk: everyone else's waiting is wasted compute; this bot wakes from a long `receive` with a full tank |
 | **Borrow Checker Approved** | stack depth +1 — memory-safe by construction |
 | **Retina Display** | +1 sensor range |
 | **Huffman Coded** | +10% cargo capacity (better packing) |

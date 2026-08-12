@@ -52,8 +52,18 @@ instance. No finding changed and nothing opened or closed by the anchor pass
 itself; the same audit's substantive findings are being ruled one at a time, and
 the first of them opened and closed **P34** the same day (status block below).
 
-**Status 2026-08-12 (latest): 34 opened, 29 fixed — P29–P33 remain open and need
-rulings.** P34 was opened and fixed the same day: the Q56 granularity entry still
+**Status 2026-08-12 (latest): 35 opened, 30 fixed — P29–P33 remain open and need
+rulings.** **P35** — the blocking-burn rule never said whether a bank held from
+before the block survives it — was opened and fixed the same day. It is the
+round's odd one out: it was found by a *comprehension question about the
+execution model*, not by any sweep, and it was invisible to grep precisely
+because all five carriers agreed with each other and were incomplete in the same
+place. The shipped VM had already decided it; the docs simply never said.
+Also this round, the **Lazy Evaluation** quirk was cut (ruling in
+[09-quirks/decided.md](09-quirks/decided.md)), which closes one of P33's six rows
+and leaves five.
+
+P34 was opened and fixed the same day: the Q56 granularity entry still
 stored XP in deci-units, a month after Q111 replaced deci with centi-points. It
 took a number rather than being swept silently because *decided text left behind*
 is the class this register exists to prove recurs — and because the entry's
@@ -199,11 +209,12 @@ invariant get restated as "movers *whose action is a move verb* finish first"?
 Both are hash-affecting; picking by implementation is exactly what the entry
 forbids.
 
-**P33 — six catalog quirks modify something that is neither a stat-sheet row nor
-a cost-table overlay, against quirk design rule 6.** Flagship: the Merge Conflict
+**P33 — five catalog quirks modify something that is neither a stat-sheet row nor
+a cost-table overlay, against quirk design rule 6.** *(Opened on one row, widened
+to six, now five — Lazy Evaluation was cut on 2026-08-12.)* Flagship: the Merge Conflict
 quirk modifies a literal inside replaceable factory Pyrite.
-[09-quirks/catalog.md:54](09-quirks/catalog.md) (the
-Merge Conflict row: "the bump factory window's built-in `wait` runs +50%
+[09-quirks/catalog.md:53](09-quirks/catalog.md) (the
+Merge Conflict row at `:53`: "the bump factory window's built-in `wait` runs +50%
 longer") vs. [09-quirks/design-rules.md:10](09-quirks/design-rules.md) rule 6 and
 [02-agents/stat-sheet.md](02-agents/stat-sheet.md)'s canonicity rule.
 
@@ -224,34 +235,35 @@ empty); re-express it as a cost-table overlay; or cut the quirk.
 
 *(Scope widened 2026-08-12 — the entry was opened on one row, but a rule-6 sweep
 of the whole catalog finds six. The ruling has to be applied catalog-wide, or it
-fixes one row and leaves five; each is hash-affecting, and none names a row.)*
+fixes one row and leaves the rest; each is hash-affecting, and none names a row.
+**One of the six, Lazy Evaluation, has since been ruled and cut** — it carried a
+second, larger defect and did not wait on this entry — so **five remain open**
+below.)*
 
-  - **Merge Conflict** (`:54`) — the flagship above.
-  - **Lazy Evaluation** (`:13`) — "its budget **accumulates while blocked**
-    instead of burning (cap `bank_cap`)". Not a row and not an overlay: it edits
-    a VM rule. ⚠ **This one is bigger than rule 6 and is not closed by P33's
-    ruling** — three canonical passages state the opposite absolutely, with no
-    quirk carve-out: [01-language/execution-model.md:33](01-language/execution-model.md)
-    ("**No banking while blocked** … you can't idle for a minute and then execute
-    600 cycles in one tick"),
-    [01-language/syntax-tiers.md:170](01-language/syntax-tiers.md) ("**No banking
-    cycles, no free listening posts**") and
-    [01-language/decided.md:31](01-language/decided.md) ("**Blocking burns
-    cycles**"). Two implementers reading different owning docs give a blocked
-    listening post 0 vs. a full tank on wake. Whether the quirk or the rule
-    yields is a separate ruling from this entry's.
-  - **Simulated Annealing** (`:27`) — "may sidestep to neighbors that lose up to
+  - **Merge Conflict** (`:53`) — the flagship above.
+  - ~~**Lazy Evaluation**~~ — **RESOLVED 2026-08-12: the quirk is CUT**
+    ([09-quirks/decided.md](09-quirks/decided.md)). It banked the budget while
+    blocked, against three canonical passages that state the opposite without
+    qualification. Ruled separately from the rest of this entry because the defect
+    was larger than rule 6: since **actions** block (Q100), the row was not the
+    Tier 7 listening-post perk it was billed as but a general one — banking during
+    every walk and every swing, making thinking free between actions and
+    reintroducing the Coprocessor Q100 retired. Rescoping it to channel blocks was
+    declined; the rule is now a cross-part invariant in the
+    [01-language doorway](01-language.md), which is where its absence let the
+    contradiction in.
+  - **Simulated Annealing** (`:26`) — "may sidestep to neighbors that lose up to
     1 tile of ground toward the goal" relaxes the ratified sidestep rule in
     [02-agents/decided.md:18](02-agents/decided.md) ("among free neighbors that
     **lose no ground** toward its goal"). A movement rule, not a row.
-  - **Off-by-One** (`:50`) — "every Kth `move_to()` stops one tile short of the
+  - **Off-by-One** (`:49`) — "every Kth `move_to()` stops one tile short of the
     target". No row, and it brushes design rule 1 as well ("never … moves the bot
     on its own" — here it *stops* the bot short of the instruction it was given).
-  - **Eventual Consistency** (`:71`) — the cycle half is a clean cost overlay,
+  - **Eventual Consistency** (`:70`) — the cycle half is a clean cost overlay,
     but "returns data that is **one additional tick stale**" modifies perception
     latency, which is spec in [07-architecture/tick-model.md:28](07-architecture/tick-model.md),
     not a sheet row.
-  - **Thermal Runaway** (`:74`) — "+20% move speed" is a row; "its wreck's blast
+  - **Thermal Runaway** (`:73`) — "+20% move speed" is a row; "its wreck's blast
     damage is doubled" is not. Blast is *derived* from the wreck's max HP
     ([02-agents/damage-faults-death.md:44](02-agents/damage-faults-death.md);
     50% of max HP in [TASKS.md](TASKS.md) M10), so doubling the blast without
@@ -1107,7 +1119,7 @@ rather than silently reworded because the text is ratified.
 
 **P34 — the Q56 granularity ruling still stores XP in deci-units, which Q111
 superseded and which cannot express the shipped Age income. FIXED
-(`<hash pending>`). ⚠HASH**
+(`2e768b6`). ⚠HASH**
 [02-agents/decided.md:8](02-agents/decided.md) (the Q56 entry: "cargo/progress/move
 — and, since round 4, XP — in deci-units") vs. **the same file's `:14`**
 ("level *n* costs `curve_base × n` additional **centi-XP**"),
@@ -1157,3 +1169,39 @@ the *Checked and cleared* exemption is retired with them. A doorway invariant no
 names the stat sheet as the sole authority on any row's unit. **No replay hash
 moves**: XP core is unbuilt and already carries ⚠HASH + units migration, so the
 fix was free to land now and would not have been after that task ships.)*
+
+**P35 — "blocking burns the budget" is specified two incompatible ways, and the
+docs never state which. FIXED (`<hash pending>`). ⚠HASH**
+[01-language/execution-model.md:33](01-language/execution-model.md) (the owning
+rule: "**burns** its per-tick budget"),
+[01-language/syntax-tiers.md:170](01-language/syntax-tiers.md) ("its per-tick
+cycle budget burns while it waits"),
+[01-language/decided.md:31](01-language/decided.md) ("**Blocking burns
+cycles**"), [01-language.md](01-language.md) (the doorway invariant),
+[TASKS.md](TASKS.md) M11 ("Blocking burns the budget (M5's rule)")
+
+Every carrier says the budget "burns" while blocked and none says what happens to
+cycles **banked before** the block. Two readings, both defensible from the prose:
+*forfeit the grant* (stop earning, keep the bank) or *zero the budget* (blocking
+empties it). They diverge by up to a full `bank_cap` — 25 cycles today, ~100
+under Q101's queued flat ceiling — **on every wake from every action**, and since
+actions block permanently (Q100) that is most of every bot's life. Two
+implementations of the same spec desync in lockstep, the P3 class exactly.
+
+The shipped VM already picks a side: `Vm::grant_centi` returns early when
+`State::Blocked` and never touches `self.budget`, and the `stall_cost()` comment
+says so outright — "a bot waiting on an action **burns its grant rather than
+banking it**". So the code was unambiguous and the design docs were not, which is
+the reverse of the usual direction and the reason no audit caught it: every
+carrier agreed with every other carrier, and all of them were incomplete in the
+same place.
+
+*(Resolution: ratified as the code already behaves — **what burns is the grant,
+never the bank**. A bot receives no grant at all while blocked; cycles banked
+before it are retained, frozen, and still there on wake. Stated in
+execution-model.md with a worked example, and the three restatements plus the
+doorway invariant now carry the clause pointing at the owner. **No code change
+and no replay hash moves** — the fix is the spec catching up to the
+implementation. Found by a comprehension question about the execution model, not
+by a sweep: the ambiguity is invisible to grep because no two carriers
+contradict each other.)*

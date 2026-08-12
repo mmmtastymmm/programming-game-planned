@@ -48,6 +48,20 @@ cannot silently break another — not to save anyone reading the parts.
   [builtins.md](01-language/builtins.md)'s table, a
   [modules-and-library.md](01-language/modules-and-library.md) import rule, or
   an [editor-ux.md](01-language/editor-ux.md) greying rule — contradicts this.
+- **Blocking burns cycles — no banking while blocked, for any bot** — canonical
+  in [execution-model.md](01-language/execution-model.md), restated for channels
+  in [syntax-tiers.md](01-language/syntax-tiers.md) (Tier 7) and in
+  [decided.md](01-language/decided.md). A bot waiting on **an action or a
+  channel** receives no grant — the tick's cycles are forfeited, while a bank
+  held from before the block is retained and frozen (P35: what burns is the
+  grant, never the bank). Accumulation happens only while *running*,
+  stalled in front of an unaffordable op. The rule is absolute and takes no
+  per-bot exception: it prices listening posts and rendezvous, and — because
+  actions block (Q100) — it is also what keeps think-while-acting out of the
+  hardware. A [09-quirks.md](09-quirks.md) entry or
+  [06-progression.md](06-progression.md) perk that banks blocked cycles
+  contradicts this and reintroduces the retired Coprocessor (the Lazy Evaluation
+  quirk was cut on exactly this ground, 2026-08-12).
 - **Engine-initiated charges are debt; window code pays normally** (Q75) —
   canonical in [execution-model.md](01-language/execution-model.md). The trap
   cost, boot's forced `upload_log()`, and abort's forced sequence drive the

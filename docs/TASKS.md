@@ -211,8 +211,10 @@ hash: statline, XP map, quirk rolls, upkeep settlements).*
       quirks (enemy-visible free). *NEEDS DISCUSSION: (1) the v1 catalog is the ~26-entry
       subset whose hooks exist — COST-OVERLAY quirks (Tail-Call Optimized, Kernel Bypass,
       Dial-Up, Telemetry Enabled, Eventual Consistency…) wait for M8's per-bot cost
-      overlays, and Lazy Evaluation / Graceful Shutdown / Kernel Panic / countdown quirks
-      wait for their systems; (2) weights are invented first-pass rarities; (3) "expected
+      overlays, and Graceful Shutdown / Kernel Panic / countdown quirks
+      wait for their systems (**Lazy Evaluation was CUT 2026-08-12** — it banked cycles
+      while blocked, reversing Q100; never built, so nothing to remove —
+      [09-quirks/decided.md](09-quirks/decided.md)); (2) weights are invented first-pass rarities; (3) "expected
       quirks per bot" is implemented as independent per-slot per-mille draws — ratify the
       dial's shape; (4) `quirk_permille` lives on MapSpec until M13's match-settings
       struct.* [pyrite][sim][game] (L) ⚠HASH
@@ -453,7 +455,8 @@ sustained-rust `rust_scraps` is the surviving valve).*
       target's COMM KEY (`analyze()` steals one; ally grants land M13); the `Channels`
       construct gates the verbs per faction (Research; dev maps exempt). Corruption jams
       both ends (blocked participants inside never wake; timeouts still run — the lease
-      recovery). Blocking burns the budget (M5's rule) and signals still interrupt (raise
+      recovery). Blocking burns the GRANT, never the bank (M5's rule, spelled out by P35)
+      and signals still interrupt (raise
       cancels the parked op — the owed result never arrives, which is exactly the
       mutex-as-lease recovery story). *NEEDS DISCUSSION: (1) `try_receive` matches blocked
       SENDERS only — polling a blocked broadcaster doesn't count as its audience; (2) the

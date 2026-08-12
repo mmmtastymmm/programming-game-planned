@@ -18,10 +18,15 @@ in the archive — a dated block is a point-in-time record, so the fix is a new
 block, never a back-edit. Second, a **2026-08-12** corpus audit re-anchored
 PROBLEMS.md and widened P33 from one catalog row to the class of six that share
 its defect (see that file's re-anchor note). That audit's substantive findings are
-being ruled one at a time; the first opened and closed **P34** (XP stored in
-deci-units in the Q56 entry, a month after Q111 moved it to centi-points), so the
-register now reads **34 opened, 29 fixed**. None of this touches the question
-board: Q127 is still the only open question.
+being ruled one at a time. The first opened and closed **P34** (XP stored in
+deci-units in the Q56 entry, a month after Q111 moved it to centi-points); the
+second **cut the Lazy Evaluation quirk** for banking cycles while blocked
+([09-quirks/decided.md](09-quirks/decided.md)), which closes one of P33's rows and
+leaves five; and a comprehension question about the execution model turned up
+**P35** (the blocking-burn rule never said whether a bank held from before the
+block survives it — it does; only the grant burns). The register now reads
+**35 opened, 30 fixed**. None of this touches the question board: Q127 is still
+the only open question.
 
 *Earlier status entries — the dated record of how the board got here — are in
 [history/questions-status-log.md](history/questions-status-log.md). The
