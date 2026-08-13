@@ -52,8 +52,13 @@ instance. No finding changed and nothing opened or closed by the anchor pass
 itself; the same audit's substantive findings are being ruled one at a time, and
 the first of them opened and closed **P34** the same day (status block below).
 
-**Status 2026-08-12 (latest): 35 opened, 30 fixed — P29–P33 remain open and need
-rulings.** **P35** — the blocking-burn rule never said whether a bank held from
+**Status 2026-08-12 (latest): 37 opened, 31 fixed — P29–P33 remain open and need
+rulings; P37 is open but needs only implementation.** **P36** closed the
+kind-constant inventory (`blight` missing though shipped, `barricade` missing
+though decided, `chip` for `chips`), and opened **P37** going the other way:
+three structures ship with no constant to find them. P37 is the register's first
+entry where the *design* is right and the *code* is behind — filed because
+nothing else recorded it, and tracked by a task rather than a ruling. **P35** — the blocking-burn rule never said whether a bank held from
 before the block survives it — was opened and fixed the same day. It is the
 round's odd one out: it was found by a *comprehension question about the
 execution model*, not by any sweep, and it was invisible to grep precisely
@@ -396,11 +401,38 @@ unmarked contradiction.)*
 
 ## Mechanical — decided text left behind
 
-These need no ruling; the decision exists and the text was not propagated.
+These need no ruling; the decision exists and was not carried through — usually
+text that was never propagated, occasionally (P37) a ratified list the
+implementation never caught up to.
 
-*(Empty. Cleared 2026-08-01; **P34** joined this class on 2026-08-12 and closed
-the same day — see the Fixed log. The class is not extinct, so this heading
-stays.)*
+*(Cleared 2026-08-01; **P34** and **P36** joined this class on 2026-08-12 and
+closed the same day — see the Fixed log. **P37** is open below.)*
+
+**P37 — three shipped structures have no kind constant, so the registry is
+narrower than the inventory that owns it. OPEN (tracked, not a ruling).**
+[01-language/types-and-env.md:15](01-language/types-and-env.md) (the Structures
+line) vs. `crates/sim/src/host.rs` (`KINDS`); task in [TASKS.md](TASKS.md)
+(*Kind-constant catch-up*).
+
+The ratified inventory lists thirteen structure constants; `KINDS` ships five
+(`depot`, `smelter`, `foundry`, `archive`, `printer`). Six of the eight missing
+names — `pump`, `repair_bay`, `sentry`, `lantern`, `request_box`, plus `ally` —
+are ordinary milestone lag: the *thing* does not exist in the sim yet either
+(`RepairBay` has zero hits in `crates/sim/src`), so there is nothing to find and
+nothing to fix until those milestones land.
+
+The remaining three are the actual gap: **`generator`, `geothermal` and
+`upgrade_station` all have shipped structures** — `StructureKind::{Generator,
+GeothermalTap, UpgradeStation}` are in `world.rs` and in `StructureKind::ALL` —
+and no way for a program to query them. A bot cannot route itself to the Upgrade
+Station it must "physically walk to" ([02-agents/decided.md](02-agents/decided.md),
+the compute-buying ruling), which makes the documented upgrade loop unwritable in
+Pyrite today. This is the inverse of the usual direction: the design is ratified
+and the implementation is behind, with nothing recording it — the only
+kind-constant task in the file was the Q127-blocked barricade one.
+
+One naming decision rides along: the doc's constant is **`geothermal`** while the
+code's structure name is **`geothermal_tap`**. Whichever wins, both must say it.
 
 ---
 
@@ -1205,3 +1237,40 @@ and no replay hash moves** — the fix is the spec catching up to the
 implementation. Found by a comprehension question about the execution model, not
 by a sweep: the ambiguity is invisible to grep because no two carriers
 contradict each other.)*
+
+**P36 — the canonical kind-constant inventory diverges from the shipped registry
+in three ways while asserting it is complete. FIXED (`<hash pending>`). ⚠HASH**
+[01-language/types-and-env.md:13](01-language/types-and-env.md) ("**Every
+resource and every registry kind gets one** (Q79, completed round 4)") vs.
+`crates/sim/src/host.rs` (`KINDS`), [05-terrain/decided.md:17](05-terrain/decided.md)
+(Q99), [TASKS.md](TASKS.md) (`closest(blight)`; *Barricade HP*)
+
+Kind constants are **pre-bound globals**, so an unknown name fails at
+parse/deploy rather than at runtime: two peers built from different lists
+disagree about whether a program *loads at all*, which is divergence before the
+first tick rather than drift during play. Three defects in one list:
+
+  - **`blight` was missing.** It ships today — `KINDS` carries it with a comment
+    citing this doc's own rule ("the creep's heart (M8-C) — attackable, so it
+    must be findable") and TASKS.md documents `closest(blight)` as live. The
+    omission also dropped the rule that goes with it: `closest(blight)` is
+    **perception-ungated**, and Q99 leans on exactly that contrast when it
+    specifies barricades as "perception-gated like structures, *unlike the creep
+    front*". So the owning doc was missing both an entry and the distinction it
+    anchors.
+  - **`barricade` was missing.** Q99 ruled it on this same rule, verbatim. Listed
+    now with its domain flagged open: Q127 rules what it may *find* (P29), never
+    whether it exists, and the `KINDS` entry stays build-blocked meanwhile.
+  - **`chip` should be `chips`.** Every other carrier — the material in
+    03-resources, `Resource::Chips`, the string `"chips"`, the Foundry recipe,
+    and `KINDS` — says plural; only the canonical inventory said singular, while
+    `gold_chip` is singular in both. A one-character slip that makes
+    `cargo_count(chip)` name nothing.
+
+*(Resolution: all three swept into
+[types-and-env.md](01-language/types-and-env.md), with `blight`'s ungated
+perception and `barricade`'s gated-but-unbuilt status written as sub-bullets so
+the two rules travel with their entries. **No code change and no hash movement**:
+`blight` and `chips` were already right in `KINDS`, and `barricade` stays
+unbuilt. The reverse gap found in the same pass — shipped structures with no
+constant — is **P37**, open above.)*

@@ -24,9 +24,13 @@ second **cut the Lazy Evaluation quirk** for banking cycles while blocked
 ([09-quirks/decided.md](09-quirks/decided.md)), which closes one of P33's rows and
 leaves five; and a comprehension question about the execution model turned up
 **P35** (the blocking-burn rule never said whether a bank held from before the
-block survives it — it does; only the grant burns). The register now reads
-**35 opened, 30 fixed**. None of this touches the question board: Q127 is still
-the only open question.
+block survives it — it does; only the grant burns). A fourth closed **P36** (the
+kind-constant inventory was missing `blight` and `barricade` and misspelled
+`chips`) and opened **P37** for the gap running the other way — three structures
+that ship with no constant to query them. The register now reads
+**37 opened, 31 fixed**. None of this touches the question board: Q127 is still
+the only open question, and P36 was written so it does not pre-empt it — the
+`barricade` constant is listed with its *domain* flagged open.
 
 *Earlier status entries — the dated record of how the board got here — are in
 [history/questions-status-log.md](history/questions-status-log.md). The
