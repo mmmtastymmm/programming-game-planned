@@ -730,6 +730,32 @@ fixed. Archived in full at [history/reviews.md](history/reviews.md).
       reads colony state and grants, both already hashed. Canonical hurt window
       gains the `exists` guard
       ([01-language/signals-and-logging.md](01-language/signals-and-logging.md)).
+      **Implementation audit 2026-08-14 — six arms, three current policies**
+      (`crates/sim/src/host.rs`, `find_kind`). `depot` and `blueprint` are
+      unscoped: any faction, through full fog. `printer`, `smelter`, `foundry` and
+      `archive` resolve **own-or-`seen`**, which is not under-scoping but the
+      surface Q126 retired — `|| per.seen.contains(id)` makes a foreign structure
+      query-reachable the moment anyone looks at it. Resource kinds already answer
+      from `known_nodes` and are consistent. **Fix all six**: the natural reading of
+      "resolve from the pool" is to gate the two bare arms and leave the four that
+      look finished, which ships the retired surface.
+      **`per.seen` is not the pool.** `find_kind` never reads `grants` — the ally
+      clause is currently approximated by accident, because a Vision grant copies
+      the granter's eye list into the grantee's perceivers
+      (`crates/sim/src/perception.rs:126`), so allied structures land in `seen`.
+      That is wrong both ways: an ally's depot the ally is not currently looking at
+      is absent, and an *enemy* structure the ally can see is present. Read
+      `granted(from, to, GrantKind::Vision)` directly.
+      **Not blocked on Q127** — that question keeps queries own-by-default
+      expressly to preserve the guarantee P22 was opened to win, so only the
+      foreign surface is live there and this can land now. The scoping belongs in
+      `find_kind`: `World::nearest_depot`/`nearest_blueprint` carry no faction or
+      perception context and cannot express the pool, so delete them, which also
+      clears the already-dead `World::nearest_enemy`.
+      **Sequencing with Q128**, the access half of the same relationship policy: if
+      Q128 rules access *allied* while queries stay own + vision-grant, an ally's
+      depot is usable but unfindable unless a Vision grant also stands — Q128's
+      open item (2). Prefer landing the two together.
       [sim] ⚠HASH (query-domain change only)
 - [ ] **Delete signal-safety** (redesign 2026-08-02, supersedes Q49/Q51) — mostly deletion,
       and **not hash-affecting**: these are deploy-time checks, so execution is unchanged and

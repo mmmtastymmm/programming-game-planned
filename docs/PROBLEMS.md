@@ -52,7 +52,27 @@ instance. No finding changed and nothing opened or closed by the anchor pass
 itself; the same audit's substantive findings are being ruled one at a time, and
 the first of them opened and closed **P34** the same day (status block below).
 
-**Status 2026-08-12 (latest): 37 opened, 31 fixed — P29–P33 remain open and need
+**Status 2026-08-14 (latest): 39 opened, 32 fixed — seven open.** **P38** joins
+the needs-a-ruling class: Q89 ruled that a Depot's `faction` governs perception
+and stopped there, while `deposit()` and `withdraw()` both accept any adjacent
+depot whatever its faction, and the only statement of that policy anywhere in
+the repository is a comment on the field itself. Like P29, it is a defect whose
+fix is a ruling it does not own — **Q128**, opened the same day, takes the
+general question of what relationship a building interaction requires, and P38
+closes when docs/03 carries the answer. The 2026-08-12 block below is kept as
+written rather than amended: it had already been edited in place four times,
+which is how its "five open entries" count reached QUESTIONS.md wrong.
+
+Also this day, **P39** opened and closed. The kind-constant registry claimed
+every placement but `blight` is perception-gated — against P22's pool rule as
+carried in ten passages across seven files — and had picked up Q99's
+"perception-gated like a structure" as a second carrier of **P29**. Both struck:
+the registry now cites the domain rules instead of restating a model it does not
+own. Two stale `<hash pending>` placeholders were backfilled in the same change
+(**P35** `33b1de8`, **P36** `a41ec41`), so every Fixed entry again names the
+commit that closed it.
+
+**Status 2026-08-12: 37 opened, 31 fixed — P29–P33 remain open and need
 rulings; P37 is open but needs only implementation.** **P36** closed the
 kind-constant inventory (`blight` missing though shipped, `barricade` missing
 though decided, `chip` for `chips`), and opened **P37** going the other way:
@@ -77,7 +97,7 @@ queued, not built), an adjacent *Checked and cleared* entry had created an
 exemption that read as covering it, and the contradiction sat six lines from its
 own refutation in the same file.
 
-**Status 2026-08-03 (latest): 33 opened, 28 fixed — P29–P33 are open and need
+**Status 2026-08-03: 33 opened, 28 fixed — P29–P33 are open and need
 rulings.** P32 and P33 were opened by the full-corpus consistency audit the
 same day: neither could be swept, because both ask which of two hash-affecting
 readings is the design (the Combat-pass movement question, and what the Merge
@@ -189,6 +209,13 @@ pure adjacency/terrain interaction with no query surface?
 grew past this entry into building allegiance and the remembered-building
 query surface generally. P29 closes when Q127 is answered; the substance
 lives in QUESTIONS.md, not here.)*
+
+*(A second carrier appeared and was removed on 2026-08-14: P36's kind-constant
+entry copied Q99's "perception-gated like a structure" into
+[01-language/types-and-env.md](01-language/types-and-env.md), and **P39** struck
+it, so the contradiction is again confined to one file. The phrase travels
+easily — anything restating Q99's gating outside 05-terrain/decided.md should be
+checked against this entry before it lands.)*
 
 **P32 — the three Combat-pass verbs all move the bot, which is the one thing
 the move→combat split exists to prevent.**
@@ -396,6 +423,38 @@ positively instead of deriving from Q108?
 grepped. The carrier now states the gap in its own voice and cites P30 rather
 than asserting the waiver, so what remains open here is the ruling alone, not an
 unmarked contradiction.)*
+
+**P38 — Q89's depot ruling governs perception; the sim also enforces an access
+rule that no design doc states.**
+[03-resources/decided.md](03-resources/decided.md) (the Q89 depot bullet) and
+[03-resources/structures-and-start.md:24](03-resources/structures-and-start.md)
+(the Depot catalog row) vs. `crates/sim/src/world.rs:216` (the `Depot.faction`
+doc comment), `crates/sim/src/actions.rs:402` and `crates/sim/src/host.rs:606`.
+
+Q89 gave the Depot a real `faction` field and ruled that it **sees/hears for
+its owner** — "One rule across the sim's perception, reachability checks, and
+the fog view." It says nothing about who may *use* one. The sim has a rule
+anyway: `deposit()` and `withdraw()` each accept any adjacent depot whatever
+its faction, while the structure arms of both verbs filter
+`st.faction == faction` — production private, drop-off public. The only
+statement of that policy anywhere in the repository is the comment on the field
+itself: "Haul deposits/withdrawals stay open to anyone standing on it —
+ownership governs perception, not access." A design rule is living in a code
+comment, and it asserts a scope Q89 did not grant it.
+
+The consequence is not a desync — the behaviour ships one way on every peer —
+it is that the corpus cannot be used to check the implementation. The Depot's
+catalog row reads "Cargo drop-off, storage."; nothing in docs/03 or docs/08
+confirms or contradicts that a rival's depot works as a forward logistics base,
+which is a strategically load-bearing rule a player has no way to learn. The
+same comment also names "withdrawals" as an open interaction, though no
+`Withdraw` action exists — `withdraw` is a host builtin — so the comment is the
+sole carrier of a rule about a code path it does not sit on.
+
+*(The ruling is being taken as **Q128**, opened 2026-08-14 — the question grew
+past the depot into what relationship any building interaction requires. P38
+closes when Q128 is answered and docs/03 states the access rule, whichever way
+it goes; the substance lives in QUESTIONS.md, not here.)*
 
 ---
 
@@ -1203,7 +1262,7 @@ moves**: XP core is unbuilt and already carries ⚠HASH + units migration, so th
 fix was free to land now and would not have been after that task ships.)*
 
 **P35 — "blocking burns the budget" is specified two incompatible ways, and the
-docs never state which. FIXED (`<hash pending>`). ⚠HASH**
+docs never state which. FIXED (`33b1de8`). ⚠HASH**
 [01-language/execution-model.md:33](01-language/execution-model.md) (the owning
 rule: "**burns** its per-tick budget"),
 [01-language/syntax-tiers.md:170](01-language/syntax-tiers.md) ("its per-tick
@@ -1239,7 +1298,7 @@ by a sweep: the ambiguity is invisible to grep because no two carriers
 contradict each other.)*
 
 **P36 — the canonical kind-constant inventory diverges from the shipped registry
-in three ways while asserting it is complete. FIXED (`<hash pending>`). ⚠HASH**
+in three ways while asserting it is complete. FIXED (`a41ec41`). ⚠HASH**
 [01-language/types-and-env.md:13](01-language/types-and-env.md) ("**Every
 resource and every registry kind gets one** (Q79, completed round 4)") vs.
 `crates/sim/src/host.rs` (`KINDS`), [05-terrain/decided.md:17](05-terrain/decided.md)
@@ -1274,3 +1333,44 @@ the two rules travel with their entries. **No code change and no hash movement**
 `blight` and `chips` were already right in `KINDS`, and `barricade` stays
 unbuilt. The reverse gap found in the same pass — shipped structures with no
 constant — is **P37**, open above.)*
+
+**P39 — the kind-constant registry claims every placement but `blight` is
+perception-gated, against a ruling carried in ten passages across seven files.
+FIXED (`<hash>`).**
+[01-language/types-and-env.md:17](01-language/types-and-env.md) (the `blight`
+sub-bullet as P36's fix wrote it) vs. the P22 ruling at
+[05-terrain/decided.md:22](05-terrain/decided.md), the doorway invariant at
+[05-terrain.md:43](05-terrain.md),
+[01-language/decided.md:29](01-language/decided.md) and
+[01-language/builtins.md:34](01-language/builtins.md).
+
+P36 gave `blight` its missing entry and stated its ungated perception correctly,
+then closed the sub-bullet with a universal: "Every other findable placement is
+gated." P22 rules the opposite for the largest class in the list — structure and
+designation kinds resolve from the faction's knowledge pool, "your own — colony
+state, always current, **no perception needed**" — and Q74 puts discovered nodes
+outside perception too ("a known vein is a fact, not a perception"). Of the nine
+constants the bullet introduces, `blueprint` is pool-resolved, `enemy` carries
+the heard-only position-only rule, `wreck` and `nest` are own-or-seen, and
+`black_box` and `cache` are seen-only: six of nine carry a rule, against the
+lead-in's "Two of these carry rules the others don't". The sentence also
+contradicted the **Decided** section of its own doc, one file over.
+
+Two aggravators. The claim sat in the **registry**, which owns *which constants
+exist*, not *what they reach*; restating a domain model it does not own is what
+let a single edit drift from ten agreeing carriers. And the barricade sub-bullet
+beside it carried "**perception-gated like a structure**", copied from the Q99
+ruling at [05-terrain/decided.md:17](05-terrain/decided.md) — the losing half of
+**P29**, whose whole substance is that Q99's phrasing and the P22 bullet five
+lines below it cannot both be true. P36 spread that contradiction from one file
+to two.
+
+*(Resolution: the registry stops restating the model and cites it — the domains
+are owned by [decided.md](01-language/decided.md) and
+[builtins.md](01-language/builtins.md), and differ by kind. `blight`'s note
+survives as the one perception-ungated placement; `barricade` keeps its Q79/Q99
+grounds and its Q127 block but drops the gating claim, so **P29 is back to one
+carrier** and nothing here pre-empts Q127. The miscount retires by not making a
+count. **No code change and no hash movement** — doc text only. The code-side
+divergence the audit turned up alongside it is the unbuilt P22 task, whose
+implementation notes were amended the same day.)*

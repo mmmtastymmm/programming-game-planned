@@ -11,6 +11,34 @@ rulings are in [questions-answered.md](questions-answered.md).
 
 ---
 
+**Status 2026-08-12: Q127 is still the only open question; the problem
+register carries five open entries.** Everything through Q126 remains decided.
+**P29–P33** are open in [PROBLEMS.md](PROBLEMS.md), and P29 closes as a
+consequence of Q127.
+
+Two corrections to the record, both about *when* things entered the board. **P32
+and P33 were opened on 2026-08-03**, by that day's full-corpus consistency audit;
+the 2026-08-02 block (now archived in the status log) had been edited in place to
+say "P29–P33" rather than being superseded, which left the 08-03 board state
+recorded nowhere and put the wrong date on it. Its original wording is restored
+in the archive — a dated block is a point-in-time record, so the fix is a new
+block, never a back-edit. Second, a **2026-08-12** corpus audit re-anchored
+PROBLEMS.md and widened P33 from one catalog row to the class of six that share
+its defect (see that file's re-anchor note). That audit's substantive findings are
+being ruled one at a time. The first opened and closed **P34** (XP stored in
+deci-units in the Q56 entry, a month after Q111 moved it to centi-points); the
+second **cut the Lazy Evaluation quirk** for banking cycles while blocked
+([09-quirks/decided.md](09-quirks/decided.md)), which closes one of P33's rows and
+leaves five; and a comprehension question about the execution model turned up
+**P35** (the blocking-burn rule never said whether a bank held from before the
+block survives it — it does; only the grant burns). A fourth closed **P36** (the
+kind-constant inventory was missing `blight` and `barricade` and misspelled
+`chips`) and opened **P37** for the gap running the other way — three structures
+that ship with no constant to query them. The register now reads
+**37 opened, 31 fixed**. None of this touches the question board: Q127 is still
+the only open question, and P36 was written so it does not pre-empt it — the
+`barricade` constant is listed with its *domain* flagged open.
+
 **Status 2026-08-02 (later): Q127 OPENED — building allegiance and the
 remembered-building query surface.** Q126 closed the foreign-structure
 surface for v1 and recorded what any future one must solve; a use case
