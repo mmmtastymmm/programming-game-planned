@@ -1336,7 +1336,7 @@ constant — is **P37**, open above.)*
 
 **P39 — the kind-constant registry claims every placement but `blight` is
 perception-gated, against a ruling carried in ten passages across seven files.
-FIXED (`<hash>`).**
+FIXED (`82d30f4`).**
 [01-language/types-and-env.md:17](01-language/types-and-env.md) (the `blight`
 sub-bullet as P36's fix wrote it) vs. the P22 ruling at
 [05-terrain/decided.md:22](05-terrain/decided.md), the doorway invariant at
