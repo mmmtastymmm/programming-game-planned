@@ -134,7 +134,7 @@ impl SelectKey {
     }
 }
 
-/// A Fabricator: prints/reprints bots for exactly one color and carries
+/// A Printer: prints/reprints bots for exactly one color and carries
 /// its target-share dials (M9, docs/01). Printers are also "the cloud" —
 /// they always accept log traffic.
 #[derive(Debug, Clone, PartialEq)]
@@ -332,7 +332,7 @@ pub enum NestState {
 }
 
 /// A Feral nest (M12, docs/04): prints archetype programs from harvested
-/// stock, exactly like a player Fabricator in spirit — but its economy is
+/// stock, exactly like a player Printer in spirit — but its economy is
 /// its own (Harvesters `deposit()` into it; starving it starves the
 /// prints).
 #[derive(Debug, Clone, PartialEq)]
@@ -1248,7 +1248,7 @@ pub struct World {
     /// Factions currently browning out (energy draw > generation, set by
     /// the phase-8 upkeep settlement; read by next tick's grant pipeline).
     pub brownout: BTreeSet<u8>,
-    /// Per-faction Fabricator-trickle pick: the ONE bot that stays fully
+    /// Per-faction Printer-trickle pick: the ONE bot that stays fully
     /// powered through a brownout (lowest entity id owning a working
     /// printer's faction — recomputed every upkeep settlement).
     pub powered_bot: BTreeMap<u8, BotId>,

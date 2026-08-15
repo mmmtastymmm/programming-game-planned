@@ -24,7 +24,7 @@ All of this is first-pass flavor to tune; the mechanical skeleton (allegiance nu
 | 13 | Death | The recycler: **salvages every wreck on the field** — yours, other Ferals', its own — to fuel printing. Starves your salvage economy and eats your battlefields. | Static; salvage-centric |
 | 14 | Temperance | Balance: reads your army composition and prints proportional counters. The first nest that **researches** — its tech keeps pace with yours. | **Researches**; adaptive mix |
 | 15 | The Devil | Corruption: spreads Corruption biome tiles outward and **hijacks your bots** — reprogrammed veterans fight for it, XP intact. | Hijack-capable; terrain-altering |
-| 16 | The Tower | Ruin: ignores your bots entirely; sudden all-in lightning raids on structures — Fabricators and Archives first. | Static siege scripts, long dormancy between strikes |
+| 16 | The Tower | Ruin: ignores your bots entirely; sudden all-in lightning raids on structures — Printers and Archives first. | Static siege scripts, long dormancy between strikes |
 | 17 | The Star | Guidance: relay beacons that extend **other nests'** broadcast range and repair their units. Kill the support first. | Static, cross-nest cooperative |
 | 18 | The Moon | Illusion: decoy units running deliberately misleading (but real) programs; forges **fake Black Boxes** with lying logs. Trust nothing on this part of the map — even what you've decrypted was *written to be decrypted*. | **Procedural counter-intel**; dishonest by design |
 | 19 | The Sun | Clarity: no tricks — simply the best straightforward combat programs in the game, surging on full Energy. Honest and terrifying. | Static, peak-quality authored code |

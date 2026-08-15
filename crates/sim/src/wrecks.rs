@@ -293,7 +293,7 @@ impl Sim {
         data.recall = None;
         data.pad_sit = false;
         data.bump_frozen = 0;
-        data.episodes.clear(); // new allegiance, fresh detection ledger
+        data.episodes.clear(); // new faction, fresh detection ledger
         // Q52 holds on stolen chassis too (review 2026-07-16): a
         // remainder artifact the prize can't hold boots the fallback —
         // hijacking cheap rookies is never a hardware-bar bypass.

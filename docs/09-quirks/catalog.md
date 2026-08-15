@@ -39,7 +39,7 @@
 | **Kernel Panic** | self-destruct countdown −50% — no graceful shutdown; rescue this one *fast* |
 | **GC Pause** | every Kth action takes +1 tick — stop-the-world, deterministic counter |
 | **Heisenbug** | every Mth tool action faults `tool_jam` — the bot forces you to write error handling |
-| **Works on My Machine** | tool actions fault every Mth use, but *only* farther than N tiles from its home Fabricator — runs flawlessly in the demo |
+| **Works on My Machine** | tool actions fault every Mth use, but *only* farther than N tiles from its home Printer — runs flawlessly in the demo |
 | **Loud Fans** | heard at +1 range *when moving* (signature is movement noise — a stationary bot is silent, Loud Fans or not) — probably the Crypto Miner's fault |
 | **Fragile Base Class** | bump collision damage taken ×2 |
 | **Dial-Up** | channel `send()`/`broadcast()` cost +1 cycle |

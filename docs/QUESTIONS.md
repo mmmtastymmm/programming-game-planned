@@ -47,7 +47,7 @@ per-question ruling log is in
 
 ## Open
 
-**Q127 — does every building carry an allegiance, and may programs query
+**Q127 — does every building carry an owning faction, and may programs query
 remembered foreign buildings? OPEN (opened 2026-08-02, docs/05 / docs/01 /
 docs/02).** Reopens what Q126 closed, on a different shape, and subsumes the
 ruling P29 needs.
@@ -60,8 +60,8 @@ the one attackable placement whose ownership decides the ruling cannot
 currently express ownership. Adding the field is free while it is unbuilt.
 
 *The proposed shape (the starting position, not a ruling).* Every building
-carries an allegiance; neutral field objects (Template Caches, Blight Cores)
-are a separate class that has none. Buildings are then **perceived and
+carries an owning faction; neutral field objects (Template Caches, Blight
+Cores) are a separate class that has none. Buildings are then **perceived and
 remembered like anything else** — the asymmetry to remove is that the fog
 display already shows the player a scouted enemy depot while no program can
 ask about it, against Q94's "knowledge is sim, appearance is view". Queries
@@ -80,13 +80,13 @@ the parameter and are likewise inapplicable.
 building returns once it is destroyed or converted under fog: a handle that
 faults on property reads, a position-only handle like a heard-only contact,
 or observation-corrected knowledge on the `known_nodes` model. Nests change
-hands via `ClaimNest`, so allegiance itself can go stale, not just
+hands via `ClaimNest`, so ownership itself can go stale, not just
 existence. **(2) The hash story** — barricades are cheap because a Barricade
 is a `TileKind` riding the per-faction known-tiles set Q94 already hashed,
 while every other building is an entity at a position, so remembering those
 re-introduces the per-faction structure memory P22's final form deleted. A
 narrower scope (barricades now, other buildings later) is available on that
-asymmetry alone. **(3) Where a built barricade's allegiance comes from** —
+asymmetry alone. **(3) Where a built barricade's faction comes from** —
 presumably the Barricade blueprint's `faction`, which requires settling
 whether the completion policy recorded in M8 ("any faction's builder can
 finish them") survived the 2026-07-26 change that gave every blueprint a
@@ -113,13 +113,13 @@ depot is a free forward base. The structure arms of the same two verbs *do*
 filter `st.faction == faction`, so production is private while drop-off is
 public, and no doc states either half — the Depot's catalog row reads "Cargo
 drop-off, storage."
-([03-resources/structures-and-start.md:24](03-resources/structures-and-start.md)).
+([03-resources/structures-and-start.md:21](03-resources/structures-and-start.md)).
 The undocumented-rule half is **P38**.
 
 *The proposed shape (the starting position, not a ruling).* Every building
 interaction requires a **relationship** to proceed, drawn from the closed set
 Q127 already fixes at design time (own / ally / enemy), with neutral field
-objects the separate no-allegiance class Q127 names. `World::allied` already
+objects the separate unowned class Q127 names. `World::allied` already
 supplies the predicate and already counts a faction as its own ally, so "own"
 needs no separate spelling.
 

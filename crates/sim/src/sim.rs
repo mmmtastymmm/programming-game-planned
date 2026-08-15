@@ -1851,7 +1851,7 @@ impl Sim {
                 continue;
             }
             // The modifier pipeline (docs/02): base → hardware → XP →
-            // quirks → state (Damaged, brownout — the Fabricator trickle
+            // quirks → state (Damaged, brownout — the Printer trickle
             // exempts one bot per faction) → clamp.
             let faction = bot.data.faction;
             let centi = crate::stats::cpu_centi(
@@ -2100,7 +2100,7 @@ impl Sim {
     /// Phase 8 (M5): the upkeep settlement — energy is a RATE, not a pile
     /// (docs/03): per-faction generation (Taps free, Generators burn fuel)
     /// vs. draw (bots + working refineries). Draw over generation =
-    /// brownout (cycle budgets −50% next grant; the Fabricator trickle
+    /// brownout (cycle budgets −50% next grant; the Printer trickle
     /// keeps ONE bot — lowest id — fully powered). Steel maintenance
     /// unpaid = rust: self-repair halts and hulls decay (Q84,
     /// `upkeep.ron`-configurable).
@@ -2192,7 +2192,7 @@ impl Sim {
             } else {
                 self.world.brownout.remove(&faction);
             }
-            // The Fabricator backup trickle (Q84): one bot always powered
+            // The Printer backup trickle (Q84): one bot always powered
             // — deterministic pick, lowest id — while a working printer
             // exists to trickle from. Blackout can never deadlock the
             // colony: someone can always walk out for fuel.

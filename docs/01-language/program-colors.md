@@ -2,7 +2,7 @@
 
 # Program Colors
 
-A colony's programs live in **colored program slots**, and every slot is embodied in a physical **Printer** (Fabricator): one printer = one color.
+A colony's programs live in **colored program slots**, and every slot is embodied in a physical **Printer**: one printer = one color.
 
 You start with **one working printer: Green**. A **ruined Red printer** stands in your base from tick zero — visibly broken, repairable for Data (tuning; "enough Data or something" is the spec) — making your second color the natural first colony milestone rather than a given. Printers beyond those two are gated by **controlled Nests** ([04-enemies.md](../04-enemies.md)) on a quadratic curve — not 1:1: the 3rd color needs 1 controlled nest, the 4th needs 3 total, then 6, 10, … (triangular; tuning constants). The named palette runs through nine (Green, Red, Blue, Yellow, Cyan, Magenta, Orange, Purple, White) and the count is **uncapped** beyond that (procedurally patterned tints). A nine-color colony is an endgame colony that has conquered a lot of map.
 

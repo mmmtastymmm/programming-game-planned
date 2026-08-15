@@ -64,7 +64,7 @@ The loop players should feel: *observe → rewrite → redeploy → watch it pla
 | **Tick** | One fixed step of the deterministic simulation (all bots, physics, combat). |
 | **Function block** | An unlockable built-in function bots can call (e.g. `scan()`, `broadcast()`). |
 | **Construct** | An unlockable language feature (variables, loops, `def`, lists — branching ships at game start). |
-| **Fabricator / Printer** | Structure that prints (and reprints) bots. One per program color; buildable count gated by controlled nests. Each adds a fixed amount to the colony's fleet cap; each printer after the first carries a target share + selection key choosing which bots wear its color (the first takes the remainder). |
+| **Printer** | Structure that prints (and reprints) bots. One per program color; buildable count gated by controlled nests. Each adds a fixed amount to the colony's fleet cap; each printer after the first carries a target share + selection key choosing which bots wear its color (the first takes the remainder). |
 | **Template Cache** | Non-consumable ruin where any colony studies a function block. Basic ones ring start zones; advanced ones sit deeper. |
 | **Reprint** | Queuing a replacement after a destruction — a fresh stock bot whose color comes from the fleet allocation. Nothing per-bot survives: XP gone, quirks re-rolled. |
 | **Black Box** | Object dropped by every destroyed bot: its local logs + cause of death + env snapshot. Readable/recoverable by anyone. |
@@ -72,4 +72,5 @@ The loop players should feel: *observe → rewrite → redeploy → watch it pla
 | **Recall** | The engine-owned signal (un-writable): the target-share allocation re-colors a claimed bot at its new printer (XP kept); an over-capacity colony recalls its **least-invested** bot — lifetime XP plus installed-tool value (Q105-R3/Q111) — for scrap. An interrupt context — double-handle applies. |
 | **Boot Sequence** | State a bot passes through on print, rescue, or recall re-coloring: auto-upload of any local logs, an optional `on boot:` window, then execute from line 1. |
 | **Feral** | The PvE enemy faction: corrupted machines running real Pyrite programs, decryptable by salvage like everyone else's. |
-| **Allegiance** | A Nest's rank 0–21, named for the tarot Major Arcana. Number ≈ difficulty; arcanum ≈ personality, especially how the nest treats code (static, mutating, researching). |
+| **Allegiance** | A Nest's rank 0–21, named for the tarot Major Arcana. Number ≈ difficulty; arcanum ≈ personality, especially how the nest treats code (static, mutating, researching). **This is the only meaning** — for which side a bot or structure belongs to, say **faction** (the field is `faction` throughout the sim). |
+| **Faction** | Which side owns a bot, structure or nest — one per colony, plus the Feral faction. The unit of ownership, perception, stock and alliance. A **colony** is a player's faction seen as an organisation; a **team** is a set of allied factions ([08-multiplayer.md](08-multiplayer.md)); a **color** is a program slot, not a side ([01-language.md](01-language.md)). |

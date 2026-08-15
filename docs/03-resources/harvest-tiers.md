@@ -43,7 +43,7 @@ Such a seller must have a **granted instance in the starting state**: hence
 the ruined Upgrade Station in every start base, repairable for tier-0/1
 materials ([structures-and-start.md](structures-and-start.md)).
 
-Tools are bought at the **Upgrade Station** (Q105 folded the Fabricator's
+Tools are bought at the **Upgrade Station** (Q105 folded the Printer's
 tool-making role into the one pad flow) and are **licensed by level** — a bot
 may buy a grade-N tool once *either* that track's level *or* its total level
 reaches N. **Buying costs no XP and resets nothing** (Q111): the licence is

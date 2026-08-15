@@ -83,6 +83,25 @@ why its entries read P36 → P37 → P35 → Lazy Evaluation → P34 and why a s
 there. This rule used to live *inside* the status blocks, where superseding them
 carried it away — hence its being restated here, in text that stays.
 
+**Status 2026-08-15 (latest): 42 opened, 35 fixed — seven open.** The two items
+sitting in `docs/personal_problems.md`, a file referenced by nothing in the repo
+and triaged into no register, are now **P41** and **P42** — both opened and
+closed today. **P41**: the glossary ratified *Fabricator / Printer* as a dual
+name, so neither spelling was wrong and both spread to twenty-one live-doc
+mentions and eleven in `crates/`, while Pyrite only ever knew `printer`. Swept to
+**Printer** on the owner's ruling; comments and test messages only, no identifier
+touched. **P42**: Q127 adopted **allegiance** for a building's owner, colliding
+with the glossary term for a nest's tarot rank 0–21 — which owns a file name, a
+22-row table and a doorway invariant. The Arcana meaning wins; Q127's vocabulary
+becomes **faction**, its substance untouched. The glossary gains a **Faction**
+row separating faction / colony / team / color.
+
+Three citations into
+[03-resources/structures-and-start.md](03-resources/structures-and-start.md) were
+re-pointed in the same pass: deleting that file's empty section earlier today
+shifted every line below it by three, which silently moved P38's and P40's
+anchors and Q128's onto the wrong rows. Re-verified against the current file.
+
 **Status 2026-08-15 (later): 40 opened, 33 fixed — seven open; no entry moved.**
 Two structural gaps the corpus audits had walked past, neither warranting a
 number. The **01-language doorway** gained the kind-registry invariant P36 needed
@@ -308,7 +327,7 @@ placement) a carve-out from P22's own-pool rule, or does breaching become a
 pure adjacency/terrain interaction with no query surface?
 
 *(The ruling is being taken as **Q127**, opened 2026-08-02 — the question
-grew past this entry into building allegiance and the remembered-building
+grew past this entry into building ownership and the remembered-building
 query surface generally. P29 closes when Q127 is answered; the substance
 lives in QUESTIONS.md, not here.)*
 
@@ -529,7 +548,7 @@ unmarked contradiction.)*
 **P38 — Q89's depot ruling governs perception; the sim also enforces an access
 rule that no design doc states.**
 [03-resources/decided.md](03-resources/decided.md) (the Q89 depot bullet) and
-[03-resources/structures-and-start.md:24](03-resources/structures-and-start.md)
+[03-resources/structures-and-start.md:21](03-resources/structures-and-start.md)
 (the Depot catalog row) vs. `crates/sim/src/world.rs:216` (the `Depot.faction`
 doc comment), `crates/sim/src/actions.rs:402` and `crates/sim/src/host.rs:606`.
 
@@ -658,7 +677,7 @@ are not re-raised:
 
 **P1 — the Upgrade Station is priced in a material only the Upgrade Station can
 unlock. FIXED (`2c56fdf`).**
-[03-resources/structures-and-start.md:32](03-resources/structures-and-start.md) (the Station's price),
+[03-resources/structures-and-start.md:29](03-resources/structures-and-start.md) (the Station's price),
 [03-resources/decided.md:16](03-resources/decided.md) ("The bootstrap works"),
 [03-resources/harvest-tiers.md](03-resources/harvest-tiers.md) (the drill ladder),
 [06-progression/upgrade-station.md:34](06-progression/upgrade-station.md)
@@ -1517,7 +1536,7 @@ spells it "Chip" in every position. FIXED (`6ded0fe`).**
 This file (P36's third evidence bullet, in the Fixed log) and
 [01-language/types-and-env.md:14](01-language/types-and-env.md) (the same
 justification) vs.
-[03-resources/structures-and-start.md:26](03-resources/structures-and-start.md),
+[03-resources/structures-and-start.md:23](03-resources/structures-and-start.md),
 [03-resources/the-tree.md:30,91,92,95](03-resources/the-tree.md) and
 [03-resources/decided.md:12,16](03-resources/decided.md).
 
@@ -1552,3 +1571,63 @@ renaming the constant to `chip` would overturn a twelve-day-old ruling for a
 cosmetic gain — verified cheap, since no golden fixture references `chips` and
 only `crates/sim/tests/economy.rs:507` would change, but not worth it. **No code
 change and no hash movement.**)*
+
+**P41 — the glossary enshrines two names for the Printer, and the corpus uses
+both. FIXED (`<hash14>`).**
+[00-overview.md:67](00-overview.md) (the glossary row, formerly
+"**Fabricator / Printer**") and twenty further mentions across thirteen live
+docs, plus eleven in `crates/`, vs. `printer` as the sole identifier in code
+(`World.printers`, `PrinterState`, `Command::PlacePrinter`, `KINDS`).
+
+One structure, two names, with the glossary *ratifying* the split rather than
+resolving it — so neither name was wrong and both kept spreading. The two
+appeared in the same sentence more than once
+([01-language/program-colors.md](01-language/program-colors.md): "every slot is
+embodied in a physical **Printer** (Fabricator)";
+[03-resources/structures-and-start.md](03-resources/structures-and-start.md):
+a catalog row headed "**Fabricator** (printer)", and a starting state listing "1
+working Fabricator (the **Green** printer)"). Pyrite only ever knew `printer`, so
+every "Fabricator" in the docs named a thing no program can say.
+
+*(Resolution: **Printer** everywhere, on the owner's ruling. Swept across
+thirteen live docs and five code files — comments and test messages only, no
+identifier touched, so no behaviour change and no hash movement. The glossary row
+is **Printer** alone. Terms of art went with it: the *Red-Fabricator pattern* is
+now the **Red-Printer pattern**, and Q84's *Fabricator trickle* the **Printer
+trickle**. Closed records keep their wording — `docs/history/` and this
+register's own Fixed entries still read "Fabricator", the standing exception that
+lets history contradict current design. Raised in `docs/personal_problems.md`,
+item 1.)*
+
+**P42 — "allegiance" names two unrelated things: a nest's tarot rank and a
+building's owner. FIXED (`<hash14>`).**
+[00-overview.md:75](00-overview.md) and
+[04-enemies/allegiance.md](04-enemies/allegiance.md) (the Major Arcana rank) vs.
+[QUESTIONS.md](QUESTIONS.md) (Q127's title and worksheet),
+[TASKS.md](TASKS.md) (Barricade HP — "the registry's allegiance field") and this
+file (P29's Q127 note).
+
+**Allegiance** was glossary-defined and given a file of its own as *a Nest's rank
+0–21 on the tarot Major Arcana* — a difficulty-and-personality axis with a 22-row
+table, a doorway invariant ("Allegiance is who a nest is; escalation is how awake
+it is"), and `crates/sim/src/world.rs:342` carrying the same sense in code. Q127,
+opened 2026-08-02, then took the same word for **which faction owns a building**,
+a meaning with nothing in common with the first. Eleven uses carried the
+established sense, seven the new one — all seven downstream of Q127. A reader
+meeting "does every building carry an allegiance" beside a file that ranks nests
+by tarot card cannot tell the two apart, and Q127 is what the whole barricade/P29
+thread waits on.
+
+*(Resolution: the **Arcana meaning wins** — it is glossary-defined, older, owns a
+file name and a doorway invariant, and matches the code. Q127's usage becomes
+**faction** / **owning faction**, which costs nothing because Q127 is open and
+unratified, and which is what the sim has called it all along
+(`Structure.faction`, `Blueprint.faction`, `Depot.faction`). Q127's *substance* is
+untouched — only its vocabulary. The glossary gains a **Faction** row and a note
+that Allegiance has the one meaning only; that row also separates the three terms
+orbiting it — a **colony** is a faction as an organisation, a **team** is a set of
+allied factions, and a **color** is a program slot, not a side. Raised in
+`docs/personal_problems.md`, item 2 — "Alligence is really what team the structure
+or bot is on". The diagnosis was right; *team* was not available as the
+replacement, being already taken for alliance groups in
+[08-multiplayer/code-visibility.md](08-multiplayer/code-visibility.md).)*

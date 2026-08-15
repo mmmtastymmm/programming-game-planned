@@ -125,7 +125,7 @@ M7 below. (Ford quieting, once deferred here, shipped with M8's Ford tile.)*
       preferred — the strong fuel; map-authored generators start stoked); Geothermal Tap (12
       Steel, Vent tiles only); per-bot draw = base + per-upgrade + per-module (per-track-level
       joins M6); refineries draw too and STAND IDLE browned out ("needs energy"); brownout
-      halves grants via the pipeline; Fabricator trickle keeps one bot (lowest id) powered
+      halves grants via the pipeline; Printer trickle keeps one bot (lowest id) powered
       while a working printer exists; Steel shortfall rusts (self-repair halts + decay through
       the damage phase; `rust_scraps` off by default). *NEEDS DISCUSSION: `MapSpec.
       dev_free_power` default TRUE (the dev_all_unlocks pattern) keeps sandboxes powered;
@@ -707,7 +707,7 @@ fixed. Archived in full at [history/reviews.md](history/reviews.md).
 ## Decided-but-unbuilt (design ruled, implementation pending)
 
 - [ ] **Ruined Upgrade Station in the start base** (P1 ruling, 2026-08-01) — the
-      Red-Fabricator pattern: start-state generation places a ruined Upgrade Station
+      Red-Printer pattern: start-state generation places a ruined Upgrade Station
       in every player base; repairable for tier-0/1 materials (`tuning.ron`) through
       the existing repair flow; sells nothing until repaired. Closes the bootstrap
       deadlock (Station prices in Chips → Crystal → drill grade **4** → Station;
@@ -811,7 +811,7 @@ fixed. Archived in full at [history/reviews.md](history/reviews.md).
       `TileKind::Barricade` for passability/LoS, 0 HP reverts the tile to Plains (the
       Demolish path, ground stack stays cleared); built by the existing Barricade blueprint;
       a `barricade` kind constant joins `KINDS` + `find_kind`. **Blocked on Q127** for the
-      registry's allegiance field and the query domain — the "perception-gated like
+      registry's faction field and the query domain — the "perception-gated like
       structures, unlike `blight`" line written here at Q99 time is the text P29 registers,
       so build neither until the ruling lands; `attack()`'s victim lookup and the damage settle learn
       the new registry — add a `DamageTarget::Barricade` variant (Q102's second half landed

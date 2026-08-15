@@ -43,7 +43,7 @@ pub struct Stats {
     /// lose this percent.
     pub damaged_penalty_pct: u32,
     /// Brownout (colony draw > generation): cycle budgets lose this
-    /// percent (the Fabricator trickle exempts one bot).
+    /// percent (the Printer trickle exempts one bot).
     pub brownout_penalty_pct: u32,
 
     /// Station coolant per COMPUTE upgrade, deci-Water from the station's
@@ -466,7 +466,7 @@ pub fn is_damaged(data: &BotData) -> bool {
 }
 
 /// Effective centicycles granted to this bot this tick, through the full
-/// pipeline. `brownout_exempt` is the Fabricator-trickle pick.
+/// pipeline. `brownout_exempt` is the Printer-trickle pick.
 pub fn cpu_centi(
     ctx: StatCtx<'_>,
     data: &BotData,

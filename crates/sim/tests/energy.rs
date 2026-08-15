@@ -1,5 +1,5 @@
 //! Energy & upkeep (M5, docs/03 Q84): generation vs. draw, brownout, the
-//! Fabricator trickle, fuel burning, and Steel-shortfall rust. Test maps
+//! Printer trickle, fuel burning, and Steel-shortfall rust. Test maps
 //! opt INTO the system with dev_free_power: false.
 
 use sim::map::{MapSpec, PrinterSpec};
@@ -102,7 +102,7 @@ fn brownout_halves_grants_but_the_printer_trickle_powers_one_bot() {
     assert_eq!(
         sim.world.powered_bot.get(&0),
         Some(&first),
-        "the Fabricator trickle picks the lowest id"
+        "the Printer trickle picks the lowest id"
     );
     let d_first = &sim.world.bots[&first].data;
     let d_second = &sim.world.bots[&second].data;

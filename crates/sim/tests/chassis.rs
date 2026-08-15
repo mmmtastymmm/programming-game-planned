@@ -94,7 +94,7 @@ fn brownout_halves_cycles_but_the_trickle_exempts() {
         .unwrap();
     let d = &sim.world.bots[&id].data;
     assert_eq!(stats::cpu_centi(sim.ctx(), d, true, false), 50, "brownout: -50%");
-    assert_eq!(stats::cpu_centi(sim.ctx(), d, true, true), 100, "the Fabricator trickle pick");
+    assert_eq!(stats::cpu_centi(sim.ctx(), d, true, true), 100, "the Printer trickle pick");
     // Damaged then brownout, each off the running subtotal, both ceils:
     // 100 - 25 = 75; 75 - ceil(37.5) = 37.
     let data = &mut sim.world.bots.get_mut(&id).unwrap().data;
