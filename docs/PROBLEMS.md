@@ -1573,7 +1573,7 @@ only `crates/sim/tests/economy.rs:507` would change, but not worth it. **No code
 change and no hash movement.**)*
 
 **P41 — the glossary enshrines two names for the Printer, and the corpus uses
-both. FIXED (`<hash14>`).**
+both. FIXED (`925b5f5`).**
 [00-overview.md:67](00-overview.md) (the glossary row, formerly
 "**Fabricator / Printer**") and twenty further mentions across thirteen live
 docs, plus eleven in `crates/`, vs. `printer` as the sole identifier in code
@@ -1600,7 +1600,7 @@ lets history contradict current design. Raised in `docs/personal_problems.md`,
 item 1.)*
 
 **P42 — "allegiance" names two unrelated things: a nest's tarot rank and a
-building's owner. FIXED (`<hash14>`).**
+building's owner. FIXED (`925b5f5`).**
 [00-overview.md:75](00-overview.md) and
 [04-enemies/allegiance.md](04-enemies/allegiance.md) (the Major Arcana rank) vs.
 [QUESTIONS.md](QUESTIONS.md) (Q127's title and worksheet),
