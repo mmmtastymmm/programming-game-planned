@@ -52,7 +52,7 @@ instance. No finding changed and nothing opened or closed by the anchor pass
 itself; the same audit's substantive findings are being ruled one at a time, and
 the first of them opened and closed **P34** the same day (status block below).
 
-**Status 2026-08-14 (latest): 39 opened, 32 fixed — seven open.** **P38** joins
+**Status 2026-08-14 (latest): 40 opened, 33 fixed — seven open.** **P38** joins
 the needs-a-ruling class: Q89 ruled that a Depot's `faction` governs perception
 and stopped there, while `deposit()` and `withdraw()` both accept any adjacent
 depot whatever its faction, and the only statement of that policy anywhere in
@@ -71,6 +71,15 @@ the registry now cites the domain rules instead of restating a model it does not
 own. Two stale `<hash pending>` placeholders were backfilled in the same change
 (**P35** `33b1de8`, **P36** `a41ec41`), so every Fixed entry again names the
 commit that closed it.
+
+**P40** opened and closed the same day, out of P39's audit: P36's evidence bullet
+claimed the Foundry recipe spells the material plural, and it spells it "Chip" in
+all seven of its recipe positions. The sweep behind it found no drift but a
+convention — **Chips** names the material, **a Chip** is one unit — so the split
+is ratified in [03-resources/decided.md](03-resources/decided.md) rather than
+swept, with the trap it carries (`chip` names nothing; the constant never
+inflects) stated at the constant. P36's ruling stands and now carries an
+amendment note recording what its evidence got wrong.
 
 **Status 2026-08-12: 37 opened, 31 fixed — P29–P33 remain open and need
 rulings; P37 is open but needs only implementation.** **P36** closed the
@@ -1334,6 +1343,12 @@ the two rules travel with their entries. **No code change and no hash movement**
 unbuilt. The reverse gap found in the same pass — shipped structures with no
 constant — is **P37**, open above.)*
 
+*(Amended 2026-08-14 by **P40**: the third evidence bullet overstated its sweep —
+the Foundry recipe spells the material "Chip", singular, in every one of its
+live-spec positions, so "every other carrier … says plural" was false. The ruling
+stands — `chips` is correct in the inventory — but it rests on the material name
+alone, not on agreement with the recipe.)*
+
 **P39 — the kind-constant registry claims every placement but `blight` is
 perception-gated, against a ruling carried in ten passages across seven files.
 FIXED (`82d30f4`).**
@@ -1374,3 +1389,44 @@ carrier** and nothing here pre-empts Q127. The miscount retires by not making a
 count. **No code change and no hash movement** — doc text only. The code-side
 divergence the audit turned up alongside it is the unbuilt P22 task, whose
 implementation notes were amended the same day.)*
+
+**P40 — P36's evidence claims the Foundry recipe spells the material plural; it
+spells it "Chip" in every position. FIXED (`<hash>`).**
+This file (P36's third evidence bullet, in the Fixed log) and
+[01-language/types-and-env.md:14](01-language/types-and-env.md) (the same
+justification) vs.
+[03-resources/structures-and-start.md:26](03-resources/structures-and-start.md),
+[03-resources/the-tree.md:30,91,92,95](03-resources/the-tree.md) and
+[03-resources/decided.md:12,16](03-resources/decided.md).
+
+P36 corrected the kind-constant inventory from `chip` to `chips` and justified it
+with "Every other carrier — the material in 03-resources, `Resource::Chips`, the
+string `"chips"`, the Foundry recipe, and `KINDS` — says plural." The Foundry
+recipe says **Chip**: "1 Silver + 2 Crystal + 1 Wire → 1 Chip" and "1 Chip + 1
+Gold → 1 Gold Chip". `types-and-env.md:14` carried the same claim.
+
+A sweep of docs/03 shows this is not drift. The corpus splits cleanly by
+grammatical position — **Chips** wherever the material is named (the-tree row
+header, the refined-goods list, "Bronze arms, Chips think", the harvest tiers)
+and **Chip** in all seven recipe and count positions. The code makes no such
+distinction: `crates/sim/src/resources.rs:78` names the material `"chips"`, and
+`resources.rs:165` is `Recipe { name: "chips", …, output: (Resource::Chips, 1) }`
+— one unit, called "chips". So P36 did not find a typo. It found the seam between
+a documentation convention and a code convention, and reported them as agreeing.
+
+The consequence outlived the fix. P36's stated reason was that `chip` "makes
+`cargo_count(chip)` name nothing" — but seven live-spec passages still teach the
+reader the noun *Chip*, so the trap was closed in the registry and left open in
+the docs a player actually reads.
+
+*(Resolution: the split is **ratified, not swept** — "Chips" is the material, "a
+Chip" is one unit, written where the material is owned
+([03-resources/decided.md](03-resources/decided.md)), with the consequence that
+matters — **the constant never inflects** — stated at the constant itself
+([01-language/types-and-env.md](01-language/types-and-env.md)). The false
+justification is struck from both carriers, and P36 carries an amendment note.
+Considered and rejected: converging the docs on plural ("→ 1 Chips") reads badly;
+renaming the constant to `chip` would overturn a twelve-day-old ruling for a
+cosmetic gain — verified cheap, since no golden fixture references `chips` and
+only `crates/sim/tests/economy.rs:507` would change, but not worth it. **No code
+change and no hash movement.**)*
