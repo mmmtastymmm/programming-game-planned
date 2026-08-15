@@ -799,11 +799,13 @@ fixed. Archived in full at [history/reviews.md](history/reviews.md).
       say it. The fourth is **`ally`**, a *bot* constant, not a structure (corrected
       2026-08-14): alliances shipped with M13 and are hashed (`World.alliances`,
       `SetAlliance`, `World::allied`, `sim.rs:3025`), so the thing exists and has no
-      constant. **Settle `enemy` in the same change** — `find_kind`'s `enemy` arm filters on
-      faction alone (`host.rs:223`), so a declared ally is currently returned by
-      `closest(enemy)`, and `World::allied` is consulted nowhere in `host.rs`; decide whether
-      `enemy` excludes allies and whether `ally` includes one's own colony (`allied()` counts
-      a faction as its own ally). The remaining five documented-but-missing names (`pump`,
+      constant. **The `ally` half is blocked on Q129** (opened 2026-08-15), which rules
+      what `enemy` and `ally` select: `find_kind`'s `enemy` arm filters on faction alone
+      (`host.rs:223`), so a declared ally is currently returned by `closest(enemy)`, and
+      `World::allied` is consulted nowhere in `host.rs`. The two are coupled — landing
+      `enemy`-excludes-allies without `ally` makes betrayal unwritable and repeals Q91 by
+      omission — so ship them together. **The three structure constants are not blocked**
+      and can land first. The remaining five documented-but-missing names (`pump`,
       `repair_bay`, `sentry`, `lantern`, `request_box`) are NOT in scope: those structures
       don't exist in the sim yet, so they land with their own milestones. [sim] (S) ⚠HASH
 - [ ] **Barricade HP** (Q99, 2026-07-26) — walls become targets. Blight-Core-shaped:

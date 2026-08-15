@@ -642,8 +642,11 @@ and `World::allied` is never consulted anywhere in `host.rs`. Q91 ruled that
 friendly fire while explicit `attack()` stays legal — but that is a rule about
 harm, and nothing rules the *query*. Whether `enemy` excludes declared allies, and
 whether `ally` includes one's own colony (`allied()` counts a faction as its own
-ally), are the two calls the implementation needs; either becomes a question if it
-turns out to be contentious.
+ally), are the two calls the implementation needs — **taken as Q129**, opened
+2026-08-15, because they are undecided rather than merely unbuilt. Q129 and the
+`ally` half of this entry are coupled: if `enemy` stops returning allies while
+`ally` stays unbuilt, betrayal becomes unwritable and Q91 is repealed by
+omission, so the two land together.
 
 ---
 

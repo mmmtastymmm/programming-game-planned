@@ -14,29 +14,28 @@ the register at six. The rule used to live *inside* the status blocks, where
 archiving them carried it away — hence its being restated here, in text that
 stays. `CLAUDE.md` and [PROBLEMS.md](PROBLEMS.md) carry the same rule.
 
-**Status 2026-08-14 (latest): two questions are open — Q127 and Q128; the
-problem register carries seven open entries.** Everything through Q126 remains
-decided. **P29–P33**, **P37** and **P38** are open in
-[PROBLEMS.md](PROBLEMS.md); P29 closes as a consequence of Q127, and P38 as a
+**Status 2026-08-15 (latest): three questions are open — Q127, Q128 and Q129;
+the problem register carries seven open entries.** Everything through Q126
+remains decided. **P29–P33**, **P37** and **P38** are open in
+[PROBLEMS.md](PROBLEMS.md); P29 closes as a consequence of Q127 and P38 as a
 consequence of Q128.
 
-**Q128 opened 2026-08-14**, out of a review of the depot access path. Q89 ruled
-that a Depot's `faction` field governs perception and stopped there, while the
-sim enforces an access rule — any bot may deposit at or withdraw from any
-depot, whoever owns it — that no design doc states; that half is **P38**. The
-question generalises past the depot to what relationship *any* building
-interaction requires, and takes the position that the relationship is fixed per
-verb rather than passed by the caller. It is scoped so it does not pre-empt
-Q127: Q127 owns the query domain, Q128 the access domain, and what the two must
-share is their treatment of allies.
+**Q129 opened 2026-08-15**, promoted out of a rider on P37. `find_kind`'s `enemy`
+arm filters on faction alone, so `closest(enemy)` returns a **declared ally**, and
+`World::allied` is consulted nowhere in `host.rs` — no Pyrite query respects an
+alliance at all. Q91 ruled the harm side (auto-fire spares allies; explicit
+`attack()` stays legal because betrayal is legal play) and said nothing about
+what a query hands you, which is where the accidental friendly fire Q91 meant to
+prevent still happens — through the combat program nobody revised after allying.
+It was filed as a task rider first and promoted because it is undecided rather
+than merely unbuilt, and because it is **coupled to P37**: if `enemy` stops
+returning allies while `ally` stays unbuilt, betrayal becomes unwritable and Q91
+is repealed by omission.
 
-One correction to the record. The 2026-08-12 block headlined "five open
-entries" while its own closing sentence put the register at 37 opened / 31
-fixed — six — because **P37 was added to that block by back-edit after the
-headline was written**, the fourth in-place amendment it took that day. This is
-its replacement, not a fifth: the block is archived unchanged in the status
-log, per the rule that block itself restated — a dated block is a point-in-time
-record, so the fix is a new block, never a back-edit.
+The three open questions divide cleanly and were written not to pre-empt each
+other: **Q127** owns the query *domain* (what a program may find), **Q128** the
+access *domain* (what a bot beside a building may do), **Q129** the *relationship
+predicates* both of them spell as own / ally / enemy.
 
 *Earlier status entries — the dated record of how the board got here — are in
 [history/questions-status-log.md](history/questions-status-log.md). The
@@ -155,6 +154,58 @@ that has to be a choice rather than an accident of ruling order.
 puts a foreign depot inside the opening's reach — the starter haul leg is the
 guarantee P22 was opened to protect. Ferals ride along free: `FERAL_FACTION`
 allies with nobody, and the nest arm of `deposit()` is already feral-only.
+
+**Q129 — what do `enemy` and `ally` select, and may a program still target a
+declared ally? OPEN (opened 2026-08-15, docs/01 / docs/08 / docs/04).** Sits
+between Q91, which ruled the *harm* side of alliance, and Q127/Q128, which own
+the relationship vocabulary. Nothing has ruled the *query* side, and the shipped
+behaviour picked an answer.
+
+*The state today.* `find_kind`'s `enemy` arm skips a bot only when
+`b.data.faction == faction || b.data.dying` (`crates/sim/src/host.rs:223`), so
+**`closest(enemy)` returns a declared ally**. `World::allied` exists
+(`world.rs:1865`, symmetric, and a faction is its own ally) and is called
+**nowhere in `host.rs`** — no Pyrite-visible query respects an alliance at all.
+The canonical combat loop is therefore `attack(closest(enemy).expect())` against
+whoever is nearest, ally included: declaring an alliance protects you from a
+partner's `guard()`/`escort()` auto-fire and from nothing else they have running.
+`ally` has no kind constant to begin with (**P37**), so there is no handle for the
+other direction either.
+
+*Why Q91 does not already answer it.* Q91 ruled that auto-fire spares declared
+allies "to prevent *accidental* friendly fire", while explicit `attack()` and the
+wreck-race verbs gate only on the server harm setting, because "betrayal is legal
+PvP play". That is a rule about what a verb may *do to* a target. It says nothing
+about what a query *hands you*, and the gap between the two is exactly where the
+accident Q91 wanted to prevent still happens — not through auto-fire, but through
+the ordinary combat program the player never revised after allying.
+
+*The proposed shape (the starting position, not a ruling).* `enemy` means **not
+own and not allied**; `ally` means **allied but not own**; `enemy` picks a former
+ally back up the tick a pact lapses. The two then partition the non-own bots and
+neither overlaps own, which keeps them usable as the closed own/ally/enemy set
+Q127 and Q128 both build on.
+
+**This cannot land without `ally`.** If `enemy` stops returning allies while P37
+leaves `ally` unbuilt, no query can produce an allied bot at all and explicit
+betrayal becomes *unwritable* — repealing Q91 by omission rather than by ruling.
+The two ship together or neither ships.
+
+*What it must still settle.* **(1) Does `ally` include your own colony?**
+`World::allied` says yes — a faction is its own ally — so the predicate as
+written makes `closest(ally)` mean "nearest friendly bot", convenient for escort
+and repair idioms but no longer the complement of `enemy`, leaving the closed set
+overlapping. A separate `own` spelling is the alternative, and it is a constant
+nobody has asked for. **(2) Ferals.** `FERAL_FACTION` allies with nobody, so a
+Feral's `enemy` is unchanged and its `ally` is empty or own-only depending on
+(1) — worth stating rather than leaving to fall out. **(3) How far the ruling
+reaches**: only the generic `closest`/`exists` pair, or every query that names
+enemies (`scan_enemies()` and friends)? Anything else naming enemies has the same
+gap, and a split answer is how one of them drifts. **(4) The betrayal ergonomics**
+the ruling implies — afterwards, attacking an ally means asking for
+`closest(ally)` and handing it to `attack()`: still legal under Q91, but now
+deliberate rather than the default. That is the behaviour change, and it is
+⚠HASH.
 
 The **playtest-tuning** bucket also remains (numbers that need the prototype, not a choice, so they never block design): upkeep mix balance — does Steel maintenance earn its complexity alongside Energy, or should the v1 config lean harder on Energy? ([02-agents.md](02-agents.md)); Corruption spread/re-corruption rates, source radii, and cleanse speed ([05-terrain.md](05-terrain.md)), and — per the 2026-07-26 sweep — the first-pass figures shipped inside completed milestones: body-perk magnitudes (+ Age's deferred max-HP growth), quirk weights and the per-slot dial shape, upgrade-catalog times, upkeep.ron figures, guard/escort leash and cooldown, the Feral footprint metric and nest income, and the 14-ticks/tile pacing floor (with the boot/print-tick spec pass flagged in TASKS.md). Implementation-milestone work (e.g. the deferred PvP mapgen symmetry) is tracked in [TASKS.md](TASKS.md), not here.
 

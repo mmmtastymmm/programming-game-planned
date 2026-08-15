@@ -11,6 +11,30 @@ rulings are in [questions-answered.md](questions-answered.md).
 
 ---
 
+**Status 2026-08-14 (latest): two questions are open — Q127 and Q128; the
+problem register carries seven open entries.** Everything through Q126 remains
+decided. **P29–P33**, **P37** and **P38** are open in
+[PROBLEMS.md](PROBLEMS.md); P29 closes as a consequence of Q127, and P38 as a
+consequence of Q128.
+
+**Q128 opened 2026-08-14**, out of a review of the depot access path. Q89 ruled
+that a Depot's `faction` field governs perception and stopped there, while the
+sim enforces an access rule — any bot may deposit at or withdraw from any
+depot, whoever owns it — that no design doc states; that half is **P38**. The
+question generalises past the depot to what relationship *any* building
+interaction requires, and takes the position that the relationship is fixed per
+verb rather than passed by the caller. It is scoped so it does not pre-empt
+Q127: Q127 owns the query domain, Q128 the access domain, and what the two must
+share is their treatment of allies.
+
+One correction to the record. The 2026-08-12 block headlined "five open
+entries" while its own closing sentence put the register at 37 opened / 31
+fixed — six — because **P37 was added to that block by back-edit after the
+headline was written**, the fourth in-place amendment it took that day. This is
+its replacement, not a fifth: the block is archived unchanged in the status
+log, per the rule that block itself restated — a dated block is a point-in-time
+record, so the fix is a new block, never a back-edit.
+
 **Status 2026-08-12: Q127 is still the only open question; the problem
 register carries five open entries.** Everything through Q126 remains decided.
 **P29–P33** are open in [PROBLEMS.md](PROBLEMS.md), and P29 closes as a
