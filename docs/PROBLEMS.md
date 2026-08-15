@@ -11,7 +11,7 @@ Numbering is stable — **append new problems, never renumber**. Open design
 questions still go in [QUESTIONS.md](QUESTIONS.md); this file is for text that is
 already wrong **or a ruling the code has not caught up to** — never for anything
 still undecided. Unsorted observations start in
-[personal_problems.md](personal_problems.md), the inbox, and become numbered
+[INBOX.md](INBOX.md), the inbox, and become numbered
 entries here once triaged.
 
 **The third class closes differently, and shares its entry with a task.** An
@@ -1598,8 +1598,8 @@ is **Printer** alone. Terms of art went with it: the *Red-Fabricator pattern* is
 now the **Red-Printer pattern**, and Q84's *Fabricator trickle* the **Printer
 trickle**. Closed records keep their wording — `docs/history/` and this
 register's own Fixed entries still read "Fabricator", the standing exception that
-lets history contradict current design. Raised in `docs/personal_problems.md`,
-item 1.)*
+lets history contradict current design. Raised in [INBOX.md](INBOX.md) (then
+`personal_problems.md`), item 1.)*
 
 **P42 — "allegiance" names two unrelated things: a nest's tarot rank and a
 building's owner. FIXED (`925b5f5`).**
@@ -1629,7 +1629,7 @@ untouched — only its vocabulary. The glossary gains a **Faction** row and a no
 that Allegiance has the one meaning only; that row also separates the three terms
 orbiting it — a **colony** is a faction as an organisation, a **team** is a set of
 allied factions, and a **color** is a program slot, not a side. Raised in
-`docs/personal_problems.md`, item 2 — "Alligence is really what team the structure
-or bot is on". The diagnosis was right; *team* was not available as the
+[INBOX.md](INBOX.md) (then `personal_problems.md`), item 2 — "Alligence is
+really what team the structure or bot is on". The diagnosis was right; *team* was not available as the
 replacement, being already taken for alliance groups in
 [08-multiplayer/code-visibility.md](08-multiplayer/code-visibility.md).)*
