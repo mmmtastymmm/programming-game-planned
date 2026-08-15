@@ -81,6 +81,20 @@ cannot silently break another — not to save anyone reading the parts.
   program that will not load — not a runtime error.
   [syntax-tiers.md](01-language/syntax-tiers.md) owns the ladder;
   [06-progression.md](06-progression.md) owns when it unlocks.
+- **The kind-constant registry rides that same load-time contract** — canonical
+  in [types-and-env.md](01-language/types-and-env.md). Kind constants are
+  pre-bound globals, so the registry decides what *parses*: naming a constant the
+  build does not carry is a program that will not load, and two peers built from
+  different lists disagree about whether a program loads **at all** — divergence
+  before the first tick rather than a diverging tick. Adding, removing or
+  renaming one is therefore lockstep-visible, and
+  [builtins.md](01-language/builtins.md)'s generic queries,
+  [syntax-tiers.md](01-language/syntax-tiers.md)'s worked programs and
+  [editor-ux.md](01-language/editor-ux.md)'s completion must read the same list.
+  What a constant may *reach* is a separate matter, owned by
+  [decided.md](01-language/decided.md) and [05-terrain.md](05-terrain.md): the
+  registry says only what exists, and a registry entry that restates a query
+  domain is how P39 happened.
 - **Every number in these files is a tuning constant** bound for `costs.ron`,
   never a commitment in code — canonical in CLAUDE.md's doc conventions.
 - **Determinism** (CLAUDE.md): no floats reach a program, queries return in

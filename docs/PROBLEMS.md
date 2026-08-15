@@ -83,7 +83,20 @@ why its entries read P36 → P37 → P35 → Lazy Evaluation → P34 and why a s
 there. This rule used to live *inside* the status blocks, where superseding them
 carried it away — hence its being restated here, in text that stays.
 
-**Status 2026-08-15 (latest): 40 opened, 33 fixed — seven open; no entry moved.**
+**Status 2026-08-15 (later): 40 opened, 33 fixed — seven open; no entry moved.**
+Two structural gaps the corpus audits had walked past, neither warranting a
+number. The **01-language doorway** gained the kind-registry invariant P36 needed
+and never added: kind constants are pre-bound globals, so the registry is part of
+the load-time contract — two peers built from different lists disagree about
+whether a program loads at all, which is divergence before the first tick. The
+bullet also records the boundary P39 crossed, that the registry says what exists
+and never what a query reaches. Separately, **two empty `##` sections** were
+removed — `03-resources/structures-and-start.md` and
+`05-terrain/map-generation.md` each carried a heading with no body, orphaned when
+the split promoted the file titles and duplicated by the real sections below
+them. No inbound anchor links to either.
+
+**Status 2026-08-15 (earlier): 40 opened, 33 fixed — seven open; no entry moved.**
 A convention round, closing the review item that the 08-12 block's four in-place
 amendments raised. The supersede-never-back-edit rule is promoted out of the
 status blocks into this header, into [QUESTIONS.md](QUESTIONS.md)'s header, and

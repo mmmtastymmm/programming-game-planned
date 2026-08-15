@@ -2,9 +2,6 @@
 
 *Part of [03-resources](../03-resources.md).*
 
-## Structures & Starting State
-
-
 ## Ally Aid: the Request Box
 
 No free-form resource gifting. A colony builds a **Request Box** and posts a request on it (*resource, amount*). Allied bots may — entirely voluntarily — haul the requested resource in and `deposit()` it; the owner collects what arrives.

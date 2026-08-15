@@ -2,9 +2,6 @@
 
 *Part of [05-terrain](../05-terrain.md).*
 
-## Map Composition & Generation
-
-
 ## Map Composition Guidelines
 
 These are the *goals* a generated map must exhibit; the generation **procedure** that produces them is specified below in **Map Generation** (2026-07-17, answers Q71).
