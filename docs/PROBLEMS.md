@@ -10,6 +10,15 @@ Numbering is stable — **append new problems, never renumber**. Open design
 questions still go in [QUESTIONS.md](QUESTIONS.md); this file is for text that
 is already wrong.
 
+**⚠HASH in this register is a forward pointer**, not a claim about the fixing
+commit: it marks an entry whose *subject* moves golden-replay hashes once someone
+builds it. A fix here essentially never moves one — by the charter above this
+file corrects text, and its commits touch docs only — so the marker exists so a
+grep for hash-affecting work finds the ruling as well as the task.
+[TASKS.md](TASKS.md)'s definition, "changes golden-replay hashes," is the one
+that binds *there*, on work that ships code. Do not put the marker on an entry
+whose subject is already implemented and already hashed.
+
 Line references are as of the sweep that found them (2026-07-28, `git diff
 @{upstream}...HEAD -- docs/` at commit `1f4ffb6`) and will drift as the docs
 are edited — the quoted text is the reliable anchor.
@@ -91,6 +100,17 @@ scope on the ground that it does not exist. Both carriers fixed. The correction
 also surfaced a decision the catch-up task now has to take: `find_kind`'s `enemy`
 arm filters on faction alone, so `closest(enemy)` returns a declared ally, and
 `World::allied` is consulted nowhere in `host.rs`.
+
+**⚠HASH is now defined for this register** (header above). All four uses sat on
+docs-only commits, which read as contradicting TASKS.md's "changes golden-replay
+hashes" — but three of them (P3, P34, P36) were using the marker coherently as a
+*forward pointer* to work that moves hashes when built, which is the only sense
+available in a file whose charter is fixing text. That sense is written down
+rather than stripped, since a grep for hash-affecting work is more useful finding
+the ruling too. **P35 lost the marker**: its own resolution says the shipped VM
+had already decided the rule and the spec was catching up, so nothing moves now
+or later. Also corrected: no CI script reads the marker — it is reviewer-facing
+only, so nothing was gated on the ambiguity.
 
 **Status 2026-08-12: 37 opened, 31 fixed — P29–P33 remain open and need
 rulings; P37 is open but needs only implementation.** **P36** closed the
@@ -1311,7 +1331,7 @@ moves**: XP core is unbuilt and already carries ⚠HASH + units migration, so th
 fix was free to land now and would not have been after that task ships.)*
 
 **P35 — "blocking burns the budget" is specified two incompatible ways, and the
-docs never state which. FIXED (`33b1de8`). ⚠HASH**
+docs never state which. FIXED (`33b1de8`).**
 [01-language/execution-model.md:33](01-language/execution-model.md) (the owning
 rule: "**burns** its per-tick budget"),
 [01-language/syntax-tiers.md:170](01-language/syntax-tiers.md) ("its per-tick
