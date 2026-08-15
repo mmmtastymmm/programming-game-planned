@@ -10,9 +10,9 @@ closed them.
 Numbering is stable — **append new problems, never renumber**. Open design
 questions still go in [QUESTIONS.md](QUESTIONS.md); this file is for text that is
 already wrong **or a ruling the code has not caught up to** — never for anything
-still undecided. Unsorted observations start in `docs/personal_problems.md` —
-a local inbox, gitignored, so it exists only in a working tree — and become
-numbered entries here once triaged.
+still undecided. Unsorted observations start in
+[personal_problems.md](personal_problems.md), the inbox, and become numbered
+entries here once triaged.
 
 **The third class closes differently, and shares its entry with a task.** An
 implementation-lag entry (P37 is the first) is fixed by *code*, so it moves to

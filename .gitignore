@@ -5,7 +5,5 @@
 # core.rs module or core/ directory.
 core.*.[0-9]*
 
-docs/personal_problems.md
-
 # doc-check tooling (scripts/) — JS deps, not part of the Rust build
 scripts/node_modules/
