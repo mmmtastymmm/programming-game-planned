@@ -73,7 +73,29 @@ instance. No finding changed and nothing opened or closed by the anchor pass
 itself; the same audit's substantive findings are being ruled one at a time, and
 the first of them opened and closed **P34** the same day (status block below).
 
-**Status 2026-08-14 (latest): 40 opened, 33 fixed — seven open.** **P38** joins
+**Dated status blocks below are point-in-time records — supersede, never
+back-edit.** When the board changes, add a new dated block above the last one and
+drop `(latest)` from its predecessor. Do not reopen a block to add an entry,
+correct a count, or extend a sentence: an amended block stops describing any real
+moment. The 2026-08-12 block was edited in place four times in one day, which is
+why its entries read P36 → P37 → P35 → Lazy Evaluation → P34 and why a stale
+"five open entries" count reached [QUESTIONS.md](QUESTIONS.md) and survived
+there. This rule used to live *inside* the status blocks, where superseding them
+carried it away — hence its being restated here, in text that stays.
+
+**Status 2026-08-15 (latest): 40 opened, 33 fixed — seven open; no entry moved.**
+A convention round, closing the review item that the 08-12 block's four in-place
+amendments raised. The supersede-never-back-edit rule is promoted out of the
+status blocks into this header, into [QUESTIONS.md](QUESTIONS.md)'s header, and
+into `CLAUDE.md` — the three places that outlive any one block. The 08-12 block
+itself is left as written: its order is not chronological and is not being
+repaired, because reordering it would be a fifth amendment. Only one purely
+mechanical fix was applied to it — a 140-character prose line, spliced when
+**P35** was inserted mid-sentence, re-wrapped to the file's width with no word
+changed. (It was the sole plain-prose line over 110 characters in a file of 1275
+lines at 85 or under; the other long lines are forced by markdown links.)
+
+**Status 2026-08-14: 40 opened, 33 fixed — seven open.** **P38** joins
 the needs-a-ruling class: Q89 ruled that a Depot's `faction` governs perception
 and stopped there, while `deposit()` and `withdraw()` both accept any adjacent
 depot whatever its faction, and the only statement of that policy anywhere in
@@ -144,8 +166,9 @@ kind-constant inventory (`blight` missing though shipped, `barricade` missing
 though decided, `chip` for `chips`), and opened **P37** going the other way:
 three structures ship with no constant to find them. P37 is the register's first
 entry where the *design* is right and the *code* is behind — filed because
-nothing else recorded it, and tracked by a task rather than a ruling. **P35** — the blocking-burn rule never said whether a bank held from
-before the block survives it — was opened and fixed the same day. It is the
+nothing else recorded it, and tracked by a task rather than a ruling. **P35** —
+the blocking-burn rule never said whether a bank held from before the block
+survives it — was opened and fixed the same day. It is the
 round's odd one out: it was found by a *comprehension question about the
 execution model*, not by any sweep, and it was invisible to grep precisely
 because all five carriers agreed with each other and were incomplete in the same

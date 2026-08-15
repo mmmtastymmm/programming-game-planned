@@ -4,6 +4,16 @@ All design questions across the design docs (00–09). As each is decided, its r
 
 This file is for things **not yet decided**. Text that is already wrong — a decision contradicted, or a number that fails arithmetic — is tracked in [PROBLEMS.md](PROBLEMS.md), numbered P1… on the same append-only rule.
 
+**Dated status blocks are point-in-time records — supersede, never back-edit.**
+When the board changes, write a new block and move the displaced one, unchanged,
+to the top of
+[history/questions-status-log.md](history/questions-status-log.md). Never reopen
+a block to add a ruling or correct a count: the 2026-08-12 block was amended four
+times in one day, and its "five open entries" headline outlived the body that put
+the register at six. The rule used to live *inside* the status blocks, where
+archiving them carried it away — hence its being restated here, in text that
+stays. `CLAUDE.md` and [PROBLEMS.md](PROBLEMS.md) carry the same rule.
+
 **Status 2026-08-14 (latest): two questions are open — Q127 and Q128; the
 problem register carries seven open entries.** Everything through Q126 remains
 decided. **P29–P33**, **P37** and **P38** are open in
