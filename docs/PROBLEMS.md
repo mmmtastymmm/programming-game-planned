@@ -1630,6 +1630,6 @@ that Allegiance has the one meaning only; that row also separates the three term
 orbiting it — a **colony** is a faction as an organisation, a **team** is a set of
 allied factions, and a **color** is a program slot, not a side. Raised in
 [INBOX.md](INBOX.md) (then `personal_problems.md`), item 2 — "Alligence is
-really what team the structure or bot is on". The diagnosis was right; *team* was not available as the
-replacement, being already taken for alliance groups in
+really what team the structure or bot is on". The diagnosis was right; *team*
+was not available as the replacement, being already taken for alliance groups in
 [08-multiplayer/code-visibility.md](08-multiplayer/code-visibility.md).)*
