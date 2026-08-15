@@ -1391,7 +1391,7 @@ divergence the audit turned up alongside it is the unbuilt P22 task, whose
 implementation notes were amended the same day.)*
 
 **P40 — P36's evidence claims the Foundry recipe spells the material plural; it
-spells it "Chip" in every position. FIXED (`<hash>`).**
+spells it "Chip" in every position. FIXED (`6ded0fe`).**
 This file (P36's third evidence bullet, in the Fixed log) and
 [01-language/types-and-env.md:14](01-language/types-and-env.md) (the same
 justification) vs.
