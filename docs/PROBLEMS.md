@@ -1359,8 +1359,8 @@ that no longer exists anywhere in the design. A one-clause fix, registered
 rather than silently reworded because the text is ratified.
 
 **P34 — the Q56 granularity ruling still stores XP in deci-units, which Q111
-superseded and which cannot express the shipped Age income. FIXED
-(`2e768b6`). ⚠HASH**
+superseded and which cannot express the shipped Age income.
+FIXED (`2e768b6`). ⚠HASH**
 [02-agents/decided.md:8](02-agents/decided.md) (the Q56 entry: "cargo/progress/move
 — and, since round 4, XP — in deci-units") vs. **the same file's `:14`**
 ("level *n* costs `curve_base × n` additional **centi-XP**"),
