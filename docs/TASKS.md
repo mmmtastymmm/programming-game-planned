@@ -789,16 +789,23 @@ fixed. Archived in full at [history/reviews.md](history/reviews.md).
       in `upkeep.ron`/`tuning.ron`); adjacency to either tile counts for damage; the house
       carries the one seeing circle and the entity position. Game: two meshes.
       [sim][game] ⚠HASH
-- [ ] **Kind-constant catch-up** (P37) — three structures ship but cannot be queried:
-      `generator`, `geothermal` and `upgrade_station` join `KINDS` + `find_kind`
+- [ ] **Kind-constant catch-up** (P37) — four shipped things cannot be queried. Three are
+      structures: `generator`, `geothermal` and `upgrade_station` join `KINDS` + `find_kind`
       (`StructureKind::{Generator, GeothermalTap, UpgradeStation}` are already in
       `StructureKind::ALL`). Until this lands, a bot cannot route itself to the Upgrade
       Station it must physically walk to, so the documented upgrade loop is unwritable in
       Pyrite. **Decide the geothermal spelling while here**: the ratified inventory says
       `geothermal`, `StructureKind::name()` says `geothermal_tap` — pick one and make both
-      say it. The other six documented-but-missing names (`pump`, `repair_bay`, `sentry`,
-      `lantern`, `request_box`, `ally`) are NOT in scope: those structures don't exist in the
-      sim yet, so they land with their own milestones. [sim] (S) ⚠HASH
+      say it. The fourth is **`ally`**, a *bot* constant, not a structure (corrected
+      2026-08-14): alliances shipped with M13 and are hashed (`World.alliances`,
+      `SetAlliance`, `World::allied`, `sim.rs:3025`), so the thing exists and has no
+      constant. **Settle `enemy` in the same change** — `find_kind`'s `enemy` arm filters on
+      faction alone (`host.rs:223`), so a declared ally is currently returned by
+      `closest(enemy)`, and `World::allied` is consulted nowhere in `host.rs`; decide whether
+      `enemy` excludes allies and whether `ally` includes one's own colony (`allied()` counts
+      a faction as its own ally). The remaining five documented-but-missing names (`pump`,
+      `repair_bay`, `sentry`, `lantern`, `request_box`) are NOT in scope: those structures
+      don't exist in the sim yet, so they land with their own milestones. [sim] (S) ⚠HASH
 - [ ] **Barricade HP** (Q99, 2026-07-26) — walls become targets. Blight-Core-shaped:
       `world.barricades: BTreeMap<EntityId, Barricade { pos, hp }>` (hashed), tile stays
       `TileKind::Barricade` for passability/LoS, 0 HP reverts the tile to Plains (the

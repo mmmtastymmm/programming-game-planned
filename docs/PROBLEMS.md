@@ -81,6 +81,17 @@ swept, with the trap it carries (`chip` names nothing; the constant never
 inflects) stated at the constant. P36's ruling stands and now carries an
 amendment note recording what its evidence got wrong.
 
+**P37 was corrected in place, not closed** — it stays open, and the register
+totals are unchanged. Its arithmetic did not survive its own inputs (thirteen
+structures minus five shipped is eight, split as 6 + 3 = 9) because it counted
+`ally` as a sixth unbuilt structure. `ally` is a **bot** constant, and alliances
+shipped with M13 and are hashed, so it is a *fourth* instance of the gap P37
+exists to record rather than milestone lag — and TASKS.md had ruled it out of
+scope on the ground that it does not exist. Both carriers fixed. The correction
+also surfaced a decision the catch-up task now has to take: `find_kind`'s `enemy`
+arm filters on faction alone, so `closest(enemy)` returns a declared ally, and
+`World::allied` is consulted nowhere in `host.rs`.
+
 **Status 2026-08-12: 37 opened, 31 fixed — P29–P33 remain open and need
 rulings; P37 is open but needs only implementation.** **P36** closed the
 kind-constant inventory (`blight` missing though shipped, `barricade` missing
@@ -476,16 +487,17 @@ implementation never caught up to.
 *(Cleared 2026-08-01; **P34** and **P36** joined this class on 2026-08-12 and
 closed the same day — see the Fixed log. **P37** is open below.)*
 
-**P37 — three shipped structures have no kind constant, so the registry is
-narrower than the inventory that owns it. OPEN (tracked, not a ruling).**
+**P37 — three shipped structures and one shipped bot relationship have no kind
+constant, so the registry is narrower than the inventory that owns it. OPEN
+(tracked, not a ruling).**
 [01-language/types-and-env.md:15](01-language/types-and-env.md) (the Structures
-line) vs. `crates/sim/src/host.rs` (`KINDS`); task in [TASKS.md](TASKS.md)
-(*Kind-constant catch-up*).
+line) and :16 (the bots line) vs. `crates/sim/src/host.rs` (`KINDS`); task in
+[TASKS.md](TASKS.md) (*Kind-constant catch-up*).
 
 The ratified inventory lists thirteen structure constants; `KINDS` ships five
-(`depot`, `smelter`, `foundry`, `archive`, `printer`). Six of the eight missing
-names — `pump`, `repair_bay`, `sentry`, `lantern`, `request_box`, plus `ally` —
-are ordinary milestone lag: the *thing* does not exist in the sim yet either
+(`depot`, `smelter`, `foundry`, `archive`, `printer`). Five of the eight missing
+structures — `pump`, `repair_bay`, `sentry`, `lantern`, `request_box` — are
+ordinary milestone lag: the *thing* does not exist in the sim yet either
 (`RepairBay` has zero hits in `crates/sim/src`), so there is nothing to find and
 nothing to fix until those milestones land.
 
@@ -499,8 +511,36 @@ Pyrite today. This is the inverse of the usual direction: the design is ratified
 and the implementation is behind, with nothing recording it — the only
 kind-constant task in the file was the Q127-blocked barricade one.
 
-One naming decision rides along: the doc's constant is **`geothermal`** while the
-code's structure name is **`geothermal_tap`**. Whichever wins, both must say it.
+**`ally` is a fourth gap, and it is not a structure** (corrected 2026-08-14). The
+inventory lists it under **bots** beside `enemy`
+([types-and-env.md:16](01-language/types-and-env.md)), and alliances shipped with
+M13: `World.alliances` is a hashed `BTreeSet<(u8, u8)>` (`world.rs:1274`),
+`Command::SetAlliance` applies at `sim.rs:1470`, the relay authorizes it at
+`lockstep.rs:200`, `World::allied` answers it at `world.rs:1865`, perception pools
+on it at `perception.rs:131`, and `sim.rs:3025` folds it into the state hash. The
+thing exists, is queryable in principle, and has no constant — the same defect as
+the three structures, filed originally as milestone lag on the mistaken reading
+that it named a building.
+
+*(Arithmetic corrected in the same pass. The entry read "Six of the eight missing
+names … plus `ally`", splitting eight into 6 + 3 = 9. Thirteen structures minus
+five shipped is eight: five milestone-lag plus three real, with `ally` a separate
+bot constant and a fourth gap. [TASKS.md](TASKS.md) carried the same miscount and
+the same misfiling, and ruled `ally` out of scope on the ground that "those
+structures don't exist in the sim yet".)*
+
+Two decisions ride along. The doc's constant is **`geothermal`** while the code's
+structure name is **`geothermal_tap`** — whichever wins, both must say it. And
+`ally` cannot be specified without settling what `enemy` means beside it:
+`find_kind`'s `enemy` arm filters on `b.data.faction == faction` alone
+(`host.rs:223`), so **a declared ally is currently returned by `closest(enemy)`**,
+and `World::allied` is never consulted anywhere in `host.rs`. Q91 ruled that
+`guard()`/`escort()` auto-fire spares allies precisely to prevent accidental
+friendly fire while explicit `attack()` stays legal — but that is a rule about
+harm, and nothing rules the *query*. Whether `enemy` excludes declared allies, and
+whether `ally` includes one's own colony (`allied()` counts a faction as its own
+ally), are the two calls the implementation needs; either becomes a question if it
+turns out to be contentious.
 
 ---
 
