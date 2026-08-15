@@ -1,14 +1,26 @@
 # Known Problems Register
 
 Defects found in the design docs that are **not open questions** — nobody is
-undecided about them. Each is either a decision that was made and then
-contradicted, or a number that does not survive arithmetic against the
-constants it derives from. They live here until fixed, then move to the
-**Fixed** log at the bottom with the commit that closed them.
+undecided about them. Each is a decision that was made and then contradicted, a
+number that does not survive arithmetic against the constants it derives from,
+or a ratified decision the implementation never caught up to. They live here
+until fixed, then move to the **Fixed** log at the bottom with the commit that
+closed them.
 
 Numbering is stable — **append new problems, never renumber**. Open design
-questions still go in [QUESTIONS.md](QUESTIONS.md); this file is for text that
-is already wrong.
+questions still go in [QUESTIONS.md](QUESTIONS.md); this file is for text that is
+already wrong **or a ruling the code has not caught up to** — never for anything
+still undecided.
+
+**The third class closes differently, and shares its entry with a task.** An
+implementation-lag entry (P37 is the first) is fixed by *code*, so it moves to
+the Fixed log with the implementing commit rather than with a docs edit, and the
+work itself is tracked in [TASKS.md](TASKS.md)'s *Decided-but-unbuilt* section.
+Living in both files is the normal pipeline, not duplication: P1, P5 and P22 each
+sit in the Fixed log with a task still open against their ruling, and a register
+entry routinely *creates* the task that will close it — P37 created *Kind-constant
+catch-up* in the same commit that opened it. The register owns the **gap**; the
+task owns the **work**.
 
 **⚠HASH in this register is a forward pointer**, not a claim about the fixing
 commit: it marks an entry whose *subject* moves golden-replay hashes once someone
@@ -111,6 +123,20 @@ the ruling too. **P35 lost the marker**: its own resolution says the shipped VM
 had already decided the rule and the spec was catching up, so nothing moves now
 or later. Also corrected: no CI script reads the marker — it is reviewer-facing
 only, so nothing was gated on the ambiguity.
+
+**The register's charter now admits its third class.** P37's opening commit
+updated the *Mechanical* class heading to cover "a ratified list the
+implementation never caught up to" but left the file header saying this file is
+for "text that is already wrong" — so the register contradicted itself about what
+it accepts, one screen apart. The header now names implementation lag alongside
+the other two classes, records that such an entry closes with the *implementing*
+commit rather than a docs edit, and states how it relates to TASKS.md. The class
+heading is renamed to *decided, then not carried through*, which covers both
+un-propagated text and un-built rulings; nothing links to the old anchor. No
+entry moved and no count changed. One thing worth recording against a
+misreading: P37 did not duplicate a pre-existing task — `a41ec41` created
+*Kind-constant catch-up* in the same commit that opened P37, which is the
+pipeline working, not a second bookkeeping path.
 
 **Status 2026-08-12: 37 opened, 31 fixed — P29–P33 remain open and need
 rulings; P37 is open but needs only implementation.** **P36** closed the
@@ -498,7 +524,7 @@ it goes; the substance lives in QUESTIONS.md, not here.)*
 
 ---
 
-## Mechanical — decided text left behind
+## Mechanical — decided, then not carried through
 
 These need no ruling; the decision exists and was not carried through — usually
 text that was never propagated, occasionally (P37) a ratified list the
